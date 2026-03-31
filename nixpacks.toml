@@ -1,0 +1,2 @@
+[start]
+cmd = "uvicorn halal_screener:app --host 0.0.0.0 --port $PORT"
