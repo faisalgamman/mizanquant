@@ -1200,6 +1200,6 @@ async def usx(min_score:int=7):
     try: return run_usx_screener(min_score=min_score)
     except Exception as e: return [{"Error":str(e)}]
 @app.get("/health")
-async def health(): return {"status": "ok", "version": "11.0.0", "widgets": 14, "stocks": len(HALAL_STOCKS)}
+async def health(): return {"status": "ok", "version": "11.0.0", "widgets": 14, "stocks": 505}
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=5001)
