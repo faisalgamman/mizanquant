@@ -1,6 +1,7 @@
-import asyncio, time, logging, os, uuid, threading, pandas as pd, yfinance as yf, numpy as np
+import asyncio, time, logging, os, uuid, threading, re, pandas as pd, yfinance as yf, numpy as np
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -10,6 +11,43 @@ app = FastAPI()
 
 import keep_alive
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# --- 4.1: Timeout wrapper ---
+async def with_timeout(coro, seconds=120):
+    try:
+        return await asyncio.wait_for(coro, timeout=seconds)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=f"Request timed out after {seconds}s")
+
+# --- 4.2 + 4.3: Input validation helpers ---
+VALID_SYMBOLS = set()  # populated after HALAL_STOCKS is defined
+
+def validate_symbol(symbol: str) -> str:
+    s = symbol.upper().strip()
+    if not re.match(r'^[A-Z]{1,6}$', s):
+        raise HTTPException(status_code=400, detail=f"Invalid symbol format: {symbol}")
+    return s
+
+def validate_date(d: str) -> str:
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', d):
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {d}. Use YYYY-MM-DD")
+    return d
+
+def validate_range(val, name, min_v, max_v):
+    if val < min_v or val > max_v:
+        raise HTTPException(status_code=400, detail=f"{name} must be between {min_v} and {max_v}, got {val}")
+    return val
+
+# --- 4.5: Simple rate limiter ---
+_rate_limits = defaultdict(list)
+_rate_lock = threading.Lock()
+
+def check_rate_limit(endpoint: str, max_concurrent: int = 2):
+    with _rate_lock:
+        _rate_limits[endpoint] = [t for t in _rate_limits[endpoint] if time.time() - t < 60]
+        if len(_rate_limits[endpoint]) >= max_concurrent:
+            raise HTTPException(status_code=429, detail=f"Too many requests to {endpoint}. Max {max_concurrent}/min. Try again shortly.")
+        _rate_limits[endpoint].append(time.time())
 
 HALAL_STOCKS = [
     "AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA","AMD","INTC",
@@ -31,6 +69,8 @@ HALAL_STOCKS = [
     "AMT","PLD","CCI","EQIX","PSA","O","WELL","DLR","AVB","EQR",
     "F","GM","UBER","RIVN",
 ]
+
+VALID_SYMBOLS.update(HALAL_STOCKS)
 
 CACHE_TTL = 300
 _cache = {}
@@ -1074,42 +1114,80 @@ async def widgets():
 
 @app.get("/screener")
 async def screener():
-    return await asyncio.to_thread(run_screener)
+    return await with_timeout(asyncio.to_thread(run_screener), 180)
+
 @app.get("/buys")
 async def buys():
-    data = await asyncio.to_thread(run_screener)
+    data = await with_timeout(asyncio.to_thread(run_screener), 180)
     return [r for r in data if r["swing_score"] >= 55]
+
 @app.get("/watchlist")
 async def watchlist():
-    data = await asyncio.to_thread(run_screener)
+    data = await with_timeout(asyncio.to_thread(run_screener), 180)
     return [r for r in data if 35 <= r["swing_score"] < 55]
+
 @app.get("/backtest")
 async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_date: str = "2024-12-31", portfolio: float = 100000, risk_pct: float = 1.0, hold_days: int = 3):
-    return await asyncio.to_thread(run_backtest, symbol.upper(), start_date, end_date, portfolio, risk_pct, hold_days)
+    s = validate_symbol(symbol)
+    validate_date(start_date); validate_date(end_date)
+    validate_range(portfolio, "portfolio", 1000, 10_000_000)
+    validate_range(risk_pct, "risk_pct", 0.1, 10.0)
+    validate_range(hold_days, "hold_days", 1, 60)
+    return await with_timeout(asyncio.to_thread(run_backtest, s, start_date, end_date, portfolio, risk_pct, hold_days), 120)
+
 @app.get("/monte_carlo")
 async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1000):
-    return await asyncio.to_thread(run_monte_carlo, symbol.upper(), days, simulations)
+    s = validate_symbol(symbol)
+    validate_range(days, "days", 1, 365)
+    validate_range(simulations, "simulations", 100, 10000)
+    return await with_timeout(asyncio.to_thread(run_monte_carlo, s, days, simulations), 120)
+
 @app.get("/lstm")
 async def lstm(symbol: str = "AAPL", horizon: int = 5):
-    return await asyncio.to_thread(run_lstm, symbol.upper(), horizon)
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    check_rate_limit("lstm", 3)
+    return await with_timeout(asyncio.to_thread(run_lstm, s, horizon), 300)
+
 @app.get("/transformer")
 async def transformer(symbol: str = "AAPL", horizon: int = 5):
-    return await asyncio.to_thread(run_transformer, symbol.upper(), horizon)
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    check_rate_limit("transformer", 3)
+    return await with_timeout(asyncio.to_thread(run_transformer, s, horizon), 300)
+
 @app.get("/ensemble")
 async def ensemble(symbol: str = "AAPL", horizon: int = 5):
-    return await asyncio.to_thread(run_ensemble, symbol.upper(), horizon)
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    return await with_timeout(asyncio.to_thread(run_ensemble, s, horizon), 120)
+
 @app.get("/dqn")
 async def dqn(symbol: str = "AAPL", episodes: int = 20):
-    return await asyncio.to_thread(run_dqn, symbol.upper(), episodes)
+    s = validate_symbol(symbol)
+    validate_range(episodes, "episodes", 1, 100)
+    check_rate_limit("dqn", 2)
+    return await with_timeout(asyncio.to_thread(run_dqn, s, episodes), 300)
+
 @app.get("/policy_gradient")
 async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
-    return await asyncio.to_thread(run_policy_gradient, symbol.upper(), episodes)
+    s = validate_symbol(symbol)
+    validate_range(episodes, "episodes", 1, 100)
+    check_rate_limit("policy_gradient", 2)
+    return await with_timeout(asyncio.to_thread(run_policy_gradient, s, episodes), 300)
+
 @app.get("/usx")
-async def usx(min_score:int=7):
-    return await asyncio.to_thread(run_usx_screener, min_score)
+async def usx(min_score: int = 7):
+    validate_range(min_score, "min_score", 1, 10)
+    return await with_timeout(asyncio.to_thread(run_usx_screener, min_score), 180)
+
 @app.get("/consensus")
-async def consensus(symbol:str="AAPL", horizon:int=5, episodes:int=10):
-    return await asyncio.to_thread(run_consensus, symbol.upper(), horizon, episodes)
+async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    validate_range(episodes, "episodes", 1, 50)
+    check_rate_limit("consensus", 2)
+    return await with_timeout(asyncio.to_thread(run_consensus, s, horizon, episodes), 600)
 
 # --- Background cache for heavy endpoints ---
 _bg_cache = {"batch_consensus": None, "pipeline": None}
@@ -1177,7 +1255,27 @@ async def refresh_pipeline():
     return [{"Status": "Pipeline refresh started"}]
 
 @app.get("/health")
-async def health(): return {"status": "ok", "version": "11.3.0", "widgets": 14, "stocks": len(HALAL_STOCKS)}
+async def health():
+    checks = {"openbb_forecast": False, "yfinance": False}
+    try:
+        from openbb_forecast.router import run_lstm
+        checks["openbb_forecast"] = True
+    except Exception:
+        pass
+    try:
+        t = yf.Ticker("AAPL")
+        h = t.history(period="1d")
+        checks["yfinance"] = len(h) > 0
+    except Exception:
+        pass
+    all_ok = all(checks.values())
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "version": "11.4.0",
+        "widgets": 14,
+        "stocks": len(HALAL_STOCKS),
+        "dependencies": checks,
+    }
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
