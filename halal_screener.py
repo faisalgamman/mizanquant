@@ -60,7 +60,7 @@ HALAL_STOCKS = [
     "XOM","CVX","COP","EOG","SLB","OXY","PSX","VLO","MPC","HAL",
     "DVN","FANG","APA","BKR",
     "WMT","COST","TGT","HD","LOW","NKE","PG","KO","PEP","CL",
-    "KMB","GIS","SYY","CMG","EL","CHD","CLX","K","CPB","HRL","MKC",
+    "KMB","GIS","SYY","CMG","EL","CHD","CLX","CPB","HRL","MKC",
     "VZ","T","TMUS",
     "GE","CAT","MMM","HON","DE","EMR","ETN","PH","ROK","AME",
     "IEX","XYL","OTIS","CARR","DOV","FTV","ROP",
@@ -101,13 +101,19 @@ def model_cache_set(key, model_data):
 
 def fetch_yf(symbol, period="2y", start=None, end=None):
     try:
+        t = yf.Ticker(symbol)
         if start and end:
-            df = yf.download(symbol, start=start, end=end, auto_adjust=True, progress=False)
+            df = t.history(start=start, end=end, auto_adjust=True)
         else:
-            df = yf.download(symbol, period=period, auto_adjust=True, progress=False)
-        df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
+            df = t.history(period=period, auto_adjust=True)
+        if df.empty:
+            return None
+        df.columns = [c.lower() for c in df.columns]
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
+        # drop non-price columns if present
+        for col in ["dividends", "stock splits", "capital gains"]:
+            df.drop(columns=[col], errors="ignore", inplace=True)
         return df if len(df) >= 200 else None
     except Exception as e:
         logger.error(f"{symbol}: {e}")
