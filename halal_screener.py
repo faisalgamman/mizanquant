@@ -1,4 +1,4 @@
-import time, logging, os, uuid, threading, pandas as pd, yfinance as yf, numpy as np
+import asyncio, time, logging, os, uuid, threading, pandas as pd, yfinance as yf, numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -1073,48 +1073,43 @@ async def widgets():
     }
 
 @app.get("/screener")
-async def screener(): return run_screener()
+async def screener():
+    return await asyncio.to_thread(run_screener)
 @app.get("/buys")
-async def buys(): return [r for r in run_screener() if r["swing_score"] >= 55]
+async def buys():
+    data = await asyncio.to_thread(run_screener)
+    return [r for r in data if r["swing_score"] >= 55]
 @app.get("/watchlist")
-async def watchlist(): return [r for r in run_screener() if 35 <= r["swing_score"] < 55]
+async def watchlist():
+    data = await asyncio.to_thread(run_screener)
+    return [r for r in data if 35 <= r["swing_score"] < 55]
 @app.get("/backtest")
 async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_date: str = "2024-12-31", portfolio: float = 100000, risk_pct: float = 1.0, hold_days: int = 3):
-    try: return run_backtest(symbol.upper(), start_date, end_date, portfolio, risk_pct, hold_days)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_backtest, symbol.upper(), start_date, end_date, portfolio, risk_pct, hold_days)
 @app.get("/monte_carlo")
 async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1000):
-    try: return run_monte_carlo(symbol.upper(), days, simulations)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_monte_carlo, symbol.upper(), days, simulations)
 @app.get("/lstm")
 async def lstm(symbol: str = "AAPL", horizon: int = 5):
-    try: return run_lstm(symbol.upper(), horizon)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_lstm, symbol.upper(), horizon)
 @app.get("/transformer")
 async def transformer(symbol: str = "AAPL", horizon: int = 5):
-    try: return run_transformer(symbol.upper(), horizon)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_transformer, symbol.upper(), horizon)
 @app.get("/ensemble")
 async def ensemble(symbol: str = "AAPL", horizon: int = 5):
-    try: return run_ensemble(symbol.upper(), horizon)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_ensemble, symbol.upper(), horizon)
 @app.get("/dqn")
 async def dqn(symbol: str = "AAPL", episodes: int = 20):
-    try: return run_dqn(symbol.upper(), episodes)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_dqn, symbol.upper(), episodes)
 @app.get("/policy_gradient")
 async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
-    try: return run_policy_gradient(symbol.upper(), episodes)
-    except Exception as e: return [{"Error": str(e)}]
+    return await asyncio.to_thread(run_policy_gradient, symbol.upper(), episodes)
 @app.get("/usx")
 async def usx(min_score:int=7):
-    try: return run_usx_screener(min_score=min_score)
-    except Exception as e: return [{"Error":str(e)}]
-
+    return await asyncio.to_thread(run_usx_screener, min_score)
 @app.get("/consensus")
 async def consensus(symbol:str="AAPL", horizon:int=5, episodes:int=10):
-    try: return run_consensus(symbol.upper(), horizon, episodes)
-    except Exception as e: return [{"Error":str(e)}]
+    return await asyncio.to_thread(run_consensus, symbol.upper(), horizon, episodes)
 
 # --- Background job system for long-running tasks ---
 _jobs = {}
