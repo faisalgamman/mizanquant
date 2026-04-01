@@ -1,3 +1,15 @@
+import threading, requests, time, os
+
+def ping():
+    url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+    if not url: return
+    while True:
+        try:
+            requests.get(f"https://{url}/health", timeout=10)
+        except: pass
+        time.sleep(240)
+
+threading.Thread(target=ping, daemon=True).start()
 import time, logging, pandas as pd, yfinance as yf, numpy as np, sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
