@@ -509,18 +509,18 @@ async def metrics(
     df = _data_to_df(data)
     prices = _extract_prices(df, target_column)
 
-    log_returns = np.diff(np.log(prices))
+    simple_returns = np.diff(prices) / prices[:-1]
     equity = prices / prices[0] * 10_000  # Normalize to $10k start
 
     result = {
-        "annualized_return": rm.annualized_return(log_returns),
-        "annualized_volatility": float(np.std(log_returns) * np.sqrt(252)),
-        "sharpe_ratio": rm.sharpe_ratio(log_returns, risk_free_rate),
-        "sortino_ratio": rm.sortino_ratio(log_returns, risk_free_rate),
+        "annualized_return": rm.annualized_return(simple_returns),
+        "annualized_volatility": float(np.std(simple_returns) * np.sqrt(252)),
+        "sharpe_ratio": rm.sharpe_ratio(simple_returns, risk_free_rate),
+        "sortino_ratio": rm.sortino_ratio(simple_returns, risk_free_rate),
         "max_drawdown": rm.max_drawdown(equity),
-        "calmar_ratio": rm.calmar_ratio(log_returns, equity),
-        "var_95": rm.value_at_risk(log_returns, 0.95),
-        "cvar_95": rm.conditional_var(log_returns, 0.95),
+        "calmar_ratio": rm.calmar_ratio(simple_returns, equity),
+        "var_95": rm.value_at_risk(simple_returns, 0.95),
+        "cvar_95": rm.conditional_var(simple_returns, 0.95),
     }
 
     return OBBject(results=result)

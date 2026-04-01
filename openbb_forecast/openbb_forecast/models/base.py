@@ -193,11 +193,12 @@ def compute_forecast_metrics(fold_results: list[FoldResult]) -> dict:
 
         # Directional accuracy: did we predict the right direction of change?
         if preds.ndim == 2 and preds.shape[1] >= 1:
-            # Compare first forecast step direction
             for j in range(len(preds)):
-                if fold.test_indices[j] > 0:
-                    pred_direction = preds[j, 0] - actuals[j, 0] if j > 0 else 0
-                    actual_direction = actuals[j, 0] - (actuals[j - 1, 0] if j > 0 else actuals[j, 0])
+                if j > 0:
+                    # Predicted direction: does the model think price goes up or down from previous actual?
+                    pred_direction = preds[j, 0] - actuals[j - 1, 0]
+                    # Actual direction: did the price actually go up or down?
+                    actual_direction = actuals[j, 0] - actuals[j - 1, 0]
                     if actual_direction != 0:
                         direction_total += 1
                         if (pred_direction > 0) == (actual_direction > 0):

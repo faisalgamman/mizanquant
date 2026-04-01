@@ -1,13 +1,14 @@
-import time, logging, pandas as pd, yfinance as yf, numpy as np, sys
+import time, logging, os, uuid, threading, pandas as pd, yfinance as yf, numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-sys.path.insert(0, "D:/Stock-Prediction-Models-master/openbb-forecast")
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("screener")
 app = FastAPI()
+
+import keep_alive
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 HALAL_STOCKS = [
@@ -43,6 +44,20 @@ def cache_get(k):
 def cache_set(k, v):
     _cache[k] = v
     _cache_ts[k] = time.time()
+
+# Model cache: stores trained models with 1-hour TTL
+MODEL_CACHE_TTL = 3600
+_model_cache = {}
+_model_cache_ts = {}
+
+def model_cache_get(key):
+    if time.time() - _model_cache_ts.get(key, 0) < MODEL_CACHE_TTL:
+        return _model_cache.get(key)
+    return None
+
+def model_cache_set(key, model_data):
+    _model_cache[key] = model_data
+    _model_cache_ts[key] = time.time()
 
 def fetch_yf(symbol, period="2y", start=None, end=None):
     try:
@@ -189,15 +204,20 @@ def analyze(symbol, df):
         logger.error(f"{symbol}: {e}")
         return None
 
+def _analyze_one(symbol):
+    df = fetch_yf(symbol)
+    if df is None: return None
+    return analyze(symbol, df)
+
 def run_screener():
     cached = cache_get("all")
     if cached: return cached
     results = []
-    for symbol in HALAL_STOCKS:
-        df = fetch_yf(symbol)
-        if df is None: continue
-        r = analyze(symbol, df)
-        if r: results.append(r)
+    with ThreadPoolExecutor(max_workers=15) as pool:
+        futures = {pool.submit(_analyze_one, s): s for s in HALAL_STOCKS}
+        for f in as_completed(futures):
+            r = f.result()
+            if r: results.append(r)
     results.sort(key=lambda x: x["swing_score"], reverse=True)
     cache_set("all", results)
     return results
@@ -274,10 +294,11 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
     except Exception as e:
         return [{"Error": str(e)}]
 
-def run_monte_carlo(symbol, days, simulations):
+def run_monte_carlo(symbol, days, simulations, df=None):
     try:
         from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
-        df = fetch_yf(symbol)
+        if df is None:
+            df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
@@ -324,25 +345,34 @@ def prepare_sequences(prices, seq_len, horizon, use_safe_scale=True):
         return X_train, y_train_s, X_test, y_test, mean_p, std_p
     return X_train, y_train, X_test, y_test, 0, 1
 
-def run_lstm(symbol, horizon):
+def run_lstm(symbol, horizon, df=None):
     try:
         from openbb_forecast.models.lstm import LSTMForecaster
-        df = fetch_yf(symbol)
+        if df is None:
+            df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
         SEQ_LEN = 20
         X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
-        folds = walk_forward_split(X_train, y_train, n_splits=3)
-        fold_scores = []
-        for X_tr, y_tr, X_val, y_val in folds:
-            lstm = LSTMForecaster(hidden_size=64, num_layers=2, epochs=30, learning_rate=0.001, patience=5)
-            lstm.fit(X_tr, y_tr)
-            preds = lstm.predict(X_val)
-            mse = float(np.mean((preds - y_val) ** 2))
-            fold_scores.append(round(mse, 4))
-        lstm_final = LSTMForecaster(hidden_size=64, num_layers=2, epochs=50, learning_rate=0.001, patience=10)
-        lstm_final.fit(X_train, y_train)
+
+        cache_key = f"lstm_{symbol}_{horizon}"
+        cached = model_cache_get(cache_key)
+        if cached:
+            lstm_final, fold_scores = cached["model"], cached["fold_scores"]
+        else:
+            folds = walk_forward_split(X_train, y_train, n_splits=3)
+            fold_scores = []
+            for X_tr, y_tr, X_val, y_val in folds:
+                lstm = LSTMForecaster(hidden_size=64, num_layers=2, epochs=30, learning_rate=0.001, patience=5)
+                lstm.fit(X_tr, y_tr)
+                preds = lstm.predict(X_val)
+                mse = float(np.mean((preds - y_val) ** 2))
+                fold_scores.append(round(mse, 4))
+            lstm_final = LSTMForecaster(hidden_size=64, num_layers=2, epochs=50, learning_rate=0.001, patience=10)
+            lstm_final.fit(X_train, y_train)
+            model_cache_set(cache_key, {"model": lstm_final, "fold_scores": fold_scores})
+
         preds = lstm_final.predict(X_test[-1:])
         pred_prices = preds[0] * std_p + mean_p
         last_price = float(prices[-1])
@@ -360,25 +390,34 @@ def run_lstm(symbol, horizon):
     except Exception as e:
         return [{"Error": str(e)}]
 
-def run_transformer(symbol, horizon):
+def run_transformer(symbol, horizon, df=None):
     try:
         from openbb_forecast.models.transformer import TransformerForecaster
-        df = fetch_yf(symbol)
+        if df is None:
+            df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
         SEQ_LEN = 20
         X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
-        folds = walk_forward_split(X_train, y_train, n_splits=3)
-        fold_scores = []
-        for X_tr, y_tr, X_val, y_val in folds:
-            tf = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=30, patience=5)
-            tf.fit(X_tr, y_tr)
-            preds = tf.predict(X_val)
-            mse = float(np.mean((preds - y_val) ** 2))
-            fold_scores.append(round(mse, 4))
-        tf_final = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=50, patience=10)
-        tf_final.fit(X_train, y_train)
+
+        cache_key = f"transformer_{symbol}_{horizon}"
+        cached = model_cache_get(cache_key)
+        if cached:
+            tf_final, fold_scores = cached["model"], cached["fold_scores"]
+        else:
+            folds = walk_forward_split(X_train, y_train, n_splits=3)
+            fold_scores = []
+            for X_tr, y_tr, X_val, y_val in folds:
+                tf = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=30, patience=5)
+                tf.fit(X_tr, y_tr)
+                preds = tf.predict(X_val)
+                mse = float(np.mean((preds - y_val) ** 2))
+                fold_scores.append(round(mse, 4))
+            tf_final = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=50, patience=10)
+            tf_final.fit(X_train, y_train)
+            model_cache_set(cache_key, {"model": tf_final, "fold_scores": fold_scores})
+
         preds = tf_final.predict(X_test[-1:])
         pred_prices = preds[0] * std_p + mean_p
         last_price = float(prices[-1])
@@ -396,10 +435,11 @@ def run_transformer(symbol, horizon):
     except Exception as e:
         return [{"Error": str(e)}]
 
-def run_ensemble(symbol, horizon):
+def run_ensemble(symbol, horizon, df=None):
     try:
         from openbb_forecast.models.ensemble import StackingForecaster
-        df = fetch_yf(symbol)
+        if df is None:
+            df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
@@ -430,13 +470,14 @@ def run_ensemble(symbol, horizon):
     except Exception as e:
         return [{"Error": str(e)}]
 
-def run_dqn(symbol, episodes):
+def run_dqn(symbol, episodes, df=None):
     try:
         from openbb_forecast.agents.double_dqn import DoubleDQNAgent
         from openbb_forecast.agents.environment import TradingEnvironment
         from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
         from openbb_forecast.risk.manager import RiskManager
-        df = fetch_yf(symbol)
+        if df is None:
+            df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
@@ -470,12 +511,13 @@ def run_dqn(symbol, episodes):
     except Exception as e:
         return [{"Error": str(e)}]
 
-def run_policy_gradient(symbol, episodes):
+def run_policy_gradient(symbol, episodes, df=None):
     try:
         from openbb_forecast.agents.policy_gradient import PolicyGradientAgent
         from openbb_forecast.agents.environment import TradingEnvironment
         from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
-        df = fetch_yf(symbol)
+        if df is None:
+            df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
@@ -500,170 +542,143 @@ def run_policy_gradient(symbol, episodes):
         return [{"Error": str(e)}]
 
 
+def score_usx_single(symbol, df):
+    """Score a single stock using the 10-point USX system. Returns dict or None."""
+    try:
+        close = df["close"]
+        high  = df["high"]
+        low   = df["low"]
+        vol   = df["volume"]
+
+        ema9  = float(ema(close, 9).iloc[-2])
+        ema21_v = float(ema(close, 21).iloc[-2])
+        daily_ema21 = float(ema(close, 21).iloc[-1])
+        daily_bullish = float(close.iloc[-1]) > daily_ema21
+        rsi_s   = rsi(close)
+        rsi_val = float(rsi_s.iloc[-2])
+        _, _, hist_s = macd(close)
+        hist_now  = float(hist_s.iloc[-2])
+        hist_prev = float(hist_s.iloc[-3])
+        macd_rising = hist_now > 0 and hist_now > hist_prev
+        atr_val = float(atr(df).iloc[-1])
+
+        high_s  = df["high"]
+        low_s   = df["low"]
+        tr      = pd.concat([high_s - low_s,
+                             (high_s - close.shift()).abs(),
+                             (low_s  - close.shift()).abs()], axis=1).max(axis=1)
+        atr14   = tr.ewm(alpha=1/14, min_periods=14).mean()
+        dm_plus  = (high_s.diff()).clip(lower=0)
+        dm_minus = (-low_s.diff()).clip(lower=0)
+        di_plus  = (dm_plus.ewm(alpha=1/14, min_periods=14).mean() / atr14 * 100).iloc[-2]
+        di_minus = (dm_minus.ewm(alpha=1/14, min_periods=14).mean() / atr14 * 100).iloc[-2]
+        adx_approx = abs(di_plus - di_minus) / (di_plus + di_minus + 1e-9) * 100
+        adx_ok     = adx_approx >= 20 and di_plus > di_minus
+
+        sma20    = close.rolling(20).mean()
+        std20    = close.rolling(20).std()
+        bb_upper = sma20 + 2 * std20
+        bb_lower = sma20 - 2 * std20
+        bb_width = ((bb_upper - bb_lower) / sma20 * 100)
+        bb_width_sma = bb_width.rolling(20).mean()
+        bb_squeeze = float(bb_width.iloc[-2]) < float(bb_width_sma.iloc[-2])
+
+        vol_ma    = vol.rolling(20).mean()
+        vol_ratio = float(vol.iloc[-2] / vol_ma.iloc[-2]) if float(vol_ma.iloc[-2]) > 0 else 1.0
+        vol_ok    = vol_ratio >= 1.0
+        gap_pct = float(((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100)
+        gap_ok  = 0 <= gap_pct <= 1.5
+
+        hlc3   = (df["high"] + df["low"] + df["close"]) / 3
+        vwap   = (hlc3 * vol).cumsum() / vol.cumsum()
+        above_vwap = float(close.iloc[-2]) > float(vwap.iloc[-2])
+        roc5    = float((close.iloc[-1] - close.iloc[-6]) / close.iloc[-6] * 100) if len(close) >= 6 else 0
+        rs_ok   = roc5 > 0
+
+        s1  = 1 if above_vwap else 0
+        s2  = 1 if daily_bullish else 0
+        s3  = 1 if ema9 > ema21_v else 0
+        s4  = 1 if macd_rising else 0
+        s5  = 1 if 40 <= rsi_val <= 65 else 0
+        s6  = 1 if adx_ok else 0
+        s7  = 1 if bb_squeeze else 0
+        s8  = 1 if rs_ok else 0
+        s9  = 1 if vol_ok else 0
+        s10 = 1 if gap_ok else 0
+        score = s1+s2+s3+s4+s5+s6+s7+s8+s9+s10
+
+        if score >= 9:   signal = "STRONG BUY"
+        elif score >= 7: signal = "BUY"
+        elif score >= 6: signal = "NEUTRAL"
+        else:            signal = "NO TRADE"
+
+        price = float(close.iloc[-1])
+        sl_mult, tp1_mult, tp2_mult, tp3_mult = 1.5, 1.5, 2.5, 4.0
+        sl  = round(price - sl_mult  * atr_val, 2)
+        tp1 = round(price + tp1_mult * atr_val, 2)
+        tp2 = round(price + tp2_mult * atr_val, 2)
+        tp3 = round(price + tp3_mult * atr_val, 2)
+        be  = round(price + 1.0 * atr_val, 2)
+        risk_per_share = price - sl
+        risk_capital   = 100000 * 0.01
+        qty = int(risk_capital / risk_per_share) if risk_per_share > 0 else 0
+
+        breakdown = []
+        if s1: breakdown.append("VWAP")
+        if s2: breakdown.append("Daily")
+        if s3: breakdown.append("EMA")
+        if s4: breakdown.append("MACD")
+        if s5: breakdown.append(f"RSI {rsi_val:.0f}")
+        if s6: breakdown.append("ADX")
+        if s7: breakdown.append("Squeeze")
+        if s8: breakdown.append("RS+")
+        if s9: breakdown.append(f"Vol {vol_ratio:.1f}x")
+        if s10: breakdown.append("Gap OK")
+
+        return {
+            "Symbol": symbol, "Price": round(price, 2), "Score": f"{score}/10",
+            "Signal": signal, "RSI": round(rsi_val, 1), "ADX": round(adx_approx, 1),
+            "BB Squeeze": "Yes" if bb_squeeze else "No", "Vol Ratio": round(vol_ratio, 2),
+            "Gap %": round(gap_pct, 2), "Stop Loss": sl, "TP1 (50%)": tp1,
+            "TP2 (30%)": tp2, "TP3 (20%)": tp3, "Breakeven": be, "Qty": qty,
+            "RR1": round(tp1_mult/sl_mult, 2), "RR2": round(tp2_mult/sl_mult, 2),
+            "RR3": round(tp3_mult/sl_mult, 2), "Confluence": ", ".join(breakdown),
+            "_score_int": score,
+        }
+    except Exception as e:
+        logger.error(f"USX {symbol}: {e}")
+        return None
+
+def _usx_one(symbol):
+    df = fetch_yf(symbol)
+    if df is None: return None
+    return score_usx_single(symbol, df)
+
 def run_usx_screener(min_score=7, direction="Long Only"):
     try:
         results = []
-        for symbol in HALAL_STOCKS:
-            df = fetch_yf(symbol)
-            if df is None: continue
-            try:
-                close = df["close"]
-                high  = df["high"]
-                low   = df["low"]
-                vol   = df["volume"]
-
-                # EMAs
-                ema9  = float(ema(close, 9).iloc[-2])
-                ema21 = float(ema(close, 21).iloc[-2])
-
-                # Daily EMA trend
-                daily_ema21 = float(ema(close, 21).iloc[-1])
-                daily_bullish = float(close.iloc[-1]) > daily_ema21
-
-                # RSI
-                rsi_s   = rsi(close)
-                rsi_val = float(rsi_s.iloc[-2])
-
-                # MACD
-                _, _, hist_s = macd(close)
-                hist_now  = float(hist_s.iloc[-2])
-                hist_prev = float(hist_s.iloc[-3])
-                macd_rising = hist_now > 0 and hist_now > hist_prev
-
-                # ATR
-                atr_val = float(atr(df).iloc[-1])
-
-                # ADX approximation
-                high_s  = df["high"]
-                low_s   = df["low"]
-                tr      = pd.concat([high_s - low_s,
-                                     (high_s - close.shift()).abs(),
-                                     (low_s  - close.shift()).abs()], axis=1).max(axis=1)
-                atr14   = tr.ewm(alpha=1/14, min_periods=14).mean()
-                dm_plus  = (high_s.diff()).clip(lower=0)
-                dm_minus = (-low_s.diff()).clip(lower=0)
-                di_plus  = (dm_plus.ewm(alpha=1/14, min_periods=14).mean() / atr14 * 100).iloc[-2]
-                di_minus = (dm_minus.ewm(alpha=1/14, min_periods=14).mean() / atr14 * 100).iloc[-2]
-                adx_approx = abs(di_plus - di_minus) / (di_plus + di_minus + 1e-9) * 100
-                adx_ok     = adx_approx >= 20 and di_plus > di_minus
-
-                # Bollinger Band Squeeze
-                sma20    = close.rolling(20).mean()
-                std20    = close.rolling(20).std()
-                bb_upper = sma20 + 2 * std20
-                bb_lower = sma20 - 2 * std20
-                bb_width = ((bb_upper - bb_lower) / sma20 * 100)
-                bb_width_sma = bb_width.rolling(20).mean()
-                bb_squeeze = float(bb_width.iloc[-2]) < float(bb_width_sma.iloc[-2])
-
-                # Volume
-                vol_ma    = vol.rolling(20).mean()
-                vol_ratio = float(vol.iloc[-2] / vol_ma.iloc[-2]) if float(vol_ma.iloc[-2]) > 0 else 1.0
-                vol_ok    = vol_ratio >= 1.0
-
-                # Gap protection
-                gap_pct = float(((close.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100)
-                gap_ok  = 0 <= gap_pct <= 1.5
-
-                # VWAP approximation (cumulative)
-                hlc3   = (df["high"] + df["low"] + df["close"]) / 3
-                vwap   = (hlc3 * vol).cumsum() / vol.cumsum()
-                above_vwap = float(close.iloc[-2]) > float(vwap.iloc[-2])
-
-                # Relative Strength (vs SPY approximation using momentum)
-                roc5    = float((close.iloc[-1] - close.iloc[-6]) / close.iloc[-6] * 100) if len(close) >= 6 else 0
-                rs_ok   = roc5 > 0
-
-                # 10-Point Scoring (Long Only)
-                s1  = 1 if above_vwap else 0          # VWAP
-                s2  = 1 if daily_bullish else 0        # Daily trend
-                s3  = 1 if ema9 > ema21 else 0        # EMA 9>21
-                s4  = 1 if macd_rising else 0          # MACD rising
-                s5  = 1 if 40 <= rsi_val <= 65 else 0  # RSI zone
-                s6  = 1 if adx_ok else 0               # ADX+DI
-                s7  = 1 if bb_squeeze else 0           # BB Squeeze
-                s8  = 1 if rs_ok else 0                # RS positive
-                s9  = 1 if vol_ok else 0               # Volume
-                s10 = 1 if gap_ok else 0               # Gap OK
-
-                score = s1+s2+s3+s4+s5+s6+s7+s8+s9+s10
-
-                if score < min_score:
-                    continue
-
-                # Signal
-                if score >= 9:   signal = "STRONG BUY"
-                elif score >= 7: signal = "BUY"
-                elif score >= 6: signal = "NEUTRAL"
-                else:            signal = "NO TRADE"
-
-                price = float(close.iloc[-1])
-
-                # Trade Plan
-                sl_mult  = 1.5
-                tp1_mult = 1.5
-                tp2_mult = 2.5
-                tp3_mult = 4.0
-
-                sl  = round(price - sl_mult  * atr_val, 2)
-                tp1 = round(price + tp1_mult * atr_val, 2)
-                tp2 = round(price + tp2_mult * atr_val, 2)
-                tp3 = round(price + tp3_mult * atr_val, 2)
-                be  = round(price + 1.0 * atr_val, 2)
-
-                # Position sizing
-                risk_per_share = price - sl
-                risk_capital   = 100000 * 0.01
-                qty = int(risk_capital / risk_per_share) if risk_per_share > 0 else 0
-
-                # R:R
-                rr1 = round(tp1_mult / sl_mult, 2)
-                rr2 = round(tp2_mult / sl_mult, 2)
-                rr3 = round(tp3_mult / sl_mult, 2)
-
-                # Score breakdown
-                breakdown = []
-                if s1: breakdown.append("VWAP")
-                if s2: breakdown.append("Daily")
-                if s3: breakdown.append("EMA")
-                if s4: breakdown.append("MACD")
-                if s5: breakdown.append(f"RSI {rsi_val:.0f}")
-                if s6: breakdown.append("ADX")
-                if s7: breakdown.append("Squeeze")
-                if s8: breakdown.append("RS+")
-                if s9: breakdown.append(f"Vol {vol_ratio:.1f}x")
-                if s10: breakdown.append("Gap OK")
-
-                results.append({
-                    "Symbol":      symbol,
-                    "Price":       round(price, 2),
-                    "Score":       f"{score}/10",
-                    "Signal":      signal,
-                    "RSI":         round(rsi_val, 1),
-                    "ADX":         round(adx_approx, 1),
-                    "BB Squeeze":  "Yes" if bb_squeeze else "No",
-                    "Vol Ratio":   round(vol_ratio, 2),
-                    "Gap %":       round(gap_pct, 2),
-                    "Stop Loss":   sl,
-                    "TP1 (50%)":   tp1,
-                    "TP2 (30%)":   tp2,
-                    "TP3 (20%)":   tp3,
-                    "Breakeven":   be,
-                    "Qty":         qty,
-                    "RR1":         rr1,
-                    "RR2":         rr2,
-                    "RR3":         rr3,
-                    "Confluence":  ", ".join(breakdown),
-                })
-            except Exception as e:
-                logger.error(f"USX {symbol}: {e}")
-                continue
-
+        with ThreadPoolExecutor(max_workers=15) as pool:
+            futures = {pool.submit(_usx_one, s): s for s in HALAL_STOCKS}
+            for f in as_completed(futures):
+                r = f.result()
+                if r and r["_score_int"] >= min_score:
+                    row = {k: v for k, v in r.items() if k != "_score_int"}
+                    results.append(row)
         results.sort(key=lambda x: int(x["Score"].split("/")[0]), reverse=True)
         return results if results else [{"Message": "No stocks meet USX Pro criteria"}]
     except Exception as e:
         return [{"Error": str(e)}]
 
+
+def _vote_signal(sig_str):
+    """Helper: convert signal string to (vote_str, buy_delta, sell_delta, hold_delta)."""
+    if "STRONG BUY" in sig_str:
+        return "BUY", 2, 0, 0
+    elif "BUY" in sig_str:
+        return "BUY", 1, 0, 0
+    elif "SELL" in sig_str:
+        return "SELL", 0, 1, 0
+    return "HOLD", 0, 0, 1
 
 def run_consensus(symbol, horizon=5, episodes=10):
     try:
@@ -683,41 +698,24 @@ def run_consensus(symbol, horizon=5, episodes=10):
             r = analyze(symbol, df)
             if r:
                 sig = r["swing_signal"]
-                score = r["swing_score"]
-                if "STRONG BUY" in sig:
-                    votes_buy += 2
-                    vote = "BUY"
-                elif "BUY" in sig:
-                    votes_buy += 1
-                    vote = "BUY"
-                else:
-                    votes_hold += 1
-                    vote = "HOLD"
-                details.append({"Tool": "Halal Screener", "Signal": sig, "Vote": vote, "Score": score})
-        except Exception as e:
+                vote, b, s, h = _vote_signal(sig)
+                votes_buy += b; votes_sell += s; votes_hold += h
+                details.append({"Tool": "Halal Screener", "Signal": sig, "Vote": vote, "Score": r["swing_score"]})
+        except Exception:
             details.append({"Tool": "Halal Screener", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 2. USX Pro ---
+        # --- 2. USX Pro (single symbol - no full scan) ---
         try:
-            usx = run_usx_screener(min_score=7)
-            usx_sym = [x for x in usx if x.get("Symbol") == symbol]
-            if usx_sym:
-                usx_sig = usx_sym[0]["Signal"]
-                usx_score = usx_sym[0]["Score"]
-                if "STRONG BUY" in usx_sig:
-                    votes_buy += 2
-                    vote = "BUY"
-                elif "BUY" in usx_sig:
-                    votes_buy += 1
-                    vote = "BUY"
-                else:
-                    votes_hold += 1
-                    vote = "HOLD"
-                details.append({"Tool": "USX Pro", "Signal": usx_sig, "Vote": vote, "Score": usx_score})
+            usx_r = score_usx_single(symbol, df)
+            if usx_r and usx_r["_score_int"] >= 7:
+                vote, b, s, h = _vote_signal(usx_r["Signal"])
+                votes_buy += b; votes_sell += s; votes_hold += h
+                details.append({"Tool": "USX Pro", "Signal": usx_r["Signal"], "Vote": vote, "Score": usx_r["Score"]})
             else:
                 votes_hold += 1
-                details.append({"Tool": "USX Pro", "Signal": "Below Min Score", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+                score_str = usx_r["Score"] if usx_r else "N/A"
+                details.append({"Tool": "USX Pro", "Signal": f"Below Min ({score_str})", "Vote": "HOLD", "Score": 0})
+        except Exception:
             details.append({"Tool": "USX Pro", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 3. Backtest ---
@@ -728,190 +726,97 @@ def run_consensus(symbol, horizon=5, episodes=10):
             bt = run_backtest(symbol, start_date, end_date, 100000, 1.0, 3)
             if bt and len(bt) > 0 and "Return %" in bt[0]:
                 ret = float(bt[0]["Return %"])
-                win_rate = float(bt[0].get("Win Rate %", 0))
+                win_rate_v = float(bt[0].get("Win Rate %", 0))
                 sharpe = float(bt[0].get("Sharpe Ratio", 0))
-                if ret > 5 and win_rate > 50 and sharpe > 0.5:
-                    votes_buy += 1
-                    vote = "BUY"
-                    sig = f"Return {ret:.1f}% WR {win_rate:.0f}%"
-                elif ret < -5 or (win_rate < 40 and sharpe < 0):
-                    votes_sell += 1
-                    vote = "SELL"
-                    sig = f"Return {ret:.1f}% WR {win_rate:.0f}%"
+                sig = f"Return {ret:.1f}% WR {win_rate_v:.0f}%"
+                if ret > 5 and win_rate_v > 50 and sharpe > 0.5:
+                    votes_buy += 1; vote = "BUY"
+                elif ret < -5 or (win_rate_v < 40 and sharpe < 0):
+                    votes_sell += 1; vote = "SELL"
                 else:
-                    votes_hold += 1
-                    vote = "HOLD"
-                    sig = f"Return {ret:.1f}% WR {win_rate:.0f}%"
+                    votes_hold += 1; vote = "HOLD"
                 details.append({"Tool": "Backtest 2Y", "Signal": sig, "Vote": vote, "Score": round(ret, 1)})
             else:
                 votes_hold += 1
                 details.append({"Tool": "Backtest 2Y", "Signal": "No trades", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+        except Exception:
             details.append({"Tool": "Backtest 2Y", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 4. Monte Carlo ---
+        # --- 4. Monte Carlo (reuse df) ---
         try:
             from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
-            prices = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices = prices[~np.isnan(prices)]
+            prices_arr = np.array(df["close"].values, dtype=np.float64).flatten()
+            prices_arr = prices_arr[~np.isnan(prices_arr)]
             mc = MonteCarloSimulator(seed=42)
-            result = mc.simulate(prices, n_simulations=500, forecast_days=horizon)
+            result = mc.simulate(prices_arr, n_simulations=500, forecast_days=horizon)
             prob = float(result["summary"]["prob_profit"])
             exp_price = float(result["summary"]["expected_terminal_price"])
             chg = (exp_price - price) / price * 100
-            if prob >= 0.60:
-                votes_buy += 1
-                vote = "BUY"
-            elif prob <= 0.45:
-                votes_sell += 1
-                vote = "SELL"
-            else:
-                votes_hold += 1
-                vote = "HOLD"
+            if prob >= 0.60: votes_buy += 1; vote = "BUY"
+            elif prob <= 0.45: votes_sell += 1; vote = "SELL"
+            else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob*100:.1f}% Exp {chg:+.1f}%", "Vote": vote, "Score": round(prob*100, 1)})
-        except Exception as e:
+        except Exception:
             details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 5. LSTM ---
-        try:
-            from openbb_forecast.models.lstm import LSTMForecaster
-            prices2 = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices2 = prices2[~np.isnan(prices2)]
-            mean_p = prices2.mean(); std_p = prices2.std() + 1e-9
-            norm = (prices2 - mean_p) / std_p
-            SEQ = 20
-            X, y = [], []
-            for i in range(len(norm)-SEQ-horizon):
-                X.append(norm[i:i+SEQ].reshape(-1,1))
-                y.append(norm[i+SEQ:i+SEQ+horizon])
-            X = np.array(X); y = np.array(y)
-            split = int(len(X)*0.8)
-            lstm = LSTMForecaster(hidden_size=64, num_layers=2, epochs=30, patience=5)
-            lstm.fit(X[:split], y[:split])
-            preds = lstm.predict(X[-1:])
-            pred5 = float(preds[0][-1]) * std_p + mean_p
-            chg = (pred5 - price) / price * 100
-            if chg > 1:
-                votes_buy += 1
-                vote = "BUY"
-            elif chg < -1:
-                votes_sell += 1
-                vote = "SELL"
-            else:
-                votes_hold += 1
-                vote = "HOLD"
-            details.append({"Tool": "LSTM", "Signal": f"{chg:+.1f}%", "Vote": vote, "Score": round(chg, 2)})
-        except Exception as e:
-            details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-", "Score": 0})
+        # --- 5-7: LSTM, Transformer, Ensemble (pass df, use model cache) ---
+        for tool_name, run_fn in [("LSTM", run_lstm), ("Transformer", run_transformer), ("Ensemble", run_ensemble)]:
+            try:
+                res = run_fn(symbol, horizon, df=df)
+                if res and len(res) > 1:
+                    last_forecast = res[-1]
+                    chg = last_forecast.get("Change %", 0)
+                    if chg > 1: votes_buy += 1; vote = "BUY"
+                    elif chg < -1: votes_sell += 1; vote = "SELL"
+                    else: votes_hold += 1; vote = "HOLD"
+                    details.append({"Tool": tool_name, "Signal": f"{chg:+.1f}%", "Vote": vote, "Score": round(chg, 2)})
+                else:
+                    votes_hold += 1
+                    details.append({"Tool": tool_name, "Signal": "No result", "Vote": "HOLD", "Score": 0})
+            except Exception:
+                details.append({"Tool": tool_name, "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 6. Transformer ---
-        try:
-            from openbb_forecast.models.transformer import TransformerForecaster
-            prices3 = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices3 = prices3[~np.isnan(prices3)]
-            mean_p = prices3.mean(); std_p = prices3.std() + 1e-9
-            norm = (prices3 - mean_p) / std_p
-            SEQ = 20
-            X, y = [], []
-            for i in range(len(norm)-SEQ-horizon):
-                X.append(norm[i:i+SEQ].reshape(-1,1))
-                y.append(norm[i+SEQ:i+SEQ+horizon])
-            X = np.array(X); y = np.array(y)
-            split = int(len(X)*0.8)
-            tf = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=30, patience=5)
-            tf.fit(X[:split], y[:split])
-            preds = tf.predict(X[-1:])
-            pred5 = float(preds[0][-1]) * std_p + mean_p
-            chg = (pred5 - price) / price * 100
-            if chg > 1:
-                votes_buy += 1
-                vote = "BUY"
-            elif chg < -1:
-                votes_sell += 1
-                vote = "SELL"
-            else:
-                votes_hold += 1
-                vote = "HOLD"
-            details.append({"Tool": "Transformer", "Signal": f"{chg:+.1f}%", "Vote": vote, "Score": round(chg, 2)})
-        except Exception as e:
-            details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-", "Score": 0})
-
-        # --- 7. Stacking Ensemble ---
-        try:
-            from openbb_forecast.models.ensemble import StackingForecaster
-            prices5 = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices5 = prices5[~np.isnan(prices5)]
-            mean_p = prices5.mean(); std_p = prices5.std() + 1e-9
-            norm = (prices5 - mean_p) / std_p
-            SEQ = 20
-            X, y = [], []
-            for i in range(len(norm)-SEQ-horizon):
-                X.append(norm[i:i+SEQ])
-                y.append(norm[i+SEQ:i+SEQ+horizon])
-            X = np.array(X); y = np.array(y)
-            split = int(len(X)*0.8)
-            ens = StackingForecaster()
-            ens.fit(X[:split], y[:split])
-            preds = ens.predict(X[-1:])
-            pred5 = float(preds[0][-1]) * std_p + mean_p
-            chg = (pred5 - price) / price * 100
-            if chg > 1:
-                votes_buy += 1
-                vote = "BUY"
-            elif chg < -1:
-                votes_sell += 1
-                vote = "SELL"
-            else:
-                votes_hold += 1
-                vote = "HOLD"
-            details.append({"Tool": "Ensemble", "Signal": f"{chg:+.1f}%", "Vote": vote, "Score": round(chg, 2)})
-        except Exception as e:
-            details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-", "Score": 0})
-
-        # --- 8. Double DQN ---
+        # --- 8. Double DQN (pass df) ---
         try:
             from openbb_forecast.agents.double_dqn import DoubleDQNAgent
             from openbb_forecast.agents.environment import TradingEnvironment
             from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
-            prices4 = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices4 = prices4[~np.isnan(prices4)]
-            split = int(len(prices4)*0.8)
+            prices_arr = np.array(df["close"].values, dtype=np.float64).flatten()
+            prices_arr = prices_arr[~np.isnan(prices_arr)]
+            split = int(len(prices_arr)*0.8)
             cost_model = TransactionCostModel(commission_bps=10)
-            env = TradingEnvironment(prices=prices4[:split], window_size=30, initial_capital=10000, cost_model=cost_model)
+            env = TradingEnvironment(prices=prices_arr[:split], window_size=30, initial_capital=10000, cost_model=cost_model)
             agent = DoubleDQNAgent(state_size=env.state_size, action_size=env.action_size)
             agent.train(env, episodes=episodes)
             state = env.reset()
             action = agent.select_action(state)
-            action_map = {0: "HOLD", 1: "BUY", 2: "SELL"}
-            dqn_sig = action_map.get(int(action), "HOLD")
+            dqn_sig = {0: "HOLD", 1: "BUY", 2: "SELL"}.get(int(action), "HOLD")
             if dqn_sig == "BUY": votes_buy += 1
             elif dqn_sig == "SELL": votes_sell += 1
             else: votes_hold += 1
             details.append({"Tool": "Double DQN", "Signal": dqn_sig, "Vote": dqn_sig, "Score": 0})
-        except Exception as e:
+        except Exception:
             details.append({"Tool": "Double DQN", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 9. Policy Gradient ---
+        # --- 9. Policy Gradient (pass df) ---
         try:
             from openbb_forecast.agents.policy_gradient import PolicyGradientAgent
-            from openbb_forecast.agents.environment import TradingEnvironment
-            from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
-            prices6 = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices6 = prices6[~np.isnan(prices6)]
-            split = int(len(prices6)*0.8)
-            cost_model2 = TransactionCostModel(commission_bps=10)
-            env2 = TradingEnvironment(prices=prices6[:split], window_size=30, initial_capital=10000, cost_model=cost_model2)
+            from openbb_forecast.agents.environment import TradingEnvironment as TradingEnv2
+            from openbb_forecast.backtesting.transaction_costs import TransactionCostModel as TCM2
+            prices_arr = np.array(df["close"].values, dtype=np.float64).flatten()
+            prices_arr = prices_arr[~np.isnan(prices_arr)]
+            split = int(len(prices_arr)*0.8)
+            env2 = TradingEnv2(prices=prices_arr[:split], window_size=30, initial_capital=10000, cost_model=TCM2(commission_bps=10))
             agent2 = PolicyGradientAgent(state_size=env2.state_size, action_size=env2.action_size)
             agent2.train(env2, episodes=episodes)
             state2 = env2.reset()
             action2 = agent2.select_action(state2)
-            action_map2 = {0: "HOLD", 1: "BUY", 2: "SELL"}
-            pg_sig = action_map2.get(int(action2), "HOLD")
+            pg_sig = {0: "HOLD", 1: "BUY", 2: "SELL"}.get(int(action2), "HOLD")
             if pg_sig == "BUY": votes_buy += 1
             elif pg_sig == "SELL": votes_sell += 1
             else: votes_hold += 1
             details.append({"Tool": "Policy Gradient", "Signal": pg_sig, "Vote": pg_sig, "Score": 0})
-        except Exception as e:
+        except Exception:
             details.append({"Tool": "Policy Gradient", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- Final Verdict ---
@@ -919,27 +824,13 @@ def run_consensus(symbol, horizon=5, episodes=10):
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        if votes_buy >= 6:
-            verdict = "STRONG BUY"
-            action_str = "✅ STRONG ENTER"
-        elif votes_buy > votes_sell and confidence >= 60:
-            verdict = "BUY"
-            action_str = "✅ ENTER"
-        elif votes_buy > votes_sell and confidence >= 40:
-            verdict = "WEAK BUY"
-            action_str = "⚠️ WEAK SIGNAL"
-        elif votes_sell >= 6:
-            verdict = "STRONG SELL"
-            action_str = "❌ STRONG AVOID"
-        elif votes_sell > votes_buy and confidence >= 60:
-            verdict = "SELL"
-            action_str = "❌ AVOID"
-        elif votes_sell > votes_buy:
-            verdict = "WEAK SELL"
-            action_str = "⚠️ WEAK SELL"
-        else:
-            verdict = "NEUTRAL"
-            action_str = "⏳ WAIT"
+        if votes_buy >= 6:         verdict, action_str = "STRONG BUY", "STRONG ENTER"
+        elif votes_buy > votes_sell and confidence >= 60: verdict, action_str = "BUY", "ENTER"
+        elif votes_buy > votes_sell and confidence >= 40: verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
+        elif votes_sell >= 6:      verdict, action_str = "STRONG SELL", "STRONG AVOID"
+        elif votes_sell > votes_buy and confidence >= 60: verdict, action_str = "SELL", "AVOID"
+        elif votes_sell > votes_buy:                      verdict, action_str = "WEAK SELL", "WEAK SELL"
+        else:                      verdict, action_str = "NEUTRAL", "WAIT"
 
         sl  = round(price - 1.5 * atr_val, 2)
         tp1 = round(price + 1.5 * atr_val, 2)
@@ -1023,30 +914,34 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
 
 RUSSELL_1000_HALAL = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AMD', 'INTC', 'CSCO', 'ORCL', 'IBM', 'QCOM', 'TXN', 'AVGO', 'CRM', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'NET', 'DDOG', 'ZS', 'CRWD', 'PANW', 'FTNT', 'CDNS', 'SNPS', 'KLAC', 'LRCX', 'AMAT', 'MCHP', 'MPWR', 'ENPH', 'FSLR', 'ON', 'SWKS', 'WOLF', 'LITE', 'ENTG', 'ACLS', 'ONTO', 'RMBS', 'CRUS', 'SLAB', 'POWI', 'AMBA', 'COHR', 'FORM', 'GIGA', 'HIMX', 'IMOS', 'IPGP', 'ITRN', 'IXYS', 'KLIC', 'LSCC', 'MKSI', 'MRVL', 'MU', 'NXPI', 'OLED', 'PLAB', 'SMTC', 'SYNA', 'TOWR', 'TSEM', 'UCTT', 'VEEA', 'VICR', 'VLAB', 'VSH', 'WFRD', 'XLNX', 'XPLT', 'YELP', 'YEXT', 'ZI', 'HUBS', 'PAYC', 'VEEV', 'WDAY', 'PCTY', 'COUP', 'MDB', 'ESTC', 'DOMO', 'FROG', 'GTLB', 'IOT', 'JAMF', 'KVYO', 'MANH', 'MNDY', 'NCNO', 'SPSC', 'TOST', 'VRNS', 'JNJ', 'PFE', 'ABBV', 'MRK', 'LLY', 'TMO', 'ABT', 'MDT', 'AMGN', 'GILD', 'REGN', 'VRTX', 'ISRG', 'BSX', 'EW', 'SYK', 'BDX', 'IQV', 'A', 'WAT', 'MTD', 'IDXX', 'PODD', 'DXCM', 'ALGN', 'HOLX', 'ILMN', 'INSP', 'IONS', 'JAZZ', 'LGND', 'MASI', 'MMSI', 'NKTR', 'NVCR', 'NVST', 'OMCL', 'PRGO', 'RARE', 'RCUS', 'RGEN', 'RVMD', 'RXRX', 'SAGE', 'SRPT', 'STAA', 'SUPN', 'TGTX', 'THRM', 'TBPH', 'ACAD', 'ACMR', 'AGIO', 'AKBA', 'AKRO', 'ALEC', 'ALKS', 'ALNY', 'ALXO', 'AMRN', 'AMRX', 'ANAB', 'ANGI', 'ANIK', 'ANIP', 'APLS', 'APOG', 'APRE', 'APTX', 'ARCT', 'ARDX', 'ARGX', 'ARQT', 'ARVN', 'ASND', 'ATEX', 'ATRC', 'ATRI', 'AVAL', 'AVEO', 'AVRO', 'AXNX', 'AXSM', 'AYTU', 'AZTA', 'BCAB', 'BCDA', 'BCRX', 'BDSI', 'BEAM', 'BHVN', 'BIOL', 'BIOP', 'BLUE', 'BMRN', 'BPMC', 'BRMK', 'BTAI', 'BYSI', 'CABA', 'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'PSX', 'VLO', 'MPC', 'HAL', 'DVN', 'FANG', 'APA', 'BKR', 'NOV', 'HP', 'WHD', 'NE', 'CIVI', 'CPE', 'ESTE', 'GPRE', 'HESM', 'MNRL', 'MTDR', 'PDCE', 'PR', 'REPX', 'SBOW', 'SM', 'SWN', 'TALO', 'VTLE', 'XEC', 'ACDC', 'AMPY', 'ARCH', 'AROC', 'BATL', 'CEIX', 'CLMT', 'CNX', 'CONSOL', 'CTRA', 'DKL', 'DK', 'DMLP', 'DNOW', 'DRQ', 'ENLC', 'EXTN', 'FLNG', 'FTI', 'GLP', 'GPRK', 'GRNT', 'HES', 'HLX', 'HRI', 'HTGC', 'IMPP', 'INT', 'INTL', 'ISNS', 'JMPX', 'KOS', 'LBRT', 'LPI', 'MGLD', 'WMT', 'COST', 'TGT', 'HD', 'LOW', 'NKE', 'PG', 'KO', 'PEP', 'CL', 'KMB', 'GIS', 'SYY', 'CMG', 'EL', 'CHD', 'CLX', 'MKC', 'HRL', 'CPB', 'BURL', 'CASY', 'CBRL', 'CHDN', 'CHEF', 'COKE', 'COLM', 'CROX', 'DG', 'DLTR', 'DPZ', 'EAT', 'EBAY', 'ELF', 'ETSY', 'FIVE', 'FIZZ', 'GFF', 'GIII', 'GPRO', 'HAIN', 'HAS', 'HELE', 'HIBB', 'HRB', 'JACK', 'JOUT', 'LEVI', 'LKQ', 'LULU', 'MAR', 'MCD', 'MDLZ', 'MNST', 'MTN', 'NOMD', 'NUS', 'NYT', 'OLLI', 'ONON', 'ORLY', 'POOL', 'QSR', 'ROST', 'SAM', 'SBUX', 'SHAK', 'SHOP', 'SKX', 'SNA', 'TSCO', 'ULTA', 'USFD', 'WGO', 'WING', 'WSM', 'YUM', 'YUMC', 'ZOES', 'GE', 'CAT', 'MMM', 'HON', 'DE', 'EMR', 'ETN', 'PH', 'ROK', 'AME', 'IEX', 'XYL', 'OTIS', 'CARR', 'DOV', 'FTV', 'ROP', 'LDOS', 'SAIC', 'BAH', 'ESAB', 'FELE', 'GNRC', 'GWW', 'HXL', 'HUBB', 'ITT', 'JBTM', 'KAI', 'KAMN', 'MANT', 'MIDD', 'MOOG', 'MWA', 'NPO', 'NVT', 'OSK', 'PRIM', 'PWR', 'RBC', 'RS', 'RTX', 'TDY', 'TEX', 'TNC', 'TR', 'TRS', 'TT', 'TXT', 'UFPI', 'VMI', 'AGCO', 'ALGT', 'ALIT', 'ALMA', 'AMWD', 'AQUA', 'ARHS', 'AROW', 'AXL', 'AZEK', 'BCOR', 'BGSF', 'BJRI', 'BLBD', 'BMBL', 'BNFT', 'BRBR', 'BRLT', 'BXMT', 'CECO', 'NEE', 'DUK', 'SO', 'AEP', 'EXC', 'SRE', 'PPL', 'XEL', 'ES', 'ETR', 'AMT', 'PLD', 'CCI', 'EQIX', 'PSA', 'O', 'WELL', 'DLR', 'AVB', 'EQR', 'ARE', 'BXP', 'CPT', 'EGP', 'EXR', 'FRT', 'HIW', 'HST', 'IRM', 'KIM', 'KRG', 'LTC', 'LXP', 'NNN', 'OFC', 'PEAK', 'PLYM', 'RPT', 'SAFE', 'SHO', 'STAG', 'STOR', 'SUI', 'SWK', 'TCO', 'UDR', 'UE', 'VNO', 'WPC', 'WRE', 'VZ', 'T', 'TMUS', 'LUMN', 'SHEN', 'USM', 'TDS', 'ATN', 'CNSL', 'LBAI', 'ATUS', 'CABO', 'CCOI', 'DISH', 'GSAT', 'IDT', 'LILA', 'LILAK', 'OOMA', 'F', 'GM', 'UBER', 'LYFT', 'RIVN', 'LCID', 'NKLA', 'RIDE', 'FSR', 'BLNK', 'CHPT', 'EVGO', 'FFIE', 'GOEV', 'HYLN', 'LEV', 'MULN', 'NRGV', 'WKHS']
 
+def _quick_filter_one(symbol):
+    """Quick filter for pipeline stage 1."""
+    try:
+        df = fetch_yf(symbol)
+        if df is None: return None
+        close = df["close"]
+        ema21_val = float(ema(close, 21).iloc[-1])
+        ema9_val  = float(ema(close, 9).iloc[-1])
+        rsi_val   = float(rsi(close).iloc[-1])
+        vol_ma    = float(df["volume"].rolling(20).mean().iloc[-1])
+        vol_ratio = float(df["volume"].iloc[-1] / vol_ma) if vol_ma > 0 else 0
+        price     = float(close.iloc[-1])
+        score = sum([price > ema21_val, ema9_val > ema21_val, 30 <= rsi_val <= 75, vol_ratio >= 0.8])
+        if score >= 2:
+            return {"symbol": symbol, "price": round(price,2), "rsi": round(rsi_val,1), "quick_score": score}
+    except:
+        pass
+    return None
+
 def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
     try:
-        # المرحلة 1: فلتر سريع
+        # Stage 1: Quick filter (concurrent)
         quick_results = []
-        for symbol in RUSSELL_1000_HALAL:
-            try:
-                df = fetch_yf(symbol)
-                if df is None: continue
-                close = df["close"]
-                ema21_val = float(ema(close, 21).iloc[-1])
-                ema9_val  = float(ema(close, 9).iloc[-1])
-                rsi_val   = float(rsi(close).iloc[-1])
-                vol_ma    = float(df["volume"].rolling(20).mean().iloc[-1])
-                vol_ratio = float(df["volume"].iloc[-1] / vol_ma) if vol_ma > 0 else 0
-                price     = float(close.iloc[-1])
-                score = sum([
-                    price > ema21_val,
-                    ema9_val > ema21_val,
-                    30 <= rsi_val <= 75,
-                    vol_ratio >= 0.8
-                ])
-                if score >= 2:
-                    quick_results.append({"symbol": symbol, "price": round(price,2), "rsi": round(rsi_val,1), "quick_score": score})
-            except: continue
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            futures = {pool.submit(_quick_filter_one, s): s for s in RUSSELL_1000_HALAL}
+            for f in as_completed(futures):
+                r = f.result()
+                if r: quick_results.append(r)
         quick_results.sort(key=lambda x: x["quick_score"], reverse=True)
         top100 = quick_results[:100]
 
@@ -1065,6 +960,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
 
         # المرحلة 3: USX Pro
         top30_symbols = [r["symbol"] for r in top30]
+        usx_filtered = []
         try:
             usx_all = run_usx_screener(min_score=5)
             usx_filtered = [x for x in usx_all if x.get("Symbol") in top30_symbols]
@@ -1081,7 +977,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
                 if consensus and len(consensus) > 0:
                     row = consensus[0].copy()
                     screener_info = next((r for r in screener_results if r["symbol"] == symbol), {})
-                    usx_info = next((r for r in usx_filtered if r.get("Symbol") == symbol), {}) if "usx_filtered" in dir() else {}
+                    usx_info = next((r for r in usx_filtered if r.get("Symbol") == symbol), {})
                     row["Swing Score"] = screener_info.get("swing_score", 0)
                     row["USX Score"]   = usx_info.get("Score", "N/A")
                     row["RSI"]         = screener_info.get("rsi", 0)
@@ -1159,6 +1055,21 @@ async def widgets():
                                    "category": "Equity", "type": "table", "endpoint": "/policy_gradient", "gridData": {"w": 20, "h": 9},
                                    "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True},
                                               {"paramName": "episodes", "value": "20", "label": "Episodes", "type": "text", "show": True}]},
+        "consensus_widget": {"name": "AI Consensus", "description": "9-tool voting system for buy/sell/hold",
+                             "category": "Equity", "type": "table", "endpoint": "/consensus", "gridData": {"w": 20, "h": 9},
+                             "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True},
+                                        {"paramName": "horizon", "value": "5", "label": "Forecast Days", "type": "text", "show": True},
+                                        {"paramName": "episodes", "value": "10", "label": "RL Episodes", "type": "text", "show": True}]},
+        "batch_consensus_widget": {"name": "Batch Consensus", "description": "AI consensus on all active buy signals",
+                                   "category": "Equity", "type": "table", "endpoint": "/batch_consensus", "gridData": {"w": 20, "h": 9},
+                                   "params": [{"paramName": "min_swing_score", "value": "55", "label": "Min Swing Score", "type": "text", "show": True},
+                                              {"paramName": "horizon", "value": "5", "label": "Forecast Days", "type": "text", "show": True},
+                                              {"paramName": "max_stocks", "value": "10", "label": "Max Stocks", "type": "text", "show": True}]},
+        "pipeline_widget": {"name": "Full AI Pipeline", "description": "Russell 1000 Halal full funnel analysis",
+                            "category": "Equity", "type": "table", "endpoint": "/pipeline", "gridData": {"w": 20, "h": 9},
+                            "params": [{"paramName": "min_confidence", "value": "40", "label": "Min Confidence %", "type": "text", "show": True},
+                                       {"paramName": "max_final", "value": "15", "label": "Max Final Stocks", "type": "text", "show": True},
+                                       {"paramName": "horizon", "value": "5", "label": "Forecast Days", "type": "text", "show": True}]},
     }
 
 @app.get("/screener")
@@ -1205,17 +1116,57 @@ async def consensus(symbol:str="AAPL", horizon:int=5, episodes:int=10):
     try: return run_consensus(symbol.upper(), horizon, episodes)
     except Exception as e: return [{"Error":str(e)}]
 
+# --- Background job system for long-running tasks ---
+_jobs = {}
+_jobs_lock = threading.Lock()
+
+def _run_job(job_id, fn, kwargs):
+    try:
+        result = fn(**kwargs)
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "completed"
+            _jobs[job_id]["result"] = result
+    except Exception as e:
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["result"] = [{"Error": str(e)}]
+
+def _start_job(fn, kwargs):
+    job_id = str(uuid.uuid4())[:8]
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running", "result": None, "started": time.time()}
+    threading.Thread(target=_run_job, args=(job_id, fn, kwargs), daemon=True).start()
+    return job_id
+
 @app.get("/batch_consensus")
-async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10):
-    try: return run_batch_consensus(min_swing_score=min_swing_score, horizon=horizon, episodes=episodes, max_stocks=max_stocks)
-    except Exception as e: return [{"Error":str(e)}]
+async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10, sync:bool=False):
+    if sync:
+        try: return run_batch_consensus(min_swing_score=min_swing_score, horizon=horizon, episodes=episodes, max_stocks=max_stocks)
+        except Exception as e: return [{"Error":str(e)}]
+    job_id = _start_job(run_batch_consensus, {"min_swing_score": min_swing_score, "horizon": horizon, "episodes": episodes, "max_stocks": max_stocks})
+    return [{"job_id": job_id, "status": "running", "check": f"/job/{job_id}"}]
 
 @app.get("/pipeline")
-async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5):
-    try: return run_pipeline(min_confidence=min_confidence, max_final=max_final, horizon=horizon, episodes=episodes)
-    except Exception as e: return [{"Error":str(e)}]
+async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5, sync:bool=False):
+    if sync:
+        try: return run_pipeline(min_confidence=min_confidence, max_final=max_final, horizon=horizon, episodes=episodes)
+        except Exception as e: return [{"Error":str(e)}]
+    job_id = _start_job(run_pipeline, {"min_confidence": min_confidence, "max_final": max_final, "horizon": horizon, "episodes": episodes})
+    return [{"job_id": job_id, "status": "running", "check": f"/job/{job_id}"}]
+
+@app.get("/job/{job_id}")
+async def job_status(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        return [{"Error": f"Job {job_id} not found"}]
+    if job["status"] == "running":
+        elapsed = round(time.time() - job["started"], 1)
+        return [{"job_id": job_id, "status": "running", "elapsed_seconds": elapsed}]
+    return job["result"]
 
 @app.get("/health")
-async def health(): return {"status": "ok", "version": "11.0.0", "widgets": 14, "stocks": 505}
+async def health(): return {"status": "ok", "version": "11.2.0", "widgets": 14, "stocks": len(HALAL_STOCKS)}
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=5001)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
