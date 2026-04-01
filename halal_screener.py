@@ -1,15 +1,3 @@
-import threading, requests, time, os
-
-def ping():
-    url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
-    if not url: return
-    while True:
-        try:
-            requests.get(f"https://{url}/health", timeout=10)
-        except: pass
-        time.sleep(240)
-
-threading.Thread(target=ping, daemon=True).start()
 import time, logging, pandas as pd, yfinance as yf, numpy as np, sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -1167,9 +1155,6 @@ async def widgets():
                        "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True},
                                   {"paramName": "episodes", "value": "20", "label": "Episodes", "type": "text", "show": True}]},
         "usx_pro_widget":{"name":"USX Pro V1.0 Screener","description":"10-point US swing trading system","category":"Equity","type":"table","endpoint":"/usx","gridData":{"w":20,"h":9},"params":[{"paramName":"min_score","value":"7","label":"Min Score (1-10)","type":"text","show":True}]},
-        "pipeline_widget":{"name":"Full Pipeline Russell 1000","description":"Russell 1000 Halal - Full AI Pipeline","category":"Equity","type":"table","endpoint":"/pipeline","gridData":{"w":20,"h":9},"params":[{"paramName":"min_confidence","value":"40","label":"Min Confidence %","type":"text","show":True},{"paramName":"max_final","value":"15","label":"Max Results","type":"text","show":True}]},
-        "batch_consensus_widget":{"name":"Batch AI Consensus","description":"Scan all buy signals with all AI tools","category":"Equity","type":"table","endpoint":"/batch_consensus","gridData":{"w":20,"h":9},"params":[{"paramName":"min_swing_score","value":"55","label":"Min Swing Score","type":"text","show":True},{"paramName":"max_stocks","value":"10","label":"Max Stocks","type":"text","show":True}]},
-        "consensus_widget":{"name":"AI Consensus Vote","description":"All tools vote - final verdict","category":"Equity","type":"table","endpoint":"/consensus","gridData":{"w":20,"h":9},"params":[{"paramName":"symbol","value":"AAPL","label":"Symbol","type":"text","show":True},{"paramName":"horizon","value":"5","label":"Forecast Days","type":"text","show":True}]},
         "policy_gradient_widget": {"name": "Policy Gradient Agent", "description": "REINFORCE trading agent",
                                    "category": "Equity", "type": "table", "endpoint": "/policy_gradient", "gridData": {"w": 20, "h": 9},
                                    "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True},
@@ -1215,6 +1200,6 @@ async def usx(min_score:int=7):
     try: return run_usx_screener(min_score=min_score)
     except Exception as e: return [{"Error":str(e)}]
 @app.get("/health")
-async def health(): return {"status": "ok", "version": "7.0.0", "widgets": 10, "stocks": len(HALAL_STOCKS)}
+async def health(): return {"status": "ok", "version": "11.0.0", "widgets": 14, "stocks": 505}
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=5001)
