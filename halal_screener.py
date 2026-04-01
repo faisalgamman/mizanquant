@@ -1187,12 +1187,35 @@ async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
     validate_range(horizon, "horizon", 1, 30)
     validate_range(episodes, "episodes", 1, 50)
     check_rate_limit("consensus", 2)
-    return await with_timeout(asyncio.to_thread(run_consensus, s, horizon, episodes), 600)
+    with _bg_lock:
+        cached = _bg_consensus_cache.get(s)
+        status = _bg_consensus_status.get(s, "idle")
+    if cached:
+        return cached
+    if status != "running":
+        threading.Thread(target=_bg_refresh_consensus, args=(s, horizon, episodes), daemon=True).start()
+    return {"Status": f"Computing AI consensus for {s} in background...", "Info": "Refresh in 2-3 minutes for results"}
 
 # --- Background cache for heavy endpoints ---
 _bg_cache = {"batch_consensus": None, "pipeline": None}
+_bg_consensus_cache = {}   # {symbol: result}
+_bg_consensus_status = {}  # {symbol: "running"|"done"|"idle"}
 _bg_status = {"batch_consensus": "idle", "pipeline": "idle"}
 _bg_lock = threading.Lock()
+
+def _bg_refresh_consensus(symbol, horizon=5, episodes=10):
+    with _bg_lock:
+        if _bg_consensus_status.get(symbol) == "running": return
+        _bg_consensus_status[symbol] = "running"
+    try:
+        result = run_consensus(symbol, horizon, episodes)
+        with _bg_lock:
+            _bg_consensus_cache[symbol] = result
+            _bg_consensus_status[symbol] = "done"
+    except Exception as e:
+        with _bg_lock:
+            _bg_consensus_cache[symbol] = {"Error": str(e)}
+            _bg_consensus_status[symbol] = "done"
 
 def _bg_refresh_batch():
     with _bg_lock:
@@ -1243,6 +1266,15 @@ async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episo
     if status != "running":
         threading.Thread(target=_bg_refresh_pipeline, daemon=True).start()
     return [{"Status": "Computing full pipeline in background...", "Info": "Refresh in 5-10 minutes for results"}]
+
+@app.get("/refresh_consensus")
+async def refresh_consensus(symbol: str = "AAPL"):
+    s = validate_symbol(symbol)
+    with _bg_lock:
+        _bg_consensus_cache.pop(s, None)
+        _bg_consensus_status[s] = "idle"
+    threading.Thread(target=_bg_refresh_consensus, args=(s,), daemon=True).start()
+    return {"Status": f"Consensus refresh started for {s}. Check /consensus?symbol={s} in 2-3 minutes."}
 
 @app.get("/refresh_batch")
 async def refresh_batch():
