@@ -10,6 +10,4 @@ COPY . .
 
 RUN pip install --no-cache-dir --no-deps -e /app/openbb_forecast/
 
-EXPOSE 8000
-
-CMD uvicorn halal_screener:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn halal_screener:app --host 0.0.0.0 --port ${PORT:-8080}
