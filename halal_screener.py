@@ -1134,20 +1134,12 @@ def _start_job(fn, kwargs):
     return job_id
 
 @app.get("/batch_consensus")
-async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10, sync:bool=False):
-    if sync:
-        try: return run_batch_consensus(min_swing_score=min_swing_score, horizon=horizon, episodes=episodes, max_stocks=max_stocks)
-        except Exception as e: return [{"Error":str(e)}]
-    job_id = _start_job(run_batch_consensus, {"min_swing_score": min_swing_score, "horizon": horizon, "episodes": episodes, "max_stocks": max_stocks})
-    return [{"job_id": job_id, "status": "running", "check": f"/job/{job_id}"}]
+async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10):
+    return await asyncio.to_thread(run_batch_consensus, min_swing_score, horizon, episodes, max_stocks)
 
 @app.get("/pipeline")
-async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5, sync:bool=False):
-    if sync:
-        try: return run_pipeline(min_confidence=min_confidence, max_final=max_final, horizon=horizon, episodes=episodes)
-        except Exception as e: return [{"Error":str(e)}]
-    job_id = _start_job(run_pipeline, {"min_confidence": min_confidence, "max_final": max_final, "horizon": horizon, "episodes": episodes})
-    return [{"job_id": job_id, "status": "running", "check": f"/job/{job_id}"}]
+async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5):
+    return await asyncio.to_thread(run_pipeline, min_confidence, max_final, horizon, episodes)
 
 @app.get("/job/{job_id}")
 async def job_status(job_id: str):
