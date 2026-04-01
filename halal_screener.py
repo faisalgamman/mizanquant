@@ -1111,49 +1111,73 @@ async def usx(min_score:int=7):
 async def consensus(symbol:str="AAPL", horizon:int=5, episodes:int=10):
     return await asyncio.to_thread(run_consensus, symbol.upper(), horizon, episodes)
 
-# --- Background job system for long-running tasks ---
-_jobs = {}
-_jobs_lock = threading.Lock()
+# --- Background cache for heavy endpoints ---
+_bg_cache = {"batch_consensus": None, "pipeline": None}
+_bg_status = {"batch_consensus": "idle", "pipeline": "idle"}
+_bg_lock = threading.Lock()
 
-def _run_job(job_id, fn, kwargs):
+def _bg_refresh_batch():
+    with _bg_lock:
+        if _bg_status["batch_consensus"] == "running": return
+        _bg_status["batch_consensus"] = "running"
     try:
-        result = fn(**kwargs)
-        with _jobs_lock:
-            _jobs[job_id]["status"] = "completed"
-            _jobs[job_id]["result"] = result
+        result = run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10)
+        with _bg_lock:
+            _bg_cache["batch_consensus"] = result
+            _bg_status["batch_consensus"] = "done"
     except Exception as e:
-        with _jobs_lock:
-            _jobs[job_id]["status"] = "failed"
-            _jobs[job_id]["result"] = [{"Error": str(e)}]
+        with _bg_lock:
+            _bg_cache["batch_consensus"] = [{"Error": str(e)}]
+            _bg_status["batch_consensus"] = "done"
 
-def _start_job(fn, kwargs):
-    job_id = str(uuid.uuid4())[:8]
-    with _jobs_lock:
-        _jobs[job_id] = {"status": "running", "result": None, "started": time.time()}
-    threading.Thread(target=_run_job, args=(job_id, fn, kwargs), daemon=True).start()
-    return job_id
+def _bg_refresh_pipeline():
+    with _bg_lock:
+        if _bg_status["pipeline"] == "running": return
+        _bg_status["pipeline"] = "running"
+    try:
+        result = run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5)
+        with _bg_lock:
+            _bg_cache["pipeline"] = result
+            _bg_status["pipeline"] = "done"
+    except Exception as e:
+        with _bg_lock:
+            _bg_cache["pipeline"] = [{"Error": str(e)}]
+            _bg_status["pipeline"] = "done"
 
 @app.get("/batch_consensus")
 async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10):
-    return await asyncio.to_thread(run_batch_consensus, min_swing_score, horizon, episodes, max_stocks)
+    with _bg_lock:
+        cached = _bg_cache["batch_consensus"]
+        status = _bg_status["batch_consensus"]
+    if cached:
+        return cached
+    if status != "running":
+        threading.Thread(target=_bg_refresh_batch, daemon=True).start()
+    return [{"Status": "Computing batch consensus in background...", "Info": "Refresh in 2-3 minutes for results"}]
 
 @app.get("/pipeline")
 async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5):
-    return await asyncio.to_thread(run_pipeline, min_confidence, max_final, horizon, episodes)
+    with _bg_lock:
+        cached = _bg_cache["pipeline"]
+        status = _bg_status["pipeline"]
+    if cached:
+        return cached
+    if status != "running":
+        threading.Thread(target=_bg_refresh_pipeline, daemon=True).start()
+    return [{"Status": "Computing full pipeline in background...", "Info": "Refresh in 5-10 minutes for results"}]
 
-@app.get("/job/{job_id}")
-async def job_status(job_id: str):
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-    if not job:
-        return [{"Error": f"Job {job_id} not found"}]
-    if job["status"] == "running":
-        elapsed = round(time.time() - job["started"], 1)
-        return [{"job_id": job_id, "status": "running", "elapsed_seconds": elapsed}]
-    return job["result"]
+@app.get("/refresh_batch")
+async def refresh_batch():
+    threading.Thread(target=_bg_refresh_batch, daemon=True).start()
+    return [{"Status": "Batch consensus refresh started"}]
+
+@app.get("/refresh_pipeline")
+async def refresh_pipeline():
+    threading.Thread(target=_bg_refresh_pipeline, daemon=True).start()
+    return [{"Status": "Pipeline refresh started"}]
 
 @app.get("/health")
-async def health(): return {"status": "ok", "version": "11.2.0", "widgets": 14, "stocks": len(HALAL_STOCKS)}
+async def health(): return {"status": "ok", "version": "11.3.0", "widgets": 14, "stocks": len(HALAL_STOCKS)}
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
