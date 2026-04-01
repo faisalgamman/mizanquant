@@ -1258,7 +1258,7 @@ async def refresh_pipeline():
 async def health():
     checks = {"openbb_forecast": False, "yfinance": False}
     try:
-        from openbb_forecast.router import run_lstm
+        from openbb_forecast.models.lstm import LSTMForecaster
         checks["openbb_forecast"] = True
     except Exception:
         pass
