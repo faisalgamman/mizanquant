@@ -2,13 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir fastapi uvicorn yfinance pandas numpy xgboost scikit-learn requests
+RUN pip install --no-cache-dir fastapi uvicorn yfinance pandas numpy xgboost scikit-learn requests poetry-core
 
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY . .
 
-RUN pip install --no-cache-dir -e /app/openbb_forecast/
+RUN pip install --no-cache-dir --no-deps -e /app/openbb_forecast/
 
 EXPOSE 8000
 
