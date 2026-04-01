@@ -1199,6 +1199,22 @@ async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
 async def usx(min_score:int=7):
     try: return run_usx_screener(min_score=min_score)
     except Exception as e: return [{"Error":str(e)}]
+
+@app.get("/consensus")
+async def consensus(symbol:str="AAPL", horizon:int=5, episodes:int=10):
+    try: return run_consensus(symbol.upper(), horizon, episodes)
+    except Exception as e: return [{"Error":str(e)}]
+
+@app.get("/batch_consensus")
+async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10):
+    try: return run_batch_consensus(min_swing_score=min_swing_score, horizon=horizon, episodes=episodes, max_stocks=max_stocks)
+    except Exception as e: return [{"Error":str(e)}]
+
+@app.get("/pipeline")
+async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5):
+    try: return run_pipeline(min_confidence=min_confidence, max_final=max_final, horizon=horizon, episodes=episodes)
+    except Exception as e: return [{"Error":str(e)}]
+
 @app.get("/health")
 async def health(): return {"status": "ok", "version": "11.0.0", "widgets": 14, "stocks": 505}
 if __name__ == "__main__":
