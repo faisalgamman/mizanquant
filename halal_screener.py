@@ -1150,7 +1150,7 @@ def _bg_compute(key, func, args=(), kwargs=None):
     except Exception as e:
         logger.error(f"Background compute {key} failed: {e}")
         with _cache_lock:
-            _cache[key] = [{"Error": str(e)}] if "batch" in key or "pipeline" in key or "screener" in key or "usx" in key else {"Error": str(e)}
+            _cache[key] = [{"Error": str(e)}]
             _cache_status[key] = "done"
             _cache_time[key] = time.time()
 
@@ -1164,7 +1164,7 @@ def _serve_or_compute(key, func, args=(), kwargs=None, msg="Computing in backgro
         return cached
     if status != "running":
         threading.Thread(target=_bg_compute, args=(key, func, args, kwargs), daemon=True).start()
-    return {"Status": msg, "Info": "Data is being computed. Refresh the widget in 1-3 minutes."}
+    return [{"Status": msg, "Info": "Data is being computed. Refresh the widget in 1-3 minutes."}]
 
 # --- Screener-based endpoints (screener, buys, watchlist) ---
 @app.get("/screener")
