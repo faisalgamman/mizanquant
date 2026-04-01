@@ -108,8 +108,9 @@ class MonteCarloSimulator:
             day_prices = paths[:, t]
             day_returns = (day_prices - last_price) / last_price
 
-            var_95 = float(-np.percentile(day_returns, 5))
-            tail = day_returns[day_returns <= -var_95]
+            percentile_5 = float(np.percentile(day_returns, 5))
+            var_95 = max(0.0, -percentile_5)
+            tail = day_returns[day_returns <= percentile_5]
             cvar_95 = float(-np.mean(tail)) if len(tail) > 0 else var_95
 
             day_stats.append({
@@ -128,8 +129,9 @@ class MonteCarloSimulator:
         # Terminal stats
         terminal_prices = paths[:, -1]
         terminal_returns = (terminal_prices - last_price) / last_price
-        terminal_var = float(-np.percentile(terminal_returns, 5))
-        terminal_tail = terminal_returns[terminal_returns <= -terminal_var]
+        terminal_percentile_5 = float(np.percentile(terminal_returns, 5))
+        terminal_var = max(0.0, -terminal_percentile_5)
+        terminal_tail = terminal_returns[terminal_returns <= terminal_percentile_5]
         terminal_cvar = float(-np.mean(terminal_tail)) if len(terminal_tail) > 0 else terminal_var
 
         summary = {

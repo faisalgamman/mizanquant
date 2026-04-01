@@ -5,7 +5,7 @@ Key differences from original:
   - Double Q-learning: action from online network, value from target network
     (reduces overestimation bias in Q-values)
   - Experience replay buffer with proper sampling
-  - Epsilon decay per step, not per episode
+  - Epsilon decay per episode (multiplicative)
   - Interacts with TradingEnvironment (costs + risk), not raw prices
   - Gradient clipping for stability
 """

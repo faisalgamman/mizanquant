@@ -91,14 +91,25 @@ def calmar_ratio(
 
 
 def annualized_return(returns: np.ndarray) -> float:
-    """Annualized return from daily returns."""
+    """Annualized return from daily returns (simple or log).
+
+    Detects log returns by checking magnitude: if mean |return| < 0.1 and
+    no return exceeds 0.5 in absolute value, assumes log returns and uses
+    exp(sum) instead of prod(1+r).
+    """
     returns = np.asarray(returns, dtype=np.float64)
     if len(returns) == 0:
         return 0.0
-    total = np.prod(1 + returns) - 1
     n_years = len(returns) / TRADING_DAYS_PER_YEAR
     if n_years <= 0:
         return 0.0
+    # Heuristic: log returns are typically small and can be negative beyond -1
+    # Simple returns cannot be < -1 (can't lose more than 100%)
+    if np.any(returns < -0.5) or (np.mean(np.abs(returns)) < 0.05 and np.max(np.abs(returns)) < 0.5):
+        # Treat as log returns: total return = exp(sum(log_returns)) - 1
+        total = np.exp(np.sum(returns)) - 1
+    else:
+        total = np.prod(1 + returns) - 1
     return float((1 + total) ** (1 / n_years) - 1)
 
 
@@ -143,8 +154,10 @@ def conditional_var(returns: np.ndarray, confidence: float = 0.95) -> float:
     returns = np.asarray(returns, dtype=np.float64)
     if len(returns) == 0:
         return 0.0
-    var = value_at_risk(returns, confidence)
-    tail = returns[returns <= -var]
+    alpha = (1 - confidence) * 100  # e.g. 5 for 95% confidence
+    threshold = float(np.percentile(returns, alpha))
+    var = max(0.0, -threshold)
+    tail = returns[returns <= threshold]
     if len(tail) == 0:
         return float(var)
     return float(-np.mean(tail))
