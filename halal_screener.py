@@ -1112,20 +1112,87 @@ async def widgets():
                                        {"paramName": "horizon", "value": "5", "label": "Forecast Days", "type": "text", "show": True}]},
     }
 
+# ============================================================
+# UNIFIED BACKGROUND CACHE — ALL endpoints serve cached results
+# OpenBB Pro has ~30s widget timeout. No endpoint should ever
+# make it wait. Everything computes in background, serves instantly.
+# ============================================================
+_cache = {}          # {"endpoint_key": result}
+_cache_status = {}   # {"endpoint_key": "idle"|"running"|"done"}
+_cache_time = {}     # {"endpoint_key": timestamp}
+_cache_lock = threading.Lock()
+CACHE_TTL = 3600     # 1 hour — results refresh hourly
+
+def _cache_key(endpoint, **params):
+    parts = [endpoint] + [f"{k}={v}" for k, v in sorted(params.items())]
+    return "|".join(parts)
+
+def _get_cached(key):
+    with _cache_lock:
+        cached = _cache.get(key)
+        status = _cache_status.get(key, "idle")
+        ts = _cache_time.get(key, 0)
+    if cached and (time.time() - ts) > CACHE_TTL:
+        return cached, "stale"
+    return cached, status
+
+def _bg_compute(key, func, args=(), kwargs=None):
+    with _cache_lock:
+        if _cache_status.get(key) == "running":
+            return
+        _cache_status[key] = "running"
+    try:
+        result = func(*args, **(kwargs or {}))
+        with _cache_lock:
+            _cache[key] = result
+            _cache_status[key] = "done"
+            _cache_time[key] = time.time()
+    except Exception as e:
+        logger.error(f"Background compute {key} failed: {e}")
+        with _cache_lock:
+            _cache[key] = [{"Error": str(e)}] if "batch" in key or "pipeline" in key or "screener" in key or "usx" in key else {"Error": str(e)}
+            _cache_status[key] = "done"
+            _cache_time[key] = time.time()
+
+def _serve_or_compute(key, func, args=(), kwargs=None, msg="Computing in background..."):
+    """Return cached result instantly, or start background compute and return status message."""
+    cached, status = _get_cached(key)
+    if status == "stale":
+        threading.Thread(target=_bg_compute, args=(key, func, args, kwargs), daemon=True).start()
+        return cached  # serve stale while refreshing
+    if cached:
+        return cached
+    if status != "running":
+        threading.Thread(target=_bg_compute, args=(key, func, args, kwargs), daemon=True).start()
+    return {"Status": msg, "Info": "Data is being computed. Refresh the widget in 1-3 minutes."}
+
+# --- Screener-based endpoints (screener, buys, watchlist) ---
 @app.get("/screener")
 async def screener():
-    return await with_timeout(asyncio.to_thread(run_screener), 180)
+    key = _cache_key("screener")
+    return _serve_or_compute(key, run_screener, msg="Computing halal screener...")
 
 @app.get("/buys")
 async def buys():
-    data = await with_timeout(asyncio.to_thread(run_screener), 180)
-    return [r for r in data if r["swing_score"] >= 55]
+    key = _cache_key("screener")
+    cached, status = _get_cached(key)
+    if cached and isinstance(cached, list):
+        return [r for r in cached if r.get("swing_score", 0) >= 55]
+    if status != "running":
+        threading.Thread(target=_bg_compute, args=(key, run_screener), daemon=True).start()
+    return [{"Status": "Computing buy signals...", "Info": "Refresh in 1-2 minutes."}]
 
 @app.get("/watchlist")
 async def watchlist():
-    data = await with_timeout(asyncio.to_thread(run_screener), 180)
-    return [r for r in data if 35 <= r["swing_score"] < 55]
+    key = _cache_key("screener")
+    cached, status = _get_cached(key)
+    if cached and isinstance(cached, list):
+        return [r for r in cached if 35 <= r.get("swing_score", 0) < 55]
+    if status != "running":
+        threading.Thread(target=_bg_compute, args=(key, run_screener), daemon=True).start()
+    return [{"Status": "Computing watchlist...", "Info": "Refresh in 1-2 minutes."}]
 
+# --- Single-symbol endpoints ---
 @app.get("/backtest")
 async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_date: str = "2024-12-31", portfolio: float = 100000, risk_pct: float = 1.0, hold_days: int = 3):
     s = validate_symbol(symbol)
@@ -1133,53 +1200,61 @@ async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_dat
     validate_range(portfolio, "portfolio", 1000, 10_000_000)
     validate_range(risk_pct, "risk_pct", 0.1, 10.0)
     validate_range(hold_days, "hold_days", 1, 60)
-    return await with_timeout(asyncio.to_thread(run_backtest, s, start_date, end_date, portfolio, risk_pct, hold_days), 120)
+    key = _cache_key("backtest", symbol=s, start=start_date, end=end_date, portfolio=portfolio, risk=risk_pct, hold=hold_days)
+    return _serve_or_compute(key, run_backtest, args=(s, start_date, end_date, portfolio, risk_pct, hold_days), msg=f"Computing backtest for {s}...")
 
 @app.get("/monte_carlo")
 async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1000):
     s = validate_symbol(symbol)
     validate_range(days, "days", 1, 365)
     validate_range(simulations, "simulations", 100, 10000)
-    return await with_timeout(asyncio.to_thread(run_monte_carlo, s, days, simulations), 120)
+    key = _cache_key("monte_carlo", symbol=s, days=days, sims=simulations)
+    return _serve_or_compute(key, run_monte_carlo, args=(s, days, simulations), msg=f"Running Monte Carlo for {s}...")
 
 @app.get("/lstm")
 async def lstm(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     check_rate_limit("lstm", 3)
-    return await with_timeout(asyncio.to_thread(run_lstm, s, horizon), 300)
+    key = _cache_key("lstm", symbol=s, horizon=horizon)
+    return _serve_or_compute(key, run_lstm, args=(s, horizon), msg=f"Running LSTM for {s}...")
 
 @app.get("/transformer")
 async def transformer(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     check_rate_limit("transformer", 3)
-    return await with_timeout(asyncio.to_thread(run_transformer, s, horizon), 300)
+    key = _cache_key("transformer", symbol=s, horizon=horizon)
+    return _serve_or_compute(key, run_transformer, args=(s, horizon), msg=f"Running Transformer for {s}...")
 
 @app.get("/ensemble")
 async def ensemble(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
-    return await with_timeout(asyncio.to_thread(run_ensemble, s, horizon), 120)
+    key = _cache_key("ensemble", symbol=s, horizon=horizon)
+    return _serve_or_compute(key, run_ensemble, args=(s, horizon), msg=f"Running Ensemble for {s}...")
 
 @app.get("/dqn")
 async def dqn(symbol: str = "AAPL", episodes: int = 20):
     s = validate_symbol(symbol)
     validate_range(episodes, "episodes", 1, 100)
     check_rate_limit("dqn", 2)
-    return await with_timeout(asyncio.to_thread(run_dqn, s, episodes), 300)
+    key = _cache_key("dqn", symbol=s, episodes=episodes)
+    return _serve_or_compute(key, run_dqn, args=(s, episodes), msg=f"Running DQN for {s}...")
 
 @app.get("/policy_gradient")
 async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
     s = validate_symbol(symbol)
     validate_range(episodes, "episodes", 1, 100)
     check_rate_limit("policy_gradient", 2)
-    return await with_timeout(asyncio.to_thread(run_policy_gradient, s, episodes), 300)
+    key = _cache_key("policy_gradient", symbol=s, episodes=episodes)
+    return _serve_or_compute(key, run_policy_gradient, args=(s, episodes), msg=f"Running Policy Gradient for {s}...")
 
 @app.get("/usx")
 async def usx(min_score: int = 7):
     validate_range(min_score, "min_score", 1, 10)
-    return await with_timeout(asyncio.to_thread(run_usx_screener, min_score), 180)
+    key = _cache_key("usx", min_score=min_score)
+    return _serve_or_compute(key, run_usx_screener, args=(min_score,), msg="Computing USX screener...")
 
 @app.get("/consensus")
 async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
@@ -1187,104 +1262,54 @@ async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
     validate_range(horizon, "horizon", 1, 30)
     validate_range(episodes, "episodes", 1, 50)
     check_rate_limit("consensus", 2)
-    with _bg_lock:
-        cached = _bg_consensus_cache.get(s)
-        status = _bg_consensus_status.get(s, "idle")
-    if cached:
-        return cached
-    if status != "running":
-        threading.Thread(target=_bg_refresh_consensus, args=(s, horizon, episodes), daemon=True).start()
-    return {"Status": f"Computing AI consensus for {s} in background...", "Info": "Refresh in 2-3 minutes for results"}
-
-# --- Background cache for heavy endpoints ---
-_bg_cache = {"batch_consensus": None, "pipeline": None}
-_bg_consensus_cache = {}   # {symbol: result}
-_bg_consensus_status = {}  # {symbol: "running"|"done"|"idle"}
-_bg_status = {"batch_consensus": "idle", "pipeline": "idle"}
-_bg_lock = threading.Lock()
-
-def _bg_refresh_consensus(symbol, horizon=5, episodes=10):
-    with _bg_lock:
-        if _bg_consensus_status.get(symbol) == "running": return
-        _bg_consensus_status[symbol] = "running"
-    try:
-        result = run_consensus(symbol, horizon, episodes)
-        with _bg_lock:
-            _bg_consensus_cache[symbol] = result
-            _bg_consensus_status[symbol] = "done"
-    except Exception as e:
-        with _bg_lock:
-            _bg_consensus_cache[symbol] = {"Error": str(e)}
-            _bg_consensus_status[symbol] = "done"
-
-def _bg_refresh_batch():
-    with _bg_lock:
-        if _bg_status["batch_consensus"] == "running": return
-        _bg_status["batch_consensus"] = "running"
-    try:
-        result = run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10)
-        with _bg_lock:
-            _bg_cache["batch_consensus"] = result
-            _bg_status["batch_consensus"] = "done"
-    except Exception as e:
-        with _bg_lock:
-            _bg_cache["batch_consensus"] = [{"Error": str(e)}]
-            _bg_status["batch_consensus"] = "done"
-
-def _bg_refresh_pipeline():
-    with _bg_lock:
-        if _bg_status["pipeline"] == "running": return
-        _bg_status["pipeline"] = "running"
-    try:
-        result = run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5)
-        with _bg_lock:
-            _bg_cache["pipeline"] = result
-            _bg_status["pipeline"] = "done"
-    except Exception as e:
-        with _bg_lock:
-            _bg_cache["pipeline"] = [{"Error": str(e)}]
-            _bg_status["pipeline"] = "done"
+    key = _cache_key("consensus", symbol=s, horizon=horizon, episodes=episodes)
+    return _serve_or_compute(key, run_consensus, args=(s, horizon, episodes), msg=f"Computing AI consensus for {s}...")
 
 @app.get("/batch_consensus")
-async def batch_consensus(min_swing_score:int=55, horizon:int=5, episodes:int=5, max_stocks:int=10):
-    with _bg_lock:
-        cached = _bg_cache["batch_consensus"]
-        status = _bg_status["batch_consensus"]
-    if cached:
-        return cached
-    if status != "running":
-        threading.Thread(target=_bg_refresh_batch, daemon=True).start()
-    return [{"Status": "Computing batch consensus in background...", "Info": "Refresh in 2-3 minutes for results"}]
+async def batch_consensus(min_swing_score: int = 55, horizon: int = 5, episodes: int = 5, max_stocks: int = 10):
+    key = _cache_key("batch_consensus", min=min_swing_score, h=horizon, ep=episodes, max=max_stocks)
+    return _serve_or_compute(key, run_batch_consensus, args=(min_swing_score, horizon, episodes, max_stocks), msg="Computing batch consensus...")
 
 @app.get("/pipeline")
-async def pipeline(min_confidence:int=40, max_final:int=15, horizon:int=5, episodes:int=5):
-    with _bg_lock:
-        cached = _bg_cache["pipeline"]
-        status = _bg_status["pipeline"]
-    if cached:
-        return cached
-    if status != "running":
-        threading.Thread(target=_bg_refresh_pipeline, daemon=True).start()
-    return [{"Status": "Computing full pipeline in background...", "Info": "Refresh in 5-10 minutes for results"}]
+async def pipeline(min_confidence: int = 40, max_final: int = 15, horizon: int = 5, episodes: int = 5):
+    key = _cache_key("pipeline", conf=min_confidence, max=max_final, h=horizon, ep=episodes)
+    return _serve_or_compute(key, run_pipeline, args=(min_confidence, max_final, horizon, episodes), msg="Computing full pipeline...")
 
+# --- Refresh endpoints (clear cache + recompute) ---
 @app.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL"):
     s = validate_symbol(symbol)
-    with _bg_lock:
-        _bg_consensus_cache.pop(s, None)
-        _bg_consensus_status[s] = "idle"
-    threading.Thread(target=_bg_refresh_consensus, args=(s,), daemon=True).start()
-    return {"Status": f"Consensus refresh started for {s}. Check /consensus?symbol={s} in 2-3 minutes."}
+    key = _cache_key("consensus", symbol=s, horizon=5, episodes=10)
+    with _cache_lock:
+        _cache.pop(key, None)
+        _cache_status[key] = "idle"
+    threading.Thread(target=_bg_compute, args=(key, run_consensus, (s, 5, 10)), daemon=True).start()
+    return {"Status": f"Consensus refresh started for {s}."}
 
 @app.get("/refresh_batch")
 async def refresh_batch():
-    threading.Thread(target=_bg_refresh_batch, daemon=True).start()
+    key = _cache_key("batch_consensus", min=55, h=5, ep=5, max=10)
+    with _cache_lock:
+        _cache.pop(key, None)
+        _cache_status[key] = "idle"
+    threading.Thread(target=_bg_compute, args=(key, run_batch_consensus, (55, 5, 5, 10)), daemon=True).start()
     return [{"Status": "Batch consensus refresh started"}]
 
 @app.get("/refresh_pipeline")
 async def refresh_pipeline():
-    threading.Thread(target=_bg_refresh_pipeline, daemon=True).start()
+    key = _cache_key("pipeline", conf=40, max=15, h=5, ep=5)
+    with _cache_lock:
+        _cache.pop(key, None)
+        _cache_status[key] = "idle"
+    threading.Thread(target=_bg_compute, args=(key, run_pipeline, (40, 15, 5, 5)), daemon=True).start()
     return [{"Status": "Pipeline refresh started"}]
+
+# --- Pre-compute screener + USX on startup so widgets load instantly ---
+@app.on_event("startup")
+async def precompute_on_startup():
+    logger.info("Pre-computing screener and USX data on startup...")
+    threading.Thread(target=_bg_compute, args=(_cache_key("screener"), run_screener), daemon=True).start()
+    threading.Thread(target=_bg_compute, args=(_cache_key("usx", min_score=7), run_usx_screener, (7,)), daemon=True).start()
 
 @app.get("/health")
 async def health():
