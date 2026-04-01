@@ -30,36 +30,17 @@
 
 ---
 
-## Remaining Phases
-
-### Phase 4: Production Hardening
-
-#### 4.1 - Request timeouts
-**Problem:** Long-running endpoints (pipeline, batch) can hang forever.
-**Fix:** Add per-endpoint timeout middleware or use `asyncio.wait_for()` with reasonable limits (e.g., 120s for screener, 300s for consensus, background for pipeline).
-**Files:** `halal_screener.py` - add timeout decorator or middleware
-
-#### 4.2 - Input validation
-**Problem:** No validation on user inputs. Invalid symbols, dates, or negative numbers are silently processed.
-**Fix:** Validate symbol is in HALAL_STOCKS, dates are valid ISO format, numeric ranges are sensible.
-**Files:** `halal_screener.py` - all endpoint functions
-
-#### 4.3 - Proper HTTP error codes
-**Problem:** All errors return 200 OK with `{"Error": "..."}` in the body.
-**Fix:** Return proper HTTP status codes (400 for bad input, 404 for unknown symbol, 500 for internal errors) using FastAPI's `HTTPException`.
-**Files:** `halal_screener.py` - all endpoint functions
-
-#### 4.4 - Health check with dependency verification
-**Problem:** `/health` returns "ok" even if yfinance is down or models can't load.
-**Fix:** Add a quick yfinance connectivity check and verify openbb_forecast imports succeed.
-**Files:** `halal_screener.py` - `/health` endpoint
-
-#### 4.5 - Rate limiting
-**Problem:** No rate limiting. A single user can flood expensive endpoints.
-**Fix:** Add `slowapi` or simple in-memory rate limiting. Limit expensive endpoints (consensus, pipeline) to 1 concurrent request.
-**Files:** `halal_screener.py` - add rate limiter middleware, `requirements.txt`
+### Phase 4: Production Hardening (DONE)
+1. Added `with_timeout()` wrapper — all endpoints have asyncio timeout (120s default, 300s for consensus/pipeline)
+2. Added `validate_symbol()`, `validate_date()`, `validate_range()` input validators with proper HTTPException (400)
+3. All endpoints return proper HTTP status codes (400, 429, 504) via FastAPI `HTTPException`
+4. Health check now verifies yfinance connectivity and openbb_forecast import — returns "degraded" if deps are down
+5. Added in-memory rate limiter `check_rate_limit()` — expensive endpoints limited to 2 req/min
+6. Bumped version to 11.4.0
 
 ---
+
+## Remaining Phases
 
 ### Phase 5: Feature Enhancements
 
