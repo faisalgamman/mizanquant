@@ -2,7 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir fastapi uvicorn yfinance pandas numpy xgboost scikit-learn requests poetry-core
+# Limit threads to prevent memory bloat on small containers
+ENV OMP_NUM_THREADS=2
+ENV MKL_NUM_THREADS=2
+ENV OPENBLAS_NUM_THREADS=2
+
+RUN pip install --no-cache-dir fastapi uvicorn yfinance pandas numpy xgboost scikit-learn requests httpx pydantic-settings python-dotenv poetry-core
 
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
