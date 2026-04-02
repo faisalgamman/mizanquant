@@ -20,6 +20,35 @@ from app.config import settings
 
 logger = logging.getLogger("screener")
 
+
+# ---------------------------------------------------------------------------
+# Market Hours Check — US Eastern Time
+# ---------------------------------------------------------------------------
+
+def is_market_open() -> bool:
+    """Check if US stock market is currently open.
+
+    NYSE/NASDAQ hours: 9:30 AM - 4:00 PM Eastern (Mon-Fri)
+    Does NOT account for holidays — Alpaca will reject orders anyway.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    eastern = ZoneInfo("America/New_York")
+    now = datetime.now(eastern)
+
+    # Weekend check (0=Mon, 5=Sat, 6=Sun)
+    if now.weekday() >= 5:
+        return False
+
+    # Market hours: 9:30 AM - 4:00 PM ET
+    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+
+    return market_open <= now <= market_close
+
 # ---------------------------------------------------------------------------
 # PDT Tracker — rolling 5 business day window
 # ---------------------------------------------------------------------------
@@ -138,6 +167,11 @@ def check_trade_eligibility(
     """
     result = {"eligible": False, "reason": "", "sizing": {}}
 
+    # 0. Market hours check
+    if not is_market_open():
+        result["reason"] = "Market is closed — trades only execute during NYSE hours (9:30 AM - 4:00 PM ET, Mon-Fri)"
+        return result
+
     # 1. Account status
     if account.get("trading_blocked") or account.get("account_blocked"):
         result["reason"] = "Account is blocked"
@@ -209,4 +243,5 @@ def get_risk_status(account: dict, positions: list[dict]) -> dict:
         "day_trades_max": MAX_DAY_TRADES,
         "pdt_safe": can_day_trade(),
         "trading_blocked": account.get("trading_blocked", False),
+        "market_open": is_market_open(),
     }
