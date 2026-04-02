@@ -1,8 +1,20 @@
-import asyncio, time, logging, os, uuid, threading, re, pandas as pd, yfinance as yf, numpy as np
+import asyncio, time, logging, os, uuid, threading, re, gc, pandas as pd, yfinance as yf, numpy as np
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+# Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("MKL_NUM_THREADS", "2")
+try:
+    import torch
+    torch.set_num_threads(2)
+except ImportError:
+    pass
+
+# Semaphore: only one model trains at a time to prevent OOM
+_model_semaphore = threading.Semaphore(1)
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
@@ -394,7 +406,19 @@ def prepare_sequences(prices, seq_len, horizon, use_safe_scale=True):
         return X_train, y_train_s, X_test, y_test, mean_p, std_p
     return X_train, y_train, X_test, y_test, 0, 1
 
+def _run_with_memory_guard(func, *args, **kwargs):
+    """Run a model function with semaphore to prevent OOM and gc after."""
+    _model_semaphore.acquire()
+    try:
+        return func(*args, **kwargs)
+    finally:
+        gc.collect()
+        _model_semaphore.release()
+
 def run_lstm(symbol, horizon, df=None):
+    return _run_with_memory_guard(_run_lstm_inner, symbol, horizon, df=df)
+
+def _run_lstm_inner(symbol, horizon, df=None):
     try:
         from openbb_forecast.models.lstm import LSTMForecaster
         if df is None:
@@ -440,6 +464,9 @@ def run_lstm(symbol, horizon, df=None):
         return [{"Error": str(e)}]
 
 def run_transformer(symbol, horizon, df=None):
+    return _run_with_memory_guard(_run_transformer_inner, symbol, horizon, df=df)
+
+def _run_transformer_inner(symbol, horizon, df=None):
     try:
         from openbb_forecast.models.transformer import TransformerForecaster
         if df is None:
@@ -485,6 +512,9 @@ def run_transformer(symbol, horizon, df=None):
         return [{"Error": str(e)}]
 
 def run_ensemble(symbol, horizon, df=None):
+    return _run_with_memory_guard(_run_ensemble_inner, symbol, horizon, df=df)
+
+def _run_ensemble_inner(symbol, horizon, df=None):
     try:
         from openbb_forecast.models.ensemble import StackingForecaster
         if df is None:
@@ -520,6 +550,9 @@ def run_ensemble(symbol, horizon, df=None):
         return [{"Error": str(e)}]
 
 def run_dqn(symbol, episodes, df=None):
+    return _run_with_memory_guard(_run_dqn_inner, symbol, episodes, df=df)
+
+def _run_dqn_inner(symbol, episodes, df=None):
     try:
         from openbb_forecast.agents.double_dqn import DoubleDQNAgent
         from openbb_forecast.agents.environment import TradingEnvironment
@@ -561,6 +594,9 @@ def run_dqn(symbol, episodes, df=None):
         return [{"Error": str(e)}]
 
 def run_policy_gradient(symbol, episodes, df=None):
+    return _run_with_memory_guard(_run_policy_gradient_inner, symbol, episodes, df=df)
+
+def _run_policy_gradient_inner(symbol, episodes, df=None):
     try:
         from openbb_forecast.agents.policy_gradient import PolicyGradientAgent
         from openbb_forecast.agents.environment import TradingEnvironment
@@ -1339,11 +1375,18 @@ def _precompute_consensus_for_top_buys():
 
 @app.on_event("startup")
 async def precompute_on_startup():
-    logger.info("Pre-computing screener, USX, and consensus data on startup...")
+    logger.info("Pre-computing screener and USX data on startup...")
     threading.Thread(target=_bg_compute, args=(_cache_key("screener"), run_screener), daemon=True).start()
-    threading.Thread(target=_bg_compute, args=(_cache_key("usx", min_score=7), run_usx_screener, (7,)), daemon=True).start()
-    # Pre-warm consensus for top buys after screener completes
-    threading.Thread(target=_precompute_consensus_for_top_buys, daemon=True).start()
+    # Wait for screener to finish before starting USX to avoid memory pressure
+    def _delayed_usx():
+        screener_key = _cache_key("screener")
+        for _ in range(60):
+            cached, status = _get_cached(screener_key)
+            if cached and isinstance(cached, list) and len(cached) > 0:
+                break
+            time.sleep(5)
+        _bg_compute(_cache_key("usx", min_score=7), run_usx_screener, (7,))
+    threading.Thread(target=_delayed_usx, daemon=True).start()
 
 @app.get("/health")
 async def health():
