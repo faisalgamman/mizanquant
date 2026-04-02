@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # --- Concurrency / workers ---
     MAX_CONCURRENT_MODELS: int = 1
     BG_WORKER_COUNT: int = 3
-    SCREENER_WORKERS: int = 15
+    SCREENER_WORKERS: int = 5
 
     # --- Phase 2: Halal screening ---
     FMP_API_KEY: str = ""
