@@ -10,3 +10,5 @@ requests
 httpx
 pydantic-settings
 python-dotenv
+sqlalchemy
+psycopg2-binary
