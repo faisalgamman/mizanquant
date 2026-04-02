@@ -18,6 +18,12 @@ from app.background.cache_manager import record_signal, db_cache_get, db_cache_s
 from app.services.halal_screening import (
     get_halal_status, get_screening_report, batch_screen, screen_symbol,
 )
+from app.services.alpaca_client import (
+    get_account as alpaca_get_account,
+    get_positions as alpaca_get_positions,
+    get_orders as alpaca_get_orders,
+    get_portfolio_history as alpaca_get_portfolio_history,
+)
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -1084,6 +1090,15 @@ async def widgets():
         "screen_stocks_widget": {"name": "Run Halal Screening", "description": "Batch AAOIFI screening for all stocks",
                                  "category": "Equity", "type": "table", "endpoint": "/screen_stocks", "gridData": {"w": 20, "h": 9},
                                  "params": [{"paramName": "max_stocks", "value": "80", "label": "Max Stocks", "type": "text", "show": True}]},
+        "portfolio_summary_widget": {"name": "Portfolio Summary", "description": "Alpaca account equity, cash, P&L",
+                                     "category": "Portfolio", "type": "table", "endpoint": "/portfolio/summary", "gridData": {"w": 20, "h": 5}},
+        "portfolio_positions_widget": {"name": "Open Positions", "description": "Current holdings with unrealized P&L",
+                                       "category": "Portfolio", "type": "table", "endpoint": "/portfolio/positions", "gridData": {"w": 20, "h": 9}},
+        "portfolio_orders_widget": {"name": "Recent Orders", "description": "Alpaca order history",
+                                    "category": "Portfolio", "type": "table", "endpoint": "/portfolio/orders", "gridData": {"w": 20, "h": 9}},
+        "portfolio_history_widget": {"name": "Portfolio History", "description": "Equity curve over time",
+                                     "category": "Portfolio", "type": "table", "endpoint": "/portfolio/history", "gridData": {"w": 20, "h": 9},
+                                     "params": [{"paramName": "period", "value": "1M", "label": "Period (1D/1W/1M/3M/1A)", "type": "text", "show": True}]},
     }
 
 # ============================================================
@@ -1378,6 +1393,87 @@ async def screen_stocks_endpoint(max_stocks: int = 80):
     return _serve_or_compute(key, _run_batch, msg=f"Screening up to {max_stocks} stocks (3 API calls each)... Refresh in a few minutes.")
 
 
+# ============================================================
+# PHASE 3: Alpaca Portfolio Integration (Read-Only)
+# ============================================================
+
+@app.get("/portfolio/summary")
+async def portfolio_summary():
+    """Get Alpaca account summary: equity, cash, buying power, P&L."""
+    if not settings.ALPACA_API_KEY:
+        return [{"Error": "Alpaca API keys not configured"}]
+    account = alpaca_get_account()
+    if not account:
+        return [{"Error": "Could not connect to Alpaca"}]
+    # Calculate daily P&L
+    daily_pl = account["equity"] - account["last_equity"]
+    daily_pl_pct = (daily_pl / account["last_equity"] * 100) if account["last_equity"] > 0 else 0
+    return [{
+        "Equity": f"${account['equity']:,.2f}",
+        "Cash": f"${account['cash']:,.2f}",
+        "Buying Power": f"${account['buying_power']:,.2f}",
+        "Portfolio Value": f"${account['portfolio_value']:,.2f}",
+        "Long Mkt Value": f"${account['long_market_value']:,.2f}",
+        "Daily P&L": f"${daily_pl:+,.2f}",
+        "Daily P&L %": f"{daily_pl_pct:+.2f}%",
+        "Day Trades": account["daytrade_count"],
+        "Status": account["status"],
+        "Currency": account["currency"],
+    }]
+
+@app.get("/portfolio/positions")
+async def portfolio_positions():
+    """Get all open positions with unrealized P&L."""
+    if not settings.ALPACA_API_KEY:
+        return [{"Error": "Alpaca API keys not configured"}]
+    positions = alpaca_get_positions()
+    if not positions:
+        return [{"Message": "No open positions"}]
+    result = []
+    for p in positions:
+        result.append({
+            "Symbol": p["symbol"],
+            "Qty": p["qty"],
+            "Side": p["side"].upper(),
+            "Avg Entry": f"${p['avg_entry_price']:.2f}",
+            "Current": f"${p['current_price']:.2f}",
+            "Market Value": f"${p['market_value']:,.2f}",
+            "Cost Basis": f"${p['cost_basis']:,.2f}",
+            "Unrealized P&L": f"${p['unrealized_pl']:+,.2f}",
+            "P&L %": f"{p['unrealized_plpc']:+.2f}%",
+            "Today %": f"{p['change_today']:+.2f}%",
+        })
+    return result
+
+@app.get("/portfolio/orders")
+async def portfolio_orders(status: str = "all", limit: int = 20):
+    """Get recent Alpaca orders."""
+    if not settings.ALPACA_API_KEY:
+        return [{"Error": "Alpaca API keys not configured"}]
+    orders = alpaca_get_orders(status=status, limit=limit)
+    if not orders:
+        return [{"Message": "No orders found"}]
+    return orders
+
+@app.get("/portfolio/history")
+async def portfolio_history(period: str = "1M"):
+    """Get portfolio equity curve history."""
+    if not settings.ALPACA_API_KEY:
+        return [{"Error": "Alpaca API keys not configured"}]
+    valid_periods = ["1D", "1W", "1M", "3M", "1A", "all"]
+    if period not in valid_periods:
+        return [{"Error": f"Invalid period. Use one of: {valid_periods}"}]
+    data = alpaca_get_portfolio_history(period=period)
+    if not data:
+        return [{"Error": "Could not fetch portfolio history"}]
+    summary = [{
+        "Period": period,
+        "Base Value": f"${data['base_value']:,.2f}" if data["base_value"] else "N/A",
+        "Data Points": len(data["history"]),
+    }]
+    return summary + data["history"]
+
+
 @app.get("/health")
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False}
@@ -1403,8 +1499,8 @@ async def health():
     all_ok = all(checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "14.0.0",
-        "widgets": 17,
+        "version": "15.0.0",
+        "widgets": 21,
         "stocks": len(HALAL_STOCKS),
         "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
