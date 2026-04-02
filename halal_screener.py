@@ -13,6 +13,8 @@ from app.services.technical import (
     safe_scale, walk_forward_split, prepare_sequences, get_score,
 )
 from app.exceptions import DataFetchError, ModelTrainingError
+from app.db.database import init_db
+from app.background.cache_manager import record_signal, db_cache_get, db_cache_set
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -834,6 +836,23 @@ def run_consensus(symbol, horizon=5, episodes=10):
             "TP3":          tp3,
         }]
 
+        # Record signal for audit trail (Phase 4.3: accuracy tracking)
+        try:
+            record_signal(
+                symbol=symbol.upper(),
+                signal_type="consensus",
+                signal=verdict,
+                score=confidence,
+                price=round(price, 2),
+                stop_loss=sl,
+                take_profit=tp1,
+                confidence=confidence,
+                details={"votes_buy": votes_buy, "votes_sell": votes_sell,
+                         "votes_hold": votes_hold, "tools": len(details)},
+            )
+        except Exception:
+            pass  # non-critical: don't break consensus if DB is down
+
         return summary + details
 
     except Exception as e:
@@ -1274,6 +1293,12 @@ def _precompute_consensus_for_top_buys():
 
 @app.on_event("startup")
 async def precompute_on_startup():
+    # Initialize database tables
+    try:
+        init_db()
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.warning(f"Database init failed (non-fatal, using in-memory caches): {e}")
     logger.info("Pre-computing screener and USX data on startup...")
     threading.Thread(target=_bg_compute, args=(_cache_key("screener"), run_screener), daemon=True).start()
     # Wait for screener to finish before starting USX to avoid memory pressure
@@ -1289,7 +1314,7 @@ async def precompute_on_startup():
 
 @app.get("/health")
 async def health():
-    checks = {"openbb_forecast": False, "market_data": False}
+    checks = {"openbb_forecast": False, "market_data": False, "database": False}
     try:
         from openbb_forecast.models.lstm import LSTMForecaster
         checks["openbb_forecast"] = True
@@ -1300,14 +1325,22 @@ async def health():
         checks["market_data"] = df is not None and len(df) > 0
     except Exception:
         pass
+    try:
+        from app.db.database import engine
+        with engine.connect() as conn:
+            conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+        checks["database"] = True
+    except Exception:
+        pass
     alpaca_configured = bool(settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY)
     all_ok = all(checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "12.0.0",
+        "version": "13.0.0",
         "widgets": 14,
         "stocks": len(HALAL_STOCKS),
         "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
+        "database": "connected" if checks["database"] else "unavailable",
         "config": "loaded",
         "dependencies": checks,
     }
