@@ -97,26 +97,71 @@ def check_rate_limit(endpoint: str, max_concurrent: int = 2):
         _rate_limits[endpoint].append(time.time())
         return True
 
-HALAL_STOCKS = [
-    "AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA","AMD","INTC",
-    "CSCO","ORCL","IBM","QCOM","TXN","AVGO","CRM","ADBE","NOW","SNOW",
-    "PLTR","NET","DDOG","ZS","CRWD","PANW","FTNT","CDNS","SNPS",
-    "KLAC","LRCX","AMAT","MCHP","MPWR","ENPH","FSLR",
-    "JNJ","PFE","ABBV","MRK","LLY","TMO","ABT","MDT","AMGN","GILD",
-    "REGN","VRTX","ISRG","BSX","EW","SYK","BDX","IQV","A","WAT",
-    "MTD","IDXX","PODD","DXCM","ALGN",
-    "XOM","CVX","COP","EOG","SLB","OXY","PSX","VLO","MPC","HAL",
-    "DVN","FANG","APA","BKR",
-    "WMT","COST","TGT","HD","LOW","NKE","PG","KO","PEP","CL",
-    "KMB","GIS","SYY","CMG","EL","CHD","CLX","CPB","HRL","MKC",
-    "VZ","T","TMUS",
-    "GE","CAT","MMM","HON","DE","EMR","ETN","PH","ROK","AME",
-    "IEX","XYL","OTIS","CARR","DOV","FTV","ROP",
-    "LDOS","SAIC","BAH","LMT","NOC","GD","TDG","HII",
-    "NEE","DUK","SO","AEP","EXC","SRE","PPL","XEL","ES","ETR",
-    "AMT","PLD","CCI","EQIX","PSA","O","WELL","DLR","AVB","EQR",
-    "F","GM","UBER","RIVN",
+# S&P 500 universe — excluding obvious haram sectors:
+# Banks/financials (interest-based), insurance, alcohol, gambling, tobacco, weapons
+# Each stock still goes through AAOIFI screening for final halal verification
+_HARAM_EXCLUDE = {
+    # Major banks & financial services (interest-based income)
+    "BAC","C","COF","CFG","FITB","GS","HBAN","JPM","KEY","MS","MTB",
+    "PNC","RF","SCHW","STT","TFC","USB","WFC","BK","BEN","BLK","BX",
+    "CBOE","CME","ICE","IVZ","KKR","MSCI","NDAQ","SPGI","TROW",
+    # Insurance
+    "ACGL","AFL","AIG","AIZ","ALL","AJG","BRO","CB","CI","CINF",
+    "CNC","COR","EG","ELV","ERIE","GL","HIG","HUM","L","MET",
+    "PFG","PGR","PRU","RJF","TRV","UNH","WRB","WTW",
+    # Alcohol & tobacco
+    "BF.B","STZ","TAP","MO","PM","SAM",
+    # Gambling & casinos
+    "WYNN","LVS","MGM","CCL","NCLH","RCL",
+    # Weapons/defense (controversial — kept some dual-use industrials)
+    "LMT","NOC","GD","RTX","HII","LHX","BA",
+    # Conventional media with haram content
+    "FOX","FOXA","NFLX","DIS","WBD","LYV",
+}
+
+# Full S&P 500 minus haram exclusions
+_SP500_ALL = [
+    "A","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK",
+    "AEE","AEP","AES","AKAM","ALB","ALGN","ALLE","AMAT","AMCR","AMD",
+    "AME","AMGN","AMP","AMT","AMZN","ANET","AON","AOS","APA","APD","APH",
+    "APO","APP","APTV","ARE","ARES","ATO","AVB","AVGO","AVY","AWK","AXON",
+    "AXP","AZO","BALL","BAX","BBY","BDX","BG","BIIB","BKNG","BKR","BLDR",
+    "BMY","BR","BRK.B","BSX","BXP","CAG","CAH","CARR","CAT","CBRE","CCI",
+    "CDNS","CDW","CEG","CF","CHD","CHRW","CHTR","CIEN","CL","CLX","CMCSA",
+    "CMG","CMI","CMS","CNP","COHR","COIN","COO","COP","COST","CPAY","CPB",
+    "CPRT","CPT","CRH","CRL","CRM","CRWD","CSCO","CSGP","CSX","CTAS",
+    "CTRA","CTSH","CTVA","CVNA","CVS","CVX","D","DAL","DASH","DD","DDOG",
+    "DE","DECK","DELL","DG","DGX","DHI","DHR","DLR","DLTR","DOC","DOV",
+    "DOW","DPZ","DRI","DTE","DUK","DVA","DVN","DXCM","EA","EBAY","ECL",
+    "ED","EFX","EIX","EL","EME","EMR","EOG","EPAM","EQIX","EQR","EQT",
+    "ES","ESS","ETN","ETR","EVRG","EW","EXC","EXE","EXPD","EXPE","EXR",
+    "F","FANG","FAST","FCX","FDS","FDX","FE","FFIV","FICO","FIS","FISV",
+    "FIX","FRT","FSLR","FTNT","FTV","GDDY","GE","GEHC","GEN","GEV","GILD",
+    "GIS","GLW","GM","GNRC","GOOG","GOOGL","GPC","GPN","GRMN","GWW","HAL",
+    "HAS","HCA","HD","HLT","HOLX","HON","HOOD","HPE","HPQ","HRL","HSIC",
+    "HST","HSY","HUBB","HWM","IBKR","IBM","IDXX","IEX","IFF","INCY","INTC",
+    "INTU","INVH","IP","IQV","IR","IRM","ISRG","IT","ITW","J","JBHT","JBL",
+    "JCI","JKHY","JNJ","KDP","KEYS","KHC","KIM","KLAC","KMB","KMI","KO",
+    "KR","KVUE","LDOS","LEN","LH","LII","LIN","LITE","LLY","LNT","LOW",
+    "LRCX","LULU","LUV","LYB","MA","MAA","MAR","MAS","MCD","MCHP","MCK",
+    "MCO","MDLZ","MDT","META","MKC","MLM","MMM","MNST","MOS","MPC","MPWR",
+    "MRK","MRNA","MRSH","MSI","MTD","MU","NEM","NEE","NI","NKE","NOW",
+    "NRG","NSC","NTAP","NTRS","NUE","NVDA","NVR","NWS","NWSA","NXPI","O",
+    "ODFL","OKE","OMC","ON","ORCL","ORLY","OTIS","OXY","PANW","PAYX","PCAR",
+    "PCG","PEG","PEP","PFE","PG","PH","PHM","PKG","PLD","PLTR","POOL",
+    "PODD","PPG","PPL","PSA","PSKY","PSX","PTC","PWR","PYPL","Q","QCOM",
+    "REG","REGN","RL","RMD","ROK","ROL","ROP","ROST","RSG","RVTY","SAIC",
+    "SATS","SBAC","SBUX","SHW","SJM","SLB","SMCI","SNA","SNDK","SNPS","SO",
+    "SOLV","SPG","SRE","STE","STLD","STX","SW","SWK","SWKS","SYF","SYK",
+    "SYY","T","TDG","TDY","TECH","TEL","TER","TGT","TJX","TKO","TMO",
+    "TMUS","TPL","TPR","TRGP","TRMB","TSCO","TSLA","TSN","TT","TTD","TTWO",
+    "TXN","TXT","TYL","UAL","UBER","UDR","UHS","ULTA","UNP","UPS","URI",
+    "V","VICI","VLO","VLTO","VMC","VRSK","VRSN","VRT","VRTX","VST","VTR",
+    "VTRS","VZ","WAB","WAT","WDAY","WDC","WEC","WELL","WM","WMB","WMT",
+    "WSM","WST","XEL","XOM","XYL","XYZ","YUM","ZBH","ZBRA","ZTS",
 ]
+
+HALAL_STOCKS = [s for s in _SP500_ALL if s not in _HARAM_EXCLUDE]
 
 VALID_SYMBOLS.update(HALAL_STOCKS)
 
@@ -966,7 +1011,8 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
         return [{"Error": str(e)}]
 
 
-RUSSELL_1000_HALAL = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AMD', 'INTC', 'CSCO', 'ORCL', 'IBM', 'QCOM', 'TXN', 'AVGO', 'CRM', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'NET', 'DDOG', 'ZS', 'CRWD', 'PANW', 'FTNT', 'CDNS', 'SNPS', 'KLAC', 'LRCX', 'AMAT', 'MCHP', 'MPWR', 'ENPH', 'FSLR', 'ON', 'SWKS', 'WOLF', 'LITE', 'ENTG', 'ACLS', 'ONTO', 'RMBS', 'CRUS', 'SLAB', 'POWI', 'AMBA', 'COHR', 'FORM', 'HIMX', 'IMOS', 'IPGP', 'ITRN', 'KLIC', 'LSCC', 'MKSI', 'MRVL', 'MU', 'NXPI', 'OLED', 'PLAB', 'SMTC', 'SYNA', 'TSEM', 'UCTT', 'VEEA', 'VICR', 'VSH', 'WFRD', 'YELP', 'YEXT', 'HUBS', 'PAYC', 'VEEV', 'WDAY', 'PCTY', 'MDB', 'ESTC', 'DOMO', 'FROG', 'GTLB', 'IOT', 'JAMF', 'KVYO', 'MANH', 'MNDY', 'NCNO', 'SPSC', 'TOST', 'VRNS', 'JNJ', 'PFE', 'ABBV', 'MRK', 'LLY', 'TMO', 'ABT', 'MDT', 'AMGN', 'GILD', 'REGN', 'VRTX', 'ISRG', 'BSX', 'EW', 'SYK', 'BDX', 'IQV', 'A', 'WAT', 'MTD', 'IDXX', 'PODD', 'DXCM', 'ALGN', 'HOLX', 'ILMN', 'INSP', 'IONS', 'JAZZ', 'LGND', 'MASI', 'MMSI', 'NKTR', 'NVCR', 'NVST', 'OMCL', 'PRGO', 'RARE', 'RCUS', 'RGEN', 'RVMD', 'RXRX', 'SRPT', 'STAA', 'SUPN', 'TGTX', 'THRM', 'TBPH', 'ACAD', 'ACMR', 'AGIO', 'AKBA', 'ALEC', 'ALKS', 'ALNY', 'ALXO', 'AMRN', 'AMRX', 'ANAB', 'ANGI', 'ANIK', 'ANIP', 'APLS', 'APOG', 'APRE', 'ARCT', 'ARDX', 'ARGX', 'ARQT', 'ARVN', 'ASND', 'ATEX', 'ATRC', 'AVAL', 'AXSM', 'AYTU', 'AZTA', 'BCAB', 'BCDA', 'BCRX', 'BEAM', 'BHVN', 'BMRN', 'BTAI', 'BYSI', 'CABA', 'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'PSX', 'VLO', 'MPC', 'HAL', 'DVN', 'FANG', 'APA', 'BKR', 'NOV', 'HP', 'WHD', 'NE', 'CIVI', 'GPRE', 'HESM', 'MTDR', 'PR', 'REPX', 'SM', 'TALO', 'ACDC', 'AMPY', 'AROC', 'BATL', 'CLMT', 'CNX', 'CTRA', 'DKL', 'DK', 'DMLP', 'DNOW', 'FLNG', 'FTI', 'GLP', 'GPRK', 'GRNT', 'HLX', 'HRI', 'HTGC', 'IMPP', 'INTL', 'KOS', 'LBRT', 'MGLD', 'WMT', 'COST', 'TGT', 'HD', 'LOW', 'NKE', 'PG', 'KO', 'PEP', 'CL', 'KMB', 'GIS', 'SYY', 'CMG', 'EL', 'CHD', 'CLX', 'MKC', 'HRL', 'CPB', 'BURL', 'CASY', 'CBRL', 'CHDN', 'CHEF', 'COKE', 'COLM', 'CROX', 'DG', 'DLTR', 'DPZ', 'EAT', 'EBAY', 'ELF', 'ETSY', 'FIVE', 'FIZZ', 'GFF', 'GIII', 'GPRO', 'HAIN', 'HAS', 'HELE', 'HRB', 'JACK', 'JOUT', 'LEVI', 'LKQ', 'LULU', 'MAR', 'MCD', 'MDLZ', 'MNST', 'MTN', 'NOMD', 'NUS', 'NYT', 'OLLI', 'ONON', 'ORLY', 'POOL', 'QSR', 'ROST', 'SAM', 'SBUX', 'SHAK', 'SHOP', 'SNA', 'TSCO', 'ULTA', 'USFD', 'WGO', 'WING', 'WSM', 'YUM', 'YUMC', 'GE', 'CAT', 'MMM', 'HON', 'DE', 'EMR', 'ETN', 'PH', 'ROK', 'AME', 'IEX', 'XYL', 'OTIS', 'CARR', 'DOV', 'FTV', 'ROP', 'LDOS', 'SAIC', 'BAH', 'ESAB', 'FELE', 'GNRC', 'GWW', 'HXL', 'HUBB', 'ITT', 'JBTM', 'KAI', 'MIDD', 'MWA', 'NPO', 'NVT', 'OSK', 'PRIM', 'PWR', 'RBC', 'RS', 'RTX', 'TDY', 'TEX', 'TNC', 'TR', 'TRS', 'TT', 'TXT', 'UFPI', 'VMI', 'AGCO', 'ALGT', 'ALIT', 'AMWD', 'ARHS', 'AROW', 'AXL', 'BCOR', 'BGSF', 'BJRI', 'BLBD', 'BMBL', 'BRBR', 'BRLT', 'BXMT', 'CECO', 'NEE', 'DUK', 'SO', 'AEP', 'EXC', 'SRE', 'PPL', 'XEL', 'ES', 'ETR', 'AMT', 'PLD', 'CCI', 'EQIX', 'PSA', 'O', 'WELL', 'DLR', 'AVB', 'EQR', 'ARE', 'BXP', 'CPT', 'EGP', 'EXR', 'FRT', 'HIW', 'HST', 'IRM', 'KIM', 'KRG', 'LTC', 'LXP', 'NNN', 'RPT', 'SAFE', 'SHO', 'STAG', 'SUI', 'SWK', 'UDR', 'UE', 'VNO', 'WPC', 'VZ', 'T', 'TMUS', 'LUMN', 'SHEN', 'TDS', 'CABO', 'CCOI', 'GSAT', 'IDT', 'LILA', 'LILAK', 'OOMA', 'F', 'GM', 'UBER', 'LYFT', 'RIVN', 'LCID', 'NKLA', 'BLNK', 'CHPT', 'EVGO', 'GOEV', 'HYLN', 'NRGV', 'WKHS']
+# Pipeline uses same S&P 500 halal universe
+RUSSELL_1000_HALAL = HALAL_STOCKS
 
 def _quick_filter_one(symbol):
     """Quick filter for pipeline stage 1."""
