@@ -45,8 +45,16 @@ class Settings(BaseSettings):
     API_KEY: str = ""
 
     # --- Risk management ---
-    RISK_CAPITAL: float = 100000.0
+    RISK_CAPITAL: float = 3000.0
     RISK_PCT: float = 1.0
+
+    # --- Auto-trading (Stage 1: Paper) ---
+    AUTO_TRADE_ENABLED: bool = False  # MUST be explicitly enabled
+    TRADE_RISK_PCT: float = 1.5      # max risk per trade (% of equity)
+    MAX_POSITION_PCT: float = 15.0   # max single position size (% of equity)
+    MAX_OPEN_POSITIONS: int = 6      # max concurrent positions
+    DAILY_LOSS_LIMIT_PCT: float = 3.0  # stop trading if daily loss exceeds this %
+    MIN_TRADE_CONFIDENCE: float = 65.0  # minimum consensus confidence to trade
 
     model_config = {
         "env_file": ".env",
