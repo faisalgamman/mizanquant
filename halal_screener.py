@@ -43,11 +43,14 @@ _rate_limits = defaultdict(list)
 _rate_lock = threading.Lock()
 
 def check_rate_limit(endpoint: str, max_concurrent: int = 2):
+    """Soft rate limiter — returns True if OK, False if over limit.
+    Never raises HTTPException so OpenBB Pro widgets don't break."""
     with _rate_lock:
         _rate_limits[endpoint] = [t for t in _rate_limits[endpoint] if time.time() - t < 60]
         if len(_rate_limits[endpoint]) >= max_concurrent:
-            raise HTTPException(status_code=429, detail=f"Too many requests to {endpoint}. Max {max_concurrent}/min. Try again shortly.")
+            return False  # caller decides what to do
         _rate_limits[endpoint].append(time.time())
+        return True
 
 HALAL_STOCKS = [
     "AAPL","MSFT","NVDA","GOOGL","AMZN","META","TSLA","AMD","INTC",
@@ -72,12 +75,12 @@ HALAL_STOCKS = [
 
 VALID_SYMBOLS.update(HALAL_STOCKS)
 
-CACHE_TTL = 300
+_SIMPLE_CACHE_TTL = 300
 _cache = {}
 _cache_ts = {}
 
 def cache_get(k):
-    if time.time() - _cache_ts.get(k, 0) < CACHE_TTL:
+    if time.time() - _cache_ts.get(k, 0) < _SIMPLE_CACHE_TTL:
         return _cache.get(k)
     return None
 
@@ -958,7 +961,7 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
         return [{"Error": str(e)}]
 
 
-RUSSELL_1000_HALAL = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AMD', 'INTC', 'CSCO', 'ORCL', 'IBM', 'QCOM', 'TXN', 'AVGO', 'CRM', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'NET', 'DDOG', 'ZS', 'CRWD', 'PANW', 'FTNT', 'CDNS', 'SNPS', 'KLAC', 'LRCX', 'AMAT', 'MCHP', 'MPWR', 'ENPH', 'FSLR', 'ON', 'SWKS', 'WOLF', 'LITE', 'ENTG', 'ACLS', 'ONTO', 'RMBS', 'CRUS', 'SLAB', 'POWI', 'AMBA', 'COHR', 'FORM', 'GIGA', 'HIMX', 'IMOS', 'IPGP', 'ITRN', 'IXYS', 'KLIC', 'LSCC', 'MKSI', 'MRVL', 'MU', 'NXPI', 'OLED', 'PLAB', 'SMTC', 'SYNA', 'TOWR', 'TSEM', 'UCTT', 'VEEA', 'VICR', 'VLAB', 'VSH', 'WFRD', 'XLNX', 'XPLT', 'YELP', 'YEXT', 'ZI', 'HUBS', 'PAYC', 'VEEV', 'WDAY', 'PCTY', 'COUP', 'MDB', 'ESTC', 'DOMO', 'FROG', 'GTLB', 'IOT', 'JAMF', 'KVYO', 'MANH', 'MNDY', 'NCNO', 'SPSC', 'TOST', 'VRNS', 'JNJ', 'PFE', 'ABBV', 'MRK', 'LLY', 'TMO', 'ABT', 'MDT', 'AMGN', 'GILD', 'REGN', 'VRTX', 'ISRG', 'BSX', 'EW', 'SYK', 'BDX', 'IQV', 'A', 'WAT', 'MTD', 'IDXX', 'PODD', 'DXCM', 'ALGN', 'HOLX', 'ILMN', 'INSP', 'IONS', 'JAZZ', 'LGND', 'MASI', 'MMSI', 'NKTR', 'NVCR', 'NVST', 'OMCL', 'PRGO', 'RARE', 'RCUS', 'RGEN', 'RVMD', 'RXRX', 'SAGE', 'SRPT', 'STAA', 'SUPN', 'TGTX', 'THRM', 'TBPH', 'ACAD', 'ACMR', 'AGIO', 'AKBA', 'AKRO', 'ALEC', 'ALKS', 'ALNY', 'ALXO', 'AMRN', 'AMRX', 'ANAB', 'ANGI', 'ANIK', 'ANIP', 'APLS', 'APOG', 'APRE', 'APTX', 'ARCT', 'ARDX', 'ARGX', 'ARQT', 'ARVN', 'ASND', 'ATEX', 'ATRC', 'ATRI', 'AVAL', 'AVEO', 'AVRO', 'AXNX', 'AXSM', 'AYTU', 'AZTA', 'BCAB', 'BCDA', 'BCRX', 'BDSI', 'BEAM', 'BHVN', 'BIOL', 'BIOP', 'BLUE', 'BMRN', 'BPMC', 'BRMK', 'BTAI', 'BYSI', 'CABA', 'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'PSX', 'VLO', 'MPC', 'HAL', 'DVN', 'FANG', 'APA', 'BKR', 'NOV', 'HP', 'WHD', 'NE', 'CIVI', 'CPE', 'ESTE', 'GPRE', 'HESM', 'MNRL', 'MTDR', 'PDCE', 'PR', 'REPX', 'SBOW', 'SM', 'SWN', 'TALO', 'VTLE', 'XEC', 'ACDC', 'AMPY', 'ARCH', 'AROC', 'BATL', 'CEIX', 'CLMT', 'CNX', 'CONSOL', 'CTRA', 'DKL', 'DK', 'DMLP', 'DNOW', 'DRQ', 'ENLC', 'EXTN', 'FLNG', 'FTI', 'GLP', 'GPRK', 'GRNT', 'HES', 'HLX', 'HRI', 'HTGC', 'IMPP', 'INT', 'INTL', 'ISNS', 'JMPX', 'KOS', 'LBRT', 'LPI', 'MGLD', 'WMT', 'COST', 'TGT', 'HD', 'LOW', 'NKE', 'PG', 'KO', 'PEP', 'CL', 'KMB', 'GIS', 'SYY', 'CMG', 'EL', 'CHD', 'CLX', 'MKC', 'HRL', 'CPB', 'BURL', 'CASY', 'CBRL', 'CHDN', 'CHEF', 'COKE', 'COLM', 'CROX', 'DG', 'DLTR', 'DPZ', 'EAT', 'EBAY', 'ELF', 'ETSY', 'FIVE', 'FIZZ', 'GFF', 'GIII', 'GPRO', 'HAIN', 'HAS', 'HELE', 'HIBB', 'HRB', 'JACK', 'JOUT', 'LEVI', 'LKQ', 'LULU', 'MAR', 'MCD', 'MDLZ', 'MNST', 'MTN', 'NOMD', 'NUS', 'NYT', 'OLLI', 'ONON', 'ORLY', 'POOL', 'QSR', 'ROST', 'SAM', 'SBUX', 'SHAK', 'SHOP', 'SKX', 'SNA', 'TSCO', 'ULTA', 'USFD', 'WGO', 'WING', 'WSM', 'YUM', 'YUMC', 'ZOES', 'GE', 'CAT', 'MMM', 'HON', 'DE', 'EMR', 'ETN', 'PH', 'ROK', 'AME', 'IEX', 'XYL', 'OTIS', 'CARR', 'DOV', 'FTV', 'ROP', 'LDOS', 'SAIC', 'BAH', 'ESAB', 'FELE', 'GNRC', 'GWW', 'HXL', 'HUBB', 'ITT', 'JBTM', 'KAI', 'KAMN', 'MANT', 'MIDD', 'MOOG', 'MWA', 'NPO', 'NVT', 'OSK', 'PRIM', 'PWR', 'RBC', 'RS', 'RTX', 'TDY', 'TEX', 'TNC', 'TR', 'TRS', 'TT', 'TXT', 'UFPI', 'VMI', 'AGCO', 'ALGT', 'ALIT', 'ALMA', 'AMWD', 'AQUA', 'ARHS', 'AROW', 'AXL', 'AZEK', 'BCOR', 'BGSF', 'BJRI', 'BLBD', 'BMBL', 'BNFT', 'BRBR', 'BRLT', 'BXMT', 'CECO', 'NEE', 'DUK', 'SO', 'AEP', 'EXC', 'SRE', 'PPL', 'XEL', 'ES', 'ETR', 'AMT', 'PLD', 'CCI', 'EQIX', 'PSA', 'O', 'WELL', 'DLR', 'AVB', 'EQR', 'ARE', 'BXP', 'CPT', 'EGP', 'EXR', 'FRT', 'HIW', 'HST', 'IRM', 'KIM', 'KRG', 'LTC', 'LXP', 'NNN', 'OFC', 'PEAK', 'PLYM', 'RPT', 'SAFE', 'SHO', 'STAG', 'STOR', 'SUI', 'SWK', 'TCO', 'UDR', 'UE', 'VNO', 'WPC', 'WRE', 'VZ', 'T', 'TMUS', 'LUMN', 'SHEN', 'USM', 'TDS', 'ATN', 'CNSL', 'LBAI', 'ATUS', 'CABO', 'CCOI', 'DISH', 'GSAT', 'IDT', 'LILA', 'LILAK', 'OOMA', 'F', 'GM', 'UBER', 'LYFT', 'RIVN', 'LCID', 'NKLA', 'RIDE', 'FSR', 'BLNK', 'CHPT', 'EVGO', 'FFIE', 'GOEV', 'HYLN', 'LEV', 'MULN', 'NRGV', 'WKHS']
+RUSSELL_1000_HALAL = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AMD', 'INTC', 'CSCO', 'ORCL', 'IBM', 'QCOM', 'TXN', 'AVGO', 'CRM', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'NET', 'DDOG', 'ZS', 'CRWD', 'PANW', 'FTNT', 'CDNS', 'SNPS', 'KLAC', 'LRCX', 'AMAT', 'MCHP', 'MPWR', 'ENPH', 'FSLR', 'ON', 'SWKS', 'WOLF', 'LITE', 'ENTG', 'ACLS', 'ONTO', 'RMBS', 'CRUS', 'SLAB', 'POWI', 'AMBA', 'COHR', 'FORM', 'HIMX', 'IMOS', 'IPGP', 'ITRN', 'KLIC', 'LSCC', 'MKSI', 'MRVL', 'MU', 'NXPI', 'OLED', 'PLAB', 'SMTC', 'SYNA', 'TSEM', 'UCTT', 'VEEA', 'VICR', 'VSH', 'WFRD', 'YELP', 'YEXT', 'HUBS', 'PAYC', 'VEEV', 'WDAY', 'PCTY', 'MDB', 'ESTC', 'DOMO', 'FROG', 'GTLB', 'IOT', 'JAMF', 'KVYO', 'MANH', 'MNDY', 'NCNO', 'SPSC', 'TOST', 'VRNS', 'JNJ', 'PFE', 'ABBV', 'MRK', 'LLY', 'TMO', 'ABT', 'MDT', 'AMGN', 'GILD', 'REGN', 'VRTX', 'ISRG', 'BSX', 'EW', 'SYK', 'BDX', 'IQV', 'A', 'WAT', 'MTD', 'IDXX', 'PODD', 'DXCM', 'ALGN', 'HOLX', 'ILMN', 'INSP', 'IONS', 'JAZZ', 'LGND', 'MASI', 'MMSI', 'NKTR', 'NVCR', 'NVST', 'OMCL', 'PRGO', 'RARE', 'RCUS', 'RGEN', 'RVMD', 'RXRX', 'SRPT', 'STAA', 'SUPN', 'TGTX', 'THRM', 'TBPH', 'ACAD', 'ACMR', 'AGIO', 'AKBA', 'ALEC', 'ALKS', 'ALNY', 'ALXO', 'AMRN', 'AMRX', 'ANAB', 'ANGI', 'ANIK', 'ANIP', 'APLS', 'APOG', 'APRE', 'ARCT', 'ARDX', 'ARGX', 'ARQT', 'ARVN', 'ASND', 'ATEX', 'ATRC', 'AVAL', 'AXSM', 'AYTU', 'AZTA', 'BCAB', 'BCDA', 'BCRX', 'BEAM', 'BHVN', 'BMRN', 'BTAI', 'BYSI', 'CABA', 'XOM', 'CVX', 'COP', 'EOG', 'SLB', 'OXY', 'PSX', 'VLO', 'MPC', 'HAL', 'DVN', 'FANG', 'APA', 'BKR', 'NOV', 'HP', 'WHD', 'NE', 'CIVI', 'GPRE', 'HESM', 'MTDR', 'PR', 'REPX', 'SM', 'TALO', 'ACDC', 'AMPY', 'AROC', 'BATL', 'CLMT', 'CNX', 'CTRA', 'DKL', 'DK', 'DMLP', 'DNOW', 'FLNG', 'FTI', 'GLP', 'GPRK', 'GRNT', 'HLX', 'HRI', 'HTGC', 'IMPP', 'INTL', 'KOS', 'LBRT', 'MGLD', 'WMT', 'COST', 'TGT', 'HD', 'LOW', 'NKE', 'PG', 'KO', 'PEP', 'CL', 'KMB', 'GIS', 'SYY', 'CMG', 'EL', 'CHD', 'CLX', 'MKC', 'HRL', 'CPB', 'BURL', 'CASY', 'CBRL', 'CHDN', 'CHEF', 'COKE', 'COLM', 'CROX', 'DG', 'DLTR', 'DPZ', 'EAT', 'EBAY', 'ELF', 'ETSY', 'FIVE', 'FIZZ', 'GFF', 'GIII', 'GPRO', 'HAIN', 'HAS', 'HELE', 'HRB', 'JACK', 'JOUT', 'LEVI', 'LKQ', 'LULU', 'MAR', 'MCD', 'MDLZ', 'MNST', 'MTN', 'NOMD', 'NUS', 'NYT', 'OLLI', 'ONON', 'ORLY', 'POOL', 'QSR', 'ROST', 'SAM', 'SBUX', 'SHAK', 'SHOP', 'SNA', 'TSCO', 'ULTA', 'USFD', 'WGO', 'WING', 'WSM', 'YUM', 'YUMC', 'GE', 'CAT', 'MMM', 'HON', 'DE', 'EMR', 'ETN', 'PH', 'ROK', 'AME', 'IEX', 'XYL', 'OTIS', 'CARR', 'DOV', 'FTV', 'ROP', 'LDOS', 'SAIC', 'BAH', 'ESAB', 'FELE', 'GNRC', 'GWW', 'HXL', 'HUBB', 'ITT', 'JBTM', 'KAI', 'MIDD', 'MWA', 'NPO', 'NVT', 'OSK', 'PRIM', 'PWR', 'RBC', 'RS', 'RTX', 'TDY', 'TEX', 'TNC', 'TR', 'TRS', 'TT', 'TXT', 'UFPI', 'VMI', 'AGCO', 'ALGT', 'ALIT', 'AMWD', 'ARHS', 'AROW', 'AXL', 'BCOR', 'BGSF', 'BJRI', 'BLBD', 'BMBL', 'BRBR', 'BRLT', 'BXMT', 'CECO', 'NEE', 'DUK', 'SO', 'AEP', 'EXC', 'SRE', 'PPL', 'XEL', 'ES', 'ETR', 'AMT', 'PLD', 'CCI', 'EQIX', 'PSA', 'O', 'WELL', 'DLR', 'AVB', 'EQR', 'ARE', 'BXP', 'CPT', 'EGP', 'EXR', 'FRT', 'HIW', 'HST', 'IRM', 'KIM', 'KRG', 'LTC', 'LXP', 'NNN', 'RPT', 'SAFE', 'SHO', 'STAG', 'SUI', 'SWK', 'UDR', 'UE', 'VNO', 'WPC', 'VZ', 'T', 'TMUS', 'LUMN', 'SHEN', 'TDS', 'CABO', 'CCOI', 'GSAT', 'IDT', 'LILA', 'LILAK', 'OOMA', 'F', 'GM', 'UBER', 'LYFT', 'RIVN', 'LCID', 'NKLA', 'BLNK', 'CHPT', 'EVGO', 'GOEV', 'HYLN', 'NRGV', 'WKHS']
 
 def _quick_filter_one(symbol):
     """Quick filter for pipeline stage 1."""
@@ -1123,11 +1126,11 @@ async def widgets():
 # OpenBB Pro has ~30s widget timeout. No endpoint should ever
 # make it wait. Everything computes in background, serves instantly.
 # ============================================================
-_cache = {}          # {"endpoint_key": result}
+_bg_cache = {}          # {"endpoint_key": result}
 _cache_status = {}   # {"endpoint_key": "idle"|"running"|"done"}
 _cache_time = {}     # {"endpoint_key": timestamp}
 _cache_lock = threading.Lock()
-CACHE_TTL = 3600     # 1 hour — results refresh hourly
+_BG_CACHE_TTL = 3600     # 1 hour — results refresh hourly
 
 def _cache_key(endpoint, **params):
     parts = [endpoint] + [f"{k}={v}" for k, v in sorted(params.items())]
@@ -1135,10 +1138,10 @@ def _cache_key(endpoint, **params):
 
 def _get_cached(key):
     with _cache_lock:
-        cached = _cache.get(key)
+        cached = _bg_cache.get(key)
         status = _cache_status.get(key, "idle")
         ts = _cache_time.get(key, 0)
-    if cached and (time.time() - ts) > CACHE_TTL:
+    if cached and (time.time() - ts) > _BG_CACHE_TTL:
         return cached, "stale"
     return cached, status
 
@@ -1150,13 +1153,13 @@ def _bg_compute(key, func, args=(), kwargs=None):
     try:
         result = func(*args, **(kwargs or {}))
         with _cache_lock:
-            _cache[key] = result
+            _bg_cache[key] = result
             _cache_status[key] = "done"
             _cache_time[key] = time.time()
     except Exception as e:
         logger.error(f"Background compute {key} failed: {e}")
         with _cache_lock:
-            _cache[key] = [{"Error": str(e)}]
+            _bg_cache[key] = [{"Error": str(e)}]
             _cache_status[key] = "done"
             _cache_time[key] = time.time()
 
@@ -1221,7 +1224,8 @@ async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1
 async def lstm(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
-    check_rate_limit("lstm", 3)
+    if not check_rate_limit("lstm", 3):
+        return [{"Status": "Rate limited", "Info": "Too many LSTM requests. Try again in 1 minute."}]
     key = _cache_key("lstm", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_lstm, args=(s, horizon), msg=f"Running LSTM for {s}...")
 
@@ -1229,7 +1233,8 @@ async def lstm(symbol: str = "AAPL", horizon: int = 5):
 async def transformer(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
-    check_rate_limit("transformer", 3)
+    if not check_rate_limit("transformer", 3):
+        return [{"Status": "Rate limited", "Info": "Too many Transformer requests. Try again in 1 minute."}]
     key = _cache_key("transformer", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_transformer, args=(s, horizon), msg=f"Running Transformer for {s}...")
 
@@ -1244,7 +1249,8 @@ async def ensemble(symbol: str = "AAPL", horizon: int = 5):
 async def dqn(symbol: str = "AAPL", episodes: int = 20):
     s = validate_symbol(symbol)
     validate_range(episodes, "episodes", 1, 100)
-    check_rate_limit("dqn", 2)
+    if not check_rate_limit("dqn", 2):
+        return [{"Status": "Rate limited", "Info": "Too many DQN requests. Try again in 1 minute."}]
     key = _cache_key("dqn", symbol=s, episodes=episodes)
     return _serve_or_compute(key, run_dqn, args=(s, episodes), msg=f"Running DQN for {s}...")
 
@@ -1252,7 +1258,8 @@ async def dqn(symbol: str = "AAPL", episodes: int = 20):
 async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
     s = validate_symbol(symbol)
     validate_range(episodes, "episodes", 1, 100)
-    check_rate_limit("policy_gradient", 2)
+    if not check_rate_limit("policy_gradient", 2):
+        return [{"Status": "Rate limited", "Info": "Too many Policy Gradient requests. Try again in 1 minute."}]
     key = _cache_key("policy_gradient", symbol=s, episodes=episodes)
     return _serve_or_compute(key, run_policy_gradient, args=(s, episodes), msg=f"Running Policy Gradient for {s}...")
 
@@ -1267,7 +1274,7 @@ async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     validate_range(episodes, "episodes", 1, 50)
-    check_rate_limit("consensus", 2)
+    # No rate limiter — the background cache already deduplicates work
     key = _cache_key("consensus", symbol=s, horizon=horizon, episodes=episodes)
     return _serve_or_compute(key, run_consensus, args=(s, horizon, episodes), msg=f"Computing AI consensus for {s}...")
 
@@ -1287,7 +1294,7 @@ async def refresh_consensus(symbol: str = "AAPL"):
     s = validate_symbol(symbol)
     key = _cache_key("consensus", symbol=s, horizon=5, episodes=10)
     with _cache_lock:
-        _cache.pop(key, None)
+        _bg_cache.pop(key, None)
         _cache_status[key] = "idle"
     threading.Thread(target=_bg_compute, args=(key, run_consensus, (s, 5, 10)), daemon=True).start()
     return {"Status": f"Consensus refresh started for {s}."}
@@ -1296,7 +1303,7 @@ async def refresh_consensus(symbol: str = "AAPL"):
 async def refresh_batch():
     key = _cache_key("batch_consensus", min=55, h=5, ep=5, max=10)
     with _cache_lock:
-        _cache.pop(key, None)
+        _bg_cache.pop(key, None)
         _cache_status[key] = "idle"
     threading.Thread(target=_bg_compute, args=(key, run_batch_consensus, (55, 5, 5, 10)), daemon=True).start()
     return [{"Status": "Batch consensus refresh started"}]
@@ -1305,17 +1312,38 @@ async def refresh_batch():
 async def refresh_pipeline():
     key = _cache_key("pipeline", conf=40, max=15, h=5, ep=5)
     with _cache_lock:
-        _cache.pop(key, None)
+        _bg_cache.pop(key, None)
         _cache_status[key] = "idle"
     threading.Thread(target=_bg_compute, args=(key, run_pipeline, (40, 15, 5, 5)), daemon=True).start()
     return [{"Status": "Pipeline refresh started"}]
 
-# --- Pre-compute screener + USX on startup so widgets load instantly ---
+# --- Pre-compute screener + USX + consensus on startup so widgets load instantly ---
+def _precompute_consensus_for_top_buys():
+    """After screener finishes, pre-warm consensus for top buy signals."""
+    # Wait for screener cache to be ready (poll every 10s, max 5 min)
+    screener_key = _cache_key("screener")
+    for _ in range(30):
+        cached, status = _get_cached(screener_key)
+        if cached and isinstance(cached, list) and len(cached) > 0:
+            break
+        time.sleep(10)
+    else:
+        return  # screener never finished
+    # Get top 3 buy signals and pre-warm their consensus
+    buys = [r for r in cached if r.get("swing_score", 0) >= 55][:3]
+    for stock in buys:
+        sym = stock["symbol"]
+        key = _cache_key("consensus", symbol=sym, horizon=5, episodes=10)
+        logger.info(f"Pre-warming consensus for {sym}...")
+        _bg_compute(key, run_consensus, (sym, 5, 10))
+
 @app.on_event("startup")
 async def precompute_on_startup():
-    logger.info("Pre-computing screener and USX data on startup...")
+    logger.info("Pre-computing screener, USX, and consensus data on startup...")
     threading.Thread(target=_bg_compute, args=(_cache_key("screener"), run_screener), daemon=True).start()
     threading.Thread(target=_bg_compute, args=(_cache_key("usx", min_score=7), run_usx_screener, (7,)), daemon=True).start()
+    # Pre-warm consensus for top buys after screener completes
+    threading.Thread(target=_precompute_consensus_for_top_buys, daemon=True).start()
 
 @app.get("/health")
 async def health():
