@@ -25,9 +25,14 @@ logger = logging.getLogger("screener")
 # Use non-interactive backend (no GUI needed on server)
 import matplotlib
 matplotlib.use("Agg")
+# Suppress font warnings on Railway (no display, limited fonts)
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import FancyArrowPatch
+
+logger.info("matplotlib loaded successfully (Agg backend)")
 
 
 def generate_signal_chart(
@@ -259,7 +264,7 @@ def generate_signal_chart(
 
         # --- Export to PNG bytes ---
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight",
                    facecolor=bg_color, edgecolor="none")
         plt.close(fig)
         buf.seek(0)
