@@ -7,3 +7,6 @@ torch
 xgboost
 scikit-learn
 requests
+httpx
+pydantic-settings
+python-dotenv

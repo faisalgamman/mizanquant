@@ -1,8 +1,18 @@
-import asyncio, time, logging, os, uuid, threading, re, gc, pandas as pd, yfinance as yf, numpy as np
+import asyncio, time, logging, os, uuid, threading, re, gc, pandas as pd, numpy as np
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+
+# --- New modular imports (Phase 1 restructuring) ---
+from app.config import settings
+from app.services.market_data import fetch as fetch_market_data
+from app.services.technical import (
+    ema, rsi, macd, atr, calc_metrics,
+    safe_scale, walk_forward_split, prepare_sequences, get_score,
+)
+from app.exceptions import DataFetchError, ModelTrainingError
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -15,9 +25,8 @@ except ImportError:
 
 # Semaphore: only one model trains at a time to prevent OOM
 _model_semaphore = threading.Semaphore(1)
-import uvicorn
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("screener")
 app = FastAPI()
 
@@ -87,7 +96,7 @@ HALAL_STOCKS = [
 
 VALID_SYMBOLS.update(HALAL_STOCKS)
 
-_SIMPLE_CACHE_TTL = 300
+_SIMPLE_CACHE_TTL = settings.SIMPLE_CACHE_TTL
 _cache = {}
 _cache_ts = {}
 
@@ -101,7 +110,7 @@ def cache_set(k, v):
     _cache_ts[k] = time.time()
 
 # Model cache: stores trained models with 1-hour TTL
-MODEL_CACHE_TTL = 3600
+MODEL_CACHE_TTL = settings.MODEL_CACHE_TTL
 _model_cache = {}
 _model_cache_ts = {}
 
@@ -115,105 +124,11 @@ def model_cache_set(key, model_data):
     _model_cache_ts[key] = time.time()
 
 def fetch_yf(symbol, period="2y", start=None, end=None):
-    try:
-        t = yf.Ticker(symbol)
-        if start and end:
-            df = t.history(start=start, end=end, auto_adjust=True)
-        else:
-            df = t.history(period=period, auto_adjust=True)
-        if df.empty:
-            return None
-        df.columns = [c.lower() for c in df.columns]
-        df = df.reset_index()
-        df.columns = [c.lower() for c in df.columns]
-        # drop non-price columns if present
-        for col in ["dividends", "stock splits", "capital gains"]:
-            df.drop(columns=[col], errors="ignore", inplace=True)
-        return df if len(df) >= 200 else None
-    except Exception as e:
-        logger.error(f"{symbol}: {e}")
-        return None
+    """Fetch market data via Alpaca (primary) or yfinance (fallback)."""
+    return fetch_market_data(symbol, period=period, start=start, end=end)
 
-def ema(s, n): return s.ewm(span=n, adjust=False).mean()
-
-def rsi(s, n=14):
-    d = s.diff()
-    g = d.clip(lower=0).ewm(alpha=1/n, min_periods=n).mean()
-    l = (-d.clip(upper=0)).ewm(alpha=1/n, min_periods=n).mean()
-    return 100 - (100 / (1 + g/l))
-
-def macd(s):
-    m = ema(s, 12) - ema(s, 26)
-    return m, ema(m, 9), m - ema(m, 9)
-
-def atr(df, n=14):
-    h, l, c = df["high"], df["low"], df["close"]
-    tr = pd.concat([h-l, (h-c.shift()).abs(), (l-c.shift()).abs()], axis=1).max(axis=1)
-    return tr.ewm(alpha=1/n, min_periods=n).mean()
-
-def calc_metrics(returns):
-    returns = np.array(returns)
-    if len(returns) == 0:
-        return {}
-    mean_r = np.mean(returns)
-    std_r = np.std(returns) + 1e-9
-    sharpe = float(mean_r / std_r * np.sqrt(252))
-    downside = returns[returns < 0]
-    sortino_denom = np.std(downside) + 1e-9 if len(downside) > 0 else 1e-9
-    sortino = float(mean_r / sortino_denom * np.sqrt(252))
-    cumulative = np.cumprod(1 + returns)
-    peak = np.maximum.accumulate(cumulative)
-    drawdowns = (cumulative - peak) / peak
-    max_dd = float(np.min(drawdowns))
-    calmar = float(mean_r * 252 / abs(max_dd)) if max_dd != 0 else 0
-    sorted_r = np.sort(returns)
-    var_95 = float(-np.percentile(sorted_r, 5))
-    tail = sorted_r[sorted_r <= -var_95]
-    cvar_95 = float(-np.mean(tail)) if len(tail) > 0 else var_95
-    wins = returns[returns > 0]
-    losses = returns[returns < 0]
-    win_rate = float(len(wins) / len(returns) * 100) if len(returns) > 0 else 0
-    profit_factor = float(np.sum(wins) / abs(np.sum(losses))) if len(losses) > 0 and np.sum(losses) != 0 else 0
-    return {
-        "Sharpe Ratio": round(sharpe, 3),
-        "Sortino Ratio": round(sortino, 3),
-        "Max Drawdown %": round(max_dd * 100, 2),
-        "Calmar Ratio": round(calmar, 3),
-        "VaR 95%": round(var_95 * 100, 2),
-        "CVaR 95%": round(cvar_95 * 100, 2),
-        "Win Rate %": round(win_rate, 1),
-        "Profit Factor": round(profit_factor, 3),
-    }
-
-def safe_scale(train, test):
-    mean = np.mean(train)
-    std = np.std(train) + 1e-9
-    return (train - mean) / std, (test - mean) / std, mean, std
-
-def walk_forward_split(X, y, n_splits=3, test_size=0.2):
-    n = len(X)
-    folds = []
-    fold_size = int(n * test_size)
-    for i in range(n_splits):
-        test_end = n - i * fold_size
-        test_start = test_end - fold_size
-        if test_start <= 0:
-            break
-        folds.append((X[:test_start], y[:test_start], X[test_start:test_end], y[test_start:test_end]))
-    return folds[::-1]
-
-def get_score(row):
-    s = 0
-    if row["close"] > row["ema21"]: s += 25
-    if 40 <= row["rsi"] <= 60 and row["rsi"] > row["rsi_prev"]: s += 20
-    elif 35 <= row["rsi"] <= 65 and row["rsi"] > row["rsi_prev"]: s += 10
-    if row["hist"] > 0 and row["hist_prev"] <= 0: s += 20
-    elif row["hist"] > 0 and row["hist"] > row["hist_prev"]: s += 10
-    if row["vol_ratio"] >= 1.5: s += 15
-    elif row["vol_ratio"] >= 1.2: s += 8
-    if 1.0 <= (row["atr_v"] / row["close"] * 100) <= 4.0: s += 10
-    if ((row["close"] - row["support"]) / row["support"] * 100) <= 2.0: s += 10
-    return s
+# Technical analysis functions (ema, rsi, macd, atr, calc_metrics, safe_scale,
+# walk_forward_split, get_score, prepare_sequences) imported from app.services.technical
 
 def analyze(symbol, df):
     try:
@@ -249,7 +164,7 @@ def analyze(symbol, df):
         elif score >= 55: sig = "BUY"
         elif score >= 35: sig = "WATCH"
         else: sig = "NO TRADE"
-        pos = int((100000 * 0.01) / atr_val) if atr_val > 0 else 0
+        pos = int((settings.RISK_CAPITAL * (settings.RISK_PCT / 100)) / atr_val) if atr_val > 0 else 0
         chg1w = float(((price - close.iloc[-5]) / close.iloc[-5]) * 100) if len(close) >= 5 else 0
         chg1m = float(((price - close.iloc[-21]) / close.iloc[-21]) * 100) if len(close) >= 21 else 0
         chg3m = float(((price - close.iloc[-63]) / close.iloc[-63]) * 100) if len(close) >= 63 else 0
@@ -274,7 +189,7 @@ def run_screener():
     cached = cache_get("all")
     if cached: return cached
     results = []
-    with ThreadPoolExecutor(max_workers=15) as pool:
+    with ThreadPoolExecutor(max_workers=settings.SCREENER_WORKERS) as pool:
         futures = {pool.submit(_analyze_one, s): s for s in HALAL_STOCKS}
         for f in as_completed(futures):
             r = f.result()
@@ -386,25 +301,6 @@ def run_monte_carlo(symbol, days, simulations, df=None):
         return summary + day_stats
     except Exception as e:
         return [{"Error": str(e)}]
-
-def prepare_sequences(prices, seq_len, horizon, use_safe_scale=True):
-    X, y = [], []
-    for i in range(len(prices) - seq_len - horizon):
-        X.append(prices[i:i+seq_len].reshape(-1, 1))
-        y.append(prices[i+seq_len:i+seq_len+horizon])
-    X = np.array(X)
-    y = np.array(y)
-    split = int(len(X) * 0.8)
-    X_train, X_test = X[:split], X[split:]
-    y_train, y_test = y[:split], y[split:]
-    if use_safe_scale:
-        mean_p = X_train.mean()
-        std_p = X_train.std() + 1e-9
-        X_train = (X_train - mean_p) / std_p
-        X_test = (X_test - mean_p) / std_p
-        y_train_s = (y_train - mean_p) / std_p
-        return X_train, y_train_s, X_test, y_test, mean_p, std_p
-    return X_train, y_train, X_test, y_test, 0, 1
 
 def _run_with_memory_guard(func, *args, **kwargs):
     """Run a model function with semaphore to prevent OOM and gc after."""
@@ -705,7 +601,7 @@ def score_usx_single(symbol, df):
         tp3 = round(price + tp3_mult * atr_val, 2)
         be  = round(price + 1.0 * atr_val, 2)
         risk_per_share = price - sl
-        risk_capital   = 100000 * 0.01
+        risk_capital   = settings.RISK_CAPITAL * (settings.RISK_PCT / 100)
         qty = int(risk_capital / risk_per_share) if risk_per_share > 0 else 0
 
         breakdown = []
@@ -742,7 +638,7 @@ def _usx_one(symbol):
 def run_usx_screener(min_score=7, direction="Long Only"):
     try:
         results = []
-        with ThreadPoolExecutor(max_workers=15) as pool:
+        with ThreadPoolExecutor(max_workers=settings.SCREENER_WORKERS) as pool:
             futures = {pool.submit(_usx_one, s): s for s in HALAL_STOCKS}
             for f in as_completed(futures):
                 r = f.result()
@@ -1014,15 +910,15 @@ def _quick_filter_one(symbol):
         score = sum([price > ema21_val, ema9_val > ema21_val, 30 <= rsi_val <= 75, vol_ratio >= 0.8])
         if score >= 2:
             return {"symbol": symbol, "price": round(price,2), "rsi": round(rsi_val,1), "quick_score": score}
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Quick filter {symbol}: {e}")
     return None
 
 def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
     try:
         # Stage 1: Quick filter (concurrent)
         quick_results = []
-        with ThreadPoolExecutor(max_workers=20) as pool:
+        with ThreadPoolExecutor(max_workers=settings.SCREENER_WORKERS) as pool:
             futures = {pool.submit(_quick_filter_one, s): s for s in RUSSELL_1000_HALAL}
             for f in as_completed(futures):
                 r = f.result()
@@ -1039,7 +935,9 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
                 r = analyze(item["symbol"], df)
                 if r and r["swing_score"] >= 45:
                     screener_results.append(r)
-            except: continue
+            except Exception as e:
+                logger.debug(f"Pipeline screener {item['symbol']}: {e}")
+                continue
         screener_results.sort(key=lambda x: x["swing_score"], reverse=True)
         top30 = screener_results[:30]
 
@@ -1051,7 +949,8 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
             usx_filtered = [x for x in usx_all if x.get("Symbol") in top30_symbols]
             usx_filtered.sort(key=lambda x: int(x.get("Score","0/10").split("/")[0]), reverse=True)
             top15 = [x["Symbol"] for x in usx_filtered[:15]]
-        except:
+        except Exception as e:
+            logger.warning(f"Pipeline USX stage failed: {e}")
             top15 = top30_symbols[:15]
 
         # المرحلة 4: AI Consensus
@@ -1166,7 +1065,7 @@ _bg_cache = {}          # {"endpoint_key": result}
 _cache_status = {}   # {"endpoint_key": "idle"|"running"|"done"}
 _cache_time = {}     # {"endpoint_key": timestamp}
 _cache_lock = threading.Lock()
-_BG_CACHE_TTL = 3600     # 1 hour — results refresh hourly
+_BG_CACHE_TTL = settings.BG_CACHE_TTL
 
 def _cache_key(endpoint, **params):
     parts = [endpoint] + [f"{k}={v}" for k, v in sorted(params.items())]
@@ -1390,24 +1289,26 @@ async def precompute_on_startup():
 
 @app.get("/health")
 async def health():
-    checks = {"openbb_forecast": False, "yfinance": False}
+    checks = {"openbb_forecast": False, "market_data": False}
     try:
         from openbb_forecast.models.lstm import LSTMForecaster
         checks["openbb_forecast"] = True
     except Exception:
         pass
     try:
-        t = yf.Ticker("AAPL")
-        h = t.history(period="1d")
-        checks["yfinance"] = len(h) > 0
+        df = fetch_yf("AAPL", period="1y")
+        checks["market_data"] = df is not None and len(df) > 0
     except Exception:
         pass
+    alpaca_configured = bool(settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY)
     all_ok = all(checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "11.4.0",
+        "version": "12.0.0",
         "widgets": 14,
         "stocks": len(HALAL_STOCKS),
+        "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
+        "config": "loaded",
         "dependencies": checks,
     }
 if __name__ == "__main__":
