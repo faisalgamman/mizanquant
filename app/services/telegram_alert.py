@@ -33,6 +33,25 @@ _TELEGRAM_PHOTO_API = "https://api.telegram.org/bot{token}/sendPhoto"
 _last_send = 0.0
 _send_lock = threading.Lock()
 
+# Deduplication: prevent sending the same signal within 30 minutes
+_sent_signals = {}  # {symbol_verdict: timestamp}
+_DEDUP_WINDOW = 1800  # 30 minutes
+
+
+def _is_duplicate_signal(symbol: str, verdict: str) -> bool:
+    """Check if we already sent this signal recently."""
+    key = f"{symbol}_{verdict}"
+    now = time.time()
+    # Clean old entries
+    expired = [k for k, ts in _sent_signals.items() if now - ts > _DEDUP_WINDOW]
+    for k in expired:
+        del _sent_signals[k]
+    # Check
+    if key in _sent_signals:
+        return True
+    _sent_signals[key] = now
+    return False
+
 
 def _is_configured() -> bool:
     """Check if Telegram credentials are set."""
@@ -125,6 +144,9 @@ def alert_consensus(symbol: str, verdict: str, confidence: float,
                     votes_buy: int, votes_sell: int, votes_hold: int,
                     price: float, stop_loss: float, tp1: float):
     """Send alert for consensus verdict."""
+    if _is_duplicate_signal(symbol, verdict):
+        logger.info(f"Skipping duplicate consensus: {symbol} {verdict}")
+        return False
     if "STRONG BUY" in verdict:
         icon = "[STRONG BUY]"
     elif "BUY" in verdict:
@@ -198,6 +220,11 @@ def alert_signal_with_chart(
     candlestick chart with entry/SL/TP lines and buy/sell arrows,
     then sends it as a photo to Telegram.
     """
+    # Deduplication — don't send the same signal twice in 30 min
+    if _is_duplicate_signal(symbol, verdict):
+        logger.info(f"Skipping duplicate signal: {symbol} {verdict}")
+        return False
+
     try:
         from app.services.chart_generator import generate_signal_chart
 
@@ -245,9 +272,16 @@ def alert_signal_with_chart(
                 votes_hold=votes_hold,
             )
             if chart_bytes:
-                return send_photo(chart_bytes, caption=caption)
+                logger.info(f"Chart ready for {symbol}: {len(chart_bytes)} bytes, sending photo...")
+                ok = send_photo(chart_bytes, caption=caption)
+                if ok:
+                    return True
+                logger.error(f"send_photo failed for {symbol}, falling back to text")
+            else:
+                logger.error(f"Chart bytes is None for {symbol}")
 
         # Fallback: text-only alert if chart generation fails
+        logger.info(f"Sending text-only fallback for {symbol}")
         return send_message(caption)
 
     except Exception as e:
