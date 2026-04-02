@@ -15,6 +15,9 @@ from app.services.technical import (
 from app.exceptions import DataFetchError, ModelTrainingError
 from app.db.database import init_db
 from app.background.cache_manager import record_signal, db_cache_get, db_cache_set
+from app.services.halal_screening import (
+    get_halal_status, get_screening_report, batch_screen, screen_symbol,
+)
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -1073,6 +1076,14 @@ async def widgets():
                             "params": [{"paramName": "min_confidence", "value": "40", "label": "Min Confidence %", "type": "text", "show": True},
                                        {"paramName": "max_final", "value": "15", "label": "Max Final Stocks", "type": "text", "show": True},
                                        {"paramName": "horizon", "value": "5", "label": "Forecast Days", "type": "text", "show": True}]},
+        "halal_status_widget": {"name": "AAOIFI Halal Check", "description": "Real AAOIFI compliance screening with financial ratios",
+                                "category": "Equity", "type": "table", "endpoint": "/halal_status", "gridData": {"w": 20, "h": 9},
+                                "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True}]},
+        "screening_report_widget": {"name": "Halal Screening Report", "description": "All stocks AAOIFI screening results",
+                                    "category": "Equity", "type": "table", "endpoint": "/screening_report", "gridData": {"w": 20, "h": 9}},
+        "screen_stocks_widget": {"name": "Run Halal Screening", "description": "Batch AAOIFI screening for all stocks",
+                                 "category": "Equity", "type": "table", "endpoint": "/screen_stocks", "gridData": {"w": 20, "h": 9},
+                                 "params": [{"paramName": "max_stocks", "value": "80", "label": "Max Stocks", "type": "text", "show": True}]},
     }
 
 # ============================================================
@@ -1312,6 +1323,61 @@ async def precompute_on_startup():
         _bg_compute(_cache_key("usx", min_score=7), run_usx_screener, (7,))
     threading.Thread(target=_delayed_usx, daemon=True).start()
 
+# ============================================================
+# PHASE 2: AAOIFI Halal Screening Endpoints
+# ============================================================
+
+@app.get("/halal_status")
+async def halal_status(symbol: str = "AAPL"):
+    """Get AAOIFI Halal compliance status for a single symbol."""
+    s = validate_symbol(symbol)
+    if not settings.FMP_API_KEY:
+        return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
+    result = get_halal_status(s)
+    if result is None:
+        return [{"Error": f"Could not retrieve fundamental data for {s}"}]
+    # Format for OpenBB widget display
+    status = "HALAL" if result.get("is_halal") else "HARAM"
+    return [{
+        "Symbol": s,
+        "Status": status,
+        "Company": result.get("company_name", s),
+        "Sector": result.get("sector", ""),
+        "Debt / MCap %": result.get("debt_ratio", 0),
+        "Debt Pass": "YES" if result.get("debt_pass") else "NO",
+        "Interest / Rev %": result.get("interest_ratio", 0),
+        "Interest Pass": "YES" if result.get("interest_pass") else "NO",
+        "Haram Sector": "YES" if result.get("haram_revenue") else "NO",
+        "Sector Pass": "YES" if result.get("haram_pass") else "NO",
+        "Liquidity / MCap %": result.get("liquidity_ratio", 0),
+        "Liquidity Pass": "YES" if result.get("liquidity_pass") else "NO",
+        "Screens Passed": f"{result.get('screens_passed', 0)}/4",
+        "Threshold": "Debt<33%, Interest<5%, No Haram Sector, Liquidity<33%",
+    }]
+
+@app.get("/screening_report")
+async def screening_report():
+    """Get all AAOIFI screening results from the database."""
+    results = get_screening_report()
+    if not results:
+        return [{"Message": "No screening results yet. Use /screen_stocks to start screening, or /halal_status/{symbol} for a single stock."}]
+    return results
+
+@app.get("/screen_stocks")
+async def screen_stocks_endpoint(max_stocks: int = 80):
+    """Trigger batch AAOIFI screening for all stocks in HALAL_STOCKS + RUSSELL_1000_HALAL."""
+    if not settings.FMP_API_KEY:
+        return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
+    validate_range(max_stocks, "max_stocks", 1, 200)
+    # Combine all known symbols, deduplicate
+    all_symbols = list(set(HALAL_STOCKS + RUSSELL_1000_HALAL))
+    # Run in background to avoid timeout
+    key = _cache_key("screening_batch", max=max_stocks)
+    def _run_batch():
+        return [batch_screen(all_symbols, max_per_run=max_stocks)]
+    return _serve_or_compute(key, _run_batch, msg=f"Screening up to {max_stocks} stocks (3 API calls each)... Refresh in a few minutes.")
+
+
 @app.get("/health")
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False}
@@ -1333,13 +1399,15 @@ async def health():
     except Exception:
         pass
     alpaca_configured = bool(settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY)
+    fmp_configured = bool(settings.FMP_API_KEY)
     all_ok = all(checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "13.0.0",
-        "widgets": 14,
+        "version": "14.0.0",
+        "widgets": 17,
         "stocks": len(HALAL_STOCKS),
         "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
+        "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "database": "connected" if checks["database"] else "unavailable",
         "config": "loaded",
         "dependencies": checks,
