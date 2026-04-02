@@ -26,7 +26,8 @@ from app.services.alpaca_client import (
 )
 from app.services.telegram_alert import (
     alert_strong_signal, alert_consensus, alert_daily_summary,
-    alert_system_health, send_message as tg_send,
+    alert_system_health, alert_signal_with_chart,
+    send_message as tg_send, send_photo as tg_send_photo,
 )
 from app.services.signal_tracker import (
     check_signal_outcomes, get_accuracy_report, get_signal_history,
@@ -920,14 +921,15 @@ def run_consensus(symbol, horizon=5, episodes=10):
         except Exception:
             pass  # non-critical
 
-        # Telegram alert for strong signals (Phase 4.1)
+        # Telegram alert with chart for strong signals (Phase 4.1 + Chart)
         try:
             if "STRONG" in verdict:
-                alert_consensus(
+                alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=verdict,
-                    confidence=confidence, votes_buy=votes_buy,
-                    votes_sell=votes_sell, votes_hold=votes_hold,
-                    price=round(price, 2), stop_loss=sl, tp1=tp1,
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, df=df,
                 )
         except Exception:
             pass  # non-critical
@@ -1647,6 +1649,78 @@ async def telegram_daily_summary():
         portfolio_info = {"equity": portfolio["equity"], "daily_pl": daily_pl}
     ok = alert_daily_summary(cached, portfolio_info)
     return [{"Status": "sent" if ok else "failed"}]
+
+
+@app.get("/api/v1/post_market_scan")
+async def post_market_scan(top_n: int = 5, min_score: int = 55):
+    """Post-market analysis: scan top stocks, send chart alerts via Telegram.
+
+    Runs the screener, picks the top N stocks by swing score,
+    runs consensus on each, and sends STRONG signals with professional
+    charts to Telegram (entry, SL, TP lines + candlestick + arrows).
+
+    Call this after market close (4 PM ET) for next-day trade ideas.
+    """
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return [{"Error": "Telegram not configured"}]
+
+    # Step 1: Run screener to find top stocks
+    screener_results = run_screener()
+    if not screener_results:
+        return [{"Error": "Screener returned no results"}]
+
+    # Filter for strong scores
+    top_stocks = [r for r in screener_results if r.get("swing_score", 0) >= min_score]
+    top_stocks.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
+    top_stocks = top_stocks[:top_n]
+
+    if not top_stocks:
+        tg_send(f"POST-MARKET SCAN\n\nNo stocks with score >= {min_score} found.\n{len(screener_results)} stocks scanned.")
+        return [{"Message": f"No stocks above {min_score} score threshold"}]
+
+    # Step 2: Send header
+    tg_send(
+        f"POST-MARKET ANALYSIS\n"
+        f"{len(screener_results)} stocks scanned\n"
+        f"{len(top_stocks)} signals found (score >= {min_score})\n"
+        f"\nSending charts..."
+    )
+
+    # Step 3: Run consensus on each and send chart
+    results = []
+    for stock in top_stocks:
+        symbol = stock["symbol"]
+        try:
+            consensus = run_consensus(symbol, horizon=5, episodes=5)
+            if consensus and not consensus[0].get("Error"):
+                summary = consensus[0]
+                results.append({
+                    "symbol": symbol,
+                    "verdict": summary.get("Verdict", "N/A"),
+                    "confidence": summary.get("Confidence %", 0),
+                    "price": summary.get("Price", 0),
+                    "stop_loss": summary.get("Stop Loss", 0),
+                    "tp1": summary.get("TP1", 0),
+                    "chart_sent": True,
+                })
+            else:
+                results.append({"symbol": symbol, "error": "Consensus failed"})
+        except Exception as e:
+            results.append({"symbol": symbol, "error": str(e)})
+
+        # Rate limit between symbols
+        time.sleep(1)
+
+    # Step 4: Summary
+    strong_signals = [r for r in results if "STRONG" in r.get("verdict", "")]
+    tg_send(
+        f"SCAN COMPLETE\n\n"
+        f"Analyzed: {len(top_stocks)} stocks\n"
+        f"STRONG signals: {len(strong_signals)}\n"
+        f"\nCharts sent above for each signal."
+    )
+
+    return results
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -27,6 +27,7 @@ from app.config import settings
 logger = logging.getLogger("screener")
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+_TELEGRAM_PHOTO_API = "https://api.telegram.org/bot{token}/sendPhoto"
 
 # Rate limit: max 30 messages/second per bot (Telegram limit)
 _last_send = 0.0
@@ -64,6 +65,36 @@ def send_message(text: str) -> bool:
             return True
     except Exception as e:
         logger.error(f"Telegram send failed: {e}")
+        return False
+
+
+def send_photo(image_bytes: bytes, caption: str = "") -> bool:
+    """Send a photo (PNG bytes) to the configured Telegram chat."""
+    if not _is_configured():
+        return False
+
+    global _last_send
+    with _send_lock:
+        elapsed = time.time() - _last_send
+        if elapsed < 0.1:
+            time.sleep(0.1 - elapsed)
+        _last_send = time.time()
+
+    url = _TELEGRAM_PHOTO_API.format(token=settings.TELEGRAM_BOT_TOKEN)
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            files = {"photo": ("chart.png", image_bytes, "image/png")}
+            data = {
+                "chat_id": settings.TELEGRAM_CHAT_ID,
+            }
+            if caption:
+                data["caption"] = caption[:1024]  # Telegram caption limit
+            resp = client.post(url, data=data, files=files)
+            resp.raise_for_status()
+            return True
+    except Exception as e:
+        logger.error(f"Telegram send_photo failed: {e}")
         return False
 
 
@@ -145,6 +176,84 @@ def alert_daily_summary(screener_data: list, portfolio_data: dict = None):
         )
 
     return send_message(text)
+
+
+def alert_signal_with_chart(
+    symbol: str,
+    verdict: str,
+    confidence: float,
+    price: float,
+    stop_loss: float,
+    tp1: float,
+    tp2: float = None,
+    tp3: float = None,
+    votes_buy: int = 0,
+    votes_sell: int = 0,
+    votes_hold: int = 0,
+    df=None,
+) -> bool:
+    """Send a signal alert WITH a professional chart image.
+
+    This is the primary post-market alert function. Generates a
+    candlestick chart with entry/SL/TP lines and buy/sell arrows,
+    then sends it as a photo to Telegram.
+    """
+    try:
+        from app.services.chart_generator import generate_signal_chart
+
+        # Risk:Reward ratio
+        risk = abs(price - stop_loss)
+        reward = abs(tp1 - price)
+        rr = round(reward / risk, 1) if risk > 0 else 0
+
+        # Caption text
+        icon = "[STRONG BUY]" if "BUY" in verdict else "[STRONG SELL]"
+        caption = (
+            f"{icon} {symbol} -- {verdict}\n"
+            f"\n"
+            f"Entry: ${price:.2f}\n"
+            f"Stop Loss: ${stop_loss:.2f}\n"
+            f"TP1: ${tp1:.2f}"
+        )
+        if tp2:
+            caption += f"  |  TP2: ${tp2:.2f}"
+        if tp3:
+            caption += f"  |  TP3: ${tp3:.2f}"
+        caption += (
+            f"\n"
+            f"Risk:Reward = 1:{rr}\n"
+            f"Confidence: {confidence:.0f}%\n"
+            f"Votes: BUY {votes_buy} | SELL {votes_sell} | HOLD {votes_hold}\n"
+            f"\n"
+            f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"
+        )
+
+        # Generate chart if we have data
+        if df is not None and len(df) >= 30:
+            chart_bytes = generate_signal_chart(
+                df=df,
+                symbol=symbol,
+                verdict=verdict,
+                entry_price=price,
+                stop_loss=stop_loss,
+                tp1=tp1,
+                tp2=tp2,
+                tp3=tp3,
+                confidence=confidence,
+                votes_buy=votes_buy,
+                votes_sell=votes_sell,
+                votes_hold=votes_hold,
+            )
+            if chart_bytes:
+                return send_photo(chart_bytes, caption=caption)
+
+        # Fallback: text-only alert if chart generation fails
+        return send_message(caption)
+
+    except Exception as e:
+        logger.error(f"Signal chart alert failed for {symbol}: {e}")
+        # Fallback to text
+        return send_message(f"[{verdict}] {symbol} @ ${price:.2f} | SL ${stop_loss:.2f} | TP ${tp1:.2f}")
 
 
 def alert_system_health(issue: str, severity: str = "WARNING"):
