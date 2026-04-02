@@ -70,14 +70,15 @@ def _fmp_rate_limit():
 
 
 def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
-    """Make a rate-limited GET request to FMP API."""
+    """Make a rate-limited GET request to FMP stable API."""
     if not settings.FMP_API_KEY:
         return None
 
     _fmp_rate_limit()
 
-    url = f"https://financialmodelingprep.com/api/v3/{endpoint}/{symbol}"
-    params = {"apikey": settings.FMP_API_KEY}
+    # FMP migrated to /stable/ endpoints (Aug 2025)
+    url = f"https://financialmodelingprep.com/stable/{endpoint}"
+    params = {"symbol": symbol, "apikey": settings.FMP_API_KEY}
 
     # Add period=annual for financial statements
     if endpoint in ("balance-sheet-statement", "income-statement"):
@@ -116,7 +117,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         return None
     profile = profile_data[0]
 
-    market_cap = profile.get("mktCap", 0) or 0
+    market_cap = profile.get("marketCap") or profile.get("mktCap") or 0
     sector = (profile.get("sector") or "").lower().strip()
     industry = (profile.get("industry") or "").lower().strip()
     company_name = profile.get("companyName", symbol)
