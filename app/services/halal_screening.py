@@ -95,6 +95,8 @@ def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
         if e.response.status_code == 429:
             logger.warning("FMP rate limit hit — waiting 60s")
             time.sleep(60)
+        elif e.response.status_code == 402:
+            logger.debug(f"FMP 402 (premium required) for {symbol}/{endpoint} — skipping")
         elif e.response.status_code == 403:
             logger.error("FMP API key invalid or expired")
         else:
