@@ -297,6 +297,12 @@ def on_signal(
     if not settings.AUTO_TRADE_ENABLED:
         return None
 
+    # Block trades outside market hours (before making any API calls)
+    from app.services.risk_manager import is_market_open
+    if not is_market_open():
+        logger.info(f"Signal {verdict} for {symbol} ignored — market is closed")
+        return None
+
     min_confidence = settings.MIN_TRADE_CONFIDENCE
 
     if verdict == "STRONG BUY" and confidence >= min_confidence:
