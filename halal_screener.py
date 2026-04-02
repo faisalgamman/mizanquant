@@ -1329,8 +1329,8 @@ def _precompute_consensus_for_top_buys():
         time.sleep(10)
     else:
         return  # screener never finished
-    # Get top 3 buy signals and pre-warm their consensus
-    buys = [r for r in cached if r.get("swing_score", 0) >= 55][:3]
+    # Get top 1 buy signal and pre-warm its consensus (limit to 1 to avoid OOM on small containers)
+    buys = [r for r in cached if r.get("swing_score", 0) >= 55][:1]
     for stock in buys:
         sym = stock["symbol"]
         key = _cache_key("consensus", symbol=sym, horizon=5, episodes=10)
