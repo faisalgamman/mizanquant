@@ -24,6 +24,13 @@ from app.services.alpaca_client import (
     get_orders as alpaca_get_orders,
     get_portfolio_history as alpaca_get_portfolio_history,
 )
+from app.services.telegram_alert import (
+    alert_strong_signal, alert_consensus, alert_daily_summary,
+    alert_system_health, send_message as tg_send,
+)
+from app.services.signal_tracker import (
+    check_signal_outcomes, get_accuracy_report, get_signal_history,
+)
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -860,7 +867,19 @@ def run_consensus(symbol, horizon=5, episodes=10):
                          "votes_hold": votes_hold, "tools": len(details)},
             )
         except Exception:
-            pass  # non-critical: don't break consensus if DB is down
+            pass  # non-critical
+
+        # Telegram alert for strong signals (Phase 4.1)
+        try:
+            if "STRONG" in verdict:
+                alert_consensus(
+                    symbol=symbol.upper(), verdict=verdict,
+                    confidence=confidence, votes_buy=votes_buy,
+                    votes_sell=votes_sell, votes_hold=votes_hold,
+                    price=round(price, 2), stop_loss=sl, tp1=tp1,
+                )
+        except Exception:
+            pass  # non-critical
 
         return summary + details
 
@@ -1099,6 +1118,12 @@ async def widgets():
         "portfolio_history_widget": {"name": "Portfolio History", "description": "Equity curve over time",
                                      "category": "Portfolio", "type": "table", "endpoint": "/portfolio/history", "gridData": {"w": 20, "h": 9},
                                      "params": [{"paramName": "period", "value": "1M", "label": "Period (1D/1W/1M/3M/1A)", "type": "text", "show": True}]},
+        "signals_accuracy_widget": {"name": "Signal Accuracy", "description": "Hit rates and P&L by signal source",
+                                    "category": "Analytics", "type": "table", "endpoint": "/signals/accuracy", "gridData": {"w": 20, "h": 9},
+                                    "params": [{"paramName": "period", "value": "30", "label": "Lookback Days", "type": "text", "show": True}]},
+        "signals_history_widget": {"name": "Signal History", "description": "All recorded signals with outcomes",
+                                   "category": "Analytics", "type": "table", "endpoint": "/signals/history", "gridData": {"w": 20, "h": 9},
+                                   "params": [{"paramName": "symbol", "value": "", "label": "Symbol (blank=all)", "type": "text", "show": True}]},
     }
 
 # ============================================================
@@ -1474,6 +1499,61 @@ async def portfolio_history(period: str = "1M"):
     return summary + data["history"]
 
 
+# ============================================================
+# PHASE 4: Signal Tracking, Alerts & Monitoring
+# ============================================================
+
+@app.get("/signals/accuracy")
+async def signals_accuracy(period: int = 30):
+    """Signal accuracy report: hit rates, avg returns by source."""
+    validate_range(period, "period", 1, 365)
+    # Trigger outcome checking first
+    try:
+        threading.Thread(target=check_signal_outcomes, args=(5,), daemon=True).start()
+    except Exception:
+        pass
+    return get_accuracy_report(period_days=period)
+
+@app.get("/signals/history")
+async def signals_history(symbol: str = "", limit: int = 50):
+    """Recent signal history with outcomes."""
+    s = validate_symbol(symbol) if symbol else None
+    validate_range(limit, "limit", 1, 500)
+    return get_signal_history(symbol=s, limit=limit)
+
+@app.get("/signals/check_outcomes")
+async def signals_check_outcomes(days: int = 5):
+    """Manually trigger outcome checking for mature signals."""
+    validate_range(days, "days", 1, 60)
+    result = check_signal_outcomes(lookback_days=days)
+    return [{"Action": "Outcome check complete", **result}]
+
+@app.get("/telegram/test")
+async def telegram_test():
+    """Send a test message to Telegram."""
+    if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_CHAT_ID:
+        return [{"Error": "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not configured in .env"}]
+    ok = tg_send("\U00002705 <b>Test message from Trading App</b>\n\nTelegram alerts are working!")
+    return [{"Status": "sent" if ok else "failed", "Bot Token": f"...{settings.TELEGRAM_BOT_TOKEN[-6:]}", "Chat ID": settings.TELEGRAM_CHAT_ID}]
+
+@app.get("/telegram/daily_summary")
+async def telegram_daily_summary():
+    """Manually trigger daily summary to Telegram."""
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return [{"Error": "Telegram not configured"}]
+    screener_key = _cache_key("screener")
+    cached, _ = _get_cached(screener_key)
+    if not cached or not isinstance(cached, list):
+        return [{"Error": "Screener data not available yet"}]
+    portfolio = alpaca_get_account()
+    portfolio_info = None
+    if portfolio:
+        daily_pl = portfolio["equity"] - portfolio["last_equity"]
+        portfolio_info = {"equity": portfolio["equity"], "daily_pl": daily_pl}
+    ok = alert_daily_summary(cached, portfolio_info)
+    return [{"Status": "sent" if ok else "failed"}]
+
+
 @app.get("/health")
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False}
@@ -1496,14 +1576,16 @@ async def health():
         pass
     alpaca_configured = bool(settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY)
     fmp_configured = bool(settings.FMP_API_KEY)
+    telegram_configured = bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
     all_ok = all(checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "15.0.0",
-        "widgets": 21,
+        "version": "16.0.0",
+        "widgets": 23,
         "stocks": len(HALAL_STOCKS),
         "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
+        "telegram": "active" if telegram_configured else "not_configured",
         "database": "connected" if checks["database"] else "unavailable",
         "config": "loaded",
         "dependencies": checks,
