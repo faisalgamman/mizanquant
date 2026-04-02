@@ -31,6 +31,12 @@ from app.services.telegram_alert import (
 from app.services.signal_tracker import (
     check_signal_outcomes, get_accuracy_report, get_signal_history,
 )
+from app.services.trading_engine import (
+    on_signal as auto_trade_signal,
+    execute_buy, execute_sell,
+    get_trade_history, get_performance_report,
+)
+from app.services.risk_manager import get_risk_status
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -881,6 +887,26 @@ def run_consensus(symbol, horizon=5, episodes=10):
         except Exception:
             pass  # non-critical
 
+        # Auto-trade execution (Stage 1: Paper Trading)
+        try:
+            trade_result = auto_trade_signal(
+                symbol=symbol.upper(),
+                verdict=verdict,
+                confidence=confidence,
+                price=round(price, 2),
+                stop_loss=sl,
+                take_profit=tp1,
+                votes_buy=votes_buy,
+                votes_sell=votes_sell,
+                votes_hold=votes_hold,
+                details={"tools": len(details)},
+            )
+            if trade_result:
+                summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+                summary[0]["Trade_Reason"] = trade_result.get("reason", "")
+        except Exception as e:
+            logger.debug(f"Auto-trade hook error: {e}")
+
         return summary + details
 
     except Exception as e:
@@ -1577,6 +1603,53 @@ async def telegram_daily_summary():
     return [{"Status": "sent" if ok else "failed"}]
 
 
+# ══════════════════════════════════════════════════════════════════════
+# AUTO-TRADING ENDPOINTS (Stage 1: Paper Trading)
+# ══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/trading/status")
+async def trading_status():
+    """Get auto-trading status: enabled/disabled, risk dashboard, PDT tracker."""
+    account = alpaca_get_account()
+    if not account:
+        return {"error": "Cannot connect to Alpaca"}
+    positions = alpaca_get_positions()
+    risk = get_risk_status(account, positions)
+    risk["auto_trade_enabled"] = settings.AUTO_TRADE_ENABLED
+    risk["min_confidence"] = settings.MIN_TRADE_CONFIDENCE
+    risk["trade_risk_pct"] = settings.TRADE_RISK_PCT
+    risk["max_position_pct"] = settings.MAX_POSITION_PCT
+    return risk
+
+
+@app.get("/api/v1/trading/history")
+async def trading_history(limit: int = 50):
+    """Get auto-trade execution history."""
+    return get_trade_history(limit=limit)
+
+
+@app.get("/api/v1/trading/performance")
+async def trading_performance():
+    """Get trading performance report: win rate, Sharpe, drawdown, profit factor."""
+    return get_performance_report()
+
+
+@app.post("/api/v1/trading/enable")
+async def trading_enable():
+    """Enable auto-trading (paper account only)."""
+    settings.AUTO_TRADE_ENABLED = True
+    tg_send("AUTO-TRADING ENABLED\n\nPaper account auto-execution is now active.\nOnly STRONG BUY/SELL signals will be executed.")
+    return {"auto_trade_enabled": True, "message": "Paper trading auto-execution enabled"}
+
+
+@app.post("/api/v1/trading/disable")
+async def trading_disable():
+    """Disable auto-trading (emergency stop)."""
+    settings.AUTO_TRADE_ENABLED = False
+    tg_send("AUTO-TRADING DISABLED\n\nAuto-execution has been stopped.\nAll existing positions remain open.")
+    return {"auto_trade_enabled": False, "message": "Auto-trading disabled"}
+
+
 @app.get("/health")
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False}
@@ -1603,13 +1676,14 @@ async def health():
     all_ok = all(checks.values())
     return {
         "status": "ok" if all_ok else "degraded",
-        "version": "16.0.0",
+        "version": "17.0.0",
         "widgets": 10,
         "stocks": len(HALAL_STOCKS),
         "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "telegram": "active" if telegram_configured else "not_configured",
         "database": "connected" if checks["database"] else "unavailable",
+        "auto_trading": "enabled" if settings.AUTO_TRADE_ENABLED else "disabled",
         "config": "loaded",
         "dependencies": checks,
     }

@@ -91,3 +91,29 @@ class PortfolioSnapshot(Base):
     buying_power = Column(Float)
     positions_json = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class TradeHistory(Base):
+    """Auto-trade execution history (Stage 1: Paper Trading)."""
+
+    __tablename__ = "trade_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    side = Column(String(10), nullable=False)  # "buy" or "sell"
+    qty = Column(Float, default=0)
+    entry_price = Column(Float)
+    exit_price = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    take_profit = Column(Float, nullable=True)
+    position_value = Column(Float, nullable=True)
+    risk_amount = Column(Float, nullable=True)
+    risk_pct = Column(Float, nullable=True)
+    confidence = Column(Float, default=0)
+    order_id = Column(String(100), default="")
+    status = Column(String(20), default="submitted")  # submitted, rejected, filled, closed
+    signal_details = Column(JSON, nullable=True)
+    pnl = Column(Float, nullable=True)  # filled in when position closes
+    pnl_pct = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    closed_at = Column(DateTime, nullable=True)
