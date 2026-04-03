@@ -1651,9 +1651,79 @@ async def telegram_daily_summary():
     return [{"Status": "sent" if ok else "failed"}]
 
 
+def _run_post_market_scan_bg(top_n: int, min_score: int):
+    """Background worker for post-market scan (runs in thread)."""
+    try:
+        # Step 1: Run screener to find top stocks
+        screener_results = run_screener()
+        if not screener_results:
+            tg_send("POST-MARKET SCAN\n\nScreener returned no results.")
+            return
+
+        # Filter for strong scores
+        top_stocks = [r for r in screener_results if r.get("swing_score", 0) >= min_score]
+        top_stocks.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
+        top_stocks = top_stocks[:top_n]
+
+        if not top_stocks:
+            tg_send(f"POST-MARKET SCAN\n\nNo stocks with score >= {min_score} found.\n{len(screener_results)} stocks scanned.")
+            return
+
+        # Step 2: Send header
+        tg_send(
+            f"POST-MARKET ANALYSIS\n"
+            f"{len(screener_results)} stocks scanned\n"
+            f"{len(top_stocks)} top signals (score >= {min_score})\n"
+            f"\nAnalyzing with AI consensus..."
+        )
+
+        # Step 3: Run consensus on each — this triggers chart alerts automatically
+        results = []
+        for stock in top_stocks:
+            symbol = stock["symbol"]
+            try:
+                consensus = run_consensus(symbol, horizon=5, episodes=5)
+                if consensus and not consensus[0].get("Error"):
+                    summary = consensus[0]
+                    results.append({
+                        "symbol": symbol,
+                        "verdict": summary.get("Verdict", "N/A"),
+                        "confidence": summary.get("Confidence %", 0),
+                    })
+                else:
+                    results.append({"symbol": symbol, "error": "Consensus failed"})
+            except Exception as e:
+                logger.error(f"Post-market scan {symbol}: {e}")
+                results.append({"symbol": symbol, "error": str(e)})
+
+            # Rate limit + memory cleanup between symbols
+            time.sleep(2)
+            gc.collect()
+
+        # Step 4: Summary
+        strong = [r for r in results if "STRONG" in r.get("verdict", "")]
+        summary_lines = []
+        for r in results:
+            if "error" not in r:
+                summary_lines.append(f"  {r['symbol']}: {r['verdict']} ({r['confidence']:.0f}%)")
+
+        tg_send(
+            f"SCAN COMPLETE\n\n"
+            f"Analyzed: {len(top_stocks)} stocks\n"
+            f"STRONG signals: {len(strong)}\n"
+            f"\nResults:\n" + "\n".join(summary_lines) if summary_lines else "No signals"
+        )
+
+    except Exception as e:
+        logger.error(f"Post-market scan failed: {e}")
+        tg_send(f"POST-MARKET SCAN ERROR\n\n{str(e)[:200]}")
+
+
 @app.get("/api/v1/post_market_scan")
 async def post_market_scan(top_n: int = 5, min_score: int = 55):
     """Post-market analysis: scan top stocks, send chart alerts via Telegram.
+
+    Runs in the BACKGROUND — returns immediately. Results sent to Telegram.
 
     Runs the screener, picks the top N stocks by swing score,
     runs consensus on each, and sends STRONG signals with professional
@@ -1664,63 +1734,20 @@ async def post_market_scan(top_n: int = 5, min_score: int = 55):
     if not settings.TELEGRAM_BOT_TOKEN:
         return [{"Error": "Telegram not configured"}]
 
-    # Step 1: Run screener to find top stocks
-    screener_results = run_screener()
-    if not screener_results:
-        return [{"Error": "Screener returned no results"}]
-
-    # Filter for strong scores
-    top_stocks = [r for r in screener_results if r.get("swing_score", 0) >= min_score]
-    top_stocks.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
-    top_stocks = top_stocks[:top_n]
-
-    if not top_stocks:
-        tg_send(f"POST-MARKET SCAN\n\nNo stocks with score >= {min_score} found.\n{len(screener_results)} stocks scanned.")
-        return [{"Message": f"No stocks above {min_score} score threshold"}]
-
-    # Step 2: Send header
-    tg_send(
-        f"POST-MARKET ANALYSIS\n"
-        f"{len(screener_results)} stocks scanned\n"
-        f"{len(top_stocks)} signals found (score >= {min_score})\n"
-        f"\nSending charts..."
+    # Launch in background thread — don't block the HTTP response
+    thread = threading.Thread(
+        target=_run_post_market_scan_bg,
+        args=(top_n, min_score),
+        daemon=True,
     )
+    thread.start()
 
-    # Step 3: Run consensus on each and send chart
-    results = []
-    for stock in top_stocks:
-        symbol = stock["symbol"]
-        try:
-            consensus = run_consensus(symbol, horizon=5, episodes=5)
-            if consensus and not consensus[0].get("Error"):
-                summary = consensus[0]
-                results.append({
-                    "symbol": symbol,
-                    "verdict": summary.get("Verdict", "N/A"),
-                    "confidence": summary.get("Confidence %", 0),
-                    "price": summary.get("Price", 0),
-                    "stop_loss": summary.get("Stop Loss", 0),
-                    "tp1": summary.get("TP1", 0),
-                    "chart_sent": True,
-                })
-            else:
-                results.append({"symbol": symbol, "error": "Consensus failed"})
-        except Exception as e:
-            results.append({"symbol": symbol, "error": str(e)})
-
-        # Rate limit between symbols
-        time.sleep(1)
-
-    # Step 4: Summary
-    strong_signals = [r for r in results if "STRONG" in r.get("verdict", "")]
-    tg_send(
-        f"SCAN COMPLETE\n\n"
-        f"Analyzed: {len(top_stocks)} stocks\n"
-        f"STRONG signals: {len(strong_signals)}\n"
-        f"\nCharts sent above for each signal."
-    )
-
-    return results
+    return [{
+        "Status": "Post-market scan started",
+        "top_n": top_n,
+        "min_score": min_score,
+        "Message": "Results will be sent to Telegram. Check your bot.",
+    }]
 
 
 # ══════════════════════════════════════════════════════════════════════
