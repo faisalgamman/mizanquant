@@ -14,8 +14,6 @@ ENV MPLCONFIGDIR=/tmp/matplotlib
 
 RUN pip install --no-cache-dir fastapi uvicorn yfinance pandas numpy xgboost scikit-learn requests httpx pydantic-settings python-dotenv poetry-core sqlalchemy psycopg2-binary matplotlib
 
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
 COPY . .
 
 RUN pip install --no-cache-dir --no-deps -e /app/openbb_forecast/

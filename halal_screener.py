@@ -42,11 +42,9 @@ from app.services.risk_manager import get_risk_status
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
 os.environ.setdefault("MKL_NUM_THREADS", "2")
-try:
-    import torch
-    torch.set_num_threads(2)
-except ImportError:
-    pass
+# PyTorch removed for memory efficiency on Railway free tier.
+# ML consensus replaced with lightweight technical analysis tools.
+# Re-add when upgrading to Railway plan with >= 1GB RAM.
 
 # Semaphore: only one model trains at a time to prevent OOM
 _model_semaphore = threading.Semaphore(1)
@@ -830,75 +828,153 @@ def run_consensus(symbol, horizon=5, episodes=10):
         except Exception:
             details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 5-7: LSTM, Transformer, Ensemble (pass df, use model cache) ---
-        for tool_name, run_fn in [("LSTM", run_lstm), ("Transformer", run_transformer), ("Ensemble", run_ensemble)]:
-            try:
-                res = run_fn(symbol, horizon, df=df)
-                if res and len(res) > 1:
-                    last_forecast = res[-1]
-                    chg = last_forecast.get("Change %", 0)
-                    if chg > 1: votes_buy += 1; vote = "BUY"
-                    elif chg < -1: votes_sell += 1; vote = "SELL"
-                    else: votes_hold += 1; vote = "HOLD"
-                    details.append({"Tool": tool_name, "Signal": f"{chg:+.1f}%", "Vote": vote, "Score": round(chg, 2)})
-                else:
-                    votes_hold += 1
-                    details.append({"Tool": tool_name, "Signal": "No result", "Vote": "HOLD", "Score": 0})
-            except Exception:
-                details.append({"Tool": tool_name, "Signal": "ERROR", "Vote": "-", "Score": 0})
-
-        # --- 8. Double DQN (pass df) ---
+        # --- 5. Bollinger Band Squeeze + Breakout ---
         try:
-            from openbb_forecast.agents.double_dqn import DoubleDQNAgent
-            from openbb_forecast.agents.environment import TradingEnvironment
-            from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
-            prices_arr = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices_arr = prices_arr[~np.isnan(prices_arr)]
-            split = int(len(prices_arr)*0.8)
-            cost_model = TransactionCostModel(commission_bps=10)
-            env = TradingEnvironment(prices=prices_arr[:split], window_size=30, initial_capital=10000, cost_model=cost_model)
-            agent = DoubleDQNAgent(state_size=env.state_size, action_size=env.action_size)
-            agent.train(env, episodes=episodes)
-            state = env.reset()
-            action = agent.select_action(state)
-            dqn_sig = {0: "HOLD", 1: "BUY", 2: "SELL"}.get(int(action), "HOLD")
-            if dqn_sig == "BUY": votes_buy += 1
-            elif dqn_sig == "SELL": votes_sell += 1
-            else: votes_hold += 1
-            details.append({"Tool": "Double DQN", "Signal": dqn_sig, "Vote": dqn_sig, "Score": 0})
+            close = df["close"]
+            sma20 = close.rolling(20).mean()
+            std20 = close.rolling(20).std()
+            upper_bb = sma20 + 2 * std20
+            lower_bb = sma20 - 2 * std20
+            bb_width = ((upper_bb - lower_bb) / sma20 * 100).iloc[-1]
+            bb_width_prev = ((upper_bb - lower_bb) / sma20 * 100).iloc[-5]
+            price_vs_upper = (price - float(upper_bb.iloc[-1])) / float(upper_bb.iloc[-1]) * 100
+            # Squeeze (narrow bands) + breakout above = BUY
+            if bb_width < 4 and price > float(upper_bb.iloc[-1]):
+                votes_buy += 1; vote = "BUY"; sig = f"Squeeze Breakout (BW {bb_width:.1f}%)"
+            elif bb_width < 4 and price < float(lower_bb.iloc[-1]):
+                votes_sell += 1; vote = "SELL"; sig = f"Squeeze Breakdown (BW {bb_width:.1f}%)"
+            elif price > float(sma20.iloc[-1]) and bb_width > bb_width_prev:
+                votes_buy += 1; vote = "BUY"; sig = f"BB Expanding Up (BW {bb_width:.1f}%)"
+            elif price < float(sma20.iloc[-1]) and bb_width > bb_width_prev:
+                votes_sell += 1; vote = "SELL"; sig = f"BB Expanding Down (BW {bb_width:.1f}%)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"BB Neutral (BW {bb_width:.1f}%)"
+            details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote, "Score": round(bb_width, 1)})
         except Exception:
-            details.append({"Tool": "Double DQN", "Signal": "ERROR", "Vote": "-", "Score": 0})
+            details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 9. Policy Gradient (pass df) ---
+        # --- 6. Multi-Timeframe EMA (21/50/200 alignment) ---
         try:
-            from openbb_forecast.agents.policy_gradient import PolicyGradientAgent
-            from openbb_forecast.agents.environment import TradingEnvironment as TradingEnv2
-            from openbb_forecast.backtesting.transaction_costs import TransactionCostModel as TCM2
-            prices_arr = np.array(df["close"].values, dtype=np.float64).flatten()
-            prices_arr = prices_arr[~np.isnan(prices_arr)]
-            split = int(len(prices_arr)*0.8)
-            env2 = TradingEnv2(prices=prices_arr[:split], window_size=30, initial_capital=10000, cost_model=TCM2(commission_bps=10))
-            agent2 = PolicyGradientAgent(state_size=env2.state_size, action_size=env2.action_size)
-            agent2.train(env2, episodes=episodes)
-            state2 = env2.reset()
-            action2 = agent2.select_action(state2)
-            pg_sig = {0: "HOLD", 1: "BUY", 2: "SELL"}.get(int(action2), "HOLD")
-            if pg_sig == "BUY": votes_buy += 1
-            elif pg_sig == "SELL": votes_sell += 1
-            else: votes_hold += 1
-            details.append({"Tool": "Policy Gradient", "Signal": pg_sig, "Vote": pg_sig, "Score": 0})
+            close = df["close"]
+            ema21_val = float(ema(close, 21).iloc[-1])
+            sma50_val = float(close.rolling(50).mean().iloc[-1])
+            sma200_val = float(close.rolling(200).mean().iloc[-1])
+            # Perfect alignment: price > EMA21 > SMA50 > SMA200
+            if price > ema21_val > sma50_val > sma200_val:
+                votes_buy += 2; vote = "BUY"  # double weight for strong trend
+                sig = "Perfect Uptrend (P>21>50>200)"
+            elif price > ema21_val > sma50_val:
+                votes_buy += 1; vote = "BUY"
+                sig = "Uptrend (P>21>50)"
+            elif price < ema21_val < sma50_val < sma200_val:
+                votes_sell += 2; vote = "SELL"
+                sig = "Perfect Downtrend (P<21<50<200)"
+            elif price < ema21_val < sma50_val:
+                votes_sell += 1; vote = "SELL"
+                sig = "Downtrend (P<21<50)"
+            else:
+                votes_hold += 1; vote = "HOLD"
+                sig = "Mixed alignment"
+            details.append({"Tool": "EMA Alignment", "Signal": sig, "Vote": vote, "Score": 0})
         except Exception:
-            details.append({"Tool": "Policy Gradient", "Signal": "ERROR", "Vote": "-", "Score": 0})
+            details.append({"Tool": "EMA Alignment", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 7. XGBoost Quick Forecast ---
+        try:
+            close = df["close"]
+            # Feature engineering: returns, RSI, MACD, volume ratio
+            rets = close.pct_change().dropna()
+            rsi_s = rsi(close)
+            _, _, macd_hist = macd(close)
+            features = pd.DataFrame({
+                "ret_1": rets, "ret_5": rets.rolling(5).mean(),
+                "ret_10": rets.rolling(10).mean(), "rsi": rsi_s,
+                "macd_h": macd_hist,
+                "vol_ratio": df["volume"] / df["volume"].rolling(20).mean(),
+            }).dropna()
+            target = (close.shift(-horizon) > close).astype(int)  # 1 if price goes up
+            features = features.iloc[:-horizon]
+            target = target.iloc[features.index[0]:features.index[-1]+1]
+            # Train/test split
+            split_idx = int(len(features) * 0.8)
+            X_train, X_test = features.iloc[:split_idx], features.iloc[split_idx:]
+            y_train, y_test = target.iloc[:split_idx], target.iloc[split_idx:]
+            import xgboost as xgb
+            model = xgb.XGBClassifier(n_estimators=50, max_depth=3, use_label_encoder=False,
+                                       eval_metric="logloss", verbosity=0)
+            model.fit(X_train.values, y_train.values)
+            # Predict on latest data
+            latest = features.iloc[-1:].values
+            prob_up = float(model.predict_proba(latest)[0][1])
+            accuracy = float((model.predict(X_test.values) == y_test.values).mean() * 100)
+            if prob_up > 0.6: votes_buy += 1; vote = "BUY"
+            elif prob_up < 0.4: votes_sell += 1; vote = "SELL"
+            else: votes_hold += 1; vote = "HOLD"
+            sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
+            details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote, "Score": round(prob_up * 100, 1)})
+            del model, X_train, X_test, y_train, y_test  # free memory
+        except Exception:
+            details.append({"Tool": "XGBoost", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 8. Momentum Score (Rate of Change + ADX) ---
+        try:
+            close = df["close"]
+            roc_10 = float((price / close.iloc[-10] - 1) * 100)
+            roc_20 = float((price / close.iloc[-20] - 1) * 100)
+            roc_60 = float((price / close.iloc[-60] - 1) * 100)
+            # ADX approximation
+            high, low = df["high"], df["low"]
+            plus_dm = high.diff().clip(lower=0)
+            minus_dm = (-low.diff()).clip(lower=0)
+            atr_14 = atr(df, 14)
+            plus_di = (plus_dm.rolling(14).mean() / atr_14 * 100).iloc[-1]
+            minus_di = (minus_dm.rolling(14).mean() / atr_14 * 100).iloc[-1]
+            dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100 if (plus_di + minus_di) > 0 else 0
+            # Strong upward momentum
+            if roc_10 > 2 and roc_20 > 3 and dx > 20 and plus_di > minus_di:
+                votes_buy += 1; vote = "BUY"; sig = f"Strong Up (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
+            elif roc_10 < -2 and roc_20 < -3 and dx > 20 and minus_di > plus_di:
+                votes_sell += 1; vote = "SELL"; sig = f"Strong Down (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Weak (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
+            details.append({"Tool": "Momentum", "Signal": sig, "Vote": vote, "Score": round(roc_10, 1)})
+        except Exception:
+            details.append({"Tool": "Momentum", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 9. Volume-Price Divergence ---
+        try:
+            close = df["close"]
+            vol = df["volume"]
+            price_chg_5d = float((price / close.iloc[-5] - 1) * 100)
+            vol_chg_5d = float((vol.iloc[-5:].mean() / vol.iloc[-25:-5].mean() - 1) * 100)
+            # Price up + volume up = confirmed strength
+            if price_chg_5d > 1 and vol_chg_5d > 20:
+                votes_buy += 1; vote = "BUY"; sig = f"Confirmed Up (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            # Price up + volume down = weak rally (divergence)
+            elif price_chg_5d > 1 and vol_chg_5d < -10:
+                votes_sell += 1; vote = "SELL"; sig = f"Weak Rally (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            # Price down + volume up = selling pressure
+            elif price_chg_5d < -1 and vol_chg_5d > 20:
+                votes_sell += 1; vote = "SELL"; sig = f"Sell Pressure (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            # Price down + volume down = exhaustion, potential bounce
+            elif price_chg_5d < -1 and vol_chg_5d < -10:
+                votes_buy += 1; vote = "BUY"; sig = f"Exhaustion (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote, "Score": round(price_chg_5d, 1)})
+        except Exception:
+            details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- Final Verdict ---
         total = votes_buy + votes_sell + votes_hold
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        if votes_buy >= 6:         verdict, action_str = "STRONG BUY", "STRONG ENTER"
+        # Verdict thresholds (9 tools, some give 2x votes for strong trends)
+        if votes_buy >= 7:         verdict, action_str = "STRONG BUY", "STRONG ENTER"
         elif votes_buy > votes_sell and confidence >= 60: verdict, action_str = "BUY", "ENTER"
         elif votes_buy > votes_sell and confidence >= 40: verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 6:      verdict, action_str = "STRONG SELL", "STRONG AVOID"
+        elif votes_sell >= 7:      verdict, action_str = "STRONG SELL", "STRONG AVOID"
         elif votes_sell > votes_buy and confidence >= 60: verdict, action_str = "SELL", "AVOID"
         elif votes_sell > votes_buy:                      verdict, action_str = "WEAK SELL", "WEAK SELL"
         else:                      verdict, action_str = "NEUTRAL", "WAIT"
