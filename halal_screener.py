@@ -1952,7 +1952,7 @@ async def trading_disable():
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False}
     try:
-        from openbb_forecast.models.lstm import LSTMForecaster
+        from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
         checks["openbb_forecast"] = True
     except Exception:
         pass
