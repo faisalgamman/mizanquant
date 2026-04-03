@@ -1556,6 +1556,14 @@ async def precompute_on_startup():
         _bg_compute(_cache_key("usx", min_score=7), run_usx_screener, (7,))
     threading.Thread(target=_delayed_usx, daemon=True).start()
 
+    # Start the automated scheduler (scans every 30 min during market hours)
+    try:
+        from app.services.scheduler import start_scheduler
+        start_scheduler()
+        logger.info("Automated scheduler started successfully")
+    except Exception as e:
+        logger.warning(f"Scheduler failed to start (non-fatal): {e}")
+
 # ============================================================
 # PHASE 2: AAOIFI Halal Screening Endpoints
 # ============================================================
