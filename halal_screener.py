@@ -179,19 +179,39 @@ def cache_set(k, v):
     _cache[k] = v
     _cache_ts[k] = time.time()
 
-# Model cache: stores trained models with 1-hour TTL
-MODEL_CACHE_TTL = settings.MODEL_CACHE_TTL
+# Model cache: stores trained models with SHORT TTL to prevent OOM
+# Railway free tier has ~512MB RAM — can't hold many models
+MODEL_CACHE_TTL = min(settings.MODEL_CACHE_TTL, 300)  # cap at 5 min on small containers
+MODEL_CACHE_MAX = 5  # max models in cache at once
 _model_cache = {}
 _model_cache_ts = {}
 
 def model_cache_get(key):
     if time.time() - _model_cache_ts.get(key, 0) < MODEL_CACHE_TTL:
         return _model_cache.get(key)
+    # Expired — remove it
+    _model_cache.pop(key, None)
+    _model_cache_ts.pop(key, None)
     return None
 
 def model_cache_set(key, model_data):
+    # Evict oldest if at capacity
+    if len(_model_cache) >= MODEL_CACHE_MAX:
+        oldest_key = min(_model_cache_ts, key=_model_cache_ts.get)
+        _model_cache.pop(oldest_key, None)
+        _model_cache_ts.pop(oldest_key, None)
+        gc.collect()
     _model_cache[key] = model_data
     _model_cache_ts[key] = time.time()
+
+def _flush_all_caches():
+    """Emergency memory cleanup — flush all caches."""
+    _model_cache.clear()
+    _model_cache_ts.clear()
+    _cache.clear()
+    _cache_ts.clear()
+    gc.collect()
+    logger.info("All caches flushed for memory relief")
 
 def fetch_yf(symbol, period="2y", start=None, end=None):
     """Fetch market data via Alpaca (primary) or yfinance (fallback)."""
@@ -1700,7 +1720,11 @@ async def telegram_daily_summary():
 
 
 def _run_post_market_scan_bg(top_n: int, min_score: int):
-    """Background worker for post-market scan (runs in thread)."""
+    """Background worker for post-market scan (runs in thread).
+
+    Memory-safe: flushes model cache between each stock,
+    limits to top_n stocks to prevent OOM on Railway free tier.
+    """
     try:
         # Step 1: Run screener to find top stocks
         screener_results = run_screener()
@@ -1711,7 +1735,7 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
         # Filter for strong scores
         top_stocks = [r for r in screener_results if r.get("swing_score", 0) >= min_score]
         top_stocks.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
-        top_stocks = top_stocks[:top_n]
+        top_stocks = top_stocks[:min(top_n, 5)]  # hard cap at 5 to prevent OOM
 
         if not top_stocks:
             tg_send(f"POST-MARKET SCAN\n\nNo stocks with score >= {min_score} found.\n{len(screener_results)} stocks scanned.")
@@ -1727,10 +1751,13 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
 
         # Step 3: Run consensus on each — this triggers chart alerts automatically
         results = []
-        for stock in top_stocks:
+        for i, stock in enumerate(top_stocks):
             symbol = stock["symbol"]
             try:
-                consensus = run_consensus(symbol, horizon=5, episodes=5)
+                # Flush caches BEFORE each consensus to prevent OOM
+                _flush_all_caches()
+
+                consensus = run_consensus(symbol, horizon=5, episodes=3)  # fewer episodes to save memory
                 if consensus and not consensus[0].get("Error"):
                     summary = consensus[0]
                     results.append({
@@ -1744,9 +1771,9 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
                 logger.error(f"Post-market scan {symbol}: {e}")
                 results.append({"symbol": symbol, "error": str(e)})
 
-            # Rate limit + memory cleanup between symbols
-            time.sleep(2)
-            gc.collect()
+            # Aggressive memory cleanup between stocks
+            _flush_all_caches()
+            time.sleep(3)
 
         # Step 4: Summary
         strong = [r for r in results if "STRONG" in r.get("verdict", "")]
