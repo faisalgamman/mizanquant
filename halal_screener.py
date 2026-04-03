@@ -1630,8 +1630,56 @@ async def telegram_test():
     """Send a test message to Telegram."""
     if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_CHAT_ID:
         return [{"Error": "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not configured in .env"}]
-    ok = tg_send("\U00002705 <b>Test message from Trading App</b>\n\nTelegram alerts are working!")
+    ok = tg_send("Test message from Halal Trading Bot\n\nTelegram alerts are working!")
     return [{"Status": "sent" if ok else "failed", "Bot Token": f"...{settings.TELEGRAM_BOT_TOKEN[-6:]}", "Chat ID": settings.TELEGRAM_CHAT_ID}]
+
+
+@app.get("/telegram/test_chart")
+async def telegram_test_chart(symbol: str = "AAPL"):
+    """Test chart generation + Telegram photo sending. Returns diagnostic info."""
+    symbol = validate_symbol(symbol)
+    result = {"symbol": symbol, "steps": []}
+
+    # Step 1: Fetch data
+    try:
+        df = fetch_market_data(symbol, period="2y")
+        if df is None or len(df) < 30:
+            result["steps"].append({"fetch_data": "FAILED", "reason": "No data or < 30 bars"})
+            return result
+        result["steps"].append({"fetch_data": "OK", "bars": len(df)})
+    except Exception as e:
+        result["steps"].append({"fetch_data": "ERROR", "error": str(e)})
+        return result
+
+    # Step 2: Generate chart
+    try:
+        from app.services.chart_generator import generate_signal_chart
+        price = float(df["close"].iloc[-1])
+        chart_bytes = generate_signal_chart(
+            df=df, symbol=symbol, verdict="STRONG BUY",
+            entry_price=price, stop_loss=round(price * 0.97, 2),
+            tp1=round(price * 1.04, 2), tp2=round(price * 1.07, 2),
+            tp3=round(price * 1.10, 2), confidence=78.0,
+            votes_buy=7, votes_sell=1, votes_hold=1,
+        )
+        if chart_bytes:
+            result["steps"].append({"generate_chart": "OK", "size_kb": round(len(chart_bytes) / 1024, 1)})
+        else:
+            result["steps"].append({"generate_chart": "FAILED", "reason": "Returned None"})
+            return result
+    except Exception as e:
+        import traceback
+        result["steps"].append({"generate_chart": "ERROR", "error": str(e), "traceback": traceback.format_exc()[-500:]})
+        return result
+
+    # Step 3: Send to Telegram
+    try:
+        ok = tg_send_photo(chart_bytes, caption=f"Test chart for {symbol} @ ${price:.2f}")
+        result["steps"].append({"send_photo": "OK" if ok else "FAILED"})
+    except Exception as e:
+        result["steps"].append({"send_photo": "ERROR", "error": str(e)})
+
+    return result
 
 @app.get("/telegram/daily_summary")
 async def telegram_daily_summary():
