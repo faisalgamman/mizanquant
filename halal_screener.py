@@ -1367,6 +1367,619 @@ def run_consensus(symbol, horizon=5, episodes=10):
         return [{"Error": str(e)}]
 
 
+# ============================================================================
+# MULTI-STRATEGY CONSENSUS FUNCTIONS
+# ============================================================================
+
+def run_consensus_momentum(symbol, horizon=5):
+    """Strategy A: Momentum Alpha — trend-following with 5 tools.
+
+    Tools: EMA Alignment (2x), Momentum ROC+ADX, Backtest 2Y, XGBoost, Monte Carlo
+    Entry: 4+ of 5 tools BUY + price > SMA50
+    Exit: Trailing stop 3%, TP at 2.5x ATR
+    """
+    try:
+        is_halal, halal_reason = verify_halal(symbol)
+        if not is_halal:
+            return [{"Symbol": symbol.upper(), "Verdict": "BLOCKED",
+                     "Strategy": "A-Momentum", "Error": f"Not halal: {halal_reason}"}]
+
+        votes_buy, votes_sell, votes_hold = 0, 0, 0
+        details = []
+
+        df = fetch_yf(symbol)
+        if df is None:
+            return [{"Error": f"No data for {symbol}"}]
+        price = float(df["close"].iloc[-1])
+        atr_val = float(atr(df).iloc[-1])
+        close = df["close"]
+
+        # SMA50 gate — only buy if above 50-day SMA (trend filter)
+        sma50_val = float(close.rolling(50).mean().iloc[-1])
+        above_sma50 = price > sma50_val
+
+        # --- Tool 1: EMA Alignment (2x weight for strong trends) ---
+        try:
+            ema21_val = float(ema(close, 21).iloc[-1])
+            sma200_val = float(close.rolling(200).mean().iloc[-1])
+            if price > ema21_val > sma50_val > sma200_val:
+                votes_buy += 2; vote = "BUY"; sig = "Perfect Uptrend (P>21>50>200)"
+            elif price > ema21_val > sma50_val:
+                votes_buy += 1; vote = "BUY"; sig = "Uptrend (P>21>50)"
+            elif price < ema21_val < sma50_val < sma200_val:
+                votes_sell += 2; vote = "SELL"; sig = "Perfect Downtrend (P<21<50<200)"
+            elif price < ema21_val < sma50_val:
+                votes_sell += 1; vote = "SELL"; sig = "Downtrend (P<21<50)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = "Mixed alignment"
+            details.append({"Tool": "EMA Alignment", "Signal": sig, "Vote": vote})
+        except Exception:
+            details.append({"Tool": "EMA Alignment", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 2: Momentum (ROC + ADX) ---
+        try:
+            roc_10 = float((price / close.iloc[-10] - 1) * 100)
+            roc_20 = float((price / close.iloc[-20] - 1) * 100)
+            high, low = df["high"], df["low"]
+            plus_dm = high.diff().clip(lower=0)
+            minus_dm = (-low.diff()).clip(lower=0)
+            atr_14 = atr(df, 14)
+            plus_di = (plus_dm.rolling(14).mean() / atr_14 * 100).iloc[-1]
+            minus_di = (minus_dm.rolling(14).mean() / atr_14 * 100).iloc[-1]
+            dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100 if (plus_di + minus_di) > 0 else 0
+            if roc_10 > 2 and roc_20 > 3 and dx > 20 and plus_di > minus_di:
+                votes_buy += 1; vote = "BUY"; sig = f"Strong Up (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
+            elif roc_10 < -2 and roc_20 < -3 and dx > 20 and minus_di > plus_di:
+                votes_sell += 1; vote = "SELL"; sig = f"Strong Down (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Weak (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
+            details.append({"Tool": "Momentum", "Signal": sig, "Vote": vote})
+        except Exception:
+            details.append({"Tool": "Momentum", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 3: Backtest 2Y ---
+        try:
+            import datetime as _dt
+            end_date = _dt.date.today().strftime("%Y-%m-%d")
+            start_date = (_dt.date.today() - _dt.timedelta(days=365 * 2)).strftime("%Y-%m-%d")
+            bt = run_backtest(symbol, start_date, end_date, 100000, 1.0, 3)
+            if bt and len(bt) > 0 and "Return %" in bt[0]:
+                ret = float(bt[0]["Return %"])
+                win_rate_v = float(bt[0].get("Win Rate %", 0))
+                sharpe = float(bt[0].get("Sharpe Ratio", 0))
+                if ret > 5 and win_rate_v > 50 and sharpe > 0.5:
+                    votes_buy += 1; vote = "BUY"
+                elif ret < -5 or (win_rate_v < 40 and sharpe < 0):
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"Return {ret:.1f}% WR {win_rate_v:.0f}%"
+                details.append({"Tool": "Backtest 2Y", "Signal": sig, "Vote": vote})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Backtest 2Y", "Signal": "No trades", "Vote": "HOLD"})
+        except Exception:
+            details.append({"Tool": "Backtest 2Y", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 4: XGBoost ---
+        try:
+            rets = close.pct_change().dropna()
+            rsi_s = rsi(close)
+            _, _, macd_hist = macd(close)
+            features = pd.DataFrame({
+                "ret_1": rets, "ret_5": rets.rolling(5).mean(),
+                "ret_10": rets.rolling(10).mean(), "rsi": rsi_s,
+                "macd_h": macd_hist,
+                "vol_ratio": df["volume"] / df["volume"].rolling(20).mean(),
+            }).dropna()
+            target = (close.shift(-horizon) > close).astype(int)
+            features = features.iloc[:-horizon]
+            target = target.iloc[features.index[0]:features.index[-1] + 1]
+            split_idx = int(len(features) * 0.8)
+            X_train, X_test = features.iloc[:split_idx], features.iloc[split_idx:]
+            y_train, y_test = target.iloc[:split_idx], target.iloc[split_idx:]
+            import xgboost as xgb
+            model = xgb.XGBClassifier(n_estimators=50, max_depth=3, use_label_encoder=False,
+                                       eval_metric="logloss", verbosity=0)
+            model.fit(X_train.values, y_train.values)
+            prob_up = float(model.predict_proba(features.iloc[-1:].values)[0][1])
+            accuracy = float((model.predict(X_test.values) == y_test.values).mean() * 100)
+            if prob_up > 0.6: votes_buy += 1; vote = "BUY"
+            elif prob_up < 0.4: votes_sell += 1; vote = "SELL"
+            else: votes_hold += 1; vote = "HOLD"
+            sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
+            details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote})
+            del model
+        except Exception:
+            details.append({"Tool": "XGBoost", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 5: Monte Carlo ---
+        try:
+            from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
+            prices_arr = np.array(close.values, dtype=np.float64).flatten()
+            prices_arr = prices_arr[~np.isnan(prices_arr)]
+            mc = MonteCarloSimulator(seed=42)
+            result = mc.simulate(prices_arr, n_simulations=500, forecast_days=horizon)
+            prob = float(result["summary"]["prob_profit"])
+            exp_price = float(result["summary"]["expected_terminal_price"])
+            chg = (exp_price - price) / price * 100
+            if prob >= 0.60: votes_buy += 1; vote = "BUY"
+            elif prob <= 0.45: votes_sell += 1; vote = "SELL"
+            else: votes_hold += 1; vote = "HOLD"
+            details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob * 100:.1f}% Exp {chg:+.1f}%", "Vote": vote})
+        except Exception:
+            details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Verdict (max ~7 votes with EMA 2x) ---
+        total = votes_buy + votes_sell + votes_hold
+        if total == 0: total = 1
+        confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
+
+        # STRONG requires 4+ BUY votes AND price above SMA50
+        if votes_buy >= 4 and above_sma50:
+            verdict = "STRONG BUY"
+        elif votes_buy > votes_sell and above_sma50 and confidence >= 55:
+            verdict = "BUY"
+        elif votes_sell >= 4:
+            verdict = "STRONG SELL"
+        elif votes_sell > votes_buy and confidence >= 55:
+            verdict = "SELL"
+        elif votes_buy > votes_sell:
+            verdict = "WEAK BUY"
+        elif votes_sell > votes_buy:
+            verdict = "WEAK SELL"
+        else:
+            verdict = "NEUTRAL"
+
+        sl = round(price - 1.5 * atr_val, 2)
+        tp1 = round(price + 2.5 * atr_val, 2)   # wider TP for momentum
+        tp2 = round(price + 4.0 * atr_val, 2)
+        tp3 = round(price + 6.0 * atr_val, 2)
+
+        summary = [{
+            "Symbol": symbol.upper(), "Strategy": "A-Momentum Alpha",
+            "Price": round(price, 2), "Verdict": verdict,
+            "Confidence %": confidence,
+            "Votes BUY": votes_buy, "Votes SELL": votes_sell, "Votes HOLD": votes_hold,
+            "SMA50 Filter": "ABOVE" if above_sma50 else "BELOW",
+            "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
+        }]
+
+        # Send breakdown to Telegram
+        if verdict != "NEUTRAL":
+            try:
+                _send_consensus_breakdown(
+                    symbol=symbol.upper(), verdict=f"[A] Momentum: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
+                    sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
+                )
+            except Exception:
+                pass
+
+        # Auto-trade via Strategy A's account
+        if "STRONG" in verdict:
+            try:
+                trade_result = auto_trade_signal(
+                    symbol=symbol.upper(), verdict=verdict,
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, take_profit=tp1,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, details={"strategy": "A"},
+                    strategy_id="A",
+                )
+                if trade_result:
+                    summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+            except Exception:
+                pass
+
+        return summary + details
+
+    except Exception as e:
+        return [{"Error": str(e), "Strategy": "A-Momentum"}]
+
+
+def run_consensus_reversion(symbol, horizon=3):
+    """Strategy B: Mean Reversion — buy oversold stocks.
+
+    Tools: Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
+    Entry: RSI < 35 + price near lower BB + volume confirmation
+    Exit: Static SL 2%, TP when RSI > 60 or price hits middle BB
+    """
+    try:
+        is_halal, halal_reason = verify_halal(symbol)
+        if not is_halal:
+            return [{"Symbol": symbol.upper(), "Verdict": "BLOCKED",
+                     "Strategy": "B-Reversion", "Error": f"Not halal: {halal_reason}"}]
+
+        votes_buy, votes_sell, votes_hold = 0, 0, 0
+        details = []
+
+        df = fetch_yf(symbol)
+        if df is None:
+            return [{"Error": f"No data for {symbol}"}]
+        price = float(df["close"].iloc[-1])
+        atr_val = float(atr(df).iloc[-1])
+        close = df["close"]
+
+        # --- Tool 1: Bollinger Bands ---
+        try:
+            sma20 = close.rolling(20).mean()
+            std20 = close.rolling(20).std()
+            upper_bb = sma20 + 2 * std20
+            lower_bb = sma20 - 2 * std20
+            mid_bb = float(sma20.iloc[-1])
+            bb_width = ((upper_bb - lower_bb) / sma20 * 100).iloc[-1]
+            lower_bb_val = float(lower_bb.iloc[-1])
+            upper_bb_val = float(upper_bb.iloc[-1])
+
+            # Mean reversion: BUY when price near/below lower band
+            if price <= lower_bb_val:
+                votes_buy += 1; vote = "BUY"; sig = f"At/Below Lower BB (${lower_bb_val:.2f})"
+            elif price >= upper_bb_val:
+                votes_sell += 1; vote = "SELL"; sig = f"At/Above Upper BB (${upper_bb_val:.2f})"
+            else:
+                pct_bb = (price - lower_bb_val) / (upper_bb_val - lower_bb_val) * 100
+                if pct_bb < 25:
+                    votes_buy += 1; vote = "BUY"; sig = f"Near Lower BB ({pct_bb:.0f}%)"
+                elif pct_bb > 75:
+                    votes_sell += 1; vote = "SELL"; sig = f"Near Upper BB ({pct_bb:.0f}%)"
+                else:
+                    votes_hold += 1; vote = "HOLD"; sig = f"Mid-range ({pct_bb:.0f}%)"
+            details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote})
+        except Exception:
+            mid_bb = price  # fallback
+            details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 2: RSI ---
+        try:
+            rsi_val = float(rsi(close).iloc[-1])
+            if rsi_val < 30:
+                votes_buy += 1; vote = "BUY"; sig = f"Oversold RSI={rsi_val:.0f}"
+            elif rsi_val < 40:
+                votes_buy += 1; vote = "BUY"; sig = f"Weak RSI={rsi_val:.0f}"
+            elif rsi_val > 70:
+                votes_sell += 1; vote = "SELL"; sig = f"Overbought RSI={rsi_val:.0f}"
+            elif rsi_val > 60:
+                votes_sell += 1; vote = "SELL"; sig = f"Elevated RSI={rsi_val:.0f}"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral RSI={rsi_val:.0f}"
+            details.append({"Tool": "RSI", "Signal": sig, "Vote": vote})
+        except Exception:
+            rsi_val = 50
+            details.append({"Tool": "RSI", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 3: Volume-Price Divergence ---
+        try:
+            vol = df["volume"]
+            price_chg_5d = float((price / close.iloc[-5] - 1) * 100)
+            vol_chg_5d = float((vol.iloc[-5:].mean() / vol.iloc[-25:-5].mean() - 1) * 100)
+            # For mean reversion: price down + high volume = capitulation (BUY)
+            if price_chg_5d < -2 and vol_chg_5d > 30:
+                votes_buy += 1; vote = "BUY"; sig = f"Capitulation (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            elif price_chg_5d > 2 and vol_chg_5d < -15:
+                votes_sell += 1; vote = "SELL"; sig = f"Weak Rally (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            elif price_chg_5d < -1 and vol_chg_5d < -10:
+                votes_buy += 1; vote = "BUY"; sig = f"Exhaustion (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote})
+        except Exception:
+            details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 4: Stochastic Oscillator ---
+        try:
+            from app.services.technical import stochastic
+            pct_k, pct_d = stochastic(df, k_period=14, d_period=3)
+            k_val = float(pct_k.iloc[-1])
+            d_val = float(pct_d.iloc[-1])
+            # Oversold + bullish crossover = BUY
+            if k_val < 20 and k_val > d_val:
+                votes_buy += 1; vote = "BUY"; sig = f"Oversold Crossover (K={k_val:.0f} D={d_val:.0f})"
+            elif k_val < 25:
+                votes_buy += 1; vote = "BUY"; sig = f"Oversold (K={k_val:.0f})"
+            elif k_val > 80 and k_val < d_val:
+                votes_sell += 1; vote = "SELL"; sig = f"Overbought Crossdown (K={k_val:.0f})"
+            elif k_val > 75:
+                votes_sell += 1; vote = "SELL"; sig = f"Overbought (K={k_val:.0f})"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral (K={k_val:.0f})"
+            details.append({"Tool": "Stochastic", "Signal": sig, "Vote": vote})
+        except Exception:
+            details.append({"Tool": "Stochastic", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 5: OBV Trend ---
+        try:
+            from app.services.technical import obv
+            obv_series = obv(df)
+            obv_now = float(obv_series.iloc[-1])
+            obv_10ago = float(obv_series.iloc[-10])
+            obv_slope = (obv_now - obv_10ago) / abs(obv_10ago) * 100 if obv_10ago != 0 else 0
+            price_chg_10 = float((price / close.iloc[-10] - 1) * 100)
+            # OBV rising while price falling = accumulation (bullish divergence)
+            if obv_slope > 5 and price_chg_10 < -1:
+                votes_buy += 1; vote = "BUY"; sig = f"Accumulation (OBV={obv_slope:+.1f}% P={price_chg_10:+.1f}%)"
+            elif obv_slope < -5 and price_chg_10 > 1:
+                votes_sell += 1; vote = "SELL"; sig = f"Distribution (OBV={obv_slope:+.1f}% P={price_chg_10:+.1f}%)"
+            elif obv_slope > 5:
+                votes_buy += 1; vote = "BUY"; sig = f"OBV Rising ({obv_slope:+.1f}%)"
+            elif obv_slope < -5:
+                votes_sell += 1; vote = "SELL"; sig = f"OBV Falling ({obv_slope:+.1f}%)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"OBV Flat ({obv_slope:+.1f}%)"
+            details.append({"Tool": "OBV", "Signal": sig, "Vote": vote})
+        except Exception:
+            details.append({"Tool": "OBV", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Verdict ---
+        total = votes_buy + votes_sell + votes_hold
+        if total == 0: total = 1
+        confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
+
+        # Mean reversion requires oversold conditions
+        if votes_buy >= 4:
+            verdict = "STRONG BUY"
+        elif votes_buy >= 3 and confidence >= 55:
+            verdict = "BUY"
+        elif votes_sell >= 4:
+            verdict = "STRONG SELL"
+        elif votes_sell >= 3 and confidence >= 55:
+            verdict = "SELL"
+        elif votes_buy > votes_sell:
+            verdict = "WEAK BUY"
+        elif votes_sell > votes_buy:
+            verdict = "WEAK SELL"
+        else:
+            verdict = "NEUTRAL"
+
+        # Static SL 2%, TP at middle Bollinger Band or +1.5 ATR
+        sl = round(price * 0.98, 2)       # 2% static stop loss
+        tp1 = round(mid_bb, 2)            # Target: middle BB (mean reversion target)
+        tp2 = round(price + 1.5 * atr_val, 2)
+        tp3 = round(price + 2.5 * atr_val, 2)
+
+        summary = [{
+            "Symbol": symbol.upper(), "Strategy": "B-Mean Reversion",
+            "Price": round(price, 2), "Verdict": verdict,
+            "Confidence %": confidence,
+            "Votes BUY": votes_buy, "Votes SELL": votes_sell, "Votes HOLD": votes_hold,
+            "RSI": round(rsi_val, 1) if 'rsi_val' in dir() else "N/A",
+            "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
+        }]
+
+        if verdict != "NEUTRAL":
+            try:
+                _send_consensus_breakdown(
+                    symbol=symbol.upper(), verdict=f"[B] Reversion: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
+                    sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
+                )
+            except Exception:
+                pass
+
+        if "STRONG" in verdict:
+            try:
+                trade_result = auto_trade_signal(
+                    symbol=symbol.upper(), verdict=verdict,
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, take_profit=tp1,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, details={"strategy": "B"},
+                    strategy_id="B",
+                )
+                if trade_result:
+                    summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+            except Exception:
+                pass
+
+        return summary + details
+
+    except Exception as e:
+        return [{"Error": str(e), "Strategy": "B-Reversion"}]
+
+
+def run_consensus_ml(symbol, horizon=7, episodes=5):
+    """Strategy C: AI Ensemble — pure ML decision-making.
+
+    Tools: LSTM, Transformer, Stacking Ensemble, Double DQN, Policy Gradient
+    Entry: 4+ of 5 ML models vote BUY
+    Exit: Trailing stop 2.5%, TP at models' average predicted price
+    """
+    try:
+        is_halal, halal_reason = verify_halal(symbol)
+        if not is_halal:
+            return [{"Symbol": symbol.upper(), "Verdict": "BLOCKED",
+                     "Strategy": "C-ML", "Error": f"Not halal: {halal_reason}"}]
+
+        votes_buy, votes_sell, votes_hold = 0, 0, 0
+        details = []
+        predicted_prices = []
+
+        df = fetch_yf(symbol)
+        if df is None:
+            return [{"Error": f"No data for {symbol}"}]
+        price = float(df["close"].iloc[-1])
+        atr_val = float(atr(df).iloc[-1])
+
+        # --- Tool 1: LSTM ---
+        try:
+            lstm_r = run_lstm(symbol, horizon, df=df)
+            if lstm_r and len(lstm_r) > 1:
+                last_forecast = lstm_r[-1]
+                pct_chg = float(last_forecast.get("Change %", 0))
+                forecast_price = float(last_forecast.get("Predicted Price", price))
+                if pct_chg > 2:
+                    votes_buy += 1; vote = "BUY"
+                    predicted_prices.append(forecast_price)
+                elif pct_chg < -2:
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
+                details.append({"Tool": "LSTM", "Signal": sig, "Vote": vote})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD"})
+        except Exception:
+            details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 2: Transformer ---
+        try:
+            tf_r = run_transformer(symbol, horizon, df=df)
+            if tf_r and len(tf_r) > 1:
+                last_forecast = tf_r[-1]
+                pct_chg = float(last_forecast.get("Change %", 0))
+                forecast_price = float(last_forecast.get("Predicted Price", price))
+                if pct_chg > 2:
+                    votes_buy += 1; vote = "BUY"
+                    predicted_prices.append(forecast_price)
+                elif pct_chg < -2:
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
+                details.append({"Tool": "Transformer", "Signal": sig, "Vote": vote})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD"})
+        except Exception:
+            details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 3: Stacking Ensemble ---
+        try:
+            ens_r = run_ensemble(symbol, horizon, df=df)
+            if ens_r and len(ens_r) > 1:
+                last_forecast = ens_r[-1]
+                pct_chg = float(last_forecast.get("Change %", 0))
+                forecast_price = float(last_forecast.get("Predicted Price", price))
+                if pct_chg > 2:
+                    votes_buy += 1; vote = "BUY"
+                    predicted_prices.append(forecast_price)
+                elif pct_chg < -2:
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
+                details.append({"Tool": "Ensemble", "Signal": sig, "Vote": vote})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD"})
+        except Exception:
+            details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 4: Double DQN ---
+        try:
+            dqn_r = run_dqn(symbol, episodes, df=df)
+            if dqn_r and len(dqn_r) > 0:
+                summary_item = dqn_r[0]
+                action = summary_item.get("Action", summary_item.get("Recommendation", ""))
+                reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
+                if "BUY" in str(action).upper():
+                    votes_buy += 1; vote = "BUY"
+                elif "SELL" in str(action).upper():
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
+                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD"})
+        except Exception:
+            details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 5: Policy Gradient ---
+        try:
+            pg_r = run_policy_gradient(symbol, episodes, df=df)
+            if pg_r and len(pg_r) > 0:
+                summary_item = pg_r[0]
+                action = summary_item.get("Action", summary_item.get("Recommendation", ""))
+                reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
+                if "BUY" in str(action).upper():
+                    votes_buy += 1; vote = "BUY"
+                elif "SELL" in str(action).upper():
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
+                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD"})
+        except Exception:
+            details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Verdict ---
+        total = votes_buy + votes_sell + votes_hold
+        if total == 0: total = 1
+        confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
+
+        if votes_buy >= 4:
+            verdict = "STRONG BUY"
+        elif votes_buy >= 3 and confidence >= 55:
+            verdict = "BUY"
+        elif votes_sell >= 4:
+            verdict = "STRONG SELL"
+        elif votes_sell >= 3 and confidence >= 55:
+            verdict = "SELL"
+        elif votes_buy > votes_sell:
+            verdict = "WEAK BUY"
+        elif votes_sell > votes_buy:
+            verdict = "WEAK SELL"
+        else:
+            verdict = "NEUTRAL"
+
+        # TP at average ML predicted price or 2x ATR
+        if predicted_prices:
+            tp1 = round(sum(predicted_prices) / len(predicted_prices), 2)
+        else:
+            tp1 = round(price + 2.0 * atr_val, 2)
+        sl = round(price - 1.5 * atr_val, 2)
+        tp2 = round(price + 3.0 * atr_val, 2)
+        tp3 = round(price + 5.0 * atr_val, 2)
+
+        summary = [{
+            "Symbol": symbol.upper(), "Strategy": "C-AI Ensemble",
+            "Price": round(price, 2), "Verdict": verdict,
+            "Confidence %": confidence,
+            "Votes BUY": votes_buy, "Votes SELL": votes_sell, "Votes HOLD": votes_hold,
+            "ML Predicted TP": tp1 if predicted_prices else "N/A",
+            "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
+        }]
+
+        if verdict != "NEUTRAL":
+            try:
+                _send_consensus_breakdown(
+                    symbol=symbol.upper(), verdict=f"[C] AI: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
+                    sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
+                )
+            except Exception:
+                pass
+
+        if "STRONG" in verdict:
+            try:
+                trade_result = auto_trade_signal(
+                    symbol=symbol.upper(), verdict=verdict,
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, take_profit=tp1,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, details={"strategy": "C"},
+                    strategy_id="C",
+                )
+                if trade_result:
+                    summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+            except Exception:
+                pass
+
+        return summary + details
+
+    except Exception as e:
+        return [{"Error": str(e), "Strategy": "C-ML"}]
+
+
 def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10):
     try:
         # الخطوة 1: جلب Active Buy Signals
@@ -1957,6 +2570,110 @@ async def screen_stocks_endpoint(max_stocks: int = 80):
     def _run_batch():
         return [batch_screen(all_symbols, max_per_run=max_stocks)]
     return _serve_or_compute(key, _run_batch, msg=f"Screening up to {max_stocks} stocks (3 API calls each)... Refresh in a few minutes.")
+
+
+# ============================================================
+# MULTI-STRATEGY ENDPOINTS
+# ============================================================
+
+@app.get("/strategies")
+async def list_strategies():
+    """List all configured strategies and their settings."""
+    from app.config import STRATEGY_CONFIGS
+    result = []
+    for sid, cfg in STRATEGY_CONFIGS.items():
+        result.append({
+            "id": cfg.strategy_id,
+            "name": cfg.name,
+            "max_positions": cfg.max_positions,
+            "position_pct": cfg.position_pct,
+            "trailing_stop": cfg.trailing_stop_enabled,
+            "trailing_stop_pct": cfg.trailing_stop_pct,
+            "static_sl_pct": cfg.static_sl_pct,
+            "min_confidence": cfg.min_confidence,
+            "configured": bool(cfg.alpaca_api_key),
+        })
+    return result if result else [{"message": "No strategies configured. Set ALPACA_API_KEY_A/B/C env vars."}]
+
+
+@app.get("/strategy/{strategy_id}/account")
+async def strategy_account(strategy_id: str):
+    """Get account info for a specific strategy."""
+    sid = strategy_id.upper()
+    from app.config import STRATEGY_CONFIGS
+    if sid not in STRATEGY_CONFIGS:
+        return [{"Error": f"Strategy {sid} not configured"}]
+    account = alpaca_get_account(strategy_id=sid)
+    if not account:
+        return [{"Error": f"Cannot fetch account for strategy {sid}"}]
+    account["strategy"] = f"{sid}: {STRATEGY_CONFIGS[sid].name}"
+    return [account]
+
+
+@app.get("/strategy/{strategy_id}/positions")
+async def strategy_positions(strategy_id: str):
+    """Get positions for a specific strategy."""
+    sid = strategy_id.upper()
+    from app.config import STRATEGY_CONFIGS
+    if sid not in STRATEGY_CONFIGS:
+        return [{"Error": f"Strategy {sid} not configured"}]
+    positions = alpaca_get_positions(strategy_id=sid)
+    if not positions:
+        return [{"message": f"No open positions for strategy {sid}: {STRATEGY_CONFIGS[sid].name}"}]
+    for p in positions:
+        p["strategy"] = f"{sid}: {STRATEGY_CONFIGS[sid].name}"
+    return positions
+
+
+@app.get("/strategy/{strategy_id}/scan")
+async def strategy_scan(strategy_id: str, symbol: str = "AAPL"):
+    """Manually run a strategy consensus for a symbol."""
+    sid = strategy_id.upper()
+    if sid == "A":
+        return run_consensus_momentum(symbol)
+    elif sid == "B":
+        return run_consensus_reversion(symbol)
+    elif sid == "C":
+        return run_consensus_ml(symbol)
+    else:
+        return [{"Error": f"Unknown strategy {sid}. Use A, B, or C."}]
+
+
+@app.get("/strategies/comparison")
+async def strategy_comparison():
+    """Get side-by-side comparison of all strategy accounts."""
+    from app.config import STRATEGY_CONFIGS
+    result = []
+    total_equity = 0
+    total_pnl = 0
+    for sid in ("A", "B", "C"):
+        cfg = STRATEGY_CONFIGS.get(sid)
+        if not cfg:
+            continue
+        account = alpaca_get_account(strategy_id=sid)
+        positions = alpaca_get_positions(strategy_id=sid)
+        if account:
+            equity = account.get("equity", 0)
+            last_eq = account.get("last_equity", 0)
+            pnl = equity - last_eq if last_eq > 0 else 0
+            total_equity += equity
+            total_pnl += pnl
+            result.append({
+                "strategy_id": sid,
+                "name": cfg.name,
+                "equity": round(equity, 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": round(pnl / last_eq * 100, 2) if last_eq > 0 else 0,
+                "positions": len(positions),
+                "max_positions": cfg.max_positions,
+                "position_symbols": [p["symbol"] for p in positions],
+            })
+    if result:
+        result.append({
+            "total_equity": round(total_equity, 2),
+            "total_pnl": round(total_pnl, 2),
+        })
+    return result if result else [{"message": "No strategies configured"}]
 
 
 # ============================================================

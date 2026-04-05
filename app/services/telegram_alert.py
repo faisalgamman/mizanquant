@@ -290,6 +290,62 @@ def alert_signal_with_chart(
         return send_message(f"[{verdict}] {symbol} @ ${price:.2f} | SL ${stop_loss:.2f} | TP ${tp1:.2f}")
 
 
+def alert_strategy_comparison():
+    """Send daily comparison of all 3 strategies to Telegram."""
+    from app.config import STRATEGY_CONFIGS
+    from app.services.alpaca_client import get_account, get_positions
+
+    if not STRATEGY_CONFIGS:
+        return False
+
+    lines = ["DAILY STRATEGY COMPARISON", ""]
+
+    total_equity = 0
+    total_pnl = 0
+
+    for sid in ("A", "B", "C"):
+        cfg = STRATEGY_CONFIGS.get(sid)
+        if not cfg:
+            continue
+
+        account = get_account(strategy_id=sid)
+        positions = get_positions(strategy_id=sid)
+
+        if account:
+            equity = account.get("equity", 0)
+            last_eq = account.get("last_equity", 0)
+            pnl = equity - last_eq if last_eq > 0 else 0
+            pnl_pct = (pnl / last_eq * 100) if last_eq > 0 else 0
+            total_equity += equity
+            total_pnl += pnl
+
+            pos_count = len(positions)
+            max_pos = cfg.max_positions
+
+            pnl_sign = "+" if pnl >= 0 else ""
+            lines.append(f"[{sid}] {cfg.name}")
+            lines.append(f"  Equity: ${equity:,.2f} | P&L: {pnl_sign}${pnl:,.2f} ({pnl_sign}{pnl_pct:.1f}%)")
+            lines.append(f"  Positions: {pos_count}/{max_pos}")
+
+            # Show individual positions
+            for p in positions:
+                pl = p.get("unrealized_pl", 0)
+                pl_sign = "+" if pl >= 0 else ""
+                lines.append(f"    {p['symbol']}: {pl_sign}${pl:.2f} ({p.get('unrealized_plpc', 0):+.1f}%)")
+
+            lines.append("")
+        else:
+            lines.append(f"[{sid}] {cfg.name}")
+            lines.append(f"  (account unavailable)")
+            lines.append("")
+
+    total_sign = "+" if total_pnl >= 0 else ""
+    lines.append(f"TOTAL: ${total_equity:,.2f} | Net P&L: {total_sign}${total_pnl:,.2f}")
+    lines.append(f"\n{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
+
+    return send_message("\n".join(lines))
+
+
 def alert_system_health(issue: str, severity: str = "WARNING"):
     """Send system health alert."""
     text = (

@@ -7,7 +7,7 @@ Enforces:
 - Daily loss limit (circuit breaker)
 - Per-stock exposure limit
 
-Designed for $3,000 capital accounts under PDT restrictions.
+Supports multi-strategy accounts via optional strategy_id parameter.
 """
 
 import logging
@@ -79,6 +79,31 @@ def can_day_trade() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Strategy-aware parameter helpers
+# ---------------------------------------------------------------------------
+
+def _get_strategy_params(strategy_id: str = None) -> dict:
+    """Get risk parameters for a specific strategy or use defaults."""
+    if strategy_id:
+        from app.config import STRATEGY_CONFIGS
+        cfg = STRATEGY_CONFIGS.get(strategy_id)
+        if cfg:
+            return {
+                "trade_risk_pct": cfg.trade_risk_pct / 100,
+                "max_position_pct": cfg.position_pct / 100,
+                "max_positions": cfg.max_positions,
+                "daily_loss_limit_pct": cfg.daily_loss_limit_pct,
+            }
+    # Legacy defaults
+    return {
+        "trade_risk_pct": settings.TRADE_RISK_PCT / 100,
+        "max_position_pct": settings.MAX_POSITION_PCT / 100,
+        "max_positions": settings.MAX_OPEN_POSITIONS,
+        "daily_loss_limit_pct": settings.DAILY_LOSS_LIMIT_PCT,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Position Sizing — conservative for small accounts
 # ---------------------------------------------------------------------------
 
@@ -87,14 +112,9 @@ def calculate_position_size(
     stop_loss: float,
     available_cash: float,
     total_equity: float,
+    strategy_id: str = None,
 ) -> dict:
     """Calculate position size based on risk management rules.
-
-    Rules for $3,000 account:
-    - Risk max 1.5% of total equity per trade ($45 on $3K)
-    - Max position size: 15% of equity ($450 on $3K)
-    - Min position: 1 share
-    - Whole shares only (no fractional for simplicity)
 
     Returns:
         dict with qty, position_value, risk_amount, risk_pct
@@ -102,8 +122,9 @@ def calculate_position_size(
     if price <= 0 or stop_loss <= 0 or stop_loss >= price:
         return {"qty": 0, "reason": "Invalid price/stop_loss"}
 
-    max_risk_pct = settings.TRADE_RISK_PCT / 100  # 1.5% default
-    max_position_pct = settings.MAX_POSITION_PCT / 100  # 15% default
+    params = _get_strategy_params(strategy_id)
+    max_risk_pct = params["trade_risk_pct"]
+    max_position_pct = params["max_position_pct"]
     max_risk_dollars = total_equity * max_risk_pct
     max_position_value = total_equity * max_position_pct
 
@@ -154,6 +175,7 @@ def check_trade_eligibility(
     stop_loss: float,
     account: dict,
     open_positions: list[dict],
+    strategy_id: str = None,
 ) -> dict:
     """Run all pre-trade risk checks. Returns {eligible: bool, reason: str, sizing: dict}.
 
@@ -166,6 +188,7 @@ def check_trade_eligibility(
     6. Position sizing is valid
     """
     result = {"eligible": False, "reason": "", "sizing": {}}
+    params = _get_strategy_params(strategy_id)
 
     # 0. Market hours check
     if not is_market_open():
@@ -178,7 +201,7 @@ def check_trade_eligibility(
         return result
 
     # 2. Max open positions
-    max_positions = settings.MAX_OPEN_POSITIONS
+    max_positions = params["max_positions"]
     current_positions = len(open_positions)
     if side == "buy" and current_positions >= max_positions:
         result["reason"] = f"Max positions reached ({current_positions}/{max_positions})"
@@ -195,15 +218,15 @@ def check_trade_eligibility(
     last_equity = account.get("last_equity", 0)
     if last_equity > 0:
         daily_pnl_pct = ((equity - last_equity) / last_equity) * 100
-        if daily_pnl_pct <= -settings.DAILY_LOSS_LIMIT_PCT:
-            result["reason"] = f"Daily loss limit hit ({daily_pnl_pct:.1f}% vs -{settings.DAILY_LOSS_LIMIT_PCT}%)"
+        if daily_pnl_pct <= -params["daily_loss_limit_pct"]:
+            result["reason"] = f"Daily loss limit hit ({daily_pnl_pct:.1f}% vs -{params['daily_loss_limit_pct']}%)"
             return result
 
     # 5. Calculate position size
     available_cash = account.get("cash", 0)
     total_equity = account.get("equity", 0)
 
-    sizing = calculate_position_size(price, stop_loss, available_cash, total_equity)
+    sizing = calculate_position_size(price, stop_loss, available_cash, total_equity, strategy_id=strategy_id)
     if sizing.get("qty", 0) == 0:
         result["reason"] = sizing.get("reason", "Position sizing returned 0 shares")
         return result
@@ -219,8 +242,9 @@ def check_trade_eligibility(
     return result
 
 
-def get_risk_status(account: dict, positions: list[dict]) -> dict:
+def get_risk_status(account: dict, positions: list[dict], strategy_id: str = None) -> dict:
     """Get current risk dashboard status."""
+    params = _get_strategy_params(strategy_id)
     equity = account.get("equity", 0)
     last_equity = account.get("last_equity", 0)
     daily_pnl = equity - last_equity if last_equity > 0 else 0
@@ -234,9 +258,9 @@ def get_risk_status(account: dict, positions: list[dict]) -> dict:
         "cash": round(account.get("cash", 0), 2),
         "daily_pnl": round(daily_pnl, 2),
         "daily_pnl_pct": round(daily_pnl_pct, 2),
-        "daily_loss_limit": f"-{settings.DAILY_LOSS_LIMIT_PCT}%",
+        "daily_loss_limit": f"-{params['daily_loss_limit_pct']}%",
         "open_positions": len(positions),
-        "max_positions": settings.MAX_OPEN_POSITIONS,
+        "max_positions": params["max_positions"],
         "total_exposure": round(total_exposure, 2),
         "exposure_pct": round(exposure_pct, 2),
         "day_trades_used": get_day_trade_count(),

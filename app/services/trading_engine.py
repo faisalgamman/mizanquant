@@ -1,12 +1,14 @@
-"""Automated paper trading engine.
+"""Automated paper trading engine — multi-strategy.
 
-Stage 1: Execute trades on Alpaca Paper account based on consensus signals.
-- STRONG BUY  → open long position with stop-loss + take-profit
-- STRONG SELL → close position if held
-- Swing trading only (hold overnight to avoid PDT)
-- All risk checks enforced before every trade
+Supports 3 concurrent strategies on separate Alpaca paper accounts:
+  A: Momentum Alpha    — concentrated trend-following
+  B: Mean Reversion    — diversified dip-buying
+  C: AI Ensemble       — pure ML decisions
 
-NO real money. Paper account only.
+Each strategy uses its own Alpaca credentials, risk limits, and
+stop-loss method (trailing vs. static).
+
+NO real money. Paper accounts only.
 """
 
 import logging
@@ -17,7 +19,7 @@ from typing import Optional
 
 import httpx
 
-from app.config import settings
+from app.config import settings, STRATEGY_CONFIGS, StrategyConfig
 from app.services.risk_manager import (
     check_trade_eligibility,
     calculate_position_size,
@@ -34,13 +36,32 @@ from app.services.telegram_alert import send_message as tg_send
 logger = logging.getLogger("screener")
 
 # ---------------------------------------------------------------------------
-# Alpaca order execution (paper only)
+# Alpaca order execution (paper only) — multi-account aware
 # ---------------------------------------------------------------------------
 
-_trade_lock = threading.Lock()  # serialize order submissions
+# Per-strategy trade locks — serialize orders within each strategy
+_trade_locks: dict[str, threading.Lock] = {}
+_global_trade_lock = threading.Lock()  # fallback for legacy calls
 
 
-def _get_headers() -> dict:
+def _get_trade_lock(strategy_id: str = None) -> threading.Lock:
+    """Get or create a lock for the given strategy."""
+    if not strategy_id:
+        return _global_trade_lock
+    if strategy_id not in _trade_locks:
+        _trade_locks[strategy_id] = threading.Lock()
+    return _trade_locks[strategy_id]
+
+
+def _get_headers(strategy_id: str = None) -> dict:
+    """Get Alpaca API headers for a specific strategy or default."""
+    if strategy_id:
+        cfg = STRATEGY_CONFIGS.get(strategy_id)
+        if cfg and cfg.alpaca_api_key:
+            return {
+                "APCA-API-KEY-ID": cfg.alpaca_api_key,
+                "APCA-API-SECRET-KEY": cfg.alpaca_secret_key,
+            }
     return {
         "APCA-API-KEY-ID": settings.ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
@@ -54,61 +75,78 @@ def _get_base_url() -> str:
     return url.rstrip("/").removesuffix("/v2")
 
 
-def _submit_order(order_payload: dict) -> Optional[dict]:
+def _submit_order(order_payload: dict, strategy_id: str = None) -> Optional[dict]:
     """Submit an order to Alpaca Trading API."""
-    if not settings.ALPACA_API_KEY:
-        logger.error("Trading engine: No Alpaca API key configured")
+    headers = _get_headers(strategy_id)
+    if not headers.get("APCA-API-KEY-ID"):
+        sid = f" [{strategy_id}]" if strategy_id else ""
+        logger.error(f"Trading engine{sid}: No Alpaca API key configured")
         return None
 
     base = _get_base_url()
     url = f"{base}/v2/orders"
+    sid = f"[{strategy_id}] " if strategy_id else ""
 
     try:
         with httpx.Client(timeout=15) as client:
-            resp = client.post(url, headers=_get_headers(), json=order_payload)
+            resp = client.post(url, headers=headers, json=order_payload)
             if resp.status_code in (200, 201):
                 order = resp.json()
-                logger.info(f"Order submitted: {order.get('id')} - {order_payload.get('symbol')} "
+                logger.info(f"{sid}Order submitted: {order.get('id')} - {order_payload.get('symbol')} "
                            f"{order_payload.get('side')} {order_payload.get('qty')} shares")
                 return order
             else:
-                logger.error(f"Order rejected ({resp.status_code}): {resp.text[:300]}")
+                logger.error(f"{sid}Order rejected ({resp.status_code}): {resp.text[:300]}")
                 return None
     except Exception as e:
-        logger.error(f"Order submission error: {e}")
+        logger.error(f"{sid}Order submission error: {e}")
         return None
 
 
-def _cancel_order(order_id: str) -> bool:
+def _cancel_order(order_id: str, strategy_id: str = None) -> bool:
     """Cancel a pending order."""
     base = _get_base_url()
     url = f"{base}/v2/orders/{order_id}"
     try:
         with httpx.Client(timeout=10) as client:
-            resp = client.delete(url, headers=_get_headers())
+            resp = client.delete(url, headers=_get_headers(strategy_id))
             return resp.status_code in (200, 204)
     except Exception as e:
         logger.error(f"Cancel order error: {e}")
         return False
 
 
-def _close_position(symbol: str) -> Optional[dict]:
+def _close_position(symbol: str, strategy_id: str = None) -> Optional[dict]:
     """Close an entire position for a symbol."""
     base = _get_base_url()
     url = f"{base}/v2/positions/{symbol}"
+    sid = f"[{strategy_id}] " if strategy_id else ""
     try:
         with httpx.Client(timeout=15) as client:
-            resp = client.delete(url, headers=_get_headers())
+            resp = client.delete(url, headers=_get_headers(strategy_id))
             if resp.status_code == 200:
                 data = resp.json()
-                logger.info(f"Position closed: {symbol}")
+                logger.info(f"{sid}Position closed: {symbol}")
                 return data
             else:
-                logger.error(f"Close position failed ({resp.status_code}): {resp.text[:200]}")
+                logger.error(f"{sid}Close position failed ({resp.status_code}): {resp.text[:200]}")
                 return None
     except Exception as e:
-        logger.error(f"Close position error for {symbol}: {e}")
+        logger.error(f"{sid}Close position error for {symbol}: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Strategy name helper
+# ---------------------------------------------------------------------------
+
+def _strategy_label(strategy_id: str = None) -> str:
+    """Get a human-readable label for Telegram messages."""
+    if strategy_id:
+        cfg = STRATEGY_CONFIGS.get(strategy_id)
+        if cfg:
+            return f"[{strategy_id}] {cfg.name}"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +160,7 @@ def execute_buy(
     take_profit: float,
     confidence: float,
     signal_details: dict,
+    strategy_id: str = None,
 ) -> dict:
     """Execute a BUY trade with full risk checks.
 
@@ -130,12 +169,16 @@ def execute_buy(
 
     Returns dict with trade result or rejection reason.
     """
-    with _trade_lock:
+    lock = _get_trade_lock(strategy_id)
+    label = _strategy_label(strategy_id)
+
+    with lock:
         result = {
             "symbol": symbol,
             "action": "BUY",
             "executed": False,
             "timestamp": datetime.utcnow().isoformat(),
+            "strategy_id": strategy_id,
         }
 
         # Auto-trading enabled?
@@ -149,7 +192,7 @@ def execute_buy(
             is_halal, halal_reason = verify_halal(symbol)
             if not is_halal:
                 result["reason"] = f"BLOCKED — not halal: {halal_reason}"
-                logger.warning(f"Trade blocked for {symbol}: {halal_reason}")
+                logger.warning(f"{label} Trade blocked for {symbol}: {halal_reason}")
                 _notify_trade(result)
                 return result
         except ImportError:
@@ -157,15 +200,15 @@ def execute_buy(
             result["reason"] = "Halal verification unavailable — trade blocked for safety"
             return result
 
-        # Get live account + positions
-        account = alpaca_get_account()
+        # Get live account + positions for THIS strategy's account
+        account = alpaca_get_account(strategy_id=strategy_id)
         if not account:
             result["reason"] = "Cannot fetch account info"
             return result
 
-        positions = alpaca_get_positions()
+        positions = alpaca_get_positions(strategy_id=strategy_id)
 
-        # Run all risk checks
+        # Run all risk checks with strategy-specific limits
         eligibility = check_trade_eligibility(
             symbol=symbol,
             side="buy",
@@ -173,21 +216,22 @@ def execute_buy(
             stop_loss=stop_loss,
             account=account,
             open_positions=positions,
+            strategy_id=strategy_id,
         )
 
         if not eligibility["eligible"]:
             result["reason"] = eligibility["reason"]
-            logger.info(f"Trade rejected for {symbol}: {eligibility['reason']}")
+            logger.info(f"{label} Trade rejected for {symbol}: {eligibility['reason']}")
             _notify_trade(result)
             return result
 
         sizing = eligibility["sizing"]
         qty = sizing["qty"]
 
-        # Submit bracket order (market entry + stop-loss + take-profit)
-        # Use trailing stop if enabled — locks in gains as price rises
-        use_trailing = settings.TRAILING_STOP_ENABLED
-        trail_pct = settings.TRAILING_STOP_PCT
+        # Determine stop-loss method from strategy config
+        cfg = STRATEGY_CONFIGS.get(strategy_id) if strategy_id else None
+        use_trailing = cfg.trailing_stop_enabled if cfg else settings.TRAILING_STOP_ENABLED
+        trail_pct = cfg.trailing_stop_pct if cfg else settings.TRAILING_STOP_PCT
 
         order_payload = {
             "symbol": symbol,
@@ -201,7 +245,7 @@ def execute_buy(
             },
         }
 
-        if use_trailing:
+        if use_trailing and trail_pct > 0:
             # Trailing stop: follows price up, triggers when price drops trail_pct% from peak
             order_payload["stop_loss"] = {
                 "stop_price": str(round(stop_loss, 2)),  # initial floor
@@ -213,7 +257,7 @@ def execute_buy(
                 "stop_price": str(round(stop_loss, 2)),
             }
 
-        order = _submit_order(order_payload)
+        order = _submit_order(order_payload, strategy_id=strategy_id)
         if not order:
             result["reason"] = "Order submission failed"
             _notify_trade(result)
@@ -239,7 +283,7 @@ def execute_buy(
         _notify_trade(result)
 
         logger.info(
-            f"BUY executed: {symbol} x{qty} @ ~${price:.2f} | "
+            f"{label} BUY executed: {symbol} x{qty} @ ~${price:.2f} | "
             f"SL=${stop_loss:.2f} TP=${take_profit:.2f} | "
             f"Risk: ${sizing['risk_amount']:.2f} ({sizing['risk_pct']:.1f}%)"
         )
@@ -247,25 +291,29 @@ def execute_buy(
         return result
 
 
-def execute_sell(symbol: str, price: float, confidence: float) -> dict:
+def execute_sell(symbol: str, price: float, confidence: float, strategy_id: str = None) -> dict:
     """Close a position on STRONG SELL signal.
 
     Only closes if we're holding the symbol.
     """
-    with _trade_lock:
+    lock = _get_trade_lock(strategy_id)
+    label = _strategy_label(strategy_id)
+
+    with lock:
         result = {
             "symbol": symbol,
             "action": "SELL",
             "executed": False,
             "timestamp": datetime.utcnow().isoformat(),
+            "strategy_id": strategy_id,
         }
 
         if not settings.AUTO_TRADE_ENABLED:
             result["reason"] = "Auto-trading is disabled"
             return result
 
-        # Check if we hold this position
-        positions = alpaca_get_positions()
+        # Check if we hold this position IN THIS STRATEGY'S ACCOUNT
+        positions = alpaca_get_positions(strategy_id=strategy_id)
         held = [p for p in positions if p["symbol"] == symbol]
 
         if not held:
@@ -273,7 +321,7 @@ def execute_sell(symbol: str, price: float, confidence: float) -> dict:
             return result
 
         position = held[0]
-        close_result = _close_position(symbol)
+        close_result = _close_position(symbol, strategy_id=strategy_id)
 
         if not close_result:
             result["reason"] = "Failed to close position"
@@ -293,7 +341,7 @@ def execute_sell(symbol: str, price: float, confidence: float) -> dict:
         _notify_trade(result)
 
         logger.info(
-            f"SELL executed: {symbol} x{position['qty']} | "
+            f"{label} SELL executed: {symbol} x{position['qty']} | "
             f"P&L: ${position['unrealized_pl']:.2f} ({position['unrealized_plpc']:.1f}%)"
         )
 
@@ -301,7 +349,7 @@ def execute_sell(symbol: str, price: float, confidence: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Auto-trade hook — called from run_consensus()
+# Auto-trade hook — called from strategy consensus functions
 # ---------------------------------------------------------------------------
 
 def on_signal(
@@ -315,6 +363,7 @@ def on_signal(
     votes_sell: int,
     votes_hold: int,
     details: dict,
+    strategy_id: str = None,
 ) -> Optional[dict]:
     """Called automatically when consensus generates a signal.
 
@@ -327,13 +376,17 @@ def on_signal(
     # Block trades outside market hours (before making any API calls)
     from app.services.risk_manager import is_market_open
     if not is_market_open():
-        logger.info(f"Signal {verdict} for {symbol} ignored — market is closed")
+        label = _strategy_label(strategy_id)
+        logger.info(f"{label} Signal {verdict} for {symbol} ignored — market is closed")
         return None
 
-    min_confidence = settings.MIN_TRADE_CONFIDENCE
+    # Get min confidence from strategy config
+    cfg = STRATEGY_CONFIGS.get(strategy_id) if strategy_id else None
+    min_confidence = cfg.min_confidence if cfg else settings.MIN_TRADE_CONFIDENCE
+    label = _strategy_label(strategy_id)
 
     if verdict == "STRONG BUY" and confidence >= min_confidence:
-        logger.info(f"Auto-trade trigger: STRONG BUY {symbol} (confidence={confidence}%)")
+        logger.info(f"{label} Auto-trade trigger: STRONG BUY {symbol} (confidence={confidence}%)")
         return execute_buy(
             symbol=symbol,
             price=price,
@@ -345,15 +398,18 @@ def on_signal(
                 "votes_buy": votes_buy,
                 "votes_sell": votes_sell,
                 "votes_hold": votes_hold,
+                "strategy_id": strategy_id,
             },
+            strategy_id=strategy_id,
         )
 
     elif verdict == "STRONG SELL" and confidence >= min_confidence:
-        logger.info(f"Auto-trade trigger: STRONG SELL {symbol} (confidence={confidence}%)")
+        logger.info(f"{label} Auto-trade trigger: STRONG SELL {symbol} (confidence={confidence}%)")
         return execute_sell(
             symbol=symbol,
             price=price,
             confidence=confidence,
+            strategy_id=strategy_id,
         )
 
     return None
@@ -388,6 +444,7 @@ def _record_trade(trade_result: dict, signal_details: dict):
                 signal_details=signal_details,
                 pnl=trade_result.get("unrealized_pl"),
                 pnl_pct=trade_result.get("unrealized_plpc"),
+                strategy_id=trade_result.get("strategy_id"),
             )
             db.add(trade)
             db.commit()
@@ -398,7 +455,7 @@ def _record_trade(trade_result: dict, signal_details: dict):
 
 
 # ---------------------------------------------------------------------------
-# Telegram notifications
+# Telegram notifications — strategy-aware
 # ---------------------------------------------------------------------------
 
 def _notify_trade(trade_result: dict):
@@ -407,13 +464,20 @@ def _notify_trade(trade_result: dict):
         symbol = trade_result["symbol"]
         action = trade_result["action"]
         executed = trade_result["executed"]
+        strategy_id = trade_result.get("strategy_id")
+        label = _strategy_label(strategy_id)
 
         if executed:
             if action == "BUY":
-                sl_type = "Trailing Stop" if settings.TRAILING_STOP_ENABLED else "Stop Loss"
-                trail_info = f" (trail {settings.TRAILING_STOP_PCT}%)" if settings.TRAILING_STOP_ENABLED else ""
+                # Determine stop type from strategy config
+                cfg = STRATEGY_CONFIGS.get(strategy_id) if strategy_id else None
+                use_trailing = cfg.trailing_stop_enabled if cfg else settings.TRAILING_STOP_ENABLED
+                trail_pct = cfg.trailing_stop_pct if cfg else settings.TRAILING_STOP_PCT
+
+                sl_type = "Trailing Stop" if use_trailing else "Stop Loss"
+                trail_info = f" (trail {trail_pct}%)" if use_trailing else ""
                 msg = (
-                    f"AUTO TRADE - BUY\n\n"
+                    f"AUTO TRADE - BUY {label}\n\n"
                     f"Symbol: {symbol}\n"
                     f"Qty: {trade_result.get('qty', 0)} shares\n"
                     f"Price: ${trade_result.get('entry_price', 0):.2f}\n"
@@ -426,7 +490,7 @@ def _notify_trade(trade_result: dict):
                 )
             else:
                 msg = (
-                    f"AUTO TRADE - SELL\n\n"
+                    f"AUTO TRADE - SELL {label}\n\n"
                     f"Symbol: {symbol}\n"
                     f"Qty: {trade_result.get('qty', 0)} shares\n"
                     f"Entry: ${trade_result.get('entry_price', 0):.2f}\n"
@@ -436,7 +500,7 @@ def _notify_trade(trade_result: dict):
                 )
         else:
             msg = (
-                f"TRADE REJECTED - {action}\n\n"
+                f"TRADE REJECTED - {action} {label}\n\n"
                 f"Symbol: {symbol}\n"
                 f"Reason: {trade_result.get('reason', 'Unknown')}"
             )
@@ -447,18 +511,21 @@ def _notify_trade(trade_result: dict):
 
 
 # ---------------------------------------------------------------------------
-# Performance report
+# Performance report — strategy-aware
 # ---------------------------------------------------------------------------
 
-def get_trade_history(limit: int = 50) -> list[dict]:
-    """Get recent trade history from DB."""
+def get_trade_history(limit: int = 50, strategy_id: str = None) -> list[dict]:
+    """Get recent trade history from DB, optionally filtered by strategy."""
     try:
         from app.db.database import SessionLocal
         from app.db.models import TradeHistory
 
         db = SessionLocal()
         try:
-            trades = db.query(TradeHistory).order_by(
+            query = db.query(TradeHistory)
+            if strategy_id:
+                query = query.filter(TradeHistory.strategy_id == strategy_id)
+            trades = query.order_by(
                 TradeHistory.created_at.desc()
             ).limit(limit).all()
 
@@ -478,6 +545,7 @@ def get_trade_history(limit: int = 50) -> list[dict]:
                     "confidence": t.confidence,
                     "status": t.status,
                     "order_id": t.order_id,
+                    "strategy_id": t.strategy_id,
                     "created_at": t.created_at.isoformat() if t.created_at else "",
                 }
                 for t in trades
@@ -489,24 +557,27 @@ def get_trade_history(limit: int = 50) -> list[dict]:
         return []
 
 
-def get_performance_report() -> dict:
-    """Generate trading performance report.
-
-    Returns win rate, avg return, Sharpe, max drawdown, profit factor.
-    """
+def get_performance_report(strategy_id: str = None) -> dict:
+    """Generate trading performance report, optionally for a specific strategy."""
     try:
         from app.db.database import SessionLocal
         from app.db.models import TradeHistory
 
         db = SessionLocal()
         try:
-            trades = db.query(TradeHistory).filter(
+            query = db.query(TradeHistory).filter(
                 TradeHistory.status == "submitted",
                 TradeHistory.pnl.isnot(None),
-            ).all()
+            )
+            if strategy_id:
+                query = query.filter(TradeHistory.strategy_id == strategy_id)
+
+            trades = query.all()
 
             if not trades:
+                label = _strategy_label(strategy_id)
                 return {
+                    "strategy": label or "All",
                     "total_trades": 0,
                     "message": "No completed trades yet",
                 }
@@ -549,7 +620,9 @@ def get_performance_report() -> dict:
             buys = len([t for t in trades if t.side == "buy"])
             sells = len([t for t in trades if t.side == "sell"])
 
+            label = _strategy_label(strategy_id)
             return {
+                "strategy": label or "All",
                 "total_trades": total,
                 "buys": buys,
                 "sells": sells,
