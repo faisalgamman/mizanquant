@@ -115,5 +115,6 @@ class TradeHistory(Base):
     signal_details = Column(JSON, nullable=True)
     pnl = Column(Float, nullable=True)  # filled in when position closes
     pnl_pct = Column(Float, nullable=True)
+    strategy_id = Column(String(5), nullable=True, index=True)  # "A", "B", "C" or NULL for legacy
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     closed_at = Column(DateTime, nullable=True)

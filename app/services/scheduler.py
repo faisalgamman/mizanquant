@@ -1,22 +1,16 @@
-"""Automated trading scheduler — runs scans and alerts on a timer.
+"""Automated trading scheduler — multi-strategy.
 
-This is the brain of the automated system. It runs as a background
-thread inside the FastAPI app and handles:
+Runs 3 strategies on separate Alpaca paper accounts:
+  A: Momentum Alpha    — trend-following, top 3 by score
+  B: Mean Reversion    — dip-buying, lowest-score oversold stocks
+  C: AI Ensemble       — pure ML, top 2 stocks (memory-heavy)
 
-1. MARKET HOURS (9:30 AM - 4:00 PM ET, Mon-Fri):
-   - Every 30 min: Quick screener scan → consensus on top stocks
-   - STRONG signals → auto-trade (paper) + Telegram chart alert
+Strategies run SEQUENTIALLY to stay within 8GB RAM.
 
-2. POST-MARKET (4:15 PM ET):
-   - Full post-market analysis scan
-   - Send top signals with charts to Telegram
-   - Daily performance summary
-
-3. PRE-MARKET (9:00 AM ET):
-   - Refresh screener data for the day
-   - Send daily briefing to Telegram
-
-All times are US Eastern. The scheduler is timezone-aware.
+Schedule:
+  PRE-MARKET  (9:00 AM ET):  Refresh screener, send daily briefing
+  MARKET HOURS (every 30m):  Run all 3 strategies
+  POST-MARKET (4:15 PM ET):  Full analysis + strategy comparison
 """
 
 import gc
@@ -67,11 +61,19 @@ def _scheduler_loop():
     """Main scheduler loop — runs forever in a background thread."""
     global _scheduler_running
 
-    from app.config import settings
+    from app.config import settings, STRATEGY_CONFIGS
     from app.services.telegram_alert import send_message as tg_send
 
-    logger.info("Scheduler started — automated scanning active")
-    tg_send("SCHEDULER ACTIVE\n\nAutomated scanning started.\nScans run every 30 min during market hours.")
+    strategies_active = len(STRATEGY_CONFIGS)
+    logger.info(f"Scheduler started — {strategies_active} strategies active")
+
+    strategy_names = ", ".join(f"{s.strategy_id}: {s.name}" for s in STRATEGY_CONFIGS.values())
+    tg_send(
+        f"SCHEDULER ACTIVE\n\n"
+        f"Multi-strategy scanning started.\n"
+        f"Strategies: {strategy_names or 'Default only'}\n"
+        f"Scans run every 30 min during market hours."
+    )
 
     last_scan_time = 0
     last_post_market = ""
@@ -121,11 +123,11 @@ def _scheduler_loop():
 
 
 def _run_pre_market():
-    """Pre-market: refresh screener, send daily briefing."""
+    """Pre-market: refresh screener, send daily briefing + strategy comparison."""
     from app.services.telegram_alert import send_message as tg_send, alert_daily_summary
+    from app.services.telegram_alert import alert_strategy_comparison
     from app.services.alpaca_client import get_account as alpaca_get_account
 
-    # Import from main module
     import halal_screener as hs
 
     # Refresh screener
@@ -137,7 +139,7 @@ def _run_pre_market():
         strong_buys = [r for r in results if r.get("swing_signal") == "STRONG BUY"]
         buys = [r for r in results if r.get("swing_signal") == "BUY"]
 
-        # Get portfolio info
+        # Get portfolio info from default account
         account = alpaca_get_account()
         portfolio_info = None
         if account:
@@ -147,46 +149,82 @@ def _run_pre_market():
         alert_daily_summary(results, portfolio_info)
         logger.info(f"Pre-market briefing sent: {len(results)} stocks, {len(strong_buys)} STRONG BUY")
 
+    # Send multi-strategy comparison
+    alert_strategy_comparison()
+
     gc.collect()
 
 
 def _run_market_scan():
-    """Market hours: scan top stocks, run consensus, auto-trade on STRONG signals."""
+    """Market hours: run all 3 strategies SEQUENTIALLY on their target stocks."""
     import halal_screener as hs
+    from app.config import STRATEGY_CONFIGS
 
     # Run screener (uses cache if fresh)
     results = hs.run_screener()
     if not results:
         return
 
-    # Get top stocks by swing score
-    top = [r for r in results if r.get("swing_score", 0) >= 55]
-    top.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
-    top = top[:3]  # max 3 per scan to save memory
+    # Sort stocks by swing score
+    scored = [r for r in results if r.get("swing_score", 0) >= 30]
+    scored.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
 
-    for stock in top:
-        symbol = stock["symbol"]
-        try:
-            # run_consensus auto-triggers:
-            # - Telegram chart alert (for STRONG signals)
-            # - Auto-trade execution (if market open + enabled)
-            hs.run_consensus(symbol, horizon=5, episodes=3)
-        except Exception as e:
-            logger.error(f"Market scan consensus {symbol}: {e}")
+    # ===== STRATEGY A: Momentum Alpha — top 3 trending stocks =====
+    if "A" in STRATEGY_CONFIGS:
+        momentum_candidates = [r for r in scored if r.get("swing_score", 0) >= 55][:3]
+        for stock in momentum_candidates:
+            symbol = stock["symbol"]
+            try:
+                logger.info(f"[A] Momentum scan: {symbol}")
+                hs.run_consensus_momentum(symbol, horizon=5)
+            except Exception as e:
+                logger.error(f"[A] Momentum {symbol}: {e}")
+            hs._flush_all_caches()
+            time.sleep(2)
+        gc.collect()
 
-        # Memory cleanup between stocks
-        hs._flush_all_caches()
-        time.sleep(2)
+    # ===== STRATEGY B: Mean Reversion — oversold stocks (lowest scores) =====
+    if "B" in STRATEGY_CONFIGS:
+        # For mean reversion, we want stocks that have DROPPED — low swing scores
+        reversion_candidates = [r for r in scored if r.get("swing_score", 0) >= 30]
+        reversion_candidates.sort(key=lambda x: x.get("swing_score", 0))  # lowest first
+        reversion_candidates = reversion_candidates[:5]
+        for stock in reversion_candidates:
+            symbol = stock["symbol"]
+            try:
+                logger.info(f"[B] Reversion scan: {symbol}")
+                hs.run_consensus_reversion(symbol, horizon=3)
+            except Exception as e:
+                logger.error(f"[B] Reversion {symbol}: {e}")
+            hs._flush_all_caches()
+            time.sleep(2)
+        gc.collect()
 
-    gc.collect()
+    # ===== STRATEGY C: AI Ensemble — top 2 stocks (ML is memory-heavy) =====
+    if "C" in STRATEGY_CONFIGS:
+        ml_candidates = [r for r in scored if r.get("swing_score", 0) >= 55][:2]
+        for stock in ml_candidates:
+            symbol = stock["symbol"]
+            try:
+                logger.info(f"[C] AI Ensemble scan: {symbol}")
+                hs.run_consensus_ml(symbol, horizon=7, episodes=3)
+            except Exception as e:
+                logger.error(f"[C] AI Ensemble {symbol}: {e}")
+            hs._flush_all_caches()
+            time.sleep(3)
+        gc.collect()
+
+    logger.info("Multi-strategy market scan complete")
 
 
 def _run_post_market():
-    """Post-market: full analysis, charts, daily summary."""
+    """Post-market: full analysis, strategy comparison, daily summary."""
     from app.services.telegram_alert import send_message as tg_send
+    from app.services.telegram_alert import alert_strategy_comparison
+    from app.config import STRATEGY_CONFIGS
     import halal_screener as hs
 
-    # Clear stale cache for fresh data
+    # Clear stale cache
     hs._cache.clear()
     hs._cache_ts.clear()
 
@@ -209,9 +247,10 @@ def _run_post_market():
         f"POST-MARKET ANALYSIS\n"
         f"{len(results)} stocks scanned\n"
         f"{len(top)} top signals\n"
-        f"\nRunning AI consensus..."
+        f"\nRunning full consensus + 3 strategies..."
     )
 
+    # Run standard consensus on top stocks
     scan_results = []
     for stock in top:
         symbol = stock["symbol"]
@@ -245,6 +284,9 @@ def _run_post_market():
         f"STRONG signals: {len(strong)}\n\n"
         f"Results:\n" + "\n".join(lines) if lines else "No results"
     )
+
+    # Send strategy comparison report
+    alert_strategy_comparison()
 
     gc.collect()
 
