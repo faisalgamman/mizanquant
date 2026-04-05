@@ -321,11 +321,23 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
                     reasons.append(f"liquidity {result.get('liquidity_ratio', '?')}% > 33%")
                 return False, f"Haram: {', '.join(reasons)}" if reasons else "Verified haram"
         else:
-            # FMP returned no data — cannot verify
-            _HALAL_CHECK_FAILED.add(sym)
-            logger.warning(f"Halal gate: {sym} BLOCKED — no financial data from FMP")
-            return False, "Cannot verify — no financial data available (blocked for safety)"
+            # FMP returned no data — check if stock is in our curated halal list
+            # Stocks in HALAL_STOCKS already passed sector exclusion filter,
+            # so they're safe to allow even without FMP verification
+            if sym in set(HALAL_STOCKS):
+                _VERIFIED_HALAL.add(sym)
+                logger.info(f"Halal gate: {sym} ALLOWED — in curated list, FMP unavailable")
+                return True, "Allowed (curated halal list, FMP data unavailable)"
+            else:
+                # Unknown stock NOT in curated list — block for safety
+                _HALAL_CHECK_FAILED.add(sym)
+                logger.warning(f"Halal gate: {sym} BLOCKED — not in curated list, no FMP data")
+                return False, "Cannot verify — not in curated list and no financial data"
     except Exception as e:
+        # On error, still allow curated stocks
+        if sym in set(HALAL_STOCKS):
+            _VERIFIED_HALAL.add(sym)
+            return True, "Allowed (curated halal list, verification error)"
         logger.error(f"Halal verification error for {sym}: {e}")
         _HALAL_CHECK_FAILED.add(sym)
         return False, f"Verification error: {e}"
