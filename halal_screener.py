@@ -2683,9 +2683,12 @@ async def strategy_comparison():
 @app.get("/portfolio/summary")
 async def portfolio_summary():
     """Get Alpaca account summary: equity, cash, buying power, P&L."""
-    if not settings.ALPACA_API_KEY:
+    # Use default key, or fall back to Strategy A key
+    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
+    if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    account = alpaca_get_account()
+    sid = None if settings.ALPACA_API_KEY else "A"
+    account = alpaca_get_account(strategy_id=sid)
     if not account:
         return [{"Error": "Could not connect to Alpaca"}]
     # Calculate daily P&L
@@ -2707,9 +2710,11 @@ async def portfolio_summary():
 @app.get("/portfolio/positions")
 async def portfolio_positions():
     """Get all open positions with unrealized P&L."""
-    if not settings.ALPACA_API_KEY:
+    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
+    if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    positions = alpaca_get_positions()
+    sid = None if settings.ALPACA_API_KEY else "A"
+    positions = alpaca_get_positions(strategy_id=sid)
     if not positions:
         return [{"Message": "No open positions"}]
     result = []
@@ -2731,9 +2736,11 @@ async def portfolio_positions():
 @app.get("/portfolio/orders")
 async def portfolio_orders(status: str = "all", limit: int = 20):
     """Get recent Alpaca orders."""
-    if not settings.ALPACA_API_KEY:
+    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
+    if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    orders = alpaca_get_orders(status=status, limit=limit)
+    sid = None if settings.ALPACA_API_KEY else "A"
+    orders = alpaca_get_orders(status=status, limit=limit, strategy_id=sid)
     if not orders:
         return [{"Message": "No orders found"}]
     return orders
@@ -2741,12 +2748,14 @@ async def portfolio_orders(status: str = "all", limit: int = 20):
 @app.get("/portfolio/history")
 async def portfolio_history(period: str = "1M"):
     """Get portfolio equity curve history."""
-    if not settings.ALPACA_API_KEY:
+    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
+    if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
+    sid = None if settings.ALPACA_API_KEY else "A"
     valid_periods = ["1D", "1W", "1M", "3M", "1A", "all"]
     if period not in valid_periods:
         return [{"Error": f"Invalid period. Use one of: {valid_periods}"}]
-    data = alpaca_get_portfolio_history(period=period)
+    data = alpaca_get_portfolio_history(period=period, strategy_id=sid)
     if not data:
         return [{"Error": "Could not fetch portfolio history"}]
     summary = [{
@@ -3120,7 +3129,10 @@ async def health():
         checks["database"] = True
     except Exception:
         pass
-    alpaca_configured = bool(settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY)
+    alpaca_configured = bool(
+        (settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY) or
+        (settings.ALPACA_API_KEY_A and settings.ALPACA_SECRET_KEY_A)
+    )
     fmp_configured = bool(settings.FMP_API_KEY)
     telegram_configured = bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
     all_ok = all(checks.values())
