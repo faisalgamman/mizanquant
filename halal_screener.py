@@ -270,38 +270,47 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 # ---------------------------------------------------------------------------
 # Halal verification gate — blocks unverified / haram stocks from trading
 # ---------------------------------------------------------------------------
-# Runtime blocklist of symbols confirmed haram by FMP screening.
-# Persists for the lifetime of the process (cleared on restart).
+# Runtime cache of halal verification results.
 _VERIFIED_HARAM = set()  # symbols confirmed haram via FMP
-_VERIFIED_HALAL = set()  # symbols confirmed halal via FMP
-_HALAL_CHECK_FAILED = set()  # symbols where FMP returned no data
+_VERIFIED_HALAL = set()  # symbols confirmed halal via FMP or curated list
+_CURATED_SET = None      # lazy-built set for O(1) lookups
+
+def _get_curated_set():
+    global _CURATED_SET
+    if _CURATED_SET is None:
+        _CURATED_SET = set(HALAL_STOCKS)
+    return _CURATED_SET
 
 def verify_halal(symbol: str) -> tuple[bool, str]:
     """Check if a symbol is verified halal. Returns (is_halal, reason).
 
     Priority:
-    1. If in _HARAM_EXCLUDE → blocked immediately (sector-level exclusion)
+    1. If in _HARAM_EXCLUDE → blocked (sector-level exclusion)
     2. If already verified this session → use cached result
-    3. If FMP API available → run live AAOIFI screening
-    4. If FMP unavailable → BLOCK the stock (fail-closed, not fail-open)
-
-    This ensures NO unverified stock ever gets traded.
+    3. If in curated HALAL_STOCKS list → allowed (already sector-filtered)
+    4. If FMP data available → run live AAOIFI screening
+    5. If not in curated list AND FMP unavailable → blocked
     """
     sym = symbol.upper().strip()
 
-    # 1. Already in sector-level exclusion
+    # 1. Sector-level exclusion (instant reject)
     if sym in _HARAM_EXCLUDE:
         return False, "Excluded sector (banks/insurance/alcohol/gambling/weapons/utilities/REITs)"
 
     # 2. Session cache — fast path
     if sym in _VERIFIED_HALAL:
-        return True, "Verified halal (AAOIFI)"
+        return True, "Verified halal"
     if sym in _VERIFIED_HARAM:
         return False, "Verified haram (AAOIFI screening failed)"
-    if sym in _HALAL_CHECK_FAILED:
-        return False, "Cannot verify — no financial data available (blocked for safety)"
 
-    # 3. Check database cache (survives restarts)
+    # 3. Curated list — stocks already passed sector exclusion
+    # This is the fast path that avoids FMP API calls for known stocks
+    curated = _get_curated_set()
+    if sym in curated:
+        _VERIFIED_HALAL.add(sym)
+        return True, "Halal (curated S&P 500 list, sector-verified)"
+
+    # 4. Not in curated list — must verify via FMP AAOIFI screening
     try:
         result = get_halal_status(sym)
         if result is not None:
@@ -321,25 +330,11 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
                     reasons.append(f"liquidity {result.get('liquidity_ratio', '?')}% > 33%")
                 return False, f"Haram: {', '.join(reasons)}" if reasons else "Verified haram"
         else:
-            # FMP returned no data — check if stock is in our curated halal list
-            # Stocks in HALAL_STOCKS already passed sector exclusion filter,
-            # so they're safe to allow even without FMP verification
-            if sym in set(HALAL_STOCKS):
-                _VERIFIED_HALAL.add(sym)
-                logger.info(f"Halal gate: {sym} ALLOWED — in curated list, FMP unavailable")
-                return True, "Allowed (curated halal list, FMP data unavailable)"
-            else:
-                # Unknown stock NOT in curated list — block for safety
-                _HALAL_CHECK_FAILED.add(sym)
-                logger.warning(f"Halal gate: {sym} BLOCKED — not in curated list, no FMP data")
-                return False, "Cannot verify — not in curated list and no financial data"
+            # FMP unavailable AND not in curated list → block
+            logger.warning(f"Halal gate: {sym} BLOCKED — not in curated list, no FMP data")
+            return False, "Cannot verify — not in curated list and no financial data"
     except Exception as e:
-        # On error, still allow curated stocks
-        if sym in set(HALAL_STOCKS):
-            _VERIFIED_HALAL.add(sym)
-            return True, "Allowed (curated halal list, verification error)"
         logger.error(f"Halal verification error for {sym}: {e}")
-        _HALAL_CHECK_FAILED.add(sym)
         return False, f"Verification error: {e}"
 
 # Technical analysis functions (ema, rsi, macd, atr, calc_metrics, safe_scale,
@@ -1859,8 +1854,6 @@ async def halal_blocked():
     blocked = []
     for sym in sorted(_VERIFIED_HARAM):
         blocked.append({"Symbol": sym, "Reason": "Verified haram (AAOIFI)"})
-    for sym in sorted(_HALAL_CHECK_FAILED):
-        blocked.append({"Symbol": sym, "Reason": "No financial data — blocked for safety"})
     for sym in sorted(_HARAM_EXCLUDE):
         blocked.append({"Symbol": sym, "Reason": "Sector exclusion (banks/insurance/alcohol/etc)"})
     return blocked if blocked else [{"Message": "No stocks blocked yet (gate runs on first access)"}]

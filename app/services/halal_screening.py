@@ -86,7 +86,7 @@ def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
         params["limit"] = 1  # latest only
 
     try:
-        with httpx.Client(timeout=15) as client:
+        with httpx.Client(timeout=8) as client:
             resp = client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
