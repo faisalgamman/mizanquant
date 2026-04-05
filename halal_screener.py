@@ -116,6 +116,16 @@ _HARAM_EXCLUDE = {
     "LMT","NOC","GD","RTX","HII","LHX","BA",
     # Conventional media with haram content
     "FOX","FOXA","NFLX","DIS","WBD","LYV",
+    # Utilities — almost all fail AAOIFI debt screen (>33% debt/market cap)
+    "AEE","AEP","AES","ATO","CEG","CMS","CNP","D","DTE","DUK","ED",
+    "EIX","ES","ETR","EVRG","EXC","FE","LNT","NEE","NI","NRG","PCG",
+    "PEG","PPL","SO","SRE","VST","WEC","XEL",
+    # REITs — interest-based income structure, high leverage
+    "AMT","ARE","AVB","BXP","CCI","CPT","DLR","DOC","EQIX","EQR",
+    "ESS","EXR","FRT","HST","INVH","IRM","KIM","MAA","O","PLD",
+    "PSA","REG","SBAC","SPG","UDR","VICI","VTR","WELL",
+    # Payment processors / fintech — significant interest income from credit
+    "AXP","SYF","CPAY",
 }
 
 # Full S&P 500 minus haram exclusions
@@ -256,6 +266,70 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
     """Fetch market data via Alpaca (primary) or yfinance (fallback)."""
     return fetch_market_data(symbol, period=period, start=start, end=end)
 
+
+# ---------------------------------------------------------------------------
+# Halal verification gate — blocks unverified / haram stocks from trading
+# ---------------------------------------------------------------------------
+# Runtime blocklist of symbols confirmed haram by FMP screening.
+# Persists for the lifetime of the process (cleared on restart).
+_VERIFIED_HARAM = set()  # symbols confirmed haram via FMP
+_VERIFIED_HALAL = set()  # symbols confirmed halal via FMP
+_HALAL_CHECK_FAILED = set()  # symbols where FMP returned no data
+
+def verify_halal(symbol: str) -> tuple[bool, str]:
+    """Check if a symbol is verified halal. Returns (is_halal, reason).
+
+    Priority:
+    1. If in _HARAM_EXCLUDE → blocked immediately (sector-level exclusion)
+    2. If already verified this session → use cached result
+    3. If FMP API available → run live AAOIFI screening
+    4. If FMP unavailable → BLOCK the stock (fail-closed, not fail-open)
+
+    This ensures NO unverified stock ever gets traded.
+    """
+    sym = symbol.upper().strip()
+
+    # 1. Already in sector-level exclusion
+    if sym in _HARAM_EXCLUDE:
+        return False, "Excluded sector (banks/insurance/alcohol/gambling/weapons/utilities/REITs)"
+
+    # 2. Session cache — fast path
+    if sym in _VERIFIED_HALAL:
+        return True, "Verified halal (AAOIFI)"
+    if sym in _VERIFIED_HARAM:
+        return False, "Verified haram (AAOIFI screening failed)"
+    if sym in _HALAL_CHECK_FAILED:
+        return False, "Cannot verify — no financial data available (blocked for safety)"
+
+    # 3. Check database cache (survives restarts)
+    try:
+        result = get_halal_status(sym)
+        if result is not None:
+            if result.get("is_halal"):
+                _VERIFIED_HALAL.add(sym)
+                return True, "Verified halal (AAOIFI)"
+            else:
+                _VERIFIED_HARAM.add(sym)
+                reasons = []
+                if not result.get("debt_pass", True):
+                    reasons.append(f"debt {result.get('debt_ratio', '?')}% > 33%")
+                if not result.get("interest_pass", True):
+                    reasons.append(f"interest {result.get('interest_ratio', '?')}% > 5%")
+                if not result.get("haram_pass", True):
+                    reasons.append("haram sector/industry")
+                if not result.get("liquidity_pass", True):
+                    reasons.append(f"liquidity {result.get('liquidity_ratio', '?')}% > 33%")
+                return False, f"Haram: {', '.join(reasons)}" if reasons else "Verified haram"
+        else:
+            # FMP returned no data — cannot verify
+            _HALAL_CHECK_FAILED.add(sym)
+            logger.warning(f"Halal gate: {sym} BLOCKED — no financial data from FMP")
+            return False, "Cannot verify — no financial data available (blocked for safety)"
+    except Exception as e:
+        logger.error(f"Halal verification error for {sym}: {e}")
+        _HALAL_CHECK_FAILED.add(sym)
+        return False, f"Verification error: {e}"
+
 # Technical analysis functions (ema, rsi, macd, atr, calc_metrics, safe_scale,
 # walk_forward_split, get_score, prepare_sequences) imported from app.services.technical
 
@@ -310,6 +384,10 @@ def analyze(symbol, df):
         return None
 
 def _analyze_one(symbol):
+    # Halal gate — skip stocks that fail AAOIFI verification
+    is_halal, reason = verify_halal(symbol)
+    if not is_halal:
+        return None
     df = fetch_yf(symbol)
     if df is None: return None
     return analyze(symbol, df)
@@ -792,6 +870,14 @@ def _vote_signal(sig_str):
 
 def run_consensus(symbol, horizon=5, episodes=10):
     try:
+        # --- Halal verification gate (MUST pass before any analysis) ---
+        is_halal, halal_reason = verify_halal(symbol)
+        if not is_halal:
+            logger.info(f"Consensus blocked for {symbol}: {halal_reason}")
+            return [{"Symbol": symbol.upper(), "Verdict": "BLOCKED",
+                     "Error": f"Not halal-verified: {halal_reason}",
+                     "Action": "DO NOT TRADE"}]
+
         votes_buy  = 0
         votes_sell = 0
         votes_hold = 0
@@ -1636,6 +1722,37 @@ async def halal_status(symbol: str = "AAPL"):
         "Screens Passed": f"{result.get('screens_passed', 0)}/4",
         "Threshold": "Debt<33%, Interest<5%, No Haram Sector, Liquidity<33%",
     }]
+
+@app.get("/halal_verify/{symbol}")
+async def halal_verify(symbol: str):
+    """Quick halal verification gate check for any symbol.
+
+    Returns whether the stock is allowed for trading.
+    Uses the 3-layer defense: sector exclusion → FMP AAOIFI → fail-closed.
+    """
+    s = validate_symbol(symbol)
+    is_halal, reason = verify_halal(s)
+    return [{
+        "Symbol": s,
+        "Allowed": is_halal,
+        "Status": "HALAL - OK TO TRADE" if is_halal else "BLOCKED",
+        "Reason": reason,
+        "Gate": "verify_halal()",
+    }]
+
+
+@app.get("/halal_blocked")
+async def halal_blocked():
+    """List all stocks currently blocked by the halal verification gate."""
+    blocked = []
+    for sym in sorted(_VERIFIED_HARAM):
+        blocked.append({"Symbol": sym, "Reason": "Verified haram (AAOIFI)"})
+    for sym in sorted(_HALAL_CHECK_FAILED):
+        blocked.append({"Symbol": sym, "Reason": "No financial data — blocked for safety"})
+    for sym in sorted(_HARAM_EXCLUDE):
+        blocked.append({"Symbol": sym, "Reason": "Sector exclusion (banks/insurance/alcohol/etc)"})
+    return blocked if blocked else [{"Message": "No stocks blocked yet (gate runs on first access)"}]
+
 
 @app.get("/screening_report")
 async def screening_report():

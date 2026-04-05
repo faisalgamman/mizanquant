@@ -143,6 +143,20 @@ def execute_buy(
             result["reason"] = "Auto-trading is disabled (AUTO_TRADE_ENABLED=false)"
             return result
 
+        # Halal verification gate — MUST pass before buying
+        try:
+            from halal_screener import verify_halal
+            is_halal, halal_reason = verify_halal(symbol)
+            if not is_halal:
+                result["reason"] = f"BLOCKED — not halal: {halal_reason}"
+                logger.warning(f"Trade blocked for {symbol}: {halal_reason}")
+                _notify_trade(result)
+                return result
+        except ImportError:
+            logger.warning(f"Halal verification unavailable for {symbol} — blocking trade")
+            result["reason"] = "Halal verification unavailable — trade blocked for safety"
+            return result
+
         # Get live account + positions
         account = alpaca_get_account()
         if not account:
