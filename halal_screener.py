@@ -1318,10 +1318,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
         except Exception:
             pass  # non-critical
 
-        # Telegram alert: chart for STRONG signals, text breakdown for ALL
+        # Telegram alert: chart + breakdown for STRONG BUY only
         try:
-            if "STRONG" in verdict:
-                # Chart + tool breakdown for STRONG signals
+            if verdict == "STRONG BUY":
                 alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=verdict,
                     confidence=confidence, price=round(price, 2),
@@ -1329,8 +1328,6 @@ def run_consensus(symbol, horizon=5, episodes=10):
                     votes_buy=votes_buy, votes_sell=votes_sell,
                     votes_hold=votes_hold, df=df,
                 )
-            # Send full 14-tool breakdown for ALL verdicts (not just STRONG)
-            if verdict != "NEUTRAL":
                 _send_consensus_breakdown(
                     symbol=symbol.upper(), verdict=verdict,
                     confidence=confidence, price=round(price, 2),
@@ -1545,9 +1542,16 @@ def run_consensus_momentum(symbol, horizon=5):
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
         }]
 
-        # Send breakdown to Telegram
-        if verdict != "NEUTRAL":
+        # Telegram: chart + breakdown for STRONG BUY only
+        if verdict == "STRONG BUY":
             try:
+                alert_signal_with_chart(
+                    symbol=symbol.upper(), verdict=f"[A] Momentum: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, df=df,
+                )
                 _send_consensus_breakdown(
                     symbol=symbol.upper(), verdict=f"[A] Momentum: {verdict}",
                     confidence=confidence, price=round(price, 2),
@@ -1747,8 +1751,15 @@ def run_consensus_reversion(symbol, horizon=3):
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
         }]
 
-        if verdict != "NEUTRAL":
+        if verdict == "STRONG BUY":
             try:
+                alert_signal_with_chart(
+                    symbol=symbol.upper(), verdict=f"[B] Reversion: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, df=df,
+                )
                 _send_consensus_breakdown(
                     symbol=symbol.upper(), verdict=f"[B] Reversion: {verdict}",
                     confidence=confidence, price=round(price, 2),
@@ -1948,8 +1959,15 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
         }]
 
-        if verdict != "NEUTRAL":
+        if verdict == "STRONG BUY":
             try:
+                alert_signal_with_chart(
+                    symbol=symbol.upper(), verdict=f"[C] AI: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, df=df,
+                )
                 _send_consensus_breakdown(
                     symbol=symbol.upper(), verdict=f"[C] AI: {verdict}",
                     confidence=confidence, price=round(price, 2),
