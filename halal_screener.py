@@ -2687,7 +2687,7 @@ async def portfolio_summary():
     has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
     if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = None if settings.ALPACA_API_KEY else "A"
+    sid = "A" if settings.ALPACA_API_KEY_A else None
     account = alpaca_get_account(strategy_id=sid)
     if not account:
         return [{"Error": "Could not connect to Alpaca"}]
@@ -2713,7 +2713,7 @@ async def portfolio_positions():
     has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
     if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = None if settings.ALPACA_API_KEY else "A"
+    sid = "A" if settings.ALPACA_API_KEY_A else None
     positions = alpaca_get_positions(strategy_id=sid)
     if not positions:
         return [{"Message": "No open positions"}]
@@ -2739,7 +2739,7 @@ async def portfolio_orders(status: str = "all", limit: int = 20):
     has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
     if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = None if settings.ALPACA_API_KEY else "A"
+    sid = "A" if settings.ALPACA_API_KEY_A else None
     orders = alpaca_get_orders(status=status, limit=limit, strategy_id=sid)
     if not orders:
         return [{"Message": "No orders found"}]
@@ -2751,7 +2751,7 @@ async def portfolio_history(period: str = "1M"):
     has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
     if not has_key:
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = None if settings.ALPACA_API_KEY else "A"
+    sid = "A" if settings.ALPACA_API_KEY_A else None
     valid_periods = ["1D", "1W", "1M", "3M", "1A", "all"]
     if period not in valid_periods:
         return [{"Error": f"Invalid period. Use one of: {valid_periods}"}]
