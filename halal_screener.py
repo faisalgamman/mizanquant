@@ -1104,16 +1104,18 @@ def run_consensus(symbol, horizon=5, episodes=10):
         # --- 10. LSTM Neural Network ---
         try:
             lstm_r = run_lstm(symbol, horizon, df=df)
-            if lstm_r and len(lstm_r) > 0 and "Forecast" in lstm_r[0]:
-                forecast = float(lstm_r[0]["Forecast"])
-                pct_chg = (forecast - price) / price * 100
+            if lstm_r and len(lstm_r) > 1:
+                # Forecasts are in items [1:] with "Predicted Price" and "Change %"
+                last_forecast = lstm_r[-1]  # last day forecast
+                pct_chg = float(last_forecast.get("Change %", 0))
+                forecast_price = float(last_forecast.get("Predicted Price", price))
                 if pct_chg > 2:
                     votes_buy += 1; vote = "BUY"
                 elif pct_chg < -2:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"Forecast ${forecast:.2f} ({pct_chg:+.1f}%)"
+                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
                 details.append({"Tool": "LSTM", "Signal": sig, "Vote": vote, "Score": round(pct_chg, 1)})
             else:
                 votes_hold += 1
@@ -1124,16 +1126,17 @@ def run_consensus(symbol, horizon=5, episodes=10):
         # --- 11. Transformer Attention Network ---
         try:
             tf_r = run_transformer(symbol, horizon, df=df)
-            if tf_r and len(tf_r) > 0 and "Forecast" in tf_r[0]:
-                forecast = float(tf_r[0]["Forecast"])
-                pct_chg = (forecast - price) / price * 100
+            if tf_r and len(tf_r) > 1:
+                last_forecast = tf_r[-1]
+                pct_chg = float(last_forecast.get("Change %", 0))
+                forecast_price = float(last_forecast.get("Predicted Price", price))
                 if pct_chg > 2:
                     votes_buy += 1; vote = "BUY"
                 elif pct_chg < -2:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"Forecast ${forecast:.2f} ({pct_chg:+.1f}%)"
+                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
                 details.append({"Tool": "Transformer", "Signal": sig, "Vote": vote, "Score": round(pct_chg, 1)})
             else:
                 votes_hold += 1
@@ -1144,16 +1147,17 @@ def run_consensus(symbol, horizon=5, episodes=10):
         # --- 12. Stacking Ensemble (XGB + RF + GBM → Ridge) ---
         try:
             ens_r = run_ensemble(symbol, horizon, df=df)
-            if ens_r and len(ens_r) > 0 and "Forecast" in ens_r[0]:
-                forecast = float(ens_r[0]["Forecast"])
-                pct_chg = (forecast - price) / price * 100
+            if ens_r and len(ens_r) > 1:
+                last_forecast = ens_r[-1]
+                pct_chg = float(last_forecast.get("Change %", 0))
+                forecast_price = float(last_forecast.get("Predicted Price", price))
                 if pct_chg > 2:
                     votes_buy += 1; vote = "BUY"
                 elif pct_chg < -2:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"Forecast ${forecast:.2f} ({pct_chg:+.1f}%)"
+                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
                 details.append({"Tool": "Ensemble", "Signal": sig, "Vote": vote, "Score": round(pct_chg, 1)})
             else:
                 votes_hold += 1
@@ -1164,16 +1168,19 @@ def run_consensus(symbol, horizon=5, episodes=10):
         # --- 13. Double DQN Reinforcement Learning ---
         try:
             dqn_r = run_dqn(symbol, episodes, df=df)
-            if dqn_r and len(dqn_r) > 0 and "Action" in dqn_r[0]:
-                action = dqn_r[0]["Action"]
-                if action == "BUY":
+            if dqn_r and len(dqn_r) > 0:
+                # DQN returns [summary_dict, ...] with "Action" key
+                summary_item = dqn_r[0]
+                action = summary_item.get("Action", summary_item.get("Recommendation", ""))
+                reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
+                if "BUY" in str(action).upper():
                     votes_buy += 1; vote = "BUY"
-                elif action == "SELL":
+                elif "SELL" in str(action).upper():
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"{action} (reward={dqn_r[0].get('Total Reward', 0):.1f})"
-                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote, "Score": dqn_r[0].get("Total Reward", 0)})
+                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
+                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote, "Score": round(float(reward), 1) if isinstance(reward, (int, float)) else 0})
             else:
                 votes_hold += 1
                 details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD", "Score": 0})
@@ -1183,16 +1190,18 @@ def run_consensus(symbol, horizon=5, episodes=10):
         # --- 14. Policy Gradient (REINFORCE) ---
         try:
             pg_r = run_policy_gradient(symbol, episodes, df=df)
-            if pg_r and len(pg_r) > 0 and "Action" in pg_r[0]:
-                action = pg_r[0]["Action"]
-                if action == "BUY":
+            if pg_r and len(pg_r) > 0:
+                summary_item = pg_r[0]
+                action = summary_item.get("Action", summary_item.get("Recommendation", ""))
+                reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
+                if "BUY" in str(action).upper():
                     votes_buy += 1; vote = "BUY"
-                elif action == "SELL":
+                elif "SELL" in str(action).upper():
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"{action} (reward={pg_r[0].get('Total Reward', 0):.1f})"
-                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote, "Score": pg_r[0].get("Total Reward", 0)})
+                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
+                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote, "Score": round(float(reward), 1) if isinstance(reward, (int, float)) else 0})
             else:
                 votes_hold += 1
                 details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD", "Score": 0})
