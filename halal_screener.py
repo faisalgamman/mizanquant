@@ -1013,7 +1013,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             prob = float(result["summary"]["prob_profit"])
             exp_price = float(result["summary"]["expected_terminal_price"])
             chg = (exp_price - price) / price * 100
-            if prob >= 0.65: votes_buy += 1; vote = "BUY"
+            if prob >= 0.60: votes_buy += 1; vote = "BUY"
             elif prob <= 0.45: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob*100:.1f}% Exp {chg:+.1f}%", "Vote": vote, "Score": round(prob*100, 1)})
@@ -1099,8 +1099,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             latest = features.iloc[-1:].values
             prob_up = float(model.predict_proba(latest)[0][1])
             accuracy = float((model.predict(X_test.values) == y_test.values).mean() * 100)
-            if prob_up > 0.65: votes_buy += 1; vote = "BUY"
-            elif prob_up < 0.35: votes_sell += 1; vote = "SELL"
+            if prob_up > 0.6: votes_buy += 1; vote = "BUY"
+            elif prob_up < 0.4: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
             details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote, "Score": round(prob_up * 100, 1)})
@@ -1167,9 +1167,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 last_forecast = lstm_r[-1]  # last day forecast
                 pct_chg = float(last_forecast.get("Change %", 0))
                 forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 3:
+                if pct_chg > 2:
                     votes_buy += 1; vote = "BUY"
-                elif pct_chg < -3:
+                elif pct_chg < -2:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
@@ -1188,9 +1188,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 last_forecast = tf_r[-1]
                 pct_chg = float(last_forecast.get("Change %", 0))
                 forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 3:
+                if pct_chg > 2:
                     votes_buy += 1; vote = "BUY"
-                elif pct_chg < -3:
+                elif pct_chg < -2:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
@@ -1209,9 +1209,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 last_forecast = ens_r[-1]
                 pct_chg = float(last_forecast.get("Change %", 0))
                 forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 3:
+                if pct_chg > 2:
                     votes_buy += 1; vote = "BUY"
-                elif pct_chg < -3:
+                elif pct_chg < -2:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
@@ -1272,21 +1272,13 @@ def run_consensus(symbol, horizon=5, episodes=10):
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
         # Verdict thresholds (14 tools, EMA gives 2x for strong trends → max ~16 votes)
-        # STRONG requires 11+ votes AND at least 3-vote margin over opposition
-        if votes_buy >= 11 and votes_buy >= votes_sell + 3:
-            verdict, action_str = "STRONG BUY", "STRONG ENTER"
-        elif votes_buy > votes_sell and confidence >= 60:
-            verdict, action_str = "BUY", "ENTER"
-        elif votes_buy > votes_sell and confidence >= 40:
-            verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 11 and votes_sell >= votes_buy + 3:
-            verdict, action_str = "STRONG SELL", "STRONG AVOID"
-        elif votes_sell > votes_buy and confidence >= 60:
-            verdict, action_str = "SELL", "AVOID"
-        elif votes_sell > votes_buy:
-            verdict, action_str = "WEAK SELL", "WEAK SELL"
-        else:
-            verdict, action_str = "NEUTRAL", "WAIT"
+        if votes_buy >= 10:        verdict, action_str = "STRONG BUY", "STRONG ENTER"
+        elif votes_buy > votes_sell and confidence >= 60: verdict, action_str = "BUY", "ENTER"
+        elif votes_buy > votes_sell and confidence >= 40: verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
+        elif votes_sell >= 10:     verdict, action_str = "STRONG SELL", "STRONG AVOID"
+        elif votes_sell > votes_buy and confidence >= 60: verdict, action_str = "SELL", "AVOID"
+        elif votes_sell > votes_buy:                      verdict, action_str = "WEAK SELL", "WEAK SELL"
+        else:                      verdict, action_str = "NEUTRAL", "WAIT"
 
         sl  = round(price - 1.5 * atr_val, 2)
         tp1 = round(price + 1.5 * atr_val, 2)
