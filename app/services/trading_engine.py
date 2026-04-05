@@ -171,6 +171,10 @@ def execute_buy(
         qty = sizing["qty"]
 
         # Submit bracket order (market entry + stop-loss + take-profit)
+        # Use trailing stop if enabled — locks in gains as price rises
+        use_trailing = settings.TRAILING_STOP_ENABLED
+        trail_pct = settings.TRAILING_STOP_PCT
+
         order_payload = {
             "symbol": symbol,
             "qty": str(qty),
@@ -178,13 +182,22 @@ def execute_buy(
             "type": "market",
             "time_in_force": "day",
             "order_class": "bracket",
-            "stop_loss": {
-                "stop_price": str(round(stop_loss, 2)),
-            },
             "take_profit": {
                 "limit_price": str(round(take_profit, 2)),
             },
         }
+
+        if use_trailing:
+            # Trailing stop: follows price up, triggers when price drops trail_pct% from peak
+            order_payload["stop_loss"] = {
+                "stop_price": str(round(stop_loss, 2)),  # initial floor
+                "trail_percent": str(round(trail_pct, 1)),
+            }
+        else:
+            # Static stop-loss at fixed price
+            order_payload["stop_loss"] = {
+                "stop_price": str(round(stop_loss, 2)),
+            }
 
         order = _submit_order(order_payload)
         if not order:
@@ -383,13 +396,15 @@ def _notify_trade(trade_result: dict):
 
         if executed:
             if action == "BUY":
+                sl_type = "Trailing Stop" if settings.TRAILING_STOP_ENABLED else "Stop Loss"
+                trail_info = f" (trail {settings.TRAILING_STOP_PCT}%)" if settings.TRAILING_STOP_ENABLED else ""
                 msg = (
                     f"AUTO TRADE - BUY\n\n"
                     f"Symbol: {symbol}\n"
                     f"Qty: {trade_result.get('qty', 0)} shares\n"
                     f"Price: ${trade_result.get('entry_price', 0):.2f}\n"
                     f"Value: ${trade_result.get('position_value', 0):.2f}\n"
-                    f"Stop Loss: ${trade_result.get('stop_loss', 0):.2f}\n"
+                    f"{sl_type}: ${trade_result.get('stop_loss', 0):.2f}{trail_info}\n"
                     f"Take Profit: ${trade_result.get('take_profit', 0):.2f}\n"
                     f"Risk: ${trade_result.get('risk_amount', 0):.2f} ({trade_result.get('risk_pct', 0):.1f}%)\n"
                     f"Confidence: {trade_result.get('confidence', 0)}%\n"

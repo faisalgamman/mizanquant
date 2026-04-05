@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     MAX_OPEN_POSITIONS: int = 6      # max concurrent positions
     DAILY_LOSS_LIMIT_PCT: float = 3.0  # stop trading if daily loss exceeds this %
     MIN_TRADE_CONFIDENCE: float = 65.0  # minimum consensus confidence to trade
+    TRAILING_STOP_ENABLED: bool = True   # use trailing stops instead of static SL
+    TRAILING_STOP_PCT: float = 2.5       # trailing stop distance (% from peak)
 
     model_config = {
         "env_file": ".env",
