@@ -228,10 +228,10 @@ def cache_set(k, v):
     _cache[k] = v
     _cache_ts[k] = time.time()
 
-# Model cache: stores trained models with SHORT TTL to prevent OOM
-# Railway free tier has ~512MB RAM — can't hold many models
-MODEL_CACHE_TTL = min(settings.MODEL_CACHE_TTL, 300)  # cap at 5 min on small containers
-MODEL_CACHE_MAX = 5  # max models in cache at once
+# Model cache: stores trained models with TTL
+# 8GB RAM tier — can hold more models for faster consensus
+MODEL_CACHE_TTL = min(settings.MODEL_CACHE_TTL, 1800)  # 30 min cache
+MODEL_CACHE_MAX = 20  # more models in cache for faster repeat consensus
 _model_cache = {}
 _model_cache_ts = {}
 
@@ -1092,16 +1092,116 @@ def run_consensus(symbol, horizon=5, episodes=10):
         except Exception:
             details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
+        # === ML MODELS (re-enabled with 8GB RAM tier) ===
+
+        # --- 10. LSTM Neural Network ---
+        try:
+            lstm_r = run_lstm(symbol, horizon, df=df)
+            if lstm_r and len(lstm_r) > 0 and "Forecast" in lstm_r[0]:
+                forecast = float(lstm_r[0]["Forecast"])
+                pct_chg = (forecast - price) / price * 100
+                if pct_chg > 2:
+                    votes_buy += 1; vote = "BUY"
+                elif pct_chg < -2:
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"Forecast ${forecast:.2f} ({pct_chg:+.1f}%)"
+                details.append({"Tool": "LSTM", "Signal": sig, "Vote": vote, "Score": round(pct_chg, 1)})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
+        except Exception:
+            details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 11. Transformer Attention Network ---
+        try:
+            tf_r = run_transformer(symbol, horizon, df=df)
+            if tf_r and len(tf_r) > 0 and "Forecast" in tf_r[0]:
+                forecast = float(tf_r[0]["Forecast"])
+                pct_chg = (forecast - price) / price * 100
+                if pct_chg > 2:
+                    votes_buy += 1; vote = "BUY"
+                elif pct_chg < -2:
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"Forecast ${forecast:.2f} ({pct_chg:+.1f}%)"
+                details.append({"Tool": "Transformer", "Signal": sig, "Vote": vote, "Score": round(pct_chg, 1)})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
+        except Exception:
+            details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 12. Stacking Ensemble (XGB + RF + GBM → Ridge) ---
+        try:
+            ens_r = run_ensemble(symbol, horizon, df=df)
+            if ens_r and len(ens_r) > 0 and "Forecast" in ens_r[0]:
+                forecast = float(ens_r[0]["Forecast"])
+                pct_chg = (forecast - price) / price * 100
+                if pct_chg > 2:
+                    votes_buy += 1; vote = "BUY"
+                elif pct_chg < -2:
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"Forecast ${forecast:.2f} ({pct_chg:+.1f}%)"
+                details.append({"Tool": "Ensemble", "Signal": sig, "Vote": vote, "Score": round(pct_chg, 1)})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
+        except Exception:
+            details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 13. Double DQN Reinforcement Learning ---
+        try:
+            dqn_r = run_dqn(symbol, episodes, df=df)
+            if dqn_r and len(dqn_r) > 0 and "Action" in dqn_r[0]:
+                action = dqn_r[0]["Action"]
+                if action == "BUY":
+                    votes_buy += 1; vote = "BUY"
+                elif action == "SELL":
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"{action} (reward={dqn_r[0].get('Total Reward', 0):.1f})"
+                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote, "Score": dqn_r[0].get("Total Reward", 0)})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD", "Score": 0})
+        except Exception:
+            details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
+        # --- 14. Policy Gradient (REINFORCE) ---
+        try:
+            pg_r = run_policy_gradient(symbol, episodes, df=df)
+            if pg_r and len(pg_r) > 0 and "Action" in pg_r[0]:
+                action = pg_r[0]["Action"]
+                if action == "BUY":
+                    votes_buy += 1; vote = "BUY"
+                elif action == "SELL":
+                    votes_sell += 1; vote = "SELL"
+                else:
+                    votes_hold += 1; vote = "HOLD"
+                sig = f"{action} (reward={pg_r[0].get('Total Reward', 0):.1f})"
+                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote, "Score": pg_r[0].get("Total Reward", 0)})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD", "Score": 0})
+        except Exception:
+            details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-", "Score": 0})
+
         # --- Final Verdict ---
         total = votes_buy + votes_sell + votes_hold
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # Verdict thresholds (9 tools, some give 2x votes for strong trends)
-        if votes_buy >= 7:         verdict, action_str = "STRONG BUY", "STRONG ENTER"
+        # Verdict thresholds (14 tools, EMA gives 2x for strong trends → max ~16 votes)
+        if votes_buy >= 10:        verdict, action_str = "STRONG BUY", "STRONG ENTER"
         elif votes_buy > votes_sell and confidence >= 60: verdict, action_str = "BUY", "ENTER"
         elif votes_buy > votes_sell and confidence >= 40: verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 7:      verdict, action_str = "STRONG SELL", "STRONG AVOID"
+        elif votes_sell >= 10:     verdict, action_str = "STRONG SELL", "STRONG AVOID"
         elif votes_sell > votes_buy and confidence >= 60: verdict, action_str = "SELL", "AVOID"
         elif votes_sell > votes_buy:                      verdict, action_str = "WEAK SELL", "WEAK SELL"
         else:                      verdict, action_str = "NEUTRAL", "WAIT"
@@ -2204,6 +2304,8 @@ async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False}
     try:
         from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
+        from openbb_forecast.models.lstm import LSTMForecaster
+        import torch
         checks["openbb_forecast"] = True
     except Exception:
         pass

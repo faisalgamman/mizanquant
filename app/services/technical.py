@@ -55,6 +55,19 @@ def macd(s):
     return m, ema(m, 9), m - ema(m, 9)
 
 
+def sma(s, n):
+    """Simple Moving Average.
+
+    Args:
+        s: pandas Series of prices.
+        n: window size (number of periods).
+
+    Returns:
+        pandas Series with the SMA values.
+    """
+    return s.rolling(window=n, min_periods=n).mean()
+
+
 def atr(df, n=14):
     """Average True Range.
 
@@ -70,6 +83,139 @@ def atr(df, n=14):
         [h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1
     ).max(axis=1)
     return tr.ewm(alpha=1 / n, min_periods=n).mean()
+
+
+def adx(df, n=14):
+    """Average Directional Index (properly smoothed).
+
+    Measures trend strength regardless of direction.
+    ADX > 25 = strong trend, ADX < 20 = weak/no trend.
+
+    Args:
+        df: DataFrame with columns 'high', 'low', 'close'.
+        n: smoothing period (default 14).
+
+    Returns:
+        Tuple of (adx_series, plus_di_series, minus_di_series) as pandas Series.
+    """
+    high, low, close = df["high"], df["low"], df["close"]
+
+    # Directional movement
+    up_move = high.diff()
+    down_move = -low.diff()
+
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0),
+                        index=high.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0),
+                         index=high.index)
+
+    # True Range
+    tr = pd.concat([high - low, (high - close.shift()).abs(),
+                    (low - close.shift()).abs()], axis=1).max(axis=1)
+
+    # Wilder's smoothing (EMA with alpha=1/n)
+    atr_smooth = tr.ewm(alpha=1/n, min_periods=n).mean()
+    plus_dm_smooth = plus_dm.ewm(alpha=1/n, min_periods=n).mean()
+    minus_dm_smooth = minus_dm.ewm(alpha=1/n, min_periods=n).mean()
+
+    # Directional indicators
+    plus_di = (plus_dm_smooth / atr_smooth) * 100
+    minus_di = (minus_dm_smooth / atr_smooth) * 100
+
+    # DX and ADX
+    di_sum = plus_di + minus_di
+    di_sum = di_sum.replace(0, 1e-9)  # avoid division by zero
+    dx = (abs(plus_di - minus_di) / di_sum) * 100
+    adx_val = dx.ewm(alpha=1/n, min_periods=n).mean()
+
+    return adx_val, plus_di, minus_di
+
+
+def roc(s, n=10):
+    """Rate of Change (percentage).
+
+    Measures the percentage change over n periods.
+
+    Args:
+        s: pandas Series of prices.
+        n: lookback period (default 10).
+
+    Returns:
+        pandas Series with ROC values in percent.
+    """
+    return (s / s.shift(n) - 1) * 100
+
+
+def bollinger_bands(s, n=20, k=2):
+    """Bollinger Bands.
+
+    Args:
+        s: pandas Series of prices.
+        n: SMA period (default 20).
+        k: number of standard deviations (default 2).
+
+    Returns:
+        Tuple of (upper_band, middle_band, lower_band, bandwidth_pct) as pandas Series.
+    """
+    middle = s.rolling(n).mean()
+    std = s.rolling(n).std()
+    upper = middle + k * std
+    lower = middle - k * std
+    bandwidth = ((upper - lower) / middle) * 100
+    return upper, middle, lower, bandwidth
+
+
+def stochastic(df, k_period=14, d_period=3):
+    """Stochastic Oscillator (%K and %D).
+
+    Compares closing price to the high-low range over k_period.
+    %K > 80 = overbought, %K < 20 = oversold.
+
+    Args:
+        df: DataFrame with columns 'high', 'low', 'close'.
+        k_period: lookback for %K (default 14).
+        d_period: smoothing for %D (default 3).
+
+    Returns:
+        Tuple of (percent_k, percent_d) as pandas Series.
+    """
+    low_min = df["low"].rolling(k_period).min()
+    high_max = df["high"].rolling(k_period).max()
+    denom = high_max - low_min
+    denom = denom.replace(0, 1e-9)
+    percent_k = ((df["close"] - low_min) / denom) * 100
+    percent_d = percent_k.rolling(d_period).mean()
+    return percent_k, percent_d
+
+
+def obv(df):
+    """On-Balance Volume.
+
+    Cumulative volume indicator — adds volume on up days, subtracts on down days.
+
+    Args:
+        df: DataFrame with columns 'close' and 'volume'.
+
+    Returns:
+        pandas Series with OBV values.
+    """
+    direction = np.sign(df["close"].diff())
+    return (df["volume"] * direction).cumsum()
+
+
+def vwap(df):
+    """Volume Weighted Average Price (intraday approximation).
+
+    Args:
+        df: DataFrame with columns 'high', 'low', 'close', 'volume'.
+
+    Returns:
+        pandas Series with VWAP values.
+    """
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3
+    cum_tp_vol = (typical_price * df["volume"]).cumsum()
+    cum_vol = df["volume"].cumsum()
+    return cum_tp_vol / cum_vol
 
 
 # ---------------------------------------------------------------------------

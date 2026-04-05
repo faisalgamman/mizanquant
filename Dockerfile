@@ -2,17 +2,27 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Limit threads to prevent memory bloat on small containers
-ENV OMP_NUM_THREADS=1
-ENV MKL_NUM_THREADS=1
-ENV OPENBLAS_NUM_THREADS=1
-ENV MALLOC_TRIM_THRESHOLD_=65536
+# 8GB RAM tier — allow more threads for ML models
+ENV OMP_NUM_THREADS=4
+ENV MKL_NUM_THREADS=4
+ENV OPENBLAS_NUM_THREADS=4
+ENV MALLOC_TRIM_THRESHOLD_=131072
 ENV PYTHONUNBUFFERED=1
-# Reduce matplotlib memory: use Agg backend, no font cache rebuild
+# Matplotlib non-interactive backend
 ENV MPLBACKEND=Agg
 ENV MPLCONFIGDIR=/tmp/matplotlib
 
-RUN pip install --no-cache-dir fastapi uvicorn yfinance pandas numpy xgboost scikit-learn requests httpx pydantic-settings python-dotenv poetry-core sqlalchemy psycopg2-binary matplotlib
+# Install PyTorch CPU-only (no CUDA = ~200MB instead of 2GB)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install all other dependencies
+RUN pip install --no-cache-dir \
+    fastapi uvicorn yfinance pandas numpy \
+    xgboost scikit-learn \
+    requests httpx \
+    pydantic-settings python-dotenv poetry-core \
+    sqlalchemy psycopg2-binary \
+    matplotlib
 
 COPY . .
 
