@@ -154,7 +154,7 @@ _SP500_ALL = [
     "KR","KVUE","LDOS","LEN","LH","LII","LIN","LITE","LLY","LNT","LOW",
     "LRCX","LULU","LUV","LYB","MA","MAA","MAR","MAS","MCD","MCHP","MCK",
     "MCO","MDLZ","MDT","META","MKC","MLM","MMM","MNST","MOS","MPC","MPWR",
-    "MRK","MRNA","MRSH","MSI","MTD","MU","NEM","NEE","NI","NKE","NOW",
+    "MRK","MRNA","MRSH","MSFT","MSI","MTD","MU","NEM","NEE","NI","NKE","NOW",
     "NRG","NSC","NTAP","NTRS","NUE","NVDA","NVR","NWS","NWSA","NXPI","O",
     "ODFL","OKE","OMC","ON","ORCL","ORLY","OTIS","OXY","PANW","PAYX","PCAR",
     "PCG","PEG","PEP","PFE","PG","PH","PHM","PKG","PLD","PLTR","POOL",
