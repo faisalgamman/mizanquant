@@ -865,6 +865,64 @@ def run_usx_screener(min_score=7, direction="Long Only"):
         return [{"Error": str(e)}]
 
 
+def _send_consensus_breakdown(symbol, verdict, confidence, price,
+                              votes_buy, votes_sell, votes_hold,
+                              sl, tp1, tp2, tp3, details):
+    """Send full 14-tool consensus breakdown to Telegram."""
+    from app.services.telegram_alert import send_message as tg_send, _is_duplicate_signal
+
+    # Skip if already sent this symbol recently
+    dedup_key = f"breakdown_{symbol}"
+    if _is_duplicate_signal(symbol, f"breakdown_{verdict}"):
+        return
+
+    # Verdict icon
+    icons = {
+        "STRONG BUY": "[STRONG BUY]", "BUY": "[BUY]",
+        "WEAK BUY": "[WEAK BUY]", "STRONG SELL": "[STRONG SELL]",
+        "SELL": "[SELL]", "WEAK SELL": "[WEAK SELL]",
+    }
+    icon = icons.get(verdict, "[--]")
+
+    # Header
+    lines = [
+        f"{icon} AI CONSENSUS: {symbol}",
+        f"Verdict: {verdict} | Confidence: {confidence:.0f}%",
+        f"Price: ${price:.2f}",
+        f"Votes: BUY {votes_buy} | SELL {votes_sell} | HOLD {votes_hold}",
+        f"",
+        f"--- 14-TOOL BREAKDOWN ---",
+    ]
+
+    # Tool details
+    for d in details:
+        tool = d.get("Tool", "?")
+        signal = d.get("Signal", "?")
+        vote = d.get("Vote", "?")
+        # Vote emoji
+        if vote == "BUY":
+            v_icon = "+"
+        elif vote == "SELL":
+            v_icon = "-"
+        elif vote == "-":
+            v_icon = "X"
+        else:
+            v_icon = "="
+        lines.append(f"  [{v_icon}] {tool}: {signal}")
+
+    # Levels
+    lines.append(f"")
+    lines.append(f"Entry: ${price:.2f}")
+    lines.append(f"SL: ${sl:.2f} | TP1: ${tp1:.2f}")
+    lines.append(f"TP2: ${tp2:.2f} | TP3: ${tp3:.2f}")
+
+    from datetime import datetime
+    lines.append(f"")
+    lines.append(f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
+
+    tg_send("\n".join(lines))
+
+
 def _vote_signal(sig_str):
     """Helper: convert signal string to (vote_str, buy_delta, sell_delta, hold_delta)."""
     if "STRONG BUY" in sig_str:
@@ -955,7 +1013,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             prob = float(result["summary"]["prob_profit"])
             exp_price = float(result["summary"]["expected_terminal_price"])
             chg = (exp_price - price) / price * 100
-            if prob >= 0.60: votes_buy += 1; vote = "BUY"
+            if prob >= 0.65: votes_buy += 1; vote = "BUY"
             elif prob <= 0.45: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob*100:.1f}% Exp {chg:+.1f}%", "Vote": vote, "Score": round(prob*100, 1)})
@@ -1041,8 +1099,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             latest = features.iloc[-1:].values
             prob_up = float(model.predict_proba(latest)[0][1])
             accuracy = float((model.predict(X_test.values) == y_test.values).mean() * 100)
-            if prob_up > 0.6: votes_buy += 1; vote = "BUY"
-            elif prob_up < 0.4: votes_sell += 1; vote = "SELL"
+            if prob_up > 0.65: votes_buy += 1; vote = "BUY"
+            elif prob_up < 0.35: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
             details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote, "Score": round(prob_up * 100, 1)})
@@ -1109,9 +1167,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 last_forecast = lstm_r[-1]  # last day forecast
                 pct_chg = float(last_forecast.get("Change %", 0))
                 forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 2:
+                if pct_chg > 3:
                     votes_buy += 1; vote = "BUY"
-                elif pct_chg < -2:
+                elif pct_chg < -3:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
@@ -1130,9 +1188,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 last_forecast = tf_r[-1]
                 pct_chg = float(last_forecast.get("Change %", 0))
                 forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 2:
+                if pct_chg > 3:
                     votes_buy += 1; vote = "BUY"
-                elif pct_chg < -2:
+                elif pct_chg < -3:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
@@ -1151,9 +1209,9 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 last_forecast = ens_r[-1]
                 pct_chg = float(last_forecast.get("Change %", 0))
                 forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 2:
+                if pct_chg > 3:
                     votes_buy += 1; vote = "BUY"
-                elif pct_chg < -2:
+                elif pct_chg < -3:
                     votes_sell += 1; vote = "SELL"
                 else:
                     votes_hold += 1; vote = "HOLD"
@@ -1214,13 +1272,21 @@ def run_consensus(symbol, horizon=5, episodes=10):
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
         # Verdict thresholds (14 tools, EMA gives 2x for strong trends → max ~16 votes)
-        if votes_buy >= 10:        verdict, action_str = "STRONG BUY", "STRONG ENTER"
-        elif votes_buy > votes_sell and confidence >= 60: verdict, action_str = "BUY", "ENTER"
-        elif votes_buy > votes_sell and confidence >= 40: verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 10:     verdict, action_str = "STRONG SELL", "STRONG AVOID"
-        elif votes_sell > votes_buy and confidence >= 60: verdict, action_str = "SELL", "AVOID"
-        elif votes_sell > votes_buy:                      verdict, action_str = "WEAK SELL", "WEAK SELL"
-        else:                      verdict, action_str = "NEUTRAL", "WAIT"
+        # STRONG requires 11+ votes AND at least 3-vote margin over opposition
+        if votes_buy >= 11 and votes_buy >= votes_sell + 3:
+            verdict, action_str = "STRONG BUY", "STRONG ENTER"
+        elif votes_buy > votes_sell and confidence >= 60:
+            verdict, action_str = "BUY", "ENTER"
+        elif votes_buy > votes_sell and confidence >= 40:
+            verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
+        elif votes_sell >= 11 and votes_sell >= votes_buy + 3:
+            verdict, action_str = "STRONG SELL", "STRONG AVOID"
+        elif votes_sell > votes_buy and confidence >= 60:
+            verdict, action_str = "SELL", "AVOID"
+        elif votes_sell > votes_buy:
+            verdict, action_str = "WEAK SELL", "WEAK SELL"
+        else:
+            verdict, action_str = "NEUTRAL", "WAIT"
 
         sl  = round(price - 1.5 * atr_val, 2)
         tp1 = round(price + 1.5 * atr_val, 2)
@@ -1260,15 +1326,25 @@ def run_consensus(symbol, horizon=5, episodes=10):
         except Exception:
             pass  # non-critical
 
-        # Telegram alert with chart for strong signals (Phase 4.1 + Chart)
+        # Telegram alert: chart for STRONG signals, text breakdown for ALL
         try:
             if "STRONG" in verdict:
+                # Chart + tool breakdown for STRONG signals
                 alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=verdict,
                     confidence=confidence, price=round(price, 2),
                     stop_loss=sl, tp1=tp1, tp2=tp2, tp3=tp3,
                     votes_buy=votes_buy, votes_sell=votes_sell,
                     votes_hold=votes_hold, df=df,
+                )
+            # Send full 14-tool breakdown for ALL verdicts (not just STRONG)
+            if verdict != "NEUTRAL":
+                _send_consensus_breakdown(
+                    symbol=symbol.upper(), verdict=verdict,
+                    confidence=confidence, price=round(price, 2),
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, sl=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+                    details=details,
                 )
         except Exception:
             pass  # non-critical
