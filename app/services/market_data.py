@@ -193,6 +193,106 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
         return None
 
 
+def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10):
+    """Fetch intraday bars from Alpaca Market Data API v2.
+
+    Supports: 1Min, 5Min, 15Min, 1Hour timeframes.
+    Free IEX tier provides intraday data for last 5+ years.
+
+    Args:
+        symbol: Stock ticker
+        timeframe: Bar size (1Min, 5Min, 15Min, 1Hour)
+        days_back: Number of calendar days to fetch (max ~30 for minute data)
+
+    Returns:
+        DataFrame with [date, open, high, low, close, volume] or None
+    """
+    symbol = _validate_symbol(symbol)
+    if not symbol:
+        return None
+
+    cache_key = f"{symbol}|intraday|{timeframe}|{days_back}"
+    cached = _data_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        from app.config import settings
+        if not settings.ALPACA_API_KEY or not settings.ALPACA_SECRET_KEY:
+            return None
+
+        import httpx
+        from datetime import datetime, timedelta
+
+        headers = {
+            "APCA-API-KEY-ID": settings.ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
+        }
+
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=days_back)
+
+        url = "https://data.alpaca.markets/v2/stocks/bars"
+        params = {
+            "symbols": symbol,
+            "timeframe": timeframe,
+            "start": start_dt.strftime("%Y-%m-%dT00:00:00Z"),
+            "end": end_dt.strftime("%Y-%m-%dT23:59:59Z"),
+            "limit": 10000,
+            "adjustment": "split",
+            "feed": "iex",
+        }
+
+        _alpaca_semaphore.acquire()
+        try:
+            _alpaca_rate_limit()
+            with httpx.Client(timeout=30) as client:
+                all_bars = []
+                next_page = None
+
+                while True:
+                    if next_page:
+                        params["page_token"] = next_page
+                    resp = client.get(url, headers=headers, params=params)
+
+                    if resp.status_code == 429:
+                        time.sleep(2)
+                        resp = client.get(url, headers=headers, params=params)
+                        if resp.status_code != 200:
+                            return None
+
+                    resp.raise_for_status()
+                    data = resp.json()
+                    bars = data.get("bars", {}).get(symbol, [])
+                    all_bars.extend(bars)
+
+                    next_page = data.get("next_page_token")
+                    if not next_page:
+                        break
+
+                if not all_bars:
+                    return None
+
+                df = pd.DataFrame(all_bars)
+                df = df.rename(columns={
+                    "t": "date", "o": "open", "h": "high",
+                    "l": "low", "c": "close", "v": "volume",
+                })
+                df["date"] = pd.to_datetime(df["date"])
+                df = df[["date", "open", "high", "low", "close", "volume"]].sort_values("date").reset_index(drop=True)
+
+                if len(df) > 0:
+                    _data_cache_set(cache_key, df)
+                    return df
+                return None
+        finally:
+            _alpaca_semaphore.release()
+
+    except Exception as e:
+        logger.error(f"Alpaca intraday {symbol}: {e}")
+        return None
+
+
 def fetch_yf(symbol, period="2y", start=None, end=None):
     """Fetch historical data from yfinance (fallback)."""
     symbol = _validate_symbol(symbol)

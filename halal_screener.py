@@ -7,7 +7,7 @@ import uvicorn
 
 # --- New modular imports (Phase 1 restructuring) ---
 from app.config import settings
-from app.services.market_data import fetch as fetch_market_data
+from app.services.market_data import fetch as fetch_market_data, fetch_alpaca_intraday
 from app.services.technical import (
     ema, rsi, macd, atr, calc_metrics,
     safe_scale, walk_forward_split, prepare_sequences, get_score,
@@ -162,7 +162,48 @@ _SP500_ALL = [
 
 HALAL_STOCKS = [s for s in _SP500_ALL if s not in _HARAM_EXCLUDE]
 
+# Survivorship bias mitigation: stocks removed from S&P 500 in 2023-2025
+# that were halal-compliant when removed. Including these in backtests
+# prevents inflating historical performance by only testing current winners.
+_SP500_DELISTED_HALAL = [
+    # Removed 2024-2025
+    "ATVI",  # Activision (acquired by MSFT)
+    "DISH",  # Dish Network (merged with EchoStar)
+    "FRC",   # First Republic (failed - but was in S&P)
+    "SIVB",  # SVB Financial (failed)
+    "LUMN",  # Lumen Technologies (removed)
+    "VFC",   # VF Corporation (removed)
+    "ALK",   # Alaska Air (removed)
+    "NCLH",  # Norwegian Cruise (moved to haram)
+    "SEE",   # Sealed Air (removed)
+    "NWL",   # Newell Brands (removed)
+    "OGN",   # Organon (removed)
+    "PARA",  # Paramount (removed / merged)
+    "SEDG",  # SolarEdge (removed)
+    "ENPH",  # Enphase (removed)
+    "BBWI",  # Bath & Body Works (removed)
+    "CTLT",  # Catalent (acquired)
+    "AAL",   # American Airlines (removed)
+    # Removed 2023
+    "TWTR",  # Twitter (acquired by Musk)
+    "SBNY",  # Signature Bank (failed)
+    "DISCA", # Discovery (merged into WBD)
+    "XLNX",  # Xilinx (acquired by AMD)
+    "CERN",  # Cerner (acquired by Oracle)
+    "FBHS",  # Fortune Brands Home (reorganized)
+    "RE",    # Everest Group (ticker changed)
+    "NLSN",  # Nielsen (taken private)
+    "DRE",   # Duke Realty (acquired)
+    "VIAC",  # ViacomCBS (now PARA)
+]
+
+# For backtesting only — includes delisted stocks to avoid survivorship bias
+HALAL_STOCKS_BACKTEST = HALAL_STOCKS + [
+    s for s in _SP500_DELISTED_HALAL if s not in _HARAM_EXCLUDE
+]
+
 VALID_SYMBOLS.update(HALAL_STOCKS)
+VALID_SYMBOLS.update(_SP500_DELISTED_HALAL)
 
 _SIMPLE_CACHE_TTL = settings.SIMPLE_CACHE_TTL
 _cache = {}
@@ -1954,6 +1995,91 @@ async def trading_disable():
     settings.AUTO_TRADE_ENABLED = False
     tg_send("AUTO-TRADING DISABLED\n\nAuto-execution has been stopped.\nAll existing positions remain open.")
     return {"auto_trade_enabled": False, "message": "Auto-trading disabled"}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PARAMETER OPTIMIZATION ENDPOINT
+# ══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/optimize")
+async def optimize_parameters(n_stocks: int = 10):
+    """Run parameter sweep optimization on historical data.
+
+    Tests different consensus thresholds, SL/TP multipliers, and tool
+    parameters to find optimal values. Results show improvement vs current defaults.
+    Runs in background — returns immediately, results sent to Telegram.
+    """
+    def _run_optimizer():
+        try:
+            from app.services.optimizer import optimize_params
+            result = optimize_params(n_samples=n_stocks)
+            if "error" not in result:
+                msg = (
+                    f"OPTIMIZER RESULTS\n\n"
+                    f"Stocks tested: {len(result['stocks_tested'])}\n\n"
+                    f"CURRENT vs OPTIMAL:\n"
+                    f"Win Rate: {result['baseline_performance']['win_rate']}% -> {result['optimal_performance']['win_rate']}%\n"
+                    f"Profit Factor: {result['baseline_performance']['profit_factor']} -> {result['optimal_performance']['profit_factor']}\n"
+                    f"Sharpe: {result['baseline_performance']['sharpe']} -> {result['optimal_performance']['sharpe']}\n\n"
+                    f"Best Params:\n"
+                    f"Strong BUY votes: {result['optimal_params']['strong_buy_votes']}\n"
+                    f"Min confidence: {result['optimal_params']['min_confidence']}%\n"
+                    f"SL mult: {result['optimal_params']['sl_atr_mult']}x ATR\n"
+                    f"TP1 mult: {result['optimal_params']['tp1_atr_mult']}x ATR\n"
+                    f"BB squeeze: {result['optimal_params']['bb_squeeze_width']}%\n"
+                    f"Momentum ROC: {result['optimal_params']['momentum_roc_threshold']}%"
+                )
+                tg_send(msg)
+        except Exception as e:
+            logger.error(f"Optimizer error: {e}")
+
+    threading.Thread(target=_run_optimizer, daemon=True).start()
+    return [{"Status": "Optimizer started", "Message": "Results will be sent to Telegram"}]
+
+
+# ════════���═════════════════��═══════════════════════════════════════════
+# INTRADAY DATA ENDPOINT
+# ══════════════════════════════════════════���═══════════════════════════
+
+@app.get("/api/v1/intraday/{symbol}")
+async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
+    """Get intraday bars for a symbol (15Min default).
+
+    Supports: 1Min, 5Min, 15Min, 1Hour.
+    Includes basic technical overlay: EMA9, VWAP approximation, RSI.
+    """
+    s = validate_symbol(symbol)
+    valid_tf = {"1Min", "5Min", "15Min", "1Hour"}
+    if timeframe not in valid_tf:
+        return [{"Error": f"Invalid timeframe. Use: {valid_tf}"}]
+
+    df = fetch_alpaca_intraday(s, timeframe=timeframe, days_back=days)
+    if df is None or df.empty:
+        return [{"Error": f"No intraday data for {s}"}]
+
+    # Add technical overlays
+    close = df["close"]
+    df["ema9"] = ema(close, 9)
+    df["rsi14"] = rsi(close, 14)
+
+    # VWAP approximation (cumulative volume-weighted average price)
+    df["vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+
+    # Format for response
+    bars = []
+    for _, row in df.tail(200).iterrows():
+        bars.append({
+            "date": row["date"].isoformat(),
+            "open": round(float(row["open"]), 2),
+            "high": round(float(row["high"]), 2),
+            "low": round(float(row["low"]), 2),
+            "close": round(float(row["close"]), 2),
+            "volume": int(row["volume"]),
+            "ema9": round(float(row["ema9"]), 2) if pd.notna(row["ema9"]) else None,
+            "rsi14": round(float(row["rsi14"]), 1) if pd.notna(row["rsi14"]) else None,
+            "vwap": round(float(row["vwap"]), 2) if pd.notna(row["vwap"]) else None,
+        })
+    return bars
 
 
 @app.get("/health")
