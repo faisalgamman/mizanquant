@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, File, UploadFile, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from app.db.database import SessionLocal
 from app.egx.data import load_csv, save_to_db, get_stock_data, get_watchlist, get_all_symbols
@@ -30,6 +31,109 @@ from app.egx.models import EgxSignalHistory, EgxBacktestResult, EgxWatchlist
 logger = logging.getLogger("egx")
 
 router = APIRouter(prefix="/egx", tags=["EGX - Egyptian Exchange"])
+
+
+# ---------------------------------------------------------------------------
+# Upload Page (drag & drop UI)
+# ---------------------------------------------------------------------------
+
+@router.get("/upload_page", response_class=HTMLResponse)
+async def upload_page():
+    """Simple drag-and-drop upload page for EGX CSV files."""
+    return """<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>EGX - رفع بيانات الأسهم المصرية</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #0d1117; color: #c9d1d9; max-width: 800px; margin: 40px auto; padding: 20px; }
+  h1 { color: #58a6ff; text-align: center; }
+  .drop-zone { border: 3px dashed #30363d; border-radius: 12px; padding: 60px 20px; text-align: center; cursor: pointer; transition: all 0.3s; margin: 20px 0; }
+  .drop-zone:hover, .drop-zone.active { border-color: #58a6ff; background: #161b22; }
+  .drop-zone h2 { color: #8b949e; margin: 0 0 10px; }
+  .drop-zone p { color: #6e7681; margin: 0; }
+  input[type=file] { display: none; }
+  #results { margin-top: 20px; }
+  .result { background: #161b22; border-radius: 8px; padding: 15px; margin: 10px 0; border-right: 4px solid #238636; }
+  .result.error { border-right-color: #f85149; }
+  .result .symbol { color: #58a6ff; font-weight: bold; font-size: 18px; }
+  .result .info { color: #8b949e; margin-top: 5px; }
+  .loading { color: #d29922; }
+  .btn { background: #238636; color: white; border: none; padding: 12px 30px; border-radius: 8px; cursor: pointer; font-size: 16px; margin-top: 10px; }
+  .btn:hover { background: #2ea043; }
+  .btn:disabled { background: #30363d; cursor: not-allowed; }
+  .stats { display: flex; gap: 20px; justify-content: center; margin: 20px 0; }
+  .stat { background: #161b22; padding: 15px 25px; border-radius: 8px; text-align: center; }
+  .stat .num { font-size: 28px; color: #58a6ff; font-weight: bold; }
+  .stat .label { color: #8b949e; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>EGX - رفع بيانات الأسهم المصرية</h1>
+<p style="text-align:center; color:#8b949e;">ارفع ملفات CSV للأسهم المصرية (يدعم الأعمدة العربية والإنجليزية)</p>
+
+<div class="drop-zone" id="dropZone" onclick="fileInput.click()">
+  <h2>اسحب الملفات هنا أو اضغط للاختيار</h2>
+  <p>CSV files - يمكن رفع عدة ملفات دفعة واحدة</p>
+</div>
+<input type="file" id="fileInput" multiple accept=".csv">
+
+<div id="stats" style="display:none" class="stats">
+  <div class="stat"><div class="num" id="totalFiles">0</div><div class="label">ملفات</div></div>
+  <div class="stat"><div class="num" id="totalRows">0</div><div class="label">صفوف</div></div>
+  <div class="stat"><div class="num" id="totalSymbols">0</div><div class="label">أسهم</div></div>
+</div>
+
+<div id="results"></div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const results = document.getElementById('results');
+let totalFiles=0, totalRows=0, allSymbols=new Set();
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('active'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('active'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('active'); handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+async function handleFiles(files) {
+  for (const file of files) {
+    if (!file.name.endsWith('.csv')) continue;
+    const div = document.createElement('div');
+    div.className = 'result';
+    div.innerHTML = '<span class="loading">جاري رفع ' + file.name + '...</span>';
+    results.prepend(div);
+
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const resp = await fetch('/egx/upload', { method: 'POST', body: form });
+      const data = await resp.json();
+      if (resp.ok) {
+        const syms = data.symbols || [];
+        syms.forEach(s => allSymbols.add(s));
+        totalFiles++;
+        totalRows += data.total_rows || 0;
+        div.innerHTML = '<div class="symbol">' + syms.join(', ') + '</div>' +
+          '<div class="info">' + file.name + ' — ' + (data.rows_inserted||0) + ' صف جديد, ' + (data.rows_updated||0) + ' محدث</div>';
+      } else {
+        div.className = 'result error';
+        div.innerHTML = '<div class="symbol">خطأ: ' + file.name + '</div><div class="info">' + (data.detail||'Unknown error') + '</div>';
+      }
+    } catch(e) {
+      div.className = 'result error';
+      div.innerHTML = '<div class="symbol">خطأ: ' + file.name + '</div><div class="info">' + e.message + '</div>';
+    }
+    document.getElementById('stats').style.display='flex';
+    document.getElementById('totalFiles').textContent = totalFiles;
+    document.getElementById('totalRows').textContent = totalRows;
+    document.getElementById('totalSymbols').textContent = allSymbols.size;
+  }
+}
+</script>
+</body>
+</html>"""
 
 
 # ---------------------------------------------------------------------------
