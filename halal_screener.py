@@ -2263,6 +2263,54 @@ async def widgets():
             "gridData": {"w": 10, "h": 6},
             "params": [{"paramName": "symbol", "value": "", "label": "Symbol (blank=all)", "type": "text", "show": True}],
         },
+
+        # ===== EGX: Egyptian Exchange (separate section) =====
+        "egx_watchlist": {
+            "name": "EGX Watchlist",
+            "description": "Uploaded Egyptian stocks with data status",
+            "category": "EGX Egypt", "type": "table",
+            "endpoint": "/egx/watchlist",
+            "gridData": {"w": 10, "h": 5},
+        },
+        "egx_analyze": {
+            "name": "EGX Analysis (7 Tools)",
+            "description": "V9 Score + Bollinger + StochRSI + OBV + ADX + Backtest + Monte Carlo",
+            "category": "EGX Egypt", "type": "table",
+            "endpoint": "/egx/analyze/COMI",
+            "gridData": {"w": 10, "h": 9},
+            "params": [{"paramName": "symbol", "value": "COMI", "label": "EGX Symbol", "type": "text", "show": True}],
+        },
+        "egx_scan": {
+            "name": "EGX Full Scan",
+            "description": "Scan all uploaded Egyptian stocks for signals",
+            "category": "EGX Egypt", "type": "table",
+            "endpoint": "/egx/scan",
+            "gridData": {"w": 10, "h": 9},
+        },
+        "egx_backtest": {
+            "name": "EGX Backtest (V9)",
+            "description": "ATR-based backtest with win rate, profit factor, expectancy",
+            "category": "EGX Egypt", "type": "table",
+            "endpoint": "/egx/backtest/COMI",
+            "gridData": {"w": 10, "h": 9},
+            "params": [{"paramName": "symbol", "value": "COMI", "label": "EGX Symbol", "type": "text", "show": True}],
+        },
+        "egx_optimize": {
+            "name": "EGX Optimizer",
+            "description": "Find best SL/TP/Score/Volume params (72 combos)",
+            "category": "EGX Egypt", "type": "table",
+            "endpoint": "/egx/optimize/COMI",
+            "gridData": {"w": 10, "h": 6},
+            "params": [{"paramName": "symbol", "value": "COMI", "label": "EGX Symbol", "type": "text", "show": True}],
+        },
+        "egx_signals": {
+            "name": "EGX Signal History",
+            "description": "Past EGX signals with V9 scores and tool votes",
+            "category": "EGX Egypt", "type": "table",
+            "endpoint": "/egx/signals",
+            "gridData": {"w": 10, "h": 6},
+            "params": [{"paramName": "symbol", "value": "", "label": "Symbol (blank=all)", "type": "text", "show": True}],
+        },
     }
 
 # ============================================================
