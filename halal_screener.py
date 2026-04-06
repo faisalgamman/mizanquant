@@ -56,18 +56,6 @@ app = FastAPI()
 import keep_alive
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# --- Request logging middleware (debug OpenBB params) ---
-from starlette.middleware.base import BaseHTTPMiddleware
-
-class RequestLoggerMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        if "/egx/" in str(request.url.path):
-            logger.warning(f"[EGX REQUEST] {request.method} {request.url} | path={request.url.path} | query={request.url.query} | params={dict(request.query_params)}")
-        response = await call_next(request)
-        return response
-
-app.add_middleware(RequestLoggerMiddleware)
-
 # --- EGX module (completely separate from US stocks) ---
 from app.egx.routes import router as egx_router
 app.include_router(egx_router)
