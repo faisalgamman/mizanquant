@@ -233,9 +233,8 @@ async def egx_data(symbol: str, limit: int = Query(default=100, ge=1, le=5000)):
 # ---------------------------------------------------------------------------
 
 @router.get("/analyze")
-@router.get("/analyze/{symbol}")
 async def egx_analyze(
-    symbol: str = "COMI",
+    symbol: str = Query(default="COMI"),
     send_telegram: bool = Query(default=True),
 ):
     """Run full 7-tool consensus analysis on an EGX stock.
@@ -316,8 +315,7 @@ async def egx_analyze(
 
 
 @router.get("/backtest")
-@router.get("/backtest/{symbol}")
-async def egx_backtest(symbol: str = "COMI"):
+async def egx_backtest(symbol: str = Query(default="COMI")):
     """Run V9 backtest on an EGX stock and return performance metrics."""
     df = get_stock_data(symbol.upper())
     if df is None:
@@ -363,8 +361,7 @@ async def egx_backtest(symbol: str = "COMI"):
 
 
 @router.get("/optimize")
-@router.get("/optimize/{symbol}")
-async def egx_optimize(symbol: str = "COMI"):
+async def egx_optimize(symbol: str = Query(default="COMI")):
     """Run parameter optimization (72 combinations) for an EGX stock."""
     df = get_stock_data(symbol.upper())
     if df is None:
