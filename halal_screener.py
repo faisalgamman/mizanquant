@@ -56,6 +56,10 @@ app = FastAPI()
 import keep_alive
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# --- EGX module (completely separate from US stocks) ---
+from app.egx.routes import router as egx_router
+app.include_router(egx_router)
+
 # --- 4.1: Timeout wrapper ---
 async def with_timeout(coro, seconds=120):
     try:
