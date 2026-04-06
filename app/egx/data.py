@@ -182,7 +182,7 @@ def save_to_db(df: pd.DataFrame) -> dict:
         db.close()
 
 
-def get_stock_data(symbol: str, min_rows: int = 50) -> Optional[pd.DataFrame]:
+def get_stock_data(symbol: str, min_rows: int = 5) -> Optional[pd.DataFrame]:
     """Load EGX stock data from database for a given symbol."""
     db = SessionLocal()
     try:

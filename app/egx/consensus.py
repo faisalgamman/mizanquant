@@ -49,12 +49,12 @@ def run_consensus(
     if cfg is None:
         cfg = EgxStrategyConfig()
 
-    if df is None or len(df) < 50:
+    if df is None or len(df) < 5:
         return {"error": f"Insufficient data for {symbol} ({len(df) if df is not None else 0} rows)"}
 
     # Compute all indicators
     df_ind = compute_indicators(df, cfg)
-    if len(df_ind) < 50:
+    if len(df_ind) < 5:
         return {"error": "Not enough data after indicator computation"}
 
     row = df_ind.iloc[-1]

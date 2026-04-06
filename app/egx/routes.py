@@ -244,7 +244,7 @@ async def egx_analyze(
     """
     df = get_stock_data(symbol.upper())
     if df is None:
-        raise HTTPException(status_code=404, detail=f"No data for {symbol} (need >= 50 rows)")
+        raise HTTPException(status_code=404, detail=f"No data for {symbol} — upload CSV first via /egx/upload_page")
 
     cfg = EgxStrategyConfig()
     result = run_consensus(df, symbol.upper(), cfg)
@@ -392,14 +392,14 @@ async def egx_scan(send_telegram: bool = Query(default=True)):
     """
     symbols = get_all_symbols()
     if not symbols:
-        return {"error": "No EGX symbols uploaded. Use POST /egx/upload first."}
+        return [{"Status": "No EGX symbols uploaded", "Info": "Use /egx/upload_page to upload CSV files"}]
 
     cfg = EgxStrategyConfig()
     results = []
 
     for symbol in symbols:
         try:
-            df = get_stock_data(symbol, min_rows=50)
+            df = get_stock_data(symbol, min_rows=5)
             if df is None:
                 continue
 
