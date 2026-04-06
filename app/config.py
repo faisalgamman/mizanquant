@@ -107,11 +107,11 @@ def _build_strategy_configs() -> dict:
     """Build strategy configs from environment variables."""
     configs = {}
 
-    # Strategy A: Momentum Alpha — concentrated trend-following
+    # Strategy A: HANA — concentrated trend-following
     if settings.ALPACA_API_KEY_A:
         configs["A"] = StrategyConfig(
             strategy_id="A",
-            name="Momentum Alpha",
+            name="HANA",
             alpaca_api_key=settings.ALPACA_API_KEY_A,
             alpaca_secret_key=settings.ALPACA_SECRET_KEY_A,
             max_positions=3,
@@ -124,11 +124,11 @@ def _build_strategy_configs() -> dict:
             daily_loss_limit_pct=3.0,
         )
 
-    # Strategy B: Mean Reversion — diversified dip-buying
+    # Strategy B: marem — diversified dip-buying
     if settings.ALPACA_API_KEY_B:
         configs["B"] = StrategyConfig(
             strategy_id="B",
-            name="Mean Reversion",
+            name="marem",
             alpaca_api_key=settings.ALPACA_API_KEY_B,
             alpaca_secret_key=settings.ALPACA_SECRET_KEY_B,
             max_positions=5,
@@ -141,11 +141,11 @@ def _build_strategy_configs() -> dict:
             daily_loss_limit_pct=3.0,
         )
 
-    # Strategy C: AI Ensemble — pure ML decision-making
+    # Strategy C: mazem — pure ML decision-making
     if settings.ALPACA_API_KEY_C:
         configs["C"] = StrategyConfig(
             strategy_id="C",
-            name="AI Ensemble",
+            name="mazem",
             alpaca_api_key=settings.ALPACA_API_KEY_C,
             alpaca_secret_key=settings.ALPACA_SECRET_KEY_C,
             max_positions=4,
