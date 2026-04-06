@@ -385,8 +385,11 @@ def on_signal(
     min_confidence = cfg.min_confidence if cfg else settings.MIN_TRADE_CONFIDENCE
     label = _strategy_label(strategy_id)
 
-    if verdict == "STRONG BUY" and confidence >= min_confidence:
-        logger.info(f"{label} Auto-trade trigger: STRONG BUY {symbol} (confidence={confidence}%)")
+    buy_verdicts = ("STRONG BUY", "BUY", "WEAK BUY")
+    sell_verdicts = ("STRONG SELL", "SELL", "WEAK SELL")
+
+    if verdict in buy_verdicts and confidence >= min_confidence:
+        logger.info(f"{label} Auto-trade trigger: {verdict} {symbol} (confidence={confidence}%)")
         return execute_buy(
             symbol=symbol,
             price=price,
@@ -403,7 +406,7 @@ def on_signal(
             strategy_id=strategy_id,
         )
 
-    elif verdict == "STRONG SELL" and confidence >= min_confidence:
+    elif verdict in sell_verdicts and confidence >= min_confidence:
         logger.info(f"{label} Auto-trade trigger: STRONG SELL {symbol} (confidence={confidence}%)")
         return execute_sell(
             symbol=symbol,
