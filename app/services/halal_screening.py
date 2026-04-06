@@ -107,17 +107,83 @@ def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
         return None
 
 
+def _yf_fallback(symbol: str) -> Optional[dict]:
+    """Fallback: fetch fundamental data from yfinance when FMP fails (premium block)."""
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        info = ticker.info or {}
+        bs = ticker.balance_sheet
+        inc = ticker.income_stmt
+
+        market_cap = info.get("marketCap", 0) or 0
+        if market_cap <= 0:
+            return None
+
+        # Balance sheet fields
+        total_debt = 0
+        cash_eq = 0
+        short_inv = 0
+        if bs is not None and not bs.empty:
+            latest = bs.iloc[:, 0]  # most recent column
+            total_debt = float(latest.get("Total Debt", latest.get("Long Term Debt", 0)) or 0)
+            cash_eq = float(latest.get("Cash And Cash Equivalents", 0) or 0)
+            short_inv = float(latest.get("Other Short Term Investments", 0) or 0)
+
+        # Income statement fields
+        revenue = 0
+        interest_income = 0
+        interest_expense = 0
+        if inc is not None and not inc.empty:
+            latest_inc = inc.iloc[:, 0]
+            revenue = float(latest_inc.get("Total Revenue", 0) or 0)
+            interest_income = float(latest_inc.get("Interest Income", 0) or 0)
+            interest_expense = float(latest_inc.get("Interest Expense", 0) or 0)
+
+        return {
+            "profile": {
+                "marketCap": market_cap,
+                "sector": info.get("sector", ""),
+                "industry": info.get("industry", ""),
+                "companyName": info.get("shortName", symbol),
+            },
+            "bs": {
+                "totalDebt": total_debt,
+                "cashAndCashEquivalents": cash_eq,
+                "shortTermInvestments": short_inv,
+                "cashAndShortTermInvestments": cash_eq + short_inv,
+            },
+            "income": {
+                "revenue": revenue,
+                "interestIncome": interest_income,
+                "interestExpense": interest_expense,
+            },
+        }
+    except Exception as e:
+        logger.error(f"yfinance fallback failed for {symbol}: {e}")
+        return None
+
+
 def screen_symbol(symbol: str) -> Optional[dict]:
     """Run AAOIFI Halal screening on a single symbol.
 
     Returns a dict with screening results, or None if data unavailable.
-    Requires 3 FMP API calls (balance sheet, income statement, profile).
+    Uses FMP API with yfinance fallback for premium-blocked symbols.
     """
     # 1. Fetch profile (market cap + sector/industry)
     profile_data = _fmp_get("profile", symbol)
     if not profile_data or not isinstance(profile_data, list) or len(profile_data) == 0:
-        return None
-    profile = profile_data[0]
+        # Try yfinance fallback
+        yf_data = _yf_fallback(symbol)
+        if not yf_data:
+            return None
+        profile = yf_data["profile"]
+        bs = yf_data["bs"]
+        income = yf_data["income"]
+        used_fallback = True
+    else:
+        profile = profile_data[0]
+        used_fallback = False
 
     market_cap = profile.get("marketCap") or profile.get("mktCap") or 0
     sector = (profile.get("sector") or "").lower().strip()
@@ -132,22 +198,35 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     haram_sector_flag = sector in HARAM_SECTORS
     haram_industry_flag = industry in HARAM_INDUSTRIES
 
-    # 3. Fetch balance sheet
-    bs_data = _fmp_get("balance-sheet-statement", symbol)
-    if not bs_data or not isinstance(bs_data, list) or len(bs_data) == 0:
-        return None
-    bs = bs_data[0]
+    # 3. Fetch balance sheet (skip if already from yfinance)
+    if not used_fallback:
+        bs_data = _fmp_get("balance-sheet-statement", symbol)
+        if not bs_data or not isinstance(bs_data, list) or len(bs_data) == 0:
+            # FMP premium block — try yfinance
+            yf_data = _yf_fallback(symbol)
+            if not yf_data:
+                return None
+            bs = yf_data["bs"]
+            income = yf_data["income"]
+            used_fallback = True
+        else:
+            bs = bs_data[0]
 
     total_debt = bs.get("totalDebt", 0) or 0
     cash_and_equivalents = bs.get("cashAndCashEquivalents", 0) or 0
     short_term_investments = bs.get("shortTermInvestments", 0) or 0
     cash_and_short_term = bs.get("cashAndShortTermInvestments", 0) or 0
 
-    # 4. Fetch income statement
-    is_data = _fmp_get("income-statement", symbol)
-    if not is_data or not isinstance(is_data, list) or len(is_data) == 0:
-        return None
-    income = is_data[0]
+    # 4. Fetch income statement (skip if already from yfinance)
+    if not used_fallback:
+        is_data = _fmp_get("income-statement", symbol)
+        if not is_data or not isinstance(is_data, list) or len(is_data) == 0:
+            yf_data = _yf_fallback(symbol)
+            if not yf_data:
+                return None
+            income = yf_data["income"]
+        else:
+            income = is_data[0]
 
     revenue = income.get("revenue", 0) or 0
     interest_income = income.get("interestIncome", 0) or 0
