@@ -113,33 +113,44 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
         import yfinance as yf
         ticker = yf.Ticker(symbol)
         info = ticker.info or {}
-        bs = ticker.balance_sheet
-        inc = ticker.income_stmt
 
         market_cap = info.get("marketCap", 0) or 0
         if market_cap <= 0:
+            logger.warning(f"yfinance: no market cap for {symbol}")
             return None
 
         # Balance sheet fields
-        total_debt = 0
-        cash_eq = 0
+        total_debt = float(info.get("totalDebt", 0) or 0)
+        cash_eq = float(info.get("totalCash", 0) or 0)
         short_inv = 0
-        if bs is not None and not bs.empty:
-            latest = bs.iloc[:, 0]  # most recent column
-            total_debt = float(latest.get("Total Debt", latest.get("Long Term Debt", 0)) or 0)
-            cash_eq = float(latest.get("Cash And Cash Equivalents", 0) or 0)
-            short_inv = float(latest.get("Other Short Term Investments", 0) or 0)
+
+        # Try balance_sheet DataFrame for more detail
+        try:
+            bs = ticker.balance_sheet
+            if bs is not None and not bs.empty:
+                latest = bs.iloc[:, 0]
+                total_debt = float(latest.get("Total Debt", total_debt) or total_debt)
+                cash_eq = float(latest.get("Cash And Cash Equivalents", cash_eq) or cash_eq)
+                short_inv = float(latest.get("Other Short Term Investments", 0) or 0)
+        except Exception:
+            pass  # use info-based values
 
         # Income statement fields
-        revenue = 0
+        revenue = float(info.get("totalRevenue", 0) or 0)
         interest_income = 0
         interest_expense = 0
-        if inc is not None and not inc.empty:
-            latest_inc = inc.iloc[:, 0]
-            revenue = float(latest_inc.get("Total Revenue", 0) or 0)
-            interest_income = float(latest_inc.get("Interest Income", 0) or 0)
-            interest_expense = float(latest_inc.get("Interest Expense", 0) or 0)
 
+        try:
+            inc = ticker.income_stmt
+            if inc is not None and not inc.empty:
+                latest_inc = inc.iloc[:, 0]
+                revenue = float(latest_inc.get("Total Revenue", revenue) or revenue)
+                interest_income = float(latest_inc.get("Interest Income", 0) or 0)
+                interest_expense = float(latest_inc.get("Interest Expense", 0) or 0)
+        except Exception:
+            pass  # use info-based values
+
+        logger.info(f"yfinance fallback OK for {symbol}: mcap={market_cap}, debt={total_debt}")
         return {
             "profile": {
                 "marketCap": market_cap,
