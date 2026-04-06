@@ -231,10 +231,24 @@ def optimize_parameters(df: pd.DataFrame, symbol: str) -> Dict:
     base_cfg = EgxStrategyConfig()
     df_ind = compute_indicators(df.copy(), base_cfg)
 
-    for sl_m in [1.5, 2.0, 2.5]:
-        for tp_m in [2.5, 3.0, 3.5, 4.0]:
-            for min_sc in [4, 5]:
-                for vol_s in [1.2, 1.5, 2.0]:
+    # Reduce grid for small datasets to avoid timeout
+    if len(df) < 100:
+        sl_values = [1.5, 2.0]
+        tp_values = [2.5, 3.5]
+        min_sc_values = [4, 5]
+        vol_values = [1.2, 1.5]
+    else:
+        sl_values = [1.5, 2.0, 2.5]
+        tp_values = [2.5, 3.0, 3.5, 4.0]
+        min_sc_values = [4, 5]
+        vol_values = [1.2, 1.5, 2.0]
+
+    combos = 0
+    for sl_m in sl_values:
+        for tp_m in tp_values:
+            for min_sc in min_sc_values:
+                for vol_s in vol_values:
+                    combos += 1
                     cfg = EgxStrategyConfig(
                         sl_atr_mult=sl_m,
                         tp_atr_mult=tp_m,
@@ -245,7 +259,7 @@ def optimize_parameters(df: pd.DataFrame, symbol: str) -> Dict:
 
                     # Run backtest from signals
                     trades = run_backtest(df_sig, symbol, cfg)
-                    if len(trades) < 3:
+                    if len(trades) < 2:
                         continue
 
                     stats = analyze_performance(trades)
@@ -274,5 +288,5 @@ def optimize_parameters(df: pd.DataFrame, symbol: str) -> Dict:
             "vol_surge": best_cfg.vol_surge,
         },
         "best_stats": best_stats,
-        "combinations_tested": 72,
+        "combinations_tested": combos,
     }
