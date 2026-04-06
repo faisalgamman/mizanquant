@@ -2704,6 +2704,40 @@ async def strategy_account(strategy_id: str):
     return [account]
 
 
+@app.get("/debug/alpaca")
+async def debug_alpaca():
+    """Debug Alpaca connection — shows key prefix, base URL, and test result."""
+    import httpx
+    from app.config import STRATEGY_CONFIGS
+    results = []
+    for sid, cfg in STRATEGY_CONFIGS.items():
+        key_prefix = cfg.alpaca_api_key[:8] + "..." if cfg.alpaca_api_key else "EMPTY"
+        secret_prefix = cfg.alpaca_secret_key[:4] + "..." if cfg.alpaca_secret_key else "EMPTY"
+        base_url = settings.ALPACA_BASE_URL
+        test_url = f"{base_url.rstrip('/').removesuffix('/v2')}/v2/account"
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(test_url, headers={
+                    "APCA-API-KEY-ID": cfg.alpaca_api_key,
+                    "APCA-API-SECRET-KEY": cfg.alpaca_secret_key,
+                })
+                status = resp.status_code
+                body = resp.text[:200]
+        except Exception as e:
+            status = "ERROR"
+            body = str(e)[:200]
+        results.append({
+            "strategy": f"{sid}: {cfg.name}",
+            "key_prefix": key_prefix,
+            "secret_prefix": secret_prefix,
+            "base_url": base_url,
+            "test_url": test_url,
+            "http_status": status,
+            "response": body,
+        })
+    return results
+
+
 @app.get("/strategy/{strategy_id}/positions")
 async def strategy_positions(strategy_id: str):
     """Get positions for a specific strategy."""
