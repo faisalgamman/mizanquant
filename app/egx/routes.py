@@ -232,6 +232,11 @@ async def egx_data(symbol: str, limit: int = Query(default=100, ge=1, le=5000)):
 # Analysis
 # ---------------------------------------------------------------------------
 
+@router.get("/analyze/{symbol}")
+async def egx_analyze_path(symbol: str, send_telegram: bool = Query(default=True)):
+    """Path-based route for /egx/analyze/COMI."""
+    return await egx_analyze(symbol=symbol, send_telegram=send_telegram)
+
 @router.get("/analyze")
 async def egx_analyze(
     symbol: str = Query(default="COMI"),
@@ -314,6 +319,11 @@ async def egx_analyze(
     ]
 
 
+@router.get("/backtest/{symbol}")
+async def egx_backtest_path(symbol: str):
+    """Path-based route."""
+    return await egx_backtest(symbol=symbol)
+
 @router.get("/backtest")
 async def egx_backtest(symbol: str = Query(default="COMI")):
     """Run V9 backtest on an EGX stock and return performance metrics."""
@@ -359,6 +369,11 @@ async def egx_backtest(symbol: str = Query(default="COMI")):
         })
     return rows
 
+
+@router.get("/optimize/{symbol}")
+async def egx_optimize_path(symbol: str):
+    """Path-based route."""
+    return await egx_optimize(symbol=symbol)
 
 @router.get("/optimize")
 async def egx_optimize(symbol: str = Query(default="COMI")):
