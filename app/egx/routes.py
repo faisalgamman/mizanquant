@@ -1,21 +1,22 @@
 """EGX API routes — all under /egx/ prefix.
 
 Endpoints:
-  POST /egx/upload          — Upload CSV file(s) with EGX stock data
-  GET  /egx/watchlist        — List all uploaded EGX symbols
-  GET  /egx/data/{symbol}    — Get stored OHLCV data for a symbol
-  GET  /egx/analyze/{symbol} — Run full 7-tool consensus analysis
-  GET  /egx/backtest/{symbol}— Run backtest with V9 strategy
-  GET  /egx/optimize/{symbol}— Run parameter optimization
-  GET  /egx/scan             — Scan all watchlist symbols
-  GET  /egx/chart/{symbol}   — Generate chart image (PNG)
+  POST /egx/upload              — Upload CSV file(s) with EGX stock data
+  GET  /egx/watchlist           — List all uploaded EGX symbols
+  GET  /egx/data/{symbol}       — Get stored OHLCV data for a symbol
+  GET  /egx/analyze?symbol=X    — Run full 7-tool consensus analysis
+  GET  /egx/backtest?symbol=X   — Run backtest with V9 strategy
+  GET  /egx/optimize?symbol=X   — Run parameter optimization
+  GET  /egx/scan                — Scan all watchlist symbols
+  GET  /egx/chart/{symbol}      — Generate chart image (PNG)
+  GET  /egx/debug?symbol=X      — Debug: verify query param reception
 """
 
 import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Query
+from fastapi import APIRouter, File, UploadFile, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from app.db.database import SessionLocal
@@ -207,7 +208,7 @@ async def egx_watchlist():
 
 
 @router.get("/data/{symbol}")
-async def egx_data(symbol: str, limit: int = Query(default=100, ge=1, le=5000)):
+async def egx_data(symbol: str, limit: int = 100):
     """Get stored OHLCV data for an EGX symbol."""
     df = get_stock_data(symbol.upper(), min_rows=1)
     if df is None:
@@ -232,21 +233,14 @@ async def egx_data(symbol: str, limit: int = Query(default=100, ge=1, le=5000)):
 # Analysis
 # ---------------------------------------------------------------------------
 
-@router.get("/analyze/{symbol}")
-async def egx_analyze_path(symbol: str, send_telegram: bool = Query(default=True)):
-    """Path-based route for /egx/analyze/COMI."""
-    return await egx_analyze(symbol=symbol, send_telegram=send_telegram)
-
 @router.get("/analyze")
-async def egx_analyze(
-    symbol: str = Query(default="COMI"),
-    send_telegram: bool = Query(default=True),
-):
+async def egx_analyze(symbol: str = "COMI", send_telegram: bool = True):
     """Run full 7-tool consensus analysis on an EGX stock.
 
     Tools: V9 Score, Bollinger, StochRSI, OBV, ADX, Backtest, Monte Carlo.
     Sends Telegram alert with chart for STRONG signals.
     """
+    logger.info(f"EGX analyze called — symbol={symbol}")
     df = get_stock_data(symbol.upper())
     if df is None:
         raise HTTPException(status_code=404, detail=f"No data for {symbol} — upload CSV first via /egx/upload_page")
@@ -294,6 +288,7 @@ async def egx_analyze(
     return [
         {
             "Symbol": result["symbol"],
+            "Requested": symbol,
             "Verdict": result["verdict"],
             "Confidence": f"{result['confidence']:.0f}%",
             "V9 Score": f"{result.get('v9_score', 0)}/6",
@@ -319,14 +314,10 @@ async def egx_analyze(
     ]
 
 
-@router.get("/backtest/{symbol}")
-async def egx_backtest_path(symbol: str):
-    """Path-based route."""
-    return await egx_backtest(symbol=symbol)
-
 @router.get("/backtest")
-async def egx_backtest(symbol: str = Query(default="COMI")):
+async def egx_backtest(symbol: str = "COMI"):
     """Run V9 backtest on an EGX stock and return performance metrics."""
+    logger.info(f"EGX backtest called — symbol={symbol}")
     df = get_stock_data(symbol.upper())
     if df is None:
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
@@ -370,14 +361,10 @@ async def egx_backtest(symbol: str = Query(default="COMI")):
     return rows
 
 
-@router.get("/optimize/{symbol}")
-async def egx_optimize_path(symbol: str):
-    """Path-based route."""
-    return await egx_optimize(symbol=symbol)
-
 @router.get("/optimize")
-async def egx_optimize(symbol: str = Query(default="COMI")):
+async def egx_optimize(symbol: str = "COMI"):
     """Run parameter optimization (72 combinations) for an EGX stock."""
+    logger.info(f"EGX optimize called — symbol={symbol}")
     df = get_stock_data(symbol.upper())
     if df is None:
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
@@ -403,7 +390,7 @@ async def egx_optimize(symbol: str = Query(default="COMI")):
 
 
 @router.get("/scan")
-async def egx_scan(send_telegram: bool = Query(default=True)):
+async def egx_scan(send_telegram: bool = True):
     """Scan all watchlist symbols and return consensus for each.
 
     Sends Telegram summary + individual STRONG signal alerts.
@@ -538,6 +525,24 @@ async def egx_signal_history(symbol: Optional[str] = None, limit: int = 50):
         } for s in signals] if signals else [{"Status": "No signals recorded yet"}]
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Debug — verify query params are received
+# ---------------------------------------------------------------------------
+
+@router.get("/debug")
+async def egx_debug(request: Request, symbol: str = "COMI"):
+    """Debug endpoint to verify query parameter reception."""
+    raw = request.query_params.get("symbol", "NOT_SENT")
+    all_symbols = get_all_symbols()
+    return [{
+        "received_symbol": symbol,
+        "raw_query_param": raw,
+        "all_query_params": str(dict(request.query_params)),
+        "url": str(request.url),
+        "symbols_in_db": ", ".join(all_symbols) if all_symbols else "NONE",
+    }]
 
 
 # ---------------------------------------------------------------------------
