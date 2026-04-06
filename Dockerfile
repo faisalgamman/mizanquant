@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir \
     requests httpx \
     pydantic-settings python-dotenv poetry-core \
     sqlalchemy psycopg2-binary \
-    matplotlib
+    matplotlib python-multipart
 
 COPY . .
 
