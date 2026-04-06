@@ -2592,7 +2592,11 @@ async def halal_status(symbol: str = "AAPL"):
     s = validate_symbol(symbol)
     if not settings.FMP_API_KEY:
         return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
-    result = get_halal_status(s)
+    try:
+        result = get_halal_status(s)
+    except Exception as e:
+        logger.error(f"Halal screening crashed for {s}: {e}")
+        result = None
     if result is None:
         return [{"Error": f"Could not retrieve fundamental data for {s}"}]
     # Format for OpenBB widget display
