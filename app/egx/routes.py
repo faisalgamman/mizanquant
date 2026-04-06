@@ -196,11 +196,14 @@ async def egx_watchlist():
     """List all EGX symbols with uploaded data."""
     items = get_watchlist()
     symbols = get_all_symbols()
-    return {
-        "total": len(symbols),
-        "symbols": symbols,
-        "watchlist": items,
-    }
+    # Flat table for OpenBB widgets
+    return [{
+        "Symbol": w["symbol"],
+        "Name": w.get("name_ar") or "-",
+        "Sector": w.get("sector") or "-",
+        "Added": (w["added_at"] or "")[:10],
+        "Last Analyzed": (w["last_analyzed"] or "-")[:10] if w.get("last_analyzed") else "-",
+    } for w in items] if items else [{"Symbol": s} for s in symbols]
 
 
 @router.get("/data/{symbol}")
@@ -276,7 +279,36 @@ async def egx_analyze(
 
         alert_egx_signal(symbol.upper(), result, chart_bytes)
 
-    return result
+    # Flat table for OpenBB widgets
+    tools = result.get("tools", {})
+    bt = result.get("backtest_stats") or {}
+    mc = result.get("monte_carlo") or {}
+    return [
+        {
+            "Symbol": result["symbol"],
+            "Verdict": result["verdict"],
+            "Confidence": f"{result['confidence']:.0f}%",
+            "V9 Score": f"{result.get('v9_score', 0)}/6",
+            "Price (EGP)": result["price"],
+            "Stop Loss": result["stop_loss"],
+            "TP1": result["tp1"],
+            "TP2": result.get("tp2"),
+            "TP3": result.get("tp3"),
+            "R:R": f"1:{result.get('risk_reward', 0)}",
+            "RSI": result.get("rsi"),
+            "ADX": result.get("adx"),
+            "V9 Score Tool": tools.get("V9 Score", "-"),
+            "Bollinger": tools.get("Bollinger", "-"),
+            "StochRSI": tools.get("StochRSI", "-"),
+            "OBV": tools.get("OBV", "-"),
+            "ADX Trend": tools.get("ADX Trend", "-"),
+            "Backtest": tools.get("Backtest", "-"),
+            "Monte Carlo": tools.get("Monte Carlo", "-"),
+            "BT Win Rate": f"{bt.get('win_rate', 0):.0f}%" if bt else "-",
+            "BT PF": bt.get("profit_factor", "-"),
+            "MC Prob": f"{mc.get('prob_profit', 0)*100:.0f}%" if mc else "-",
+        }
+    ]
 
 
 @router.get("/backtest/{symbol}")
@@ -293,18 +325,36 @@ async def egx_backtest(symbol: str):
     # Save to DB
     _save_backtest(symbol.upper(), stats, cfg)
 
-    return {
-        "symbol": symbol.upper(),
-        "config": {
-            "sl_atr_mult": cfg.sl_atr_mult,
-            "tp_atr_mult": cfg.tp_atr_mult,
-            "min_score": cfg.min_score,
-            "vol_surge": cfg.vol_surge,
-        },
-        "performance": stats,
-        "trades": [t.to_dict() for t in trades[-20:]],  # Last 20 trades
-        "total_trade_count": len(trades),
-    }
+    # Flat table for OpenBB: summary row + last 15 trades
+    rows = [{
+        "Symbol": symbol.upper(),
+        "Type": "SUMMARY",
+        "Total Trades": stats.get("total_trades", 0),
+        "Wins": stats.get("wins", 0),
+        "Losses": stats.get("losses", 0),
+        "Win Rate": f"{stats.get('win_rate', 0):.1f}%",
+        "Total PnL (EGP)": f"{stats.get('total_pnl', 0):,.0f}",
+        "Profit Factor": stats.get("profit_factor", 0),
+        "Expectancy": f"{stats.get('expectancy', 0):,.0f}",
+        "R:R": stats.get("risk_reward", 0),
+        "Max DD": f"{stats.get('max_drawdown', 0):,.0f}",
+        "Avg Hold": f"{stats.get('avg_hold_days', 0):.1f}d",
+        "SL ATR": cfg.sl_atr_mult,
+        "TP ATR": cfg.tp_atr_mult,
+    }]
+    for t in trades[-15:]:
+        rows.append({
+            "Symbol": t.symbol,
+            "Type": "LONG" if t.direction == 1 else "SHORT",
+            "Entry": f"{t.entry_price:.2f}",
+            "Exit": f"{t.exit_price:.2f}" if t.exit_price else "-",
+            "PnL (EGP)": f"{t.pnl:,.0f}",
+            "PnL %": f"{t.pnl_pct:.1f}%",
+            "Exit Reason": t.exit_reason,
+            "Score": t.score,
+            "Hold": f"{t.hold_days}d",
+        })
+    return rows
 
 
 @router.get("/optimize/{symbol}")
@@ -315,10 +365,23 @@ async def egx_optimize(symbol: str):
         raise HTTPException(status_code=404, detail=f"No data for {symbol}")
 
     result = optimize_parameters(df, symbol.upper())
-    return {
-        "symbol": symbol.upper(),
-        **result,
-    }
+    bc = result.get("best_config", {})
+    bs = result.get("best_stats", {})
+    # Flat table for OpenBB
+    return [{
+        "Symbol": symbol.upper(),
+        "SL ATR": bc.get("sl_atr_mult", "-"),
+        "TP ATR": bc.get("tp_atr_mult", "-"),
+        "Min Score": bc.get("min_score", "-"),
+        "Vol Surge": bc.get("vol_surge", "-"),
+        "Total Trades": bs.get("total_trades", 0),
+        "Win Rate": f"{bs.get('win_rate', 0):.1f}%",
+        "Total PnL (EGP)": f"{bs.get('total_pnl', 0):,.0f}",
+        "Profit Factor": bs.get("profit_factor", 0),
+        "Expectancy": f"{bs.get('expectancy', 0):,.0f}",
+        "R:R": bs.get("risk_reward", 0),
+        "Combos Tested": result.get("combinations_tested", 72),
+    }]
 
 
 @router.get("/scan")
@@ -378,12 +441,22 @@ async def egx_scan(send_telegram: bool = Query(default=True)):
     if send_telegram and results:
         alert_egx_scan_summary(results)
 
-    return {
-        "scanned": len(symbols),
-        "signals": len(results),
-        "strong_signals": len([r for r in results if "STRONG" in r.get("verdict", "")]),
-        "results": results,
-    }
+    # Flat table for OpenBB
+    return [{
+        "Symbol": r["symbol"],
+        "Verdict": r["verdict"],
+        "Confidence": f"{r.get('confidence', 0):.0f}%",
+        "V9": f"{r.get('v9_score', 0)}/6",
+        "Price (EGP)": r.get("price", 0),
+        "SL": r.get("stop_loss", 0),
+        "TP1": r.get("tp1", 0),
+        "R:R": f"1:{r.get('risk_reward', 0)}",
+        "RSI": r.get("rsi"),
+        "ADX": r.get("adx"),
+        "Buy": r.get("votes_buy", 0),
+        "Sell": r.get("votes_sell", 0),
+        "Hold": r.get("votes_hold", 0),
+    } for r in results] if results else [{"Status": "No signals found"}]
 
 
 @router.get("/chart/{symbol}")
@@ -433,19 +506,18 @@ async def egx_signal_history(symbol: Optional[str] = None, limit: int = 50):
             query = query.filter_by(symbol=symbol.upper())
         signals = query.limit(limit).all()
 
+        # Flat table for OpenBB
         return [{
-            "id": s.id,
-            "symbol": s.symbol,
-            "direction": s.direction,
-            "signal": s.signal,
-            "score": s.score,
-            "price": s.price,
-            "stop_loss": s.stop_loss,
-            "take_profit": s.take_profit,
-            "confidence": s.confidence,
-            "tool_votes": s.tool_votes,
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-        } for s in signals]
+            "Symbol": s.symbol,
+            "Signal": s.signal,
+            "Direction": s.direction,
+            "V9 Score": s.score,
+            "Price (EGP)": s.price,
+            "Stop Loss": s.stop_loss,
+            "Take Profit": s.take_profit,
+            "Confidence": f"{s.confidence:.0f}%" if s.confidence else "-",
+            "Date": s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "-",
+        } for s in signals] if signals else [{"Status": "No signals recorded yet"}]
     finally:
         db.close()
 
