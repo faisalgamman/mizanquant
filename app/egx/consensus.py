@@ -52,6 +52,10 @@ def run_consensus(
     if df is None or len(df) < 5:
         return {"error": f"Insufficient data for {symbol} ({len(df) if df is not None else 0} rows)"}
 
+    # Use last 300 rows max for indicator computation (speed)
+    if len(df) > 300:
+        df = df.tail(300).copy().reset_index(drop=True)
+
     # Compute all indicators
     df_ind = compute_indicators(df, cfg)
     if len(df_ind) < 5:
@@ -130,9 +134,10 @@ def run_consensus(
     else:
         tool_5 = "HOLD"  # No trend
 
-    # === TOOL 6: Backtest Win Rate ===
+    # === TOOL 6: Backtest Win Rate (use last 200 rows for speed) ===
     try:
-        trades = run_backtest(df.copy(), symbol, cfg)
+        bt_df = df.tail(200).copy() if len(df) > 200 else df.copy()
+        trades = run_backtest(bt_df, symbol, cfg)
         stats = analyze_performance(trades)
         bt_wr = stats.get("win_rate", 0)
         bt_pf = stats.get("profit_factor", 0)
@@ -147,9 +152,10 @@ def run_consensus(
         tool_6 = "HOLD"
         stats = {}
 
-    # === TOOL 7: Monte Carlo ===
+    # === TOOL 7: Monte Carlo (use last 100 rows, 200 sims for speed) ===
     try:
-        mc_result = _monte_carlo_sim(df_ind, n_sims=500, horizon=5)
+        mc_df = df_ind.tail(100) if len(df_ind) > 100 else df_ind
+        mc_result = _monte_carlo_sim(mc_df, n_sims=200, horizon=5)
         if mc_result["prob_profit"] >= 0.60:
             tool_7 = "BUY"
         elif mc_result["prob_profit"] <= 0.40:

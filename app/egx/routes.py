@@ -248,6 +248,9 @@ async def egx_analyze(
         raise HTTPException(status_code=404, detail=f"No data for {symbol} — upload CSV first via /egx/upload_page")
 
     cfg = EgxStrategyConfig()
+    # Limit data for faster response
+    if len(df) > 300:
+        df = df.tail(300).copy().reset_index(drop=True)
     result = run_consensus(df, symbol.upper(), cfg)
 
     if "error" in result:
