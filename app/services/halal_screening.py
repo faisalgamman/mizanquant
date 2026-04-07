@@ -26,6 +26,25 @@ from app.db.models import ScreeningResult
 
 logger = logging.getLogger("screener")
 
+
+def _safe_float(val, default: float = 0.0) -> float:
+    """Convert value to float, treating None/NaN/Inf as default.
+
+    yfinance often returns NaN for missing data. float('nan') is truthy
+    so the common ``val or 0`` pattern silently passes NaN through,
+    which later crashes FastAPI's JSON serializer (NaN is invalid JSON).
+    """
+    import math
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return f
+    except (TypeError, ValueError):
+        return default
+
 # ---------------------------------------------------------------------------
 # Haram sectors/industries — excluded by default (AAOIFI standard)
 # ---------------------------------------------------------------------------
@@ -114,39 +133,39 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
         ticker = yf.Ticker(symbol)
         info = ticker.info or {}
 
-        market_cap = info.get("marketCap", 0) or 0
+        market_cap = _safe_float(info.get("marketCap"))
         if market_cap <= 0:
             logger.warning(f"yfinance: no market cap for {symbol}")
             return None
 
         # Balance sheet fields
-        total_debt = float(info.get("totalDebt", 0) or 0)
-        cash_eq = float(info.get("totalCash", 0) or 0)
-        short_inv = 0
+        total_debt = _safe_float(info.get("totalDebt"))
+        cash_eq = _safe_float(info.get("totalCash"))
+        short_inv = 0.0
 
         # Try balance_sheet DataFrame for more detail
         try:
             bs = ticker.balance_sheet
             if bs is not None and not bs.empty:
                 latest = bs.iloc[:, 0]
-                total_debt = float(latest.get("Total Debt", total_debt) or total_debt)
-                cash_eq = float(latest.get("Cash And Cash Equivalents", cash_eq) or cash_eq)
-                short_inv = float(latest.get("Other Short Term Investments", 0) or 0)
+                total_debt = _safe_float(latest.get("Total Debt"), total_debt)
+                cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
+                short_inv = _safe_float(latest.get("Other Short Term Investments"))
         except Exception:
             pass  # use info-based values
 
         # Income statement fields
-        revenue = float(info.get("totalRevenue", 0) or 0)
-        interest_income = 0
-        interest_expense = 0
+        revenue = _safe_float(info.get("totalRevenue"))
+        interest_income = 0.0
+        interest_expense = 0.0
 
         try:
             inc = ticker.income_stmt
             if inc is not None and not inc.empty:
                 latest_inc = inc.iloc[:, 0]
-                revenue = float(latest_inc.get("Total Revenue", revenue) or revenue)
-                interest_income = float(latest_inc.get("Interest Income", 0) or 0)
-                interest_expense = float(latest_inc.get("Interest Expense", 0) or 0)
+                revenue = _safe_float(latest_inc.get("Total Revenue"), revenue)
+                interest_income = _safe_float(latest_inc.get("Interest Income"))
+                interest_expense = _safe_float(latest_inc.get("Interest Expense"))
         except Exception:
             pass  # use info-based values
 
@@ -196,7 +215,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         profile = profile_data[0]
         used_fallback = False
 
-    market_cap = profile.get("marketCap") or profile.get("mktCap") or 0
+    market_cap = _safe_float(profile.get("marketCap")) or _safe_float(profile.get("mktCap"))
     sector = (profile.get("sector") or "").lower().strip()
     industry = (profile.get("industry") or "").lower().strip()
     company_name = profile.get("companyName", symbol)
@@ -223,10 +242,10 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         else:
             bs = bs_data[0]
 
-    total_debt = bs.get("totalDebt", 0) or 0
-    cash_and_equivalents = bs.get("cashAndCashEquivalents", 0) or 0
-    short_term_investments = bs.get("shortTermInvestments", 0) or 0
-    cash_and_short_term = bs.get("cashAndShortTermInvestments", 0) or 0
+    total_debt = _safe_float(bs.get("totalDebt"))
+    cash_and_equivalents = _safe_float(bs.get("cashAndCashEquivalents"))
+    short_term_investments = _safe_float(bs.get("shortTermInvestments"))
+    cash_and_short_term = _safe_float(bs.get("cashAndShortTermInvestments"))
 
     # 4. Fetch income statement (skip if already from yfinance)
     if not used_fallback:
@@ -239,9 +258,9 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         else:
             income = is_data[0]
 
-    revenue = income.get("revenue", 0) or 0
-    interest_income = income.get("interestIncome", 0) or 0
-    interest_expense = income.get("interestExpense", 0) or 0
+    revenue = _safe_float(income.get("revenue"))
+    interest_income = _safe_float(income.get("interestIncome"))
+    interest_expense = _safe_float(income.get("interestExpense"))
 
     # ---------------------------------------------------------------------------
     # AAOIFI Screens
