@@ -616,7 +616,8 @@ def get_performance_report(strategy_id: str = None) -> dict:
             import numpy as np
             if len(pnl_pcts) > 1:
                 returns = np.array(pnl_pcts) / 100
-                sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(252) if np.std(returns) > 0 else 0
+                rf_daily = 0.043 / 252  # Current US T-bill ~4.3% annualized
+                sharpe = ((np.mean(returns) - rf_daily) / np.std(returns)) * np.sqrt(252) if np.std(returns) > 0 else 0
             else:
                 sharpe = 0
 
