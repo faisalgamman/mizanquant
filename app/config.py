@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
 
+    # --- Claude AI Agent ---
+    ANTHROPIC_API_KEY: str = ""
+    CLAUDE_MODEL: str = "claude-sonnet-4-6"
+
     # --- Phase 5: API authentication ---
     # Empty string means no authentication is required.
     API_KEY: str = ""

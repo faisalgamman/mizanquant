@@ -2494,6 +2494,16 @@ async def widgets():
             "params": [{"paramName": "portfolio", "value": "100000", "label": "Portfolio ($)", "type": "text", "show": True}],
         },
 
+        # ===== Claude AI Agent =====
+        "ai_agent": {
+            "name": "Claude AI Agent",
+            "description": "AI-powered analysis: halal + technical + consensus + trade plan",
+            "category": "AI Agent", "type": "table",
+            "endpoint": "/agent/analyze",
+            "gridData": {"w": 10, "h": 9},
+            "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True}],
+        },
+
         # ===== ROW 3: Deep Analysis (single stock) =====
         "ai_consensus": {
             "name": "AI Consensus (9 Tools)",
@@ -3578,6 +3588,85 @@ async def health():
         "config": "loaded",
         "dependencies": checks,
     }
+
+# ══════════════════════════════════════════════════════════════════════
+# CLAUDE AI AGENT ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════
+
+@app.post("/agent/chat")
+async def agent_chat(payload: dict):
+    """Conversational AI trading assistant powered by Claude.
+
+    Send a natural language message (Arabic or English) and get
+    data-driven analysis using all available trading tools.
+
+    Request: {"message": "حلل لي سهم AAPL", "conversation_id": "optional"}
+    """
+    if not settings.ANTHROPIC_API_KEY:
+        return {"error": "ANTHROPIC_API_KEY not configured. Add it to Railway environment variables."}
+
+    message = payload.get("message", "").strip()
+    if not message:
+        return {"error": "Message is required"}
+
+    conversation_id = payload.get("conversation_id")
+
+    try:
+        from app.services.claude_agent import get_agent
+        agent = get_agent()
+        result = await agent.chat(message, conversation_id=conversation_id)
+        return result
+    except Exception as e:
+        logger.error(f"Agent chat error: {e}")
+        return {"error": f"Agent error: {str(e)}"}
+
+
+@app.get("/agent/analyze")
+async def agent_analyze(symbol: str = "AAPL"):
+    """AI Agent single-stock analysis — convenience endpoint for OpenBB widget.
+
+    Runs a comprehensive analysis: halal check + technical + consensus + trade plan.
+    Returns the analysis as a table row for widget display.
+    """
+    if not settings.ANTHROPIC_API_KEY:
+        return [{"Error": "ANTHROPIC_API_KEY not configured"}]
+
+    s = validate_symbol(symbol)
+
+    try:
+        from app.services.claude_agent import get_agent
+        agent = get_agent()
+        prompt = (
+            f"Analyze {s} comprehensively: check halal status, run technical analysis "
+            f"and consensus. Give me a clear verdict with entry/SL/TP levels. Be concise."
+        )
+        result = await agent.chat(prompt)
+        return [{
+            "Symbol": s,
+            "AI Analysis": result.get("response", "No response"),
+            "Tools Used": ", ".join(result.get("tools_used", [])),
+            "Model": result.get("model", ""),
+        }]
+    except Exception as e:
+        logger.error(f"Agent analyze error: {e}")
+        return [{"Error": f"Agent error: {str(e)}"}]
+
+
+@app.get("/agent/health")
+async def agent_health():
+    """Check Claude AI agent status."""
+    from app.services.claude_tools import TOOL_SCHEMAS
+    configured = bool(settings.ANTHROPIC_API_KEY)
+    return {
+        "status": "ready" if configured else "not_configured",
+        "model": settings.CLAUDE_MODEL,
+        "api_key_set": configured,
+        "api_key_prefix": settings.ANTHROPIC_API_KEY[:12] + "..." if configured else "",
+        "tools_count": len(TOOL_SCHEMAS),
+        "tools": [t["name"] for t in TOOL_SCHEMAS],
+    }
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
