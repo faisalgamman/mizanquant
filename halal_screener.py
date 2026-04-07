@@ -1853,7 +1853,8 @@ def run_consensus_momentum(symbol, horizon=5):
                 pass
 
         # Auto-trade via Strategy A's account
-        if "STRONG" in verdict:
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
                     symbol=symbol.upper(), verdict=verdict,
@@ -1865,6 +1866,7 @@ def run_consensus_momentum(symbol, horizon=5):
                 )
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+                    summary[0]["Trade_Reason"] = trade_result.get("reason", "")
             except Exception:
                 pass
 
@@ -2060,7 +2062,8 @@ def run_consensus_reversion(symbol, horizon=3):
             except Exception:
                 pass
 
-        if "STRONG" in verdict:
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
                     symbol=symbol.upper(), verdict=verdict,
@@ -2072,6 +2075,7 @@ def run_consensus_reversion(symbol, horizon=3):
                 )
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+                    summary[0]["Trade_Reason"] = trade_result.get("reason", "")
             except Exception:
                 pass
 
@@ -2268,7 +2272,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             except Exception:
                 pass
 
-        if "STRONG" in verdict:
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
                     symbol=symbol.upper(), verdict=verdict,
@@ -2280,6 +2285,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
                 )
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+                    summary[0]["Trade_Reason"] = trade_result.get("reason", "")
             except Exception:
                 pass
 

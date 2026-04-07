@@ -389,7 +389,7 @@ def on_signal(
     sell_verdicts = ("STRONG SELL", "SELL", "WEAK SELL")
 
     if verdict in buy_verdicts and confidence >= min_confidence:
-        logger.info(f"{label} Auto-trade trigger: {verdict} {symbol} (confidence={confidence}%)")
+        logger.info(f"{label} Auto-trade trigger: {verdict} {symbol} (confidence={confidence}%, min={min_confidence}%)")
         return execute_buy(
             symbol=symbol,
             price=price,
@@ -407,7 +407,7 @@ def on_signal(
         )
 
     elif verdict in sell_verdicts and confidence >= min_confidence:
-        logger.info(f"{label} Auto-trade trigger: STRONG SELL {symbol} (confidence={confidence}%)")
+        logger.info(f"{label} Auto-trade trigger: {verdict} {symbol} (confidence={confidence}%, min={min_confidence}%)")
         return execute_sell(
             symbol=symbol,
             price=price,
@@ -415,7 +415,19 @@ def on_signal(
             strategy_id=strategy_id,
         )
 
-    return None
+    else:
+        # Log WHY signal was rejected
+        if verdict in buy_verdicts or verdict in sell_verdicts:
+            logger.info(
+                f"{label} Signal REJECTED: {verdict} {symbol} — "
+                f"confidence {confidence}% < min {min_confidence}%"
+            )
+        else:
+            logger.info(
+                f"{label} Signal SKIPPED: {verdict} {symbol} — "
+                f"not a buy/sell verdict (confidence={confidence}%)"
+            )
+        return None
 
 
 # ---------------------------------------------------------------------------
