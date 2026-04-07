@@ -109,7 +109,8 @@ def _simulate_trades(df: pd.DataFrame, signals: list, params: dict) -> dict:
     gross_profit = float(wins.sum()) if len(wins) > 0 else 0
     gross_loss = float(abs(losses.sum())) if len(losses) > 0 else 0.01
     profit_factor = gross_profit / gross_loss
-    sharpe = float(pnls.mean() / pnls.std() * np.sqrt(252)) if pnls.std() > 0 else 0
+    rf_daily = 0.043 / 252  # Current US T-bill ~4.3% annualized
+    sharpe = float((pnls.mean() - rf_daily) / pnls.std() * np.sqrt(252)) if pnls.std() > 0 else 0
     total_return = float(pnls.sum())
 
     return {

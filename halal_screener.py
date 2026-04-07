@@ -739,6 +739,7 @@ def _run_policy_gradient_inner(symbol, episodes, df=None):
         from openbb_forecast.agents.policy_gradient import PolicyGradientAgent
         from openbb_forecast.agents.environment import TradingEnvironment
         from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
+        from openbb_forecast.risk.manager import RiskManager
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
@@ -746,8 +747,13 @@ def _run_policy_gradient_inner(symbol, episodes, df=None):
         prices = prices[~np.isnan(prices)]
         split = int(len(prices) * 0.8)
         cost_model = TransactionCostModel(commission_bps=10)
+        try:
+            risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
+        except Exception:
+            risk_mgr = None
         env = TradingEnvironment(prices=prices[:split], window_size=30,
-                                  initial_capital=10000, cost_model=cost_model)
+                                  initial_capital=10000, cost_model=cost_model,
+                                  risk_manager=risk_mgr)
         agent = PolicyGradientAgent(state_size=env.state_size, action_size=env.action_size)
         rewards = agent.train(env, episodes=episodes)
         state = env.reset()
@@ -813,7 +819,9 @@ def score_usx_single(symbol, df):
         gap_ok  = 0 <= gap_pct <= 1.5
 
         hlc3   = (df["high"] + df["low"] + df["close"]) / 3
-        vwap   = (hlc3 * vol).cumsum() / vol.cumsum()
+        # Rolling 20-day VWAP instead of all-time cumulative
+        _vwap_window = 20
+        vwap   = (hlc3 * vol).rolling(_vwap_window).sum() / vol.rolling(_vwap_window).sum()
         above_vwap = float(close.iloc[-2]) > float(vwap.iloc[-2])
         roc5    = float((close.iloc[-1] - close.iloc[-6]) / close.iloc[-6] * 100) if len(close) >= 6 else 0
         rs_ok   = roc5 > 0
@@ -890,6 +898,261 @@ def run_usx_screener(min_score=7, direction="Long Only"):
         results.sort(key=lambda x: int(x["Score"].split("/")[0]), reverse=True)
         return results if results else [{"Message": "No stocks meet USX Pro criteria"}]
     except Exception as e:
+        return [{"Error": str(e)}]
+
+
+# ---------------------------------------------------------------------------
+# GICS sector mapping for BCF portfolio diversification (max 2 per sector)
+# ---------------------------------------------------------------------------
+_GICS_SECTOR = {
+    # Technology
+    **{s: "Technology" for s in [
+        "AAPL","MSFT","NVDA","AVGO","ORCL","CRM","AMD","ADBE","CSCO","ACN",
+        "IBM","INTC","INTU","NOW","QCOM","TXN","AMAT","ADI","LRCX","SNPS",
+        "CDNS","KLAC","MCHP","MPWR","FTNT","PANW","CRWD","DDOG","NXPI",
+        "KEYS","FFIV","EPAM","CTSH","IT","GDDY","GEN","SMCI","HPQ","HPE",
+        "DELL","NTAP","WDC","STX","JKHY","TYL","CSGP","CIEN","COHR","LITE",
+        "CDW","FDS","BR","FIS","FISV","GPN","PYPL","FI","COIN","PLTR",
+        "APP","HOOD","FICO","SWKS","ON","TER","ZBRA","AKAM","SNDK",
+    ]},
+    # Healthcare
+    **{s: "Healthcare" for s in [
+        "LLY","UNH","JNJ","ABBV","MRK","TMO","ABT","DHR","BMY","AMGN",
+        "PFE","GILD","VRTX","REGN","ISRG","MDT","BSX","SYK","BDX","EW",
+        "IDXX","IQV","ZBH","BAX","HOLX","PODD","DXCM","A","LH","DGX",
+        "CRL","RVTY","TECH","MRNA","BIIB","INCY","GEHC","SOLV","RMD",
+        "STE","COO","HSIC","HCA","DVA","WAT","MCK","CAH","CVS",
+    ]},
+    # Consumer Discretionary
+    **{s: "Consumer Disc" for s in [
+        "AMZN","TSLA","HD","MCD","NKE","LOW","SBUX","TJX","BKNG","CMG",
+        "ORLY","AZO","ROST","MAR","HLT","GM","F","APTV","DHI","LEN",
+        "PHM","NVR","DECK","LULU","BBY","DPZ","YUM","DRI","POOL","GPC",
+        "ULTA","TPR","RL","DG","DLTR","CVNA","DASH","UBER","ABNB",
+        "EXPE","EBAY","ETSY","WSM","TSCO","LII","SWK","GNRC","LUV",
+        "DAL","UAL",
+    ]},
+    # Consumer Staples
+    **{s: "Consumer Staples" for s in [
+        "PG","KO","PEP","COST","WMT","MDLZ","CL","KMB","GIS","HSY",
+        "KHC","KDP","MKC","HRL","SJM","CPB","CAG","TSN","CHD","CLX",
+        "MNST","SYY","KR","ADM","BG","KVUE",
+    ]},
+    # Energy
+    **{s: "Energy" for s in [
+        "XOM","CVX","COP","EOG","SLB","MPC","PSX","VLO","OXY","HAL",
+        "DVN","FANG","BKR","CTRA","EQT","APA","OKE","WMB","KMI","TRGP",
+    ]},
+    # Industrials
+    **{s: "Industrials" for s in [
+        "CAT","GE","HON","UNP","UPS","DE","ETN","ITW","EMR","CSX",
+        "NSC","WM","RSG","FAST","CMI","IR","ROK","DOV","PH","OTIS",
+        "CARR","FTV","GWW","SNA","JBHT","CHRW","EXPD","ODFL","WAB",
+        "TT","AME","IEX","AXON","BLDR","PWR","EME","FIX","SAIC","LDOS",
+        "TDG","TDY","HWM","TXT","J","JCI","ALLE","AOS","XYL","AWK",
+        "ROL","CTAS","PAYX","VRSK","IP","AVY","PKG","MLM","VMC","CRH",
+        "SW","TRMB","FDX",
+    ]},
+    # Communication Services
+    **{s: "Communication" for s in [
+        "GOOGL","GOOG","META","CMCSA","CHTR","T","TMUS","VZ","EA","TTWO",
+        "OMC","IPG","NWSA","NWS","TKO",
+    ]},
+    # Materials
+    **{s: "Materials" for s in [
+        "LIN","APD","ECL","SHW","FCX","NUE","STLD","NEM","DOW","DD",
+        "PPG","ALB","CF","MOS","AMCR","BALL","LYB","IFF","FMC","CTVA",
+        "AVY",
+    ]},
+}
+
+
+def _get_news_sentiment_compound(symbol):
+    """Lightweight news sentiment using NLTK VADER on recent headlines.
+
+    Returns compound score in [-1, +1].  Falls back to 0.0 (neutral) on any
+    failure so the gate never blocks due to data-source issues.
+    """
+    try:
+        import nltk
+        from nltk.sentiment.vader import SentimentIntensityAnalyzer
+        # Ensure vader lexicon is available
+        try:
+            nltk.data.find("sentiment/vader_lexicon.zip")
+        except LookupError:
+            nltk.download("vader_lexicon", quiet=True)
+
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        news = ticker.news
+        if not news:
+            return 0.0
+
+        sia = SentimentIntensityAnalyzer()
+        scores = []
+        for article in news[:10]:  # latest 10 headlines
+            title = article.get("title", "")
+            if title:
+                scores.append(sia.polarity_scores(title)["compound"])
+        return float(np.mean(scores)) if scores else 0.0
+    except Exception as e:
+        logger.debug(f"Sentiment fetch failed for {symbol}: {e}")
+        return 0.0  # neutral fallback — don't block trade on data failure
+
+
+def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
+    """Balanced Confluence Framework — 5-gate AND-logic screener.
+
+    Gates:
+      1. Technical Consensus: swing score >= 60 AND USX score >= 7
+      2. Probabilistic Confirmation: Monte Carlo prob_profit >= 55%
+      3. Sentiment Filter (veto): news compound >= -0.10
+      4. Regime Filter: SPY above 50-day SMA
+      5. Historical Validation: 2-year backtest win rate >= 45%
+
+    Position sizing: 1.25% risk, 1.5 ATR stop, 20% max position.
+    Exit rules: TP1 +1.75 ATR (40%), TP2 +2.75 ATR (35%), TP3 +4.0 ATR (25%),
+                SL -1.5 ATR (100%), Time Stop Day 12 (100%).
+    Portfolio: max 5 positions, max 2 per GICS sector.
+    """
+    try:
+        # --- Gate 4: Regime Filter — SPY above 50-day SMA ---
+        spy_df = fetch_yf("SPY", period="1y")
+        if spy_df is None or len(spy_df) < 50:
+            return [{"Message": "Cannot fetch SPY data for regime filter"}]
+
+        spy_close = spy_df["close"]
+        spy_price = float(spy_close.iloc[-1])
+        spy_sma50 = float(spy_close.tail(50).mean())
+
+        if spy_price < spy_sma50:
+            return [{
+                "Message": "BCF BLOCKED — Bear regime detected",
+                "SPY": round(spy_price, 2),
+                "SPY SMA50": round(spy_sma50, 2),
+                "Reason": "SPY below 50-day SMA. No long entries allowed.",
+            }]
+
+        # --- Pre-compute swing screener data (Gate 1a) ---
+        screener_data = cache_get("all")
+        if not screener_data:
+            screener_data = run_screener()
+
+        # Index by symbol for fast lookup
+        swing_by_sym = {r["symbol"]: r for r in screener_data if isinstance(r, dict) and "symbol" in r}
+
+        results = []
+        sector_count = defaultdict(int)
+        max_positions = 5
+        max_per_sector = 2
+
+        for symbol in HALAL_STOCKS:
+            if len(results) >= max_positions:
+                break
+
+            # --- Gate 1a: Swing score >= 60 ---
+            sw = swing_by_sym.get(symbol)
+            if not sw or sw.get("swing_score", 0) < 60:
+                continue
+
+            # --- Gate 1b: USX Pro score >= 7 ---
+            try:
+                df = fetch_yf(symbol)
+                if df is None or len(df) < 50:
+                    continue
+                usx = score_usx_single(symbol, df)
+                if not usx or usx.get("_score_int", 0) < 7:
+                    continue
+            except Exception:
+                continue
+
+            # --- Sector cap check (max 2 per GICS sector) ---
+            sector = _GICS_SECTOR.get(symbol, "Other")
+            if sector_count[sector] >= max_per_sector:
+                continue
+
+            # --- Gate 2: Monte Carlo prob_profit >= 55% ---
+            try:
+                mc_result = run_monte_carlo(symbol, days=30, simulations=200, df=df)
+                if not mc_result or isinstance(mc_result[0], dict) and "Error" in mc_result[0]:
+                    continue
+                prob_profit = mc_result[0].get("Prob Profit %", 0)
+                if prob_profit < 55:
+                    continue
+            except Exception:
+                continue
+
+            # --- Gate 3: Sentiment >= -0.10 ---
+            sentiment_score = _get_news_sentiment_compound(symbol)
+            if sentiment_score < -0.10:
+                continue
+
+            # --- Gate 5: 2-year backtest win rate >= 45% ---
+            try:
+                from datetime import datetime, timedelta
+                end_dt = datetime.now().strftime("%Y-%m-%d")
+                start_dt = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+                bt = run_backtest(symbol, start_dt, end_dt, portfolio_value, 1.25, 12)
+                if not bt or isinstance(bt[0], dict) and "Error" in bt[0]:
+                    continue
+                win_rate = bt[0].get("Win Rate %", 0)
+                if win_rate < 45:
+                    continue
+            except Exception:
+                continue
+
+            # --- All 5 gates passed — compute position sizing ---
+            price = float(df["close"].iloc[-1])
+            atr_val = float(atr(df).iloc[-1])
+
+            stop_distance = 1.5 * atr_val
+            risk_per_trade = portfolio_value * 0.0125  # 1.25%
+            qty = int(risk_per_trade / stop_distance) if stop_distance > 0 else 0
+            max_position = portfolio_value * 0.20
+            if qty * price > max_position:
+                qty = int(max_position / price)
+            if qty <= 0:
+                continue
+
+            sl = round(price - 1.5 * atr_val, 2)
+            tp1 = round(price + 1.75 * atr_val, 2)
+            tp2 = round(price + 2.75 * atr_val, 2)
+            tp3 = round(price + 4.0 * atr_val, 2)
+
+            results.append({
+                "Symbol": symbol,
+                "Price": round(price, 2),
+                "Swing Score": sw.get("swing_score", 0),
+                "USX Score": usx.get("Score", "?"),
+                "MC Prob %": round(prob_profit, 1),
+                "Sentiment": round(sentiment_score, 2),
+                "BT Win %": round(win_rate, 1),
+                "Sector": sector,
+                "ATR": round(atr_val, 2),
+                "Qty": qty,
+                "Risk $": round(qty * stop_distance, 2),
+                "Position $": round(qty * price, 2),
+                "Stop Loss": sl,
+                "TP1 (40%)": tp1,
+                "TP2 (35%)": tp2,
+                "TP3 (25%)": tp3,
+                "Time Stop": "Day 12",
+                "RR1": round(1.75 / 1.5, 2),
+                "RR2": round(2.75 / 1.5, 2),
+                "RR3": round(4.0 / 1.5, 2),
+            })
+            sector_count[sector] += 1
+
+        if not results:
+            return [{"Message": "No stocks passed all 5 BCF gates",
+                     "SPY": round(spy_price, 2),
+                     "SPY SMA50": round(spy_sma50, 2),
+                     "Regime": "Bull (SPY > SMA50)"}]
+
+        return results
+
+    except Exception as e:
+        logger.error(f"BCF screener error: {e}")
         return [{"Error": str(e)}]
 
 
@@ -1012,7 +1275,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             import datetime
             end_date = datetime.date.today().strftime("%Y-%m-%d")
             start_date = (datetime.date.today() - datetime.timedelta(days=365*2)).strftime("%Y-%m-%d")
-            bt = run_backtest(symbol, start_date, end_date, 100000, 1.0, 3)
+            bt = run_backtest(symbol, start_date, end_date, settings.RISK_CAPITAL, 1.0, 3)
             if bt and len(bt) > 0 and "Return %" in bt[0]:
                 ret = float(bt[0]["Return %"])
                 win_rate_v = float(bt[0].get("Win Rate %", 0))
@@ -1467,7 +1730,7 @@ def run_consensus_momentum(symbol, horizon=5):
             import datetime as _dt
             end_date = _dt.date.today().strftime("%Y-%m-%d")
             start_date = (_dt.date.today() - _dt.timedelta(days=365 * 2)).strftime("%Y-%m-%d")
-            bt = run_backtest(symbol, start_date, end_date, 100000, 1.0, 3)
+            bt = run_backtest(symbol, start_date, end_date, settings.RISK_CAPITAL, 1.0, 3)
             if bt and len(bt) > 0 and "Return %" in bt[0]:
                 ret = float(bt[0]["Return %"])
                 win_rate_v = float(bt[0].get("Win Rate %", 0))
@@ -2222,6 +2485,15 @@ async def widgets():
             "params": [{"paramName": "min_score", "value": "7", "label": "Min Score (1-10)", "type": "text", "show": True}],
         },
 
+        "bcf_screener": {
+            "name": "BCF Strategy (Moderate)",
+            "description": "Balanced Confluence: 5-gate AND logic with ATR exits",
+            "category": "Analysis", "type": "table",
+            "endpoint": "/bcf",
+            "gridData": {"w": 10, "h": 9},
+            "params": [{"paramName": "portfolio", "value": "100000", "label": "Portfolio ($)", "type": "text", "show": True}],
+        },
+
         # ===== ROW 3: Deep Analysis (single stock) =====
         "ai_consensus": {
             "name": "AI Consensus (9 Tools)",
@@ -2416,6 +2688,13 @@ async def watchlist():
     if status != "running":
         threading.Thread(target=_bg_compute, args=(key, run_screener), daemon=True).start()
     return [{"Status": "Computing watchlist...", "Info": "Refresh in 1-2 minutes."}]
+
+@app.get("/bcf")
+async def bcf_screener(portfolio: float = 100000):
+    """Balanced Confluence Framework — moderate risk strategy."""
+    validate_range(portfolio, "portfolio", 1000, 10_000_000)
+    key = _cache_key("bcf", portfolio=portfolio)
+    return _serve_or_compute(key, run_bcf_screener, args=(portfolio,), msg="Computing BCF screener...")
 
 # --- Single-symbol endpoints ---
 @app.get("/backtest")
@@ -3219,8 +3498,10 @@ async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
     df["ema9"] = ema(close, 9)
     df["rsi14"] = rsi(close, 14)
 
-    # VWAP approximation (cumulative volume-weighted average price)
-    df["vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    # Rolling 20-day VWAP instead of all-time cumulative
+    _vwap_window = 20
+    hlc3 = (df["high"] + df["low"] + df["close"]) / 3
+    df["vwap"] = (hlc3 * df["volume"]).rolling(_vwap_window).sum() / df["volume"].rolling(_vwap_window).sum()
 
     # Format for response
     bars = []

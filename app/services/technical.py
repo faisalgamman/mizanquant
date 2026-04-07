@@ -238,10 +238,12 @@ def calc_metrics(returns):
         return {}
     mean_r = np.mean(returns)
     std_r = np.std(returns) + 1e-9
-    sharpe = float(mean_r / std_r * np.sqrt(252))
+    rf_daily = 0.043 / 252  # Current US T-bill ~4.3% annualized
+    excess_return = mean_r - rf_daily
+    sharpe = float(excess_return / std_r * np.sqrt(252))
     downside = returns[returns < 0]
     sortino_denom = np.std(downside) + 1e-9 if len(downside) > 0 else 1e-9
-    sortino = float(mean_r / sortino_denom * np.sqrt(252))
+    sortino = float(excess_return / sortino_denom * np.sqrt(252))
     cumulative = np.cumprod(1 + returns)
     peak = np.maximum.accumulate(cumulative)
     drawdowns = (cumulative - peak) / peak
