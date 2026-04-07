@@ -2865,6 +2865,16 @@ async def precompute_on_startup():
 # PHASE 2: AAOIFI Halal Screening Endpoints
 # ============================================================
 
+def _json_safe(val, default=0):
+    """Ensure a numeric value is JSON-serializable (no NaN/Inf)."""
+    import math
+    if val is None:
+        return default
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return default
+    return val
+
+
 @app.get("/halal_status")
 async def halal_status(symbol: str = "AAPL"):
     """Get AAOIFI Halal compliance status for a single symbol."""
@@ -2872,26 +2882,27 @@ async def halal_status(symbol: str = "AAPL"):
     if not settings.FMP_API_KEY:
         return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
     try:
-        result = get_halal_status(s)
+        # Run in thread pool — get_halal_status does blocking HTTP (FMP + yfinance fallback)
+        result = await asyncio.to_thread(get_halal_status, s)
     except Exception as e:
         logger.error(f"Halal screening crashed for {s}: {e}")
         result = None
     if result is None:
         return [{"Error": f"Could not retrieve fundamental data for {s}"}]
-    # Format for OpenBB widget display
+    # Format for OpenBB widget display — _json_safe guards against NaN from yfinance
     status = "HALAL" if result.get("is_halal") else "HARAM"
     return [{
         "Symbol": s,
         "Status": status,
         "Company": result.get("company_name", s),
         "Sector": result.get("sector", ""),
-        "Debt / MCap %": result.get("debt_ratio", 0),
+        "Debt / MCap %": _json_safe(result.get("debt_ratio", 0)),
         "Debt Pass": "YES" if result.get("debt_pass") else "NO",
-        "Interest / Rev %": result.get("interest_ratio", 0),
+        "Interest / Rev %": _json_safe(result.get("interest_ratio", 0)),
         "Interest Pass": "YES" if result.get("interest_pass") else "NO",
         "Haram Sector": "YES" if result.get("haram_revenue") else "NO",
         "Sector Pass": "YES" if result.get("haram_pass") else "NO",
-        "Liquidity / MCap %": result.get("liquidity_ratio", 0),
+        "Liquidity / MCap %": _json_safe(result.get("liquidity_ratio", 0)),
         "Liquidity Pass": "YES" if result.get("liquidity_pass") else "NO",
         "Screens Passed": f"{result.get('screens_passed', 0)}/4",
         "Threshold": "Debt<33%, Interest<5%, No Haram Sector, Liquidity<33%",
