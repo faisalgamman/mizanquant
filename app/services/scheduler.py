@@ -139,8 +139,10 @@ def _run_pre_market():
         strong_buys = [r for r in results if r.get("swing_signal") == "STRONG BUY"]
         buys = [r for r in results if r.get("swing_signal") == "BUY"]
 
-        # Get portfolio info from default account
-        account = alpaca_get_account()
+        # Get portfolio info from first strategy account (no legacy keys)
+        from app.config import STRATEGY_CONFIGS
+        _sid = next(iter(STRATEGY_CONFIGS), None)
+        account = alpaca_get_account(strategy_id=_sid)
         portfolio_info = None
         if account:
             daily_pl = account["equity"] - account["last_equity"]
