@@ -3282,7 +3282,9 @@ async def telegram_daily_summary():
     cached, _ = _get_cached(screener_key)
     if not cached or not isinstance(cached, list):
         return [{"Error": "Screener data not available yet"}]
-    portfolio = alpaca_get_account()
+    from app.config import STRATEGY_CONFIGS
+    _sid = next(iter(STRATEGY_CONFIGS), None)
+    portfolio = alpaca_get_account(strategy_id=_sid)
     portfolio_info = None
     if portfolio:
         daily_pl = portfolio["equity"] - portfolio["last_equity"]
@@ -3404,10 +3406,13 @@ async def post_market_scan(top_n: int = 5, min_score: int = 55):
 @app.get("/api/v1/trading/status")
 async def trading_status():
     """Get auto-trading status: enabled/disabled, risk dashboard, PDT tracker."""
-    account = alpaca_get_account()
+    # Use first available strategy account (multi-strategy setup has no legacy keys)
+    from app.config import STRATEGY_CONFIGS
+    sid = next(iter(STRATEGY_CONFIGS), None)
+    account = alpaca_get_account(strategy_id=sid)
     if not account:
         return {"error": "Cannot connect to Alpaca"}
-    positions = alpaca_get_positions()
+    positions = alpaca_get_positions(strategy_id=sid)
     risk = get_risk_status(account, positions)
     risk["auto_trade_enabled"] = settings.AUTO_TRADE_ENABLED
     risk["min_confidence"] = settings.MIN_TRADE_CONFIDENCE
