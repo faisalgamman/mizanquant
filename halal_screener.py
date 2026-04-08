@@ -56,34 +56,6 @@ app = FastAPI()
 import keep_alive
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# --- EGX module (completely separate from US stocks) ---
-from app.egx.routes import router as egx_router
-app.include_router(egx_router)
-
-# --- EGX direct endpoints (bypass router for OpenBB widget compatibility) ---
-from app.egx.data import get_stock_data as egx_get_stock_data, get_all_symbols as egx_get_all_symbols
-from app.egx.consensus import run_consensus as egx_run_consensus
-from app.egx.scoring import EgxStrategyConfig as EgxCfg
-from app.egx.backtest import run_backtest as egx_run_backtest, analyze_performance as egx_analyze_perf, optimize_parameters as egx_optimize_params
-
-@app.get("/egx/analyze_widget")
-async def egx_analyze_widget(symbol: str = "COMI", send_telegram: bool = True):
-    """Direct app-level EGX analysis for OpenBB widget compatibility."""
-    from app.egx.routes import egx_analyze
-    return await egx_analyze(symbol=symbol, send_telegram=send_telegram)
-
-@app.get("/egx/backtest_widget")
-async def egx_backtest_widget(symbol: str = "COMI"):
-    """Direct app-level EGX backtest for OpenBB widget compatibility."""
-    from app.egx.routes import egx_backtest
-    return await egx_backtest(symbol=symbol)
-
-@app.get("/egx/optimize_widget")
-async def egx_optimize_widget(symbol: str = "COMI"):
-    """Direct app-level EGX optimizer for OpenBB widget compatibility."""
-    from app.egx.routes import egx_optimize
-    return await egx_optimize(symbol=symbol)
-
 # --- 4.1: Timeout wrapper ---
 async def with_timeout(coro, seconds=120):
     try:
@@ -2576,53 +2548,6 @@ async def widgets():
             "params": [{"paramName": "symbol", "value": "", "label": "Symbol (blank=all)", "type": "text", "show": True}],
         },
 
-        # ===== EGX: Egyptian Exchange (separate section) =====
-        "egx_watchlist": {
-            "name": "EGX Watchlist",
-            "description": "Uploaded Egyptian stocks with data status",
-            "category": "EGX Egypt", "type": "table",
-            "endpoint": "/egx/watchlist",
-            "gridData": {"w": 10, "h": 5},
-        },
-        "egx_analyze": {
-            "name": "EGX Analysis (7 Tools)",
-            "description": "V9 Score + Bollinger + StochRSI + OBV + ADX + Backtest + Monte Carlo",
-            "category": "EGX Egypt", "type": "table",
-            "endpoint": "/egx/analyze_widget",
-            "gridData": {"w": 10, "h": 9},
-            "params": [{"paramName": "symbol", "value": "COMI", "label": "EGX Symbol", "type": "text", "show": True}],
-        },
-        "egx_scan": {
-            "name": "EGX Full Scan",
-            "description": "Scan all uploaded Egyptian stocks for signals",
-            "category": "EGX Egypt", "type": "table",
-            "endpoint": "/egx/scan",
-            "gridData": {"w": 10, "h": 9},
-        },
-        "egx_backtest": {
-            "name": "EGX Backtest (V9)",
-            "description": "ATR-based backtest with win rate, profit factor, expectancy",
-            "category": "EGX Egypt", "type": "table",
-            "endpoint": "/egx/backtest_widget",
-            "gridData": {"w": 10, "h": 9},
-            "params": [{"paramName": "symbol", "value": "COMI", "label": "EGX Symbol", "type": "text", "show": True}],
-        },
-        "egx_optimize": {
-            "name": "EGX Optimizer",
-            "description": "Find best SL/TP/Score/Volume params",
-            "category": "EGX Egypt", "type": "table",
-            "endpoint": "/egx/optimize_widget",
-            "gridData": {"w": 10, "h": 6},
-            "params": [{"paramName": "symbol", "value": "COMI", "label": "EGX Symbol", "type": "text", "show": True}],
-        },
-        "egx_signals": {
-            "name": "EGX Signal History",
-            "description": "Past EGX signals with V9 scores and tool votes",
-            "category": "EGX Egypt", "type": "table",
-            "endpoint": "/egx/signals",
-            "gridData": {"w": 10, "h": 6},
-            "params": [{"paramName": "symbol", "value": "", "label": "Symbol (blank=all)", "type": "text", "show": True}],
-        },
     }
 
 # ============================================================

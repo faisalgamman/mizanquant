@@ -249,36 +249,35 @@ def _exec_get_buy_signals() -> dict:
 def _exec_run_consensus(symbol: str) -> dict:
     """7-tool consensus analysis."""
     import halal_screener as hs
-    from app.egx.consensus import run_consensus as _run_consensus
 
     symbol = symbol.upper().strip()
-    df = hs.fetch_yf(symbol)
-    if df is None or df.empty:
-        return {"error": f"Could not fetch data for {symbol}"}
 
     try:
-        result = _run_consensus(df, symbol)
+        results = hs.run_consensus(symbol, horizon=5, episodes=3)
     except Exception as e:
         logger.error(f"Consensus failed for {symbol}: {e}")
         return {"error": f"Consensus analysis failed: {str(e)}"}
+
+    if not results:
+        return {"error": f"No consensus result for {symbol}"}
+
+    result = results[0] if isinstance(results, list) else results
 
     if not result:
         return {"error": f"No consensus result for {symbol}"}
 
     return {
         "symbol": symbol,
-        "verdict": result.get("verdict", "NEUTRAL"),
-        "confidence": result.get("confidence", 0),
-        "price": result.get("price", 0),
-        "votes": result.get("votes", ""),
-        "stop_loss": result.get("stop_loss", 0),
-        "tp1": result.get("tp1", 0),
-        "tp2": result.get("tp2", 0),
-        "tp3": result.get("tp3", 0),
-        "rsi": result.get("rsi", 0),
-        "adx": result.get("adx", 0),
-        "atr": result.get("atr", 0),
-        "tools": {k: v for k, v in result.items() if k.startswith("tool_")},
+        "verdict": result.get("Verdict", result.get("verdict", "NEUTRAL")),
+        "confidence": result.get("Confidence %", result.get("confidence", 0)),
+        "price": result.get("Price", result.get("price", 0)),
+        "votes_buy": result.get("Votes BUY", 0),
+        "votes_sell": result.get("Votes SELL", 0),
+        "votes_hold": result.get("Votes HOLD", 0),
+        "stop_loss": result.get("Stop Loss", result.get("stop_loss", 0)),
+        "tp1": result.get("TP1", result.get("tp1", 0)),
+        "tp2": result.get("TP2", result.get("tp2", 0)),
+        "tp3": result.get("TP3", result.get("tp3", 0)),
     }
 
 
