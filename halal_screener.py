@@ -678,7 +678,8 @@ def _run_dqn_inner(symbol, episodes, df=None):
         cost_model = TransactionCostModel(commission_bps=10)
         try:
             risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"RiskManager init failed: {e}")
             risk_mgr = None
         train_env = TradingEnvironment(prices=train_prices, window_size=30,
                                        initial_capital=10000, cost_model=cost_model,
@@ -721,7 +722,8 @@ def _run_policy_gradient_inner(symbol, episodes, df=None):
         cost_model = TransactionCostModel(commission_bps=10)
         try:
             risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"RiskManager init failed: {e}")
             risk_mgr = None
         env = TradingEnvironment(prices=prices[:split], window_size=30,
                                   initial_capital=10000, cost_model=cost_model,
@@ -1035,7 +1037,8 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
                 usx = score_usx_single(symbol, df)
                 if not usx or usx.get("_score_int", 0) < 7:
                     continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"BCF Gate 1b failed for {symbol}: {e}")
                 continue
 
             # --- Sector cap check (max 2 per GICS sector) ---
@@ -1051,7 +1054,8 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
                 prob_profit = mc_result[0].get("Prob Profit %", 0)
                 if prob_profit < 55:
                     continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"BCF Gate 2 (Monte Carlo) failed for {symbol}: {e}")
                 continue
 
             # --- Gate 3: Sentiment >= -0.10 ---
@@ -1070,7 +1074,8 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
                 win_rate = bt[0].get("Win Rate %", 0)
                 if win_rate < 45:
                     continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"BCF Gate 5 (Backtest) failed for {symbol}: {e}")
                 continue
 
             # --- All 5 gates passed — compute position sizing ---
@@ -1225,7 +1230,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 vote, b, s, h = _vote_signal(sig)
                 votes_buy += b; votes_sell += s; votes_hold += h
                 details.append({"Tool": "Halal Screener", "Signal": sig, "Vote": vote, "Score": r["swing_score"]})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Halal Screener tool error: {e}")
             details.append({"Tool": "Halal Screener", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 2. USX Pro (single symbol - no full scan) ---
@@ -1239,7 +1245,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 votes_hold += 1
                 score_str = usx_r["Score"] if usx_r else "N/A"
                 details.append({"Tool": "USX Pro", "Signal": f"Below Min ({score_str})", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"USX Pro tool error: {e}")
             details.append({"Tool": "USX Pro", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 3. Backtest ---
@@ -1263,7 +1270,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Backtest 2Y", "Signal": "No trades", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Backtest 2Y tool error: {e}")
             details.append({"Tool": "Backtest 2Y", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 4. Monte Carlo (reuse df) ---
@@ -1280,7 +1288,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             elif prob <= 0.45: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob*100:.1f}% Exp {chg:+.1f}%", "Vote": vote, "Score": round(prob*100, 1)})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Monte Carlo tool error: {e}")
             details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 5. Bollinger Band Squeeze + Breakout ---
@@ -1305,7 +1314,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"BB Neutral (BW {bb_width:.1f}%)"
             details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote, "Score": round(bb_width, 1)})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Bollinger Bands tool error: {e}")
             details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 6. Multi-Timeframe EMA (21/50/200 alignment) ---
@@ -1331,7 +1341,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 votes_hold += 1; vote = "HOLD"
                 sig = "Mixed alignment"
             details.append({"Tool": "EMA Alignment", "Signal": sig, "Vote": vote, "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"EMA Alignment tool error: {e}")
             details.append({"Tool": "EMA Alignment", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 7. XGBoost Quick Forecast ---
@@ -1368,7 +1379,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
             details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote, "Score": round(prob_up * 100, 1)})
             del model, X_train, X_test, y_train, y_test  # free memory
-        except Exception:
+        except Exception as e:
+            logger.debug(f"XGBoost tool error: {e}")
             details.append({"Tool": "XGBoost", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 8. Momentum Score (Rate of Change + ADX) ---
@@ -1393,7 +1405,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Weak (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
             details.append({"Tool": "Momentum", "Signal": sig, "Vote": vote, "Score": round(roc_10, 1)})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Momentum tool error: {e}")
             details.append({"Tool": "Momentum", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 9. Volume-Price Divergence ---
@@ -1417,7 +1430,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
             details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote, "Score": round(price_chg_5d, 1)})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Volume-Price tool error: {e}")
             details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # === ML MODELS (re-enabled with 8GB RAM tier) ===
@@ -1441,7 +1455,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"LSTM tool error: {e}")
             details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 11. Transformer Attention Network ---
@@ -1462,7 +1477,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Transformer tool error: {e}")
             details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 12. Stacking Ensemble (XGB + RF + GBM → Ridge) ---
@@ -1483,7 +1499,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Ensemble tool error: {e}")
             details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 13. Double DQN Reinforcement Learning ---
@@ -1505,7 +1522,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"DQN tool error: {e}")
             details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 14. Policy Gradient (REINFORCE) ---
@@ -1526,7 +1544,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD", "Score": 0})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"PolicyGrad tool error: {e}")
             details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- Final Verdict ---
@@ -1598,8 +1617,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
                     votes_hold=votes_hold, sl=sl, tp1=tp1, tp2=tp2, tp3=tp3,
                     details=details,
                 )
-        except Exception:
-            pass  # non-critical
+        except Exception as e:
+            logger.debug(f"Telegram alert error for {symbol}: {e}")
 
         # Auto-trade execution (Stage 1: Paper Trading)
         try:
@@ -1673,7 +1692,8 @@ def run_consensus_momentum(symbol, horizon=5):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = "Mixed alignment"
             details.append({"Tool": "EMA Alignment", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"EMA Alignment tool error: {e}")
             details.append({"Tool": "EMA Alignment", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 2: Momentum (ROC + ADX) ---
@@ -1694,7 +1714,8 @@ def run_consensus_momentum(symbol, horizon=5):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Weak (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
             details.append({"Tool": "Momentum", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Momentum tool error: {e}")
             details.append({"Tool": "Momentum", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 3: Backtest 2Y ---
@@ -1718,7 +1739,8 @@ def run_consensus_momentum(symbol, horizon=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Backtest 2Y", "Signal": "No trades", "Vote": "HOLD"})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Backtest 2Y tool error: {e}")
             details.append({"Tool": "Backtest 2Y", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 4: XGBoost ---
@@ -1750,7 +1772,8 @@ def run_consensus_momentum(symbol, horizon=5):
             sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
             details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote})
             del model
-        except Exception:
+        except Exception as e:
+            logger.debug(f"XGBoost tool error: {e}")
             details.append({"Tool": "XGBoost", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 5: Monte Carlo ---
@@ -1767,7 +1790,8 @@ def run_consensus_momentum(symbol, horizon=5):
             elif prob <= 0.45: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob * 100:.1f}% Exp {chg:+.1f}%", "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Monte Carlo tool error: {e}")
             details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-"})
 
         # --- Verdict (max ~7 votes with EMA 2x) ---
@@ -1821,8 +1845,8 @@ def run_consensus_momentum(symbol, horizon=5):
                     votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
                     sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[A] Telegram alert failed: {e}")
 
         # Auto-trade via Strategy A's account
         # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
@@ -1839,8 +1863,8 @@ def run_consensus_momentum(symbol, horizon=5):
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                     summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[A] Auto-trade error for {symbol}: {e}")
 
         return summary + details
 
@@ -1896,7 +1920,8 @@ def run_consensus_reversion(symbol, horizon=3):
                 else:
                     votes_hold += 1; vote = "HOLD"; sig = f"Mid-range ({pct_bb:.0f}%)"
             details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Bollinger Bands error: {e}")
             mid_bb = price  # fallback
             details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-"})
 
@@ -1914,7 +1939,8 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral RSI={rsi_val:.0f}"
             details.append({"Tool": "RSI", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"RSI error: {e}")
             rsi_val = 50
             details.append({"Tool": "RSI", "Signal": "ERROR", "Vote": "-"})
 
@@ -1933,7 +1959,8 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
             details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Volume-Price tool error: {e}")
             details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 4: Stochastic Oscillator ---
@@ -1954,7 +1981,8 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral (K={k_val:.0f})"
             details.append({"Tool": "Stochastic", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Stochastic tool error: {e}")
             details.append({"Tool": "Stochastic", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 5: OBV Trend ---
@@ -1977,7 +2005,8 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"OBV Flat ({obv_slope:+.1f}%)"
             details.append({"Tool": "OBV", "Signal": sig, "Vote": vote})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"OBV tool error: {e}")
             details.append({"Tool": "OBV", "Signal": "ERROR", "Vote": "-"})
 
         # --- Verdict ---
@@ -2031,8 +2060,8 @@ def run_consensus_reversion(symbol, horizon=3):
                     votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
                     sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[B] Telegram alert failed: {e}")
 
         # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
@@ -2048,8 +2077,8 @@ def run_consensus_reversion(symbol, horizon=3):
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                     summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[B] Auto-trade error for {symbol}: {e}")
 
         return summary + details
 
@@ -2099,7 +2128,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD"})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"LSTM tool error: {e}")
             details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 2: Transformer ---
@@ -2121,7 +2151,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD"})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Transformer tool error: {e}")
             details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 3: Stacking Ensemble ---
@@ -2143,7 +2174,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD"})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Ensemble tool error: {e}")
             details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 4: Double DQN ---
@@ -2164,7 +2196,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD"})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"DQN tool error: {e}")
             details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 5: Policy Gradient ---
@@ -2185,7 +2218,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD"})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"PolicyGrad tool error: {e}")
             details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-"})
 
         # --- Verdict ---
@@ -2241,8 +2275,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
                     votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
                     sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[C] Telegram alert failed: {e}")
 
         # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
@@ -2258,8 +2292,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                     summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[C] Auto-trade error for {symbol}: {e}")
 
         return summary + details
 

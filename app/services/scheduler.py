@@ -78,6 +78,7 @@ def _scheduler_loop():
     last_scan_time = 0
     last_post_market = ""
     last_pre_market = ""
+    last_optimizer = ""
     SCAN_INTERVAL = 1800  # 30 minutes between scans
 
     while _scheduler_running:
@@ -85,8 +86,17 @@ def _scheduler_loop():
             now = _get_eastern_now()
             today_str = now.strftime("%Y-%m-%d")
 
+            # --- WEEKLY OPTIMIZER: Sunday 10:00 AM ET (once per week) ---
+            if now.weekday() == 6 and now.hour == 10 and last_optimizer != today_str:
+                last_optimizer = today_str
+                logger.info("Weekly optimizer: tuning parameters...")
+                try:
+                    _run_optimizer()
+                except Exception as e:
+                    logger.error(f"Weekly optimizer failed: {e}")
+
             # --- PRE-MARKET: 9:00-9:30 AM ET (once per day) ---
-            if _is_pre_market(now) and last_pre_market != today_str:
+            elif _is_pre_market(now) and last_pre_market != today_str:
                 last_pre_market = today_str
                 logger.info("Pre-market: refreshing screener data...")
                 try:
@@ -289,6 +299,56 @@ def _run_post_market():
 
     # Send strategy comparison report
     alert_strategy_comparison()
+
+    gc.collect()
+
+
+def _run_optimizer():
+    """Weekly optimizer: tune strategy parameters using walk-forward sweep."""
+    from app.services.optimizer import optimize_params
+    from app.services.telegram_alert import send_message as tg_send
+
+    tg_send("WEEKLY OPTIMIZER\n\nRunning parameter optimization on 13 stocks...")
+
+    result = optimize_params()
+
+    if "error" in result:
+        tg_send(f"OPTIMIZER FAILED\n\n{result['error']}")
+        return
+
+    baseline = result.get("baseline_performance", {})
+    optimal = result.get("optimal_performance", {})
+    improvement = result.get("improvement", {})
+    params = result.get("optimal_params", {})
+
+    msg = (
+        f"OPTIMIZER COMPLETE\n\n"
+        f"Stocks tested: {len(result.get('stocks_tested', []))}\n\n"
+        f"BASELINE (current):\n"
+        f"  Win Rate: {baseline.get('win_rate', 0)}%\n"
+        f"  Profit Factor: {baseline.get('profit_factor', 0)}\n"
+        f"  Sharpe: {baseline.get('sharpe', 0)}\n"
+        f"  Trades: {baseline.get('n_trades', 0)}\n\n"
+        f"OPTIMIZED (recommended):\n"
+        f"  Win Rate: {optimal.get('win_rate', 0)}% ({improvement.get('win_rate_delta', 0):+.1f})\n"
+        f"  Profit Factor: {optimal.get('profit_factor', 0)} ({improvement.get('profit_factor_delta', 0):+.2f})\n"
+        f"  Sharpe: {optimal.get('sharpe', 0)} ({improvement.get('sharpe_delta', 0):+.2f})\n"
+        f"  Trades: {optimal.get('n_trades', 0)}\n\n"
+        f"BEST PARAMS:\n"
+        f"  Votes: {params.get('strong_buy_votes')}\n"
+        f"  Confidence: {params.get('min_confidence')}%\n"
+        f"  SL ATR: {params.get('sl_atr_mult')}x\n"
+        f"  TP ATR: {params.get('tp1_atr_mult')}x\n"
+        f"  MC Prob: {params.get('mc_prob_buy')}\n"
+        f"  BB Width: {params.get('bb_squeeze_width')}\n"
+        f"  ROC: {params.get('momentum_roc_threshold')}"
+    )
+    tg_send(msg)
+
+    logger.info(
+        f"Optimizer: WR {baseline.get('win_rate')}% -> {optimal.get('win_rate')}% | "
+        f"PF {baseline.get('profit_factor')} -> {optimal.get('profit_factor')}"
+    )
 
     gc.collect()
 
