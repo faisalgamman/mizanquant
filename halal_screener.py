@@ -2488,8 +2488,8 @@ async def widgets():
             "endpoint": "/ready",
             "gridData": {"w": 20, "h": 12},
             "params": [
-                {"paramName": "min_swing", "value": "60", "label": "Min Swing Score", "type": "text", "show": True},
-                {"paramName": "max_stocks", "value": "8", "label": "Max Stocks", "type": "text", "show": True},
+                {"paramName": "min_swing", "value": "55", "label": "Min Swing Score", "type": "text", "show": True},
+                {"paramName": "max_stocks", "value": "25", "label": "Max Stocks", "type": "text", "show": True},
             ],
         },
 
@@ -2715,11 +2715,14 @@ async def pipeline(min_confidence: int = 40, max_final: int = 15, horizon: int =
 # READY TO TRADE — Single clean screen showing only actionable stocks
 # ============================================================================
 
-def run_ready_to_trade(min_swing=60, max_stocks=8):
+def run_ready_to_trade(min_swing=55, max_stocks=25):
     """Full pipeline → only BUY/STRONG BUY stocks with all details.
 
     Flow: Screener (355 stocks) → Top by score → AI Consensus (14 tools)
           → Filter: only BUY or STRONG BUY → Clean output with trade plan
+
+    Runs automatically at 9:00 AM ET (pre-market) so results are cached
+    and ready when the market opens at 9:30 AM.
     """
     try:
         screener_results = run_screener()
@@ -2749,26 +2752,28 @@ def run_ready_to_trade(min_swing=60, max_stocks=8):
                 c = consensus[0]
                 verdict = c.get("Verdict", "")
 
-                if verdict in ("STRONG BUY", "BUY"):
-                    ready.append({
-                        "Symbol": symbol,
-                        "Verdict": verdict,
-                        "Confidence %": c.get("Confidence %", 0),
-                        "Price": c.get("Price", 0),
-                        "Votes BUY": c.get("Votes BUY", 0),
-                        "Votes SELL": c.get("Votes SELL", 0),
-                        "Votes HOLD": c.get("Votes HOLD", 0),
-                        "Swing Score": stock.get("swing_score", 0),
-                        "RSI": stock.get("rsi", 0),
-                        "ATR %": stock.get("atr_pct", 0),
-                        "Stop Loss": c.get("Stop Loss", 0),
-                        "TP1": c.get("TP1", 0),
-                        "TP2": c.get("TP2", 0),
-                        "TP3": c.get("TP3", 0),
-                        "Chg 1W": stock.get("chg_1w", 0),
-                        "Chg 1M": stock.get("chg_1m", 0),
-                        "Volume Ratio": stock.get("volume_ratio", 0),
-                    })
+                row = {
+                    "Symbol": symbol,
+                    "Verdict": verdict,
+                    "Confidence %": c.get("Confidence %", 0),
+                    "Price": c.get("Price", 0),
+                    "Votes BUY": c.get("Votes BUY", 0),
+                    "Votes SELL": c.get("Votes SELL", 0),
+                    "Votes HOLD": c.get("Votes HOLD", 0),
+                    "Swing Score": stock.get("swing_score", 0),
+                    "RSI": stock.get("rsi", 0),
+                    "ATR %": stock.get("atr_pct", 0),
+                    "Stop Loss": c.get("Stop Loss", 0),
+                    "TP1": c.get("TP1", 0),
+                    "TP2": c.get("TP2", 0),
+                    "TP3": c.get("TP3", 0),
+                    "Chg 1W": stock.get("chg_1w", 0),
+                    "Chg 1M": stock.get("chg_1m", 0),
+                    "Volume Ratio": stock.get("volume_ratio", 0),
+                }
+
+                if verdict in ("STRONG BUY", "BUY", "WEAK BUY"):
+                    ready.append(row)
                 else:
                     rejected.append(f"{symbol}({verdict})")
 
@@ -2801,15 +2806,15 @@ def run_ready_to_trade(min_swing=60, max_stocks=8):
 
 
 @app.get("/ready")
-async def ready_to_trade(min_swing: int = 60, max_stocks: int = 8):
+async def ready_to_trade(min_swing: int = 55, max_stocks: int = 25):
     """Single clean screen: only stocks that passed BOTH screener AND AI consensus."""
     key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
     return _serve_or_compute(key, run_ready_to_trade, args=(min_swing, max_stocks),
-                            msg="Analyzing top stocks through full AI pipeline... This takes 3-5 minutes.")
+                            msg="Analyzing top stocks through full AI pipeline... Pre-market scan runs at 9:00 AM ET.")
 
 
 @app.get("/refresh_ready")
-async def refresh_ready(min_swing: int = 60, max_stocks: int = 8):
+async def refresh_ready(min_swing: int = 55, max_stocks: int = 25):
     key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
     with _cache_lock:
         _bg_cache.pop(key, None)
