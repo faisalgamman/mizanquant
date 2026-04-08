@@ -161,6 +161,35 @@ def _run_pre_market():
         alert_daily_summary(results, portfolio_info)
         logger.info(f"Pre-market briefing sent: {len(results)} stocks, {len(strong_buys)} STRONG BUY")
 
+    # Run Ready-to-Trade full scan (pre-warm for dashboard)
+    try:
+        logger.info("Pre-market: running Ready-to-Trade scan (25 stocks)...")
+        ready_results = hs.run_ready_to_trade(min_swing=55, max_stocks=25)
+        if ready_results:
+            header = ready_results[0]
+            ready_count = header.get("Ready to Trade", 0)
+            rejected = header.get("Rejected by AI", "")
+
+            # Send Telegram summary
+            if ready_count > 0:
+                lines = [f"READY TO TRADE — {ready_count} stocks\n"]
+                for r in ready_results[1:]:
+                    if "Symbol" in r:
+                        lines.append(
+                            f"  {r['Symbol']}: {r['Verdict']} ({r['Confidence %']}%)\n"
+                            f"    Price: ${r['Price']} | SL: ${r['Stop Loss']} | TP: ${r['TP1']}"
+                        )
+                tg_send("\n".join(lines))
+            else:
+                tg_send(
+                    f"READY TO TRADE — 0 stocks\n\n"
+                    f"All candidates rejected by AI consensus.\n"
+                    f"Rejected: {rejected[:200]}"
+                )
+            logger.info(f"Ready-to-Trade: {ready_count} stocks ready")
+    except Exception as e:
+        logger.error(f"Ready-to-Trade scan failed: {e}")
+
     # Send multi-strategy comparison
     alert_strategy_comparison()
 
