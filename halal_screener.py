@@ -2480,63 +2480,43 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
 @app.get("/widgets.json")
 async def widgets():
     return {
-        # ===== ROW 1: Portfolio Overview (top bar) =====
+        # ===== MAIN: Ready to Trade (THE one screen) =====
+        "ready_to_trade": {
+            "name": "Ready to Trade",
+            "description": "Stocks that passed BOTH screener AND AI consensus — ready for execution",
+            "category": "Trading", "type": "table",
+            "endpoint": "/ready",
+            "gridData": {"w": 20, "h": 12},
+            "params": [
+                {"paramName": "min_swing", "value": "60", "label": "Min Swing Score", "type": "text", "show": True},
+                {"paramName": "max_stocks", "value": "8", "label": "Max Stocks", "type": "text", "show": True},
+            ],
+        },
+
+        # ===== Portfolio =====
         "portfolio_summary": {
-            "name": "Portfolio Summary",
-            "description": "Equity, cash, buying power, daily P&L",
+            "name": "Portfolio & Positions",
+            "description": "Equity, cash, P&L, open positions",
             "category": "Portfolio", "type": "table",
             "endpoint": "/portfolio/summary",
-            "gridData": {"w": 10, "h": 4},
-        },
-        "open_positions": {
-            "name": "Open Positions",
-            "description": "Current holdings with unrealized P&L",
-            "category": "Portfolio", "type": "table",
-            "endpoint": "/portfolio/positions",
-            "gridData": {"w": 10, "h": 4},
-        },
-
-        # ===== ROW 2: Buy Signals + Screener (main trading view) =====
-        "buy_signals": {
-            "name": "Active Buy Signals",
-            "description": "Halal stocks with swing score >= 55",
-            "category": "Screener", "type": "table",
-            "endpoint": "/buys",
-            "gridData": {"w": 10, "h": 9},
-        },
-        "usx_pro": {
-            "name": "USX Pro Screener",
-            "description": "10-point swing system (top picks only)",
-            "category": "Screener", "type": "table",
-            "endpoint": "/usx",
-            "gridData": {"w": 10, "h": 9},
-            "params": [{"paramName": "min_score", "value": "7", "label": "Min Score (1-10)", "type": "text", "show": True}],
-        },
-
-        "bcf_screener": {
-            "name": "BCF Strategy (Moderate)",
-            "description": "Balanced Confluence: 5-gate AND logic with ATR exits",
-            "category": "Analysis", "type": "table",
-            "endpoint": "/bcf",
-            "gridData": {"w": 10, "h": 9},
-            "params": [{"paramName": "portfolio", "value": "100000", "label": "Portfolio ($)", "type": "text", "show": True}],
+            "gridData": {"w": 10, "h": 5},
         },
 
         # ===== Claude AI Agent =====
         "ai_agent": {
             "name": "Claude AI Agent",
-            "description": "AI-powered analysis: halal + technical + consensus + trade plan",
-            "category": "AI Agent", "type": "table",
+            "description": "Ask anything: halal check, analysis, trade plan",
+            "category": "AI", "type": "table",
             "endpoint": "/agent/analyze",
             "gridData": {"w": 10, "h": 9},
             "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True}],
         },
 
-        # ===== ROW 3: Deep Analysis (single stock) =====
+        # ===== Deep Dive (optional, for single stock research) =====
         "ai_consensus": {
-            "name": "AI Consensus (9 Tools)",
-            "description": "Combined verdict from all AI models",
-            "category": "Analysis", "type": "table",
+            "name": "AI Deep Analysis",
+            "description": "Full 14-tool consensus for a single stock",
+            "category": "Research", "type": "table",
             "endpoint": "/consensus",
             "gridData": {"w": 10, "h": 9},
             "params": [
@@ -2546,56 +2526,12 @@ async def widgets():
             ],
         },
         "halal_check": {
-            "name": "AAOIFI Halal Check",
-            "description": "Sharia compliance: debt, interest, liquidity ratios",
-            "category": "Analysis", "type": "table",
+            "name": "Halal Check",
+            "description": "AAOIFI Sharia compliance verification",
+            "category": "Research", "type": "table",
             "endpoint": "/halal_status",
             "gridData": {"w": 10, "h": 5},
             "params": [{"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True}],
-        },
-
-        # ===== ROW 4: Backtest & Forecast =====
-        "backtest": {
-            "name": "Backtest + Risk Metrics",
-            "description": "Historical strategy test: Sharpe, Sortino, VaR, drawdown",
-            "category": "Analysis", "type": "table",
-            "endpoint": "/backtest",
-            "gridData": {"w": 10, "h": 9},
-            "params": [
-                {"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True},
-                {"paramName": "start_date", "value": "2022-01-01", "label": "Start Date", "type": "text", "show": True},
-                {"paramName": "end_date", "value": "2024-12-31", "label": "End Date", "type": "text", "show": True},
-            ],
-        },
-        "monte_carlo": {
-            "name": "Monte Carlo Forecast",
-            "description": "1000 simulated price paths with probabilities",
-            "category": "Analysis", "type": "table",
-            "endpoint": "/monte_carlo",
-            "gridData": {"w": 10, "h": 9},
-            "params": [
-                {"paramName": "symbol", "value": "AAPL", "label": "Symbol", "type": "text", "show": True},
-                {"paramName": "days", "value": "30", "label": "Days", "type": "text", "show": True},
-                {"paramName": "simulations", "value": "1000", "label": "Simulations", "type": "text", "show": True},
-            ],
-        },
-
-        # ===== ROW 5: Signal Tracking =====
-        "signal_accuracy": {
-            "name": "Signal Accuracy Report",
-            "description": "Win rates, avg returns, profit factor by source",
-            "category": "Analytics", "type": "table",
-            "endpoint": "/signals/accuracy",
-            "gridData": {"w": 10, "h": 6},
-            "params": [{"paramName": "period", "value": "30", "label": "Lookback Days", "type": "text", "show": True}],
-        },
-        "signal_history": {
-            "name": "Signal History",
-            "description": "Recorded signals with outcomes (WIN/LOSS)",
-            "category": "Analytics", "type": "table",
-            "endpoint": "/signals/history",
-            "gridData": {"w": 10, "h": 6},
-            "params": [{"paramName": "symbol", "value": "", "label": "Symbol (blank=all)", "type": "text", "show": True}],
         },
 
     }
@@ -2773,6 +2709,113 @@ async def batch_consensus(min_swing_score: int = 55, horizon: int = 5, episodes:
 async def pipeline(min_confidence: int = 40, max_final: int = 15, horizon: int = 5, episodes: int = 5):
     key = _cache_key("pipeline", conf=min_confidence, max=max_final, h=horizon, ep=episodes)
     return _serve_or_compute(key, run_pipeline, args=(min_confidence, max_final, horizon, episodes), msg="Computing full pipeline...")
+
+
+# ============================================================================
+# READY TO TRADE — Single clean screen showing only actionable stocks
+# ============================================================================
+
+def run_ready_to_trade(min_swing=60, max_stocks=8):
+    """Full pipeline → only BUY/STRONG BUY stocks with all details.
+
+    Flow: Screener (355 stocks) → Top by score → AI Consensus (14 tools)
+          → Filter: only BUY or STRONG BUY → Clean output with trade plan
+    """
+    try:
+        screener_results = run_screener()
+        if not screener_results:
+            return [{"Message": "Screener returned no results. Market may be closed."}]
+
+        # Top candidates by swing score
+        candidates = [r for r in screener_results if r.get("swing_score", 0) >= min_swing]
+        candidates.sort(key=lambda x: x.get("swing_score", 0), reverse=True)
+        candidates = candidates[:max_stocks]
+
+        if not candidates:
+            return [{"Message": f"No stocks with swing score >= {min_swing}",
+                     "Total Scanned": len(screener_results)}]
+
+        ready = []
+        rejected = []
+
+        for stock in candidates:
+            symbol = stock["symbol"]
+            try:
+                _flush_all_caches()
+                consensus = run_consensus(symbol, horizon=5, episodes=3)
+                if not consensus or consensus[0].get("Error"):
+                    continue
+
+                c = consensus[0]
+                verdict = c.get("Verdict", "")
+
+                if verdict in ("STRONG BUY", "BUY"):
+                    ready.append({
+                        "Symbol": symbol,
+                        "Verdict": verdict,
+                        "Confidence %": c.get("Confidence %", 0),
+                        "Price": c.get("Price", 0),
+                        "Votes BUY": c.get("Votes BUY", 0),
+                        "Votes SELL": c.get("Votes SELL", 0),
+                        "Votes HOLD": c.get("Votes HOLD", 0),
+                        "Swing Score": stock.get("swing_score", 0),
+                        "RSI": stock.get("rsi", 0),
+                        "ATR %": stock.get("atr_pct", 0),
+                        "Stop Loss": c.get("Stop Loss", 0),
+                        "TP1": c.get("TP1", 0),
+                        "TP2": c.get("TP2", 0),
+                        "TP3": c.get("TP3", 0),
+                        "Chg 1W": stock.get("chg_1w", 0),
+                        "Chg 1M": stock.get("chg_1m", 0),
+                        "Volume Ratio": stock.get("volume_ratio", 0),
+                    })
+                else:
+                    rejected.append(f"{symbol}({verdict})")
+
+            except Exception as e:
+                logger.error(f"Ready-to-trade {symbol}: {e}")
+            finally:
+                _flush_all_caches()
+                gc.collect()
+
+        # Sort: STRONG BUY first, then by confidence
+        ready.sort(key=lambda x: (
+            1 if x["Verdict"] == "STRONG BUY" else 0,
+            x["Confidence %"]
+        ), reverse=True)
+
+        header = [{
+            "Pipeline": f"Scanned {len(screener_results)} → Top {len(candidates)} → AI Consensus → {len(ready)} READY",
+            "Ready to Trade": len(ready),
+            "Rejected by AI": ", ".join(rejected) if rejected else "None",
+            "Status": "READY" if ready else "NO TRADES — AI consensus blocked all candidates",
+        }]
+
+        if not ready:
+            header[0]["Tip"] = "All top stocks were rejected by AI consensus. Market conditions may be unfavorable."
+
+        return header + ready
+
+    except Exception as e:
+        return [{"Error": str(e)}]
+
+
+@app.get("/ready")
+async def ready_to_trade(min_swing: int = 60, max_stocks: int = 8):
+    """Single clean screen: only stocks that passed BOTH screener AND AI consensus."""
+    key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
+    return _serve_or_compute(key, run_ready_to_trade, args=(min_swing, max_stocks),
+                            msg="Analyzing top stocks through full AI pipeline... This takes 3-5 minutes.")
+
+
+@app.get("/refresh_ready")
+async def refresh_ready(min_swing: int = 60, max_stocks: int = 8):
+    key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
+    with _cache_lock:
+        _bg_cache.pop(key, None)
+        _cache_status[key] = "idle"
+    threading.Thread(target=_bg_compute, args=(key, run_ready_to_trade, (min_swing, max_stocks)), daemon=True).start()
+    return [{"Status": "Ready-to-Trade refresh started."}]
 
 # --- Refresh endpoints (clear cache + recompute) ---
 @app.get("/refresh_consensus")
