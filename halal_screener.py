@@ -1507,21 +1507,24 @@ def run_consensus(symbol, horizon=5, episodes=10):
         try:
             dqn_r = run_dqn(symbol, episodes, df=df)
             if dqn_r and len(dqn_r) > 0:
-                # DQN returns [summary_dict, ...] with "Action" key
                 summary_item = dqn_r[0]
                 action = summary_item.get("Action", summary_item.get("Recommendation", ""))
+                signal_str = summary_item.get("Signal", "")
                 reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
-                if "BUY" in str(action).upper():
+                reward_f = float(reward) if isinstance(reward, (int, float)) else 0
+                # Only count vote if DQN gave a meaningful signal (reward != 0)
+                if "BUY" in str(action).upper() or "BUY" in str(signal_str).upper():
                     votes_buy += 1; vote = "BUY"
-                elif "SELL" in str(action).upper():
+                elif "SELL" in str(action).upper() or "SELL" in str(signal_str).upper():
                     votes_sell += 1; vote = "SELL"
+                elif reward_f == 0:
+                    vote = "SKIP"  # Don't count non-functional result
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
-                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote, "Score": round(float(reward), 1) if isinstance(reward, (int, float)) else 0})
+                sig = f"{signal_str or action} (R={reward_f:.1f})"
+                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote, "Score": round(reward_f, 1)})
             else:
-                votes_hold += 1
-                details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD", "Score": 0})
+                details.append({"Tool": "DQN", "Signal": "No action", "Vote": "SKIP", "Score": 0})
         except Exception as e:
             logger.debug(f"DQN tool error: {e}")
             details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-", "Score": 0})
@@ -1532,35 +1535,48 @@ def run_consensus(symbol, horizon=5, episodes=10):
             if pg_r and len(pg_r) > 0:
                 summary_item = pg_r[0]
                 action = summary_item.get("Action", summary_item.get("Recommendation", ""))
+                signal_str = summary_item.get("Signal", "")
                 reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
-                if "BUY" in str(action).upper():
+                reward_f = float(reward) if isinstance(reward, (int, float)) else 0
+                if "BUY" in str(action).upper() or "BUY" in str(signal_str).upper():
                     votes_buy += 1; vote = "BUY"
-                elif "SELL" in str(action).upper():
+                elif "SELL" in str(action).upper() or "SELL" in str(signal_str).upper():
                     votes_sell += 1; vote = "SELL"
+                elif reward_f == 0:
+                    vote = "SKIP"
                 else:
                     votes_hold += 1; vote = "HOLD"
-                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
-                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote, "Score": round(float(reward), 1) if isinstance(reward, (int, float)) else 0})
+                sig = f"{signal_str or action} (R={reward_f:.1f})"
+                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote, "Score": round(reward_f, 1)})
             else:
-                votes_hold += 1
-                details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD", "Score": 0})
+                details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "SKIP", "Score": 0})
         except Exception as e:
             logger.debug(f"PolicyGrad tool error: {e}")
             details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- Final Verdict ---
+        # Only count actual votes (exclude SKIP from non-functional tools)
         total = votes_buy + votes_sell + votes_hold
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # Verdict thresholds (14 tools, EMA gives 2x for strong trends → max ~16 votes)
-        if votes_buy >= 10:        verdict, action_str = "STRONG BUY", "STRONG ENTER"
-        elif votes_buy > votes_sell and confidence >= 60: verdict, action_str = "BUY", "ENTER"
-        elif votes_buy > votes_sell and confidence >= 40: verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 10:     verdict, action_str = "STRONG SELL", "STRONG AVOID"
-        elif votes_sell > votes_buy and confidence >= 60: verdict, action_str = "SELL", "AVOID"
-        elif votes_sell > votes_buy:                      verdict, action_str = "WEAK SELL", "WEAK SELL"
-        else:                      verdict, action_str = "NEUTRAL", "WAIT"
+        # Verdict thresholds — scaled to actual voting tools
+        # With 14 tools, ~10-12 actually vote (DQN/PolicyGrad often SKIP)
+        # STRONG needs >60% of votes, BUY needs plurality with >=45% confidence
+        if votes_buy >= 7:
+            verdict, action_str = "STRONG BUY", "STRONG ENTER"
+        elif votes_buy > votes_sell and confidence >= 45:
+            verdict, action_str = "BUY", "ENTER"
+        elif votes_buy > votes_sell:
+            verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
+        elif votes_sell >= 7:
+            verdict, action_str = "STRONG SELL", "STRONG AVOID"
+        elif votes_sell > votes_buy and confidence >= 45:
+            verdict, action_str = "SELL", "AVOID"
+        elif votes_sell > votes_buy:
+            verdict, action_str = "WEAK SELL", "WEAK SELL"
+        else:
+            verdict, action_str = "NEUTRAL", "WAIT"
 
         sl  = round(price - 1.5 * atr_val, 2)
         tp1 = round(price + 1.5 * atr_val, 2)
