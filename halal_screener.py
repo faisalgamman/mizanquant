@@ -1613,8 +1613,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 details={"votes_buy": votes_buy, "votes_sell": votes_sell,
                          "votes_hold": votes_hold, "tools": len(details)},
             )
-        except Exception:
-            pass  # non-critical
+        except Exception as e:
+            logger.error(f"record_signal failed (non-critical): {e}")
 
         # Telegram alert: chart + breakdown for STRONG BUY only
         try:
@@ -3238,8 +3238,8 @@ async def signals_accuracy(period: int = 30):
     # Trigger outcome checking first
     try:
         threading.Thread(target=check_signal_outcomes, args=(5,), daemon=True).start()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"check_signal_outcomes thread failed: {e}")
     return get_accuracy_report(period_days=period)
 
 @app.get("/signals/history")
@@ -3583,20 +3583,20 @@ async def health():
         from openbb_forecast.models.lstm import LSTMForecaster
         import torch
         checks["openbb_forecast"] = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"openbb_forecast health check failed: {e}")
     try:
         df = fetch_yf("AAPL", period="1y")
         checks["market_data"] = df is not None and len(df) > 0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"market_data health check failed: {e}")
     try:
         from app.db.database import engine
         with engine.connect() as conn:
             conn.execute(__import__("sqlalchemy").text("SELECT 1"))
         checks["database"] = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"database health check failed: {e}")
     alpaca_configured = bool(
         (settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY) or
         (settings.ALPACA_API_KEY_A and settings.ALPACA_SECRET_KEY_A)

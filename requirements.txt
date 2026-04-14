@@ -16,3 +16,4 @@ matplotlib
 mplfinance
 python-multipart
 anthropic
+nltk

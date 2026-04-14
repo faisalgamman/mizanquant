@@ -151,8 +151,8 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 total_debt = _safe_float(latest.get("Total Debt"), total_debt)
                 cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
                 short_inv = _safe_float(latest.get("Other Short Term Investments"))
-        except Exception:
-            pass  # use info-based values
+        except Exception as e:
+            logger.error(f"{symbol}: balance_sheet fallback failed, using info-based values: {e}")
 
         # Income statement fields
         revenue = _safe_float(info.get("totalRevenue"))
@@ -166,8 +166,8 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 revenue = _safe_float(latest_inc.get("Total Revenue"), revenue)
                 interest_income = _safe_float(latest_inc.get("Interest Income"))
                 interest_expense = _safe_float(latest_inc.get("Interest Expense"))
-        except Exception:
-            pass  # use info-based values
+        except Exception as e:
+            logger.error(f"{symbol}: income_stmt fallback failed, using info-based values: {e}")
 
         logger.info(f"yfinance fallback OK for {symbol}: mcap={market_cap}, debt={total_debt}")
         return {
