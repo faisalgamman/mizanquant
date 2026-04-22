@@ -67,9 +67,11 @@ def test_trading_history_requires_key_and_openapi_declares_security(monkeypatch)
 def test_health_reports_broker_unavailable_when_auto_trade_enabled(monkeypatch):
     client = TestClient(hs.app)
     monkeypatch.setattr(hs.settings, "AUTO_TRADE_ENABLED", True)
+    monkeypatch.setattr(hs.settings, "API_KEY", "")
     monkeypatch.setattr(hs.settings, "ALPACA_API_KEY_A", "key")
     monkeypatch.setattr(hs.settings, "ALPACA_SECRET_KEY_A", "secret")
     monkeypatch.setattr(hs, "alpaca_get_account", lambda strategy_id=None: None)
+    monkeypatch.setattr(hs, "alpaca_get_last_error", lambda strategy_id=None: {"reason": "unauthorized", "status_code": 401})
     monkeypatch.setattr(hs, "fetch_yf", lambda *_args, **_kwargs: pd.DataFrame({"close": [1.0]}))
 
     response = client.get("/health")
@@ -77,6 +79,9 @@ def test_health_reports_broker_unavailable_when_auto_trade_enabled(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["broker"] == "configured_unavailable"
+    assert body["broker_reason"] == "unauthorized"
+    assert body["broker_status_code"] == 401
+    assert body["operator_api"] == "not_configured"
     assert body["auto_trading"] == "blocked_broker_unavailable"
     assert body["dependencies"]["broker"] is False
 
@@ -92,6 +97,23 @@ def test_refresh_and_telegram_operator_routes_require_api_key(monkeypatch):
     assert refresh.status_code == 401
     assert telegram.status_code == 401
     assert scan.status_code == 401
+
+
+def test_trading_status_returns_broker_diagnostics(monkeypatch):
+    client = TestClient(hs.app)
+    monkeypatch.setattr(hs.settings, "API_KEY", "secret")
+    monkeypatch.setattr(hs.settings, "ALPACA_API_KEY_A", "key")
+    monkeypatch.setattr(hs.settings, "ALPACA_SECRET_KEY_A", "secret")
+    monkeypatch.setattr(hs, "alpaca_get_account", lambda strategy_id=None: None)
+    monkeypatch.setattr(hs, "alpaca_get_last_error", lambda strategy_id=None: {"reason": "unauthorized", "status_code": 401})
+
+    response = client.get("/api/v1/trading/status", headers={"X-API-Key": "secret"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["broker_connected"] is False
+    assert body["broker_reason"] == "unauthorized"
+    assert body["broker_status_code"] == 401
 
 
 def test_agent_health_no_longer_exposes_key_prefix(monkeypatch):
