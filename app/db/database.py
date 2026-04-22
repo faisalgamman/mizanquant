@@ -40,6 +40,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def _datetime_sql_type(dialect_name: str) -> str:
+    """Return a portable datetime type for lightweight raw ALTER TABLE migrations."""
+    if dialect_name == "postgresql":
+        return "TIMESTAMP WITH TIME ZONE"
+    return "DATETIME"
+
+
 def get_db():
     """Yield a database session, closing it when done."""
     db = SessionLocal()
@@ -60,6 +67,7 @@ def _run_schema_migrations():
     """Lightweight additive migrations for local SQLite / Railway Postgres."""
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
+    dialect_name = engine.dialect.name
 
     if "trade_history" in tables:
         existing_columns = {col["name"] for col in inspector.get_columns("trade_history")}
@@ -71,7 +79,9 @@ def _run_schema_migrations():
         if "filled_avg_price" not in existing_columns:
             statements.append("ALTER TABLE trade_history ADD COLUMN filled_avg_price FLOAT")
         if "armed_at" not in existing_columns:
-            statements.append("ALTER TABLE trade_history ADD COLUMN armed_at DATETIME")
+            statements.append(
+                f"ALTER TABLE trade_history ADD COLUMN armed_at {_datetime_sql_type(dialect_name)}"
+            )
         for statement in statements:
             with engine.begin() as conn:
                 conn.execute(text(statement))
