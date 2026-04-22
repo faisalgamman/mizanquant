@@ -11,7 +11,7 @@ Supports multi-account via optional strategy_id parameter:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -141,16 +141,32 @@ def get_orders(status: str = "all", limit: int = 50, strategy_id: str = None) ->
 
     orders = []
     for order in data:
+        legs = order.get("legs") or []
         orders.append({
+            "id": order.get("id", ""),
             "symbol": order.get("symbol", ""),
             "side": order.get("side", ""),
             "type": order.get("type", ""),
+            "order_class": order.get("order_class", ""),
+            "client_order_id": order.get("client_order_id", ""),
+            "parent_order_id": order.get("parent_order_id", ""),
             "qty": order.get("qty", "0"),
             "filled_qty": order.get("filled_qty", "0"),
             "status": order.get("status", ""),
             "filled_avg_price": order.get("filled_avg_price", ""),
             "submitted_at": order.get("submitted_at", "")[:19] if order.get("submitted_at") else "",
             "filled_at": order.get("filled_at", "")[:19] if order.get("filled_at") else "",
+            "legs": [
+                {
+                    "id": leg.get("id", ""),
+                    "symbol": leg.get("symbol", order.get("symbol", "")),
+                    "side": leg.get("side", ""),
+                    "type": leg.get("type", ""),
+                    "status": leg.get("status", ""),
+                    "client_order_id": leg.get("client_order_id", ""),
+                }
+                for leg in legs
+            ],
         })
 
     return orders
@@ -175,7 +191,7 @@ def get_portfolio_history(period: str = "1M", timeframe: str = "1D", strategy_id
 
     history = []
     for i, ts in enumerate(timestamps):
-        dt = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
         history.append({
             "Date": dt,
             "Equity": round(equity_values[i], 2) if i < len(equity_values) and equity_values[i] else 0,

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .:openbb_forecast
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff numpy pandas scikit-learn yfinance matplotlib mplfinance python-dotenv requests anthropic nltk torch xgboost pydantic-settings sqlalchemy httpx
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Pytest
+        run: pytest -q --cov=app --cov-fail-under=80
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Backtest smoke
+        run: python scripts/run_backtest.py --profile momentum --smoke
+
+      - name: Chaos Suite
+        run: |
+          for i in $(seq 1 100); do
+            pytest -q tests/chaos/test_kill_mid_order.py
+          done

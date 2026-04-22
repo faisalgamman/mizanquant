@@ -1,12 +1,21 @@
-import asyncio, time, logging, os, uuid, threading, re, gc, pandas as pd, numpy as np
+﻿import asyncio, time, logging, os, uuid, threading, re, gc, json, pandas as pd, numpy as np
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
+
+from fastapi import FastAPI, HTTPException, Header, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.security import APIKeyHeader
+from html import escape
 import uvicorn
 
 # --- New modular imports (Phase 1 restructuring) ---
 from app.config import settings
+from app.core.config import app_cfg
 from app.services.market_data import fetch as fetch_market_data, fetch_alpaca_intraday
 from app.services.technical import (
     ema, rsi, macd, atr, calc_metrics,
@@ -38,6 +47,7 @@ from app.services.trading_engine import (
     get_trade_history, get_performance_report,
 )
 from app.services.risk_manager import get_risk_status
+from openbb_forecast.data.time_guard import signal_cutoff
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
 os.environ.setdefault("OMP_NUM_THREADS", "2")
@@ -51,7 +61,45 @@ _model_semaphore = threading.Semaphore(1)
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("screener")
-app = FastAPI()
+
+NON_FATAL_ANALYSIS_ERROR = (
+    ValueError,
+    KeyError,
+    TypeError,
+    RuntimeError,
+    ZeroDivisionError,
+    IndexError,
+    DataFetchError,
+    ModelTrainingError,
+    HTTPException,
+)
+NON_FATAL_PERSISTENCE_ERROR = Exception
+ATR_TARGETS = app_cfg.thresholds.atr_targets
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    await _startup_bootstrap()
+    try:
+        yield
+    finally:
+        try:
+            from app.services.scheduler import stop_scheduler
+
+            stop_scheduler()
+        except NON_FATAL_ANALYSIS_ERROR:
+            logger.exception("Scheduler shutdown failed")
+        try:
+            from app.services.fill_watcher import stop_fill_watcher
+
+            stop_fill_watcher()
+        except NON_FATAL_ANALYSIS_ERROR:
+            logger.exception("Fill watcher shutdown failed")
+
+
+app = FastAPI(lifespan=_app_lifespan)
+operator_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+OperatorAPIKey = Annotated[str | None, Security(operator_api_key_header)]
 
 import keep_alive
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -82,12 +130,27 @@ def validate_range(val, name, min_v, max_v):
         raise HTTPException(status_code=400, detail=f"{name} must be between {min_v} and {max_v}, got {val}")
     return val
 
+
+def _primary_broker_strategy_id() -> str | None:
+    from app.config import STRATEGY_CONFIGS
+
+    return next(iter(STRATEGY_CONFIGS), None)
+
+
+def _has_alpaca_broker_config() -> bool:
+    return bool(
+        (settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY)
+        or (settings.ALPACA_API_KEY_A and settings.ALPACA_SECRET_KEY_A)
+        or (settings.ALPACA_API_KEY_B and settings.ALPACA_SECRET_KEY_B)
+        or (settings.ALPACA_API_KEY_C and settings.ALPACA_SECRET_KEY_C)
+    )
+
 # --- 4.5: Simple rate limiter ---
 _rate_limits = defaultdict(list)
 _rate_lock = threading.Lock()
 
 def check_rate_limit(endpoint: str, max_concurrent: int = 2):
-    """Soft rate limiter — returns True if OK, False if over limit.
+    """Soft rate limiter â€” returns True if OK, False if over limit.
     Never raises HTTPException so OpenBB Pro widgets don't break."""
     with _rate_lock:
         _rate_limits[endpoint] = [t for t in _rate_limits[endpoint] if time.time() - t < 60]
@@ -96,7 +159,7 @@ def check_rate_limit(endpoint: str, max_concurrent: int = 2):
         _rate_limits[endpoint].append(time.time())
         return True
 
-# S&P 500 universe — excluding obvious haram sectors:
+# S&P 500 universe â€” excluding obvious haram sectors:
 # Banks/financials (interest-based), insurance, alcohol, gambling, tobacco, weapons
 # Each stock still goes through AAOIFI screening for final halal verification
 _HARAM_EXCLUDE = {
@@ -112,19 +175,19 @@ _HARAM_EXCLUDE = {
     "BF.B","STZ","TAP","MO","PM","SAM",
     # Gambling & casinos
     "WYNN","LVS","MGM","CCL","NCLH","RCL",
-    # Weapons/defense (controversial — kept some dual-use industrials)
+    # Weapons/defense (controversial â€” kept some dual-use industrials)
     "LMT","NOC","GD","RTX","HII","LHX","BA",
     # Conventional media with haram content
     "FOX","FOXA","NFLX","DIS","WBD","LYV",
-    # Utilities — almost all fail AAOIFI debt screen (>33% debt/market cap)
+    # Utilities â€” almost all fail AAOIFI debt screen (>33% debt/market cap)
     "AEE","AEP","AES","ATO","CEG","CMS","CNP","D","DTE","DUK","ED",
     "EIX","ES","ETR","EVRG","EXC","FE","LNT","NEE","NI","NRG","PCG",
     "PEG","PPL","SO","SRE","VST","WEC","XEL",
-    # REITs — interest-based income structure, high leverage
+    # REITs â€” interest-based income structure, high leverage
     "AMT","ARE","AVB","BXP","CCI","CPT","DLR","DOC","EQIX","EQR",
     "ESS","EXR","FRT","HST","INVH","IRM","KIM","MAA","O","PLD",
     "PSA","REG","SBAC","SPG","UDR","VICI","VTR","WELL",
-    # Payment processors / fintech — significant interest income from credit
+    # Payment processors / fintech â€” significant interest income from credit
     "AXP","SYF","CPAY",
 }
 
@@ -207,7 +270,7 @@ _SP500_DELISTED_HALAL = [
     "VIAC",  # ViacomCBS (now PARA)
 ]
 
-# For backtesting only — includes delisted stocks to avoid survivorship bias
+# For backtesting only â€” includes delisted stocks to avoid survivorship bias
 HALAL_STOCKS_BACKTEST = HALAL_STOCKS + [
     s for s in _SP500_DELISTED_HALAL if s not in _HARAM_EXCLUDE
 ]
@@ -229,7 +292,7 @@ def cache_set(k, v):
     _cache_ts[k] = time.time()
 
 # Model cache: stores trained models with TTL
-# 8GB RAM tier — can hold more models for faster consensus
+# 8GB RAM tier â€” can hold more models for faster consensus
 MODEL_CACHE_TTL = min(settings.MODEL_CACHE_TTL, 1800)  # 30 min cache
 MODEL_CACHE_MAX = 20  # more models in cache for faster repeat consensus
 _model_cache = {}
@@ -238,7 +301,7 @@ _model_cache_ts = {}
 def model_cache_get(key):
     if time.time() - _model_cache_ts.get(key, 0) < MODEL_CACHE_TTL:
         return _model_cache.get(key)
-    # Expired — remove it
+    # Expired â€” remove it
     _model_cache.pop(key, None)
     _model_cache_ts.pop(key, None)
     return None
@@ -254,7 +317,7 @@ def model_cache_set(key, model_data):
     _model_cache_ts[key] = time.time()
 
 def _flush_all_caches():
-    """Emergency memory cleanup — flush all caches."""
+    """Emergency memory cleanup â€” flush all caches."""
     _model_cache.clear()
     _model_cache_ts.clear()
     _cache.clear()
@@ -268,7 +331,7 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 
 
 # ---------------------------------------------------------------------------
-# Halal verification gate — blocks unverified / haram stocks from trading
+# Halal verification gate â€” blocks unverified / haram stocks from trading
 # ---------------------------------------------------------------------------
 # Runtime cache of halal verification results.
 _VERIFIED_HARAM = set()  # symbols confirmed haram via FMP
@@ -285,11 +348,11 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
     """Check if a symbol is verified halal. Returns (is_halal, reason).
 
     Priority:
-    1. If in _HARAM_EXCLUDE → blocked (sector-level exclusion)
-    2. If already verified this session → use cached result
-    3. If in curated HALAL_STOCKS list → allowed (already sector-filtered)
-    4. If FMP data available → run live AAOIFI screening
-    5. If not in curated list AND FMP unavailable → blocked
+    1. If in _HARAM_EXCLUDE â†’ blocked (sector-level exclusion)
+    2. If already verified this session â†’ use cached result
+    3. If in curated HALAL_STOCKS list â†’ allowed (already sector-filtered)
+    4. If FMP data available â†’ run live AAOIFI screening
+    5. If not in curated list AND FMP unavailable â†’ blocked
     """
     sym = symbol.upper().strip()
 
@@ -297,20 +360,20 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
     if sym in _HARAM_EXCLUDE:
         return False, "Excluded sector (banks/insurance/alcohol/gambling/weapons/utilities/REITs)"
 
-    # 2. Session cache — fast path
+    # 2. Session cache â€” fast path
     if sym in _VERIFIED_HALAL:
         return True, "Verified halal"
     if sym in _VERIFIED_HARAM:
         return False, "Verified haram (AAOIFI screening failed)"
 
-    # 3. Curated list — stocks already passed sector exclusion
+    # 3. Curated list â€” stocks already passed sector exclusion
     # This is the fast path that avoids FMP API calls for known stocks
     curated = _get_curated_set()
     if sym in curated:
         _VERIFIED_HALAL.add(sym)
         return True, "Halal (curated S&P 500 list, sector-verified)"
 
-    # 4. Not in curated list — must verify via FMP AAOIFI screening
+    # 4. Not in curated list â€” must verify via FMP AAOIFI screening
     try:
         result = get_halal_status(sym)
         if result is not None:
@@ -330,10 +393,10 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
                     reasons.append(f"liquidity {result.get('liquidity_ratio', '?')}% > 33%")
                 return False, f"Haram: {', '.join(reasons)}" if reasons else "Verified haram"
         else:
-            # FMP unavailable AND not in curated list → block
-            logger.warning(f"Halal gate: {sym} BLOCKED — not in curated list, no FMP data")
-            return False, "Cannot verify — not in curated list and no financial data"
-    except Exception as e:
+            # FMP unavailable AND not in curated list â†’ block
+            logger.warning(f"Halal gate: {sym} BLOCKED â€” not in curated list, no FMP data")
+            return False, "Cannot verify â€” not in curated list and no financial data"
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Halal verification error for {sym}: {e}")
         return False, f"Verification error: {e}"
 
@@ -386,12 +449,12 @@ def analyze(symbol, df):
                 "swing_score": round(score, 1), "swing_signal": sig, "signals": ", ".join(signals),
                 "stop_loss": round(price - atr_val, 2), "take_profit": round(price + (2 * atr_val), 2),
                 "position_size": pos, "halal": "Yes"}
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"{symbol}: {e}")
         return None
 
 def _analyze_one(symbol):
-    # Halal gate — skip stocks that fail AAOIFI verification
+    # Halal gate â€” skip stocks that fail AAOIFI verification
     is_halal, reason = verify_halal(symbol)
     if not is_halal:
         return None
@@ -481,7 +544,7 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
                     "Avg Loss": round(sum(t["PnL"] for t in losses) / len(losses), 2) if losses else 0,
                     **metrics}]
         return summary + trades
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 def run_monte_carlo(symbol, days, simulations, df=None):
@@ -513,7 +576,7 @@ def run_monte_carlo(symbol, days, simulations, df=None):
                               "P95 Bull": round(d["percentile_95"], 2),
                               "VaR%": round(d["var_95"] * 100, 2)})
         return summary + day_stats
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 def _run_with_memory_guard(func, *args, **kwargs):
@@ -525,12 +588,63 @@ def _run_with_memory_guard(func, *args, **kwargs):
         gc.collect()
         _model_semaphore.release()
 
+
+_PERSISTED_MODELS = {"lstm": None, "transformer": None, "ensemble": None}
+_PERSISTED_MODEL_ATTEMPTS = set()
+
+
+def _load_persisted_model(model_name):
+    if not app_cfg.thresholds.ml_tools_enabled.get(model_name, True):
+        return None
+    if model_name in _PERSISTED_MODEL_ATTEMPTS:
+        return _PERSISTED_MODELS.get(model_name)
+
+    _PERSISTED_MODEL_ATTEMPTS.add(model_name)
+    try:
+        from openbb_forecast.models.persistence import resolve_latest
+
+        if model_name == "lstm":
+            from openbb_forecast.models.lstm import LSTMForecaster as model_cls
+            suffix = ".pt"
+        elif model_name == "transformer":
+            from openbb_forecast.models.transformer import TransformerForecaster as model_cls
+            suffix = ".pt"
+        else:
+            from openbb_forecast.models.ensemble import StackingForecaster as model_cls
+            suffix = ".pkl"
+
+        latest = resolve_latest(model_name, suffix)
+        _PERSISTED_MODELS[model_name] = model_cls.load(latest)
+        logger.info(f"Loaded persisted {model_name} model from {latest}")
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.warning(f"Persisted {model_name} model unavailable: {e}")
+        _PERSISTED_MODELS[model_name] = None
+    return _PERSISTED_MODELS.get(model_name)
+
+
+def _predict_persisted_model(model_name, X_test):
+    model = _load_persisted_model(model_name)
+    if model is None:
+        return None
+    try:
+        return model.predict(X_test[-1:])
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.warning(f"Persisted {model_name} prediction failed: {e}")
+        return None
+
+
+def _preload_persisted_models():
+    for model_name in tuple(_PERSISTED_MODELS):
+        _load_persisted_model(model_name)
+
+
+_preload_persisted_models()
+
 def run_lstm(symbol, horizon, df=None):
     return _run_with_memory_guard(_run_lstm_inner, symbol, horizon, df=df)
 
 def _run_lstm_inner(symbol, horizon, df=None):
     try:
-        from openbb_forecast.models.lstm import LSTMForecaster
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
@@ -539,29 +653,18 @@ def _run_lstm_inner(symbol, horizon, df=None):
         SEQ_LEN = 20
         X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
 
-        cache_key = f"lstm_{symbol}_{horizon}"
-        cached = model_cache_get(cache_key)
-        if cached:
-            lstm_final, fold_scores = cached["model"], cached["fold_scores"]
-        else:
-            folds = walk_forward_split(X_train, y_train, n_splits=3)
-            fold_scores = []
-            for X_tr, y_tr, X_val, y_val in folds:
-                lstm = LSTMForecaster(hidden_size=64, num_layers=2, epochs=30, learning_rate=0.001, patience=5)
-                lstm.fit(X_tr, y_tr)
-                preds = lstm.predict(X_val)
-                mse = float(np.mean((preds - y_val) ** 2))
-                fold_scores.append(round(mse, 4))
-            lstm_final = LSTMForecaster(hidden_size=64, num_layers=2, epochs=50, learning_rate=0.001, patience=10)
-            lstm_final.fit(X_train, y_train)
-            model_cache_set(cache_key, {"model": lstm_final, "fold_scores": fold_scores})
+        preds = _predict_persisted_model("lstm", X_test)
+        if preds is None:
+            return [{"Error": "Persisted LSTM model unavailable"}]
 
-        preds = lstm_final.predict(X_test[-1:])
+        model_label = "LSTM Persisted"
+        fold_scores = []
         pred_prices = preds[0] * std_p + mean_p
         last_price = float(prices[-1])
+        avg_mse = round(float(np.mean(fold_scores)), 4) if fold_scores else 0.0
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
-                    "Model": "LSTM + Walk-Forward", "Folds": len(fold_scores),
-                    "Avg Fold MSE": round(float(np.mean(fold_scores)), 4),
+                    "Model": model_label, "Folds": len(fold_scores),
+                    "Avg Fold MSE": avg_mse,
                     "Forecast Horizon": horizon, "Training Samples": len(X_train)}]
         forecasts = []
         for i, p in enumerate(pred_prices):
@@ -570,7 +673,7 @@ def _run_lstm_inner(symbol, horizon, df=None):
                               "Change %": round(change, 2),
                               "Signal": "BUY" if change > 1 else "SELL" if change < -1 else "HOLD"})
         return summary + forecasts
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 def run_transformer(symbol, horizon, df=None):
@@ -578,7 +681,6 @@ def run_transformer(symbol, horizon, df=None):
 
 def _run_transformer_inner(symbol, horizon, df=None):
     try:
-        from openbb_forecast.models.transformer import TransformerForecaster
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
@@ -587,29 +689,18 @@ def _run_transformer_inner(symbol, horizon, df=None):
         SEQ_LEN = 20
         X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
 
-        cache_key = f"transformer_{symbol}_{horizon}"
-        cached = model_cache_get(cache_key)
-        if cached:
-            tf_final, fold_scores = cached["model"], cached["fold_scores"]
-        else:
-            folds = walk_forward_split(X_train, y_train, n_splits=3)
-            fold_scores = []
-            for X_tr, y_tr, X_val, y_val in folds:
-                tf = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=30, patience=5)
-                tf.fit(X_tr, y_tr)
-                preds = tf.predict(X_val)
-                mse = float(np.mean((preds - y_val) ** 2))
-                fold_scores.append(round(mse, 4))
-            tf_final = TransformerForecaster(d_model=64, n_heads=4, num_layers=2, epochs=50, patience=10)
-            tf_final.fit(X_train, y_train)
-            model_cache_set(cache_key, {"model": tf_final, "fold_scores": fold_scores})
+        preds = _predict_persisted_model("transformer", X_test)
+        if preds is None:
+            return [{"Error": "Persisted Transformer model unavailable"}]
 
-        preds = tf_final.predict(X_test[-1:])
+        model_label = "Transformer Persisted"
+        fold_scores = []
         pred_prices = preds[0] * std_p + mean_p
         last_price = float(prices[-1])
+        avg_mse = round(float(np.mean(fold_scores)), 4) if fold_scores else 0.0
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
-                    "Model": "Transformer + Walk-Forward", "Folds": len(fold_scores),
-                    "Avg Fold MSE": round(float(np.mean(fold_scores)), 4),
+                    "Model": model_label, "Folds": len(fold_scores),
+                    "Avg Fold MSE": avg_mse,
                     "Forecast Horizon": horizon}]
         forecasts = []
         for i, p in enumerate(pred_prices):
@@ -618,7 +709,7 @@ def _run_transformer_inner(symbol, horizon, df=None):
                               "Change %": round(change, 2),
                               "Signal": "BUY" if change > 1 else "SELL" if change < -1 else "HOLD"})
         return summary + forecasts
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 def run_ensemble(symbol, horizon, df=None):
@@ -626,7 +717,6 @@ def run_ensemble(symbol, horizon, df=None):
 
 def _run_ensemble_inner(symbol, horizon, df=None):
     try:
-        from openbb_forecast.models.ensemble import StackingForecaster
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
@@ -642,13 +732,15 @@ def _run_ensemble_inner(symbol, horizon, df=None):
         X = np.array(X); y = np.array(y)
         split = int(len(X) * 0.8)
         X_train, y_train = X[:split], y[:split]
-        ensemble = StackingForecaster()
-        ensemble.fit(X_train, y_train)
-        preds = ensemble.predict(X[-1:])
+        preds = _predict_persisted_model("ensemble", X)
+        if preds is None:
+            return [{"Error": "Persisted Ensemble model unavailable"}]
+
+        model_label = "Stacking Ensemble Persisted"
         pred_prices = preds[0] * std_p + mean_p
         last_price = float(prices[-1])
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
-                    "Model": "Stacking Ensemble (XGB+RF+GBR)", "Forecast Horizon": horizon}]
+                    "Model": model_label, "Forecast Horizon": horizon}]
         forecasts = []
         for i, p in enumerate(pred_prices):
             change = ((float(p) - last_price) / last_price) * 100
@@ -656,7 +748,7 @@ def _run_ensemble_inner(symbol, horizon, df=None):
                               "Change %": round(change, 2),
                               "Signal": "BUY" if change > 1 else "SELL" if change < -1 else "HOLD"})
         return summary + forecasts
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 def run_dqn(symbol, episodes, df=None):
@@ -678,7 +770,7 @@ def _run_dqn_inner(symbol, episodes, df=None):
         cost_model = TransactionCostModel(commission_bps=10)
         try:
             risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"RiskManager init failed: {e}")
             risk_mgr = None
         train_env = TradingEnvironment(prices=train_prices, window_size=30,
@@ -701,7 +793,7 @@ def _run_dqn_inner(symbol, episodes, df=None):
         episode_results = [{"Episode": i+1, "Reward": round(float(r), 2),
                             "Status": "Good" if r > 0 else "Bad"} for i, r in enumerate(rewards)]
         return summary + episode_results
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 def run_policy_gradient(symbol, episodes, df=None):
@@ -722,7 +814,7 @@ def _run_policy_gradient_inner(symbol, episodes, df=None):
         cost_model = TransactionCostModel(commission_bps=10)
         try:
             risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"RiskManager init failed: {e}")
             risk_mgr = None
         env = TradingEnvironment(prices=prices[:split], window_size=30,
@@ -741,7 +833,7 @@ def _run_policy_gradient_inner(symbol, episodes, df=None):
                     "Avg Reward": round(float(np.mean(rewards)), 2)}]
         return summary + [{"Episode": i+1, "Reward": round(float(r), 2),
                            "Status": "Good" if r > 0 else "Bad"} for i, r in enumerate(rewards)]
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 
@@ -818,7 +910,11 @@ def score_usx_single(symbol, df):
         else:            signal = "NO TRADE"
 
         price = float(close.iloc[-1])
-        sl_mult, tp1_mult, tp2_mult, tp3_mult = 1.5, 1.5, 2.5, 4.0
+        levels = ATR_TARGETS["base"]
+        sl_mult = levels["sl"]
+        tp1_mult = levels["tp1"]
+        tp2_mult = levels["tp2"]
+        tp3_mult = levels["tp3"]
         sl  = round(price - sl_mult  * atr_val, 2)
         tp1 = round(price + tp1_mult * atr_val, 2)
         tp2 = round(price + tp2_mult * atr_val, 2)
@@ -850,7 +946,7 @@ def score_usx_single(symbol, df):
             "RR3": round(tp3_mult/sl_mult, 2), "Confluence": ", ".join(breakdown),
             "_score_int": score,
         }
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"USX {symbol}: {e}")
         return None
 
@@ -871,7 +967,7 @@ def run_usx_screener(min_score=7, direction="Long Only"):
                     results.append(row)
         results.sort(key=lambda x: int(x["Score"].split("/")[0]), reverse=True)
         return results if results else [{"Message": "No stocks meet USX Pro criteria"}]
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 
@@ -969,13 +1065,13 @@ def _get_news_sentiment_compound(symbol):
             if title:
                 scores.append(sia.polarity_scores(title)["compound"])
         return float(np.mean(scores)) if scores else 0.0
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.debug(f"Sentiment fetch failed for {symbol}: {e}")
-        return 0.0  # neutral fallback — don't block trade on data failure
+        return 0.0  # neutral fallback â€” don't block trade on data failure
 
 
 def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
-    """Balanced Confluence Framework — 5-gate AND-logic screener.
+    """Balanced Confluence Framework â€” 5-gate AND-logic screener.
 
     Gates:
       1. Technical Consensus: swing score >= 60 AND USX score >= 7
@@ -990,7 +1086,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
     Portfolio: max 5 positions, max 2 per GICS sector.
     """
     try:
-        # --- Gate 4: Regime Filter — SPY above 50-day SMA ---
+        # --- Gate 4: Regime Filter â€” SPY above 50-day SMA ---
         spy_df = fetch_yf("SPY", period="1y")
         if spy_df is None or len(spy_df) < 50:
             return [{"Message": "Cannot fetch SPY data for regime filter"}]
@@ -1001,7 +1097,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
 
         if spy_price < spy_sma50:
             return [{
-                "Message": "BCF BLOCKED — Bear regime detected",
+                "Message": "BCF BLOCKED â€” Bear regime detected",
                 "SPY": round(spy_price, 2),
                 "SPY SMA50": round(spy_sma50, 2),
                 "Reason": "SPY below 50-day SMA. No long entries allowed.",
@@ -1037,7 +1133,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
                 usx = score_usx_single(symbol, df)
                 if not usx or usx.get("_score_int", 0) < 7:
                     continue
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.debug(f"BCF Gate 1b failed for {symbol}: {e}")
                 continue
 
@@ -1054,7 +1150,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
                 prob_profit = mc_result[0].get("Prob Profit %", 0)
                 if prob_profit < 55:
                     continue
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.debug(f"BCF Gate 2 (Monte Carlo) failed for {symbol}: {e}")
                 continue
 
@@ -1065,20 +1161,20 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
 
             # --- Gate 5: 2-year backtest win rate >= 45% ---
             try:
-                from datetime import datetime, timedelta
-                end_dt = datetime.now().strftime("%Y-%m-%d")
-                start_dt = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+                now_utc = _utc_now()
+                end_dt = now_utc.strftime("%Y-%m-%d")
+                start_dt = (now_utc - timedelta(days=730)).strftime("%Y-%m-%d")
                 bt = run_backtest(symbol, start_dt, end_dt, portfolio_value, 1.25, 12)
                 if not bt or isinstance(bt[0], dict) and "Error" in bt[0]:
                     continue
                 win_rate = bt[0].get("Win Rate %", 0)
                 if win_rate < 45:
                     continue
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.debug(f"BCF Gate 5 (Backtest) failed for {symbol}: {e}")
                 continue
 
-            # --- All 5 gates passed — compute position sizing ---
+            # --- All 5 gates passed â€” compute position sizing ---
             price = float(df["close"].iloc[-1])
             atr_val = float(atr(df).iloc[-1])
 
@@ -1128,7 +1224,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
 
         return results
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"BCF screener error: {e}")
         return [{"Error": str(e)}]
 
@@ -1184,9 +1280,8 @@ def _send_consensus_breakdown(symbol, verdict, confidence, price,
     lines.append(f"SL: ${sl:.2f} | TP1: ${tp1:.2f}")
     lines.append(f"TP2: ${tp2:.2f} | TP3: ${tp3:.2f}")
 
-    from datetime import datetime
     lines.append(f"")
-    lines.append(f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
+    lines.append(f"{_utc_now().strftime('%Y-%m-%d %H:%M')} UTC")
 
     tg_send("\n".join(lines))
 
@@ -1201,7 +1296,7 @@ def _vote_signal(sig_str):
         return "SELL", 0, 1, 0
     return "HOLD", 0, 0, 1
 
-def run_consensus(symbol, horizon=5, episodes=10):
+def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
     try:
         # --- Halal verification gate (MUST pass before any analysis) ---
         is_halal, halal_reason = verify_halal(symbol)
@@ -1216,7 +1311,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
         votes_hold = 0
         details    = []
 
-        df = fetch_yf(symbol)
+        df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
         if df is None:
             return [{"Error": f"No data for {symbol}"}]
         price = float(df["close"].iloc[-1])
@@ -1230,7 +1325,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 vote, b, s, h = _vote_signal(sig)
                 votes_buy += b; votes_sell += s; votes_hold += h
                 details.append({"Tool": "Halal Screener", "Signal": sig, "Vote": vote, "Score": r["swing_score"]})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Halal Screener tool error: {e}")
             details.append({"Tool": "Halal Screener", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1245,15 +1340,15 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 votes_hold += 1
                 score_str = usx_r["Score"] if usx_r else "N/A"
                 details.append({"Tool": "USX Pro", "Signal": f"Below Min ({score_str})", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"USX Pro tool error: {e}")
             details.append({"Tool": "USX Pro", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
         # --- 3. Backtest ---
         try:
-            import datetime
-            end_date = datetime.date.today().strftime("%Y-%m-%d")
-            start_date = (datetime.date.today() - datetime.timedelta(days=365*2)).strftime("%Y-%m-%d")
+            today = _utc_now().date()
+            end_date = today.strftime("%Y-%m-%d")
+            start_date = (today - timedelta(days=365 * 2)).strftime("%Y-%m-%d")
             bt = run_backtest(symbol, start_date, end_date, settings.RISK_CAPITAL, 1.0, 3)
             if bt and len(bt) > 0 and "Return %" in bt[0]:
                 ret = float(bt[0]["Return %"])
@@ -1270,7 +1365,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Backtest 2Y", "Signal": "No trades", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Backtest 2Y tool error: {e}")
             details.append({"Tool": "Backtest 2Y", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1288,7 +1383,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             elif prob <= 0.45: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob*100:.1f}% Exp {chg:+.1f}%", "Vote": vote, "Score": round(prob*100, 1)})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Monte Carlo tool error: {e}")
             details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1314,7 +1409,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"BB Neutral (BW {bb_width:.1f}%)"
             details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote, "Score": round(bb_width, 1)})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Bollinger Bands tool error: {e}")
             details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1341,7 +1436,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 votes_hold += 1; vote = "HOLD"
                 sig = "Mixed alignment"
             details.append({"Tool": "EMA Alignment", "Signal": sig, "Vote": vote, "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"EMA Alignment tool error: {e}")
             details.append({"Tool": "EMA Alignment", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1379,7 +1474,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
             details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote, "Score": round(prob_up * 100, 1)})
             del model, X_train, X_test, y_train, y_test  # free memory
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"XGBoost tool error: {e}")
             details.append({"Tool": "XGBoost", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1405,7 +1500,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Weak (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
             details.append({"Tool": "Momentum", "Signal": sig, "Vote": vote, "Score": round(roc_10, 1)})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Momentum tool error: {e}")
             details.append({"Tool": "Momentum", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1430,7 +1525,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
             details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote, "Score": round(price_chg_5d, 1)})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Volume-Price tool error: {e}")
             details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1455,7 +1550,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"LSTM tool error: {e}")
             details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1477,11 +1572,11 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Transformer tool error: {e}")
             details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 12. Stacking Ensemble (XGB + RF + GBM → Ridge) ---
+        # --- 12. Stacking Ensemble (XGB + RF + GBM â†’ Ridge) ---
         try:
             ens_r = run_ensemble(symbol, horizon, df=df)
             if ens_r and len(ens_r) > 1:
@@ -1499,7 +1594,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Ensemble tool error: {e}")
             details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1525,7 +1620,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 details.append({"Tool": "DQN", "Signal": sig, "Vote": vote, "Score": round(reward_f, 1)})
             else:
                 details.append({"Tool": "DQN", "Signal": "No action", "Vote": "SKIP", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"DQN tool error: {e}")
             details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1550,7 +1645,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote, "Score": round(reward_f, 1)})
             else:
                 details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "SKIP", "Score": 0})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"PolicyGrad tool error: {e}")
             details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
@@ -1560,7 +1655,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # Verdict thresholds — scaled to actual voting tools
+        # Verdict thresholds â€” scaled to actual voting tools
         # With 14 tools, ~10-12 actually vote (DQN/PolicyGrad often SKIP)
         # STRONG needs >60% of votes, BUY needs plurality with >=45% confidence
         if votes_buy >= 7:
@@ -1578,10 +1673,11 @@ def run_consensus(symbol, horizon=5, episodes=10):
         else:
             verdict, action_str = "NEUTRAL", "WAIT"
 
-        sl  = round(price - 1.5 * atr_val, 2)
-        tp1 = round(price + 1.5 * atr_val, 2)
-        tp2 = round(price + 2.5 * atr_val, 2)
-        tp3 = round(price + 4.0 * atr_val, 2)
+        levels = ATR_TARGETS["base"]
+        sl  = round(price - levels["sl"] * atr_val, 2)
+        tp1 = round(price + levels["tp1"] * atr_val, 2)
+        tp2 = round(price + levels["tp2"] * atr_val, 2)
+        tp3 = round(price + levels["tp3"] * atr_val, 2)
 
         summary = [{
             "Symbol":       symbol.upper(),
@@ -1613,7 +1709,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 details={"votes_buy": votes_buy, "votes_sell": votes_sell,
                          "votes_hold": votes_hold, "tools": len(details)},
             )
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.error(f"record_signal failed (non-critical): {e}")
 
         # Telegram alert: chart + breakdown for STRONG BUY only
@@ -1633,7 +1729,7 @@ def run_consensus(symbol, horizon=5, episodes=10):
                     votes_hold=votes_hold, sl=sl, tp1=tp1, tp2=tp2, tp3=tp3,
                     details=details,
                 )
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Telegram alert error for {symbol}: {e}")
 
         # Auto-trade execution (Stage 1: Paper Trading)
@@ -1653,12 +1749,12 @@ def run_consensus(symbol, horizon=5, episodes=10):
             if trade_result:
                 summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                 summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Auto-trade hook error: {e}")
 
         return summary + details
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 
@@ -1666,8 +1762,8 @@ def run_consensus(symbol, horizon=5, episodes=10):
 # MULTI-STRATEGY CONSENSUS FUNCTIONS
 # ============================================================================
 
-def run_consensus_momentum(symbol, horizon=5):
-    """Strategy A: Momentum Alpha — trend-following with 5 tools.
+def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
+    """Strategy A: Momentum Alpha â€” trend-following with 5 tools.
 
     Tools: EMA Alignment (2x), Momentum ROC+ADX, Backtest 2Y, XGBoost, Monte Carlo
     Entry: 4+ of 5 tools BUY + price > SMA50
@@ -1682,14 +1778,14 @@ def run_consensus_momentum(symbol, horizon=5):
         votes_buy, votes_sell, votes_hold = 0, 0, 0
         details = []
 
-        df = fetch_yf(symbol)
+        df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
         if df is None:
             return [{"Error": f"No data for {symbol}"}]
         price = float(df["close"].iloc[-1])
         atr_val = float(atr(df).iloc[-1])
         close = df["close"]
 
-        # SMA50 gate — only buy if above 50-day SMA (trend filter)
+        # SMA50 gate â€” only buy if above 50-day SMA (trend filter)
         sma50_val = float(close.rolling(50).mean().iloc[-1])
         above_sma50 = price > sma50_val
 
@@ -1708,7 +1804,7 @@ def run_consensus_momentum(symbol, horizon=5):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = "Mixed alignment"
             details.append({"Tool": "EMA Alignment", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"EMA Alignment tool error: {e}")
             details.append({"Tool": "EMA Alignment", "Signal": "ERROR", "Vote": "-"})
 
@@ -1730,15 +1826,15 @@ def run_consensus_momentum(symbol, horizon=5):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Weak (ROC10={roc_10:+.1f}% ADX={dx:.0f})"
             details.append({"Tool": "Momentum", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Momentum tool error: {e}")
             details.append({"Tool": "Momentum", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 3: Backtest 2Y ---
         try:
-            import datetime as _dt
-            end_date = _dt.date.today().strftime("%Y-%m-%d")
-            start_date = (_dt.date.today() - _dt.timedelta(days=365 * 2)).strftime("%Y-%m-%d")
+            today = _utc_now().date()
+            end_date = today.strftime("%Y-%m-%d")
+            start_date = (today - timedelta(days=365 * 2)).strftime("%Y-%m-%d")
             bt = run_backtest(symbol, start_date, end_date, settings.RISK_CAPITAL, 1.0, 3)
             if bt and len(bt) > 0 and "Return %" in bt[0]:
                 ret = float(bt[0]["Return %"])
@@ -1755,7 +1851,7 @@ def run_consensus_momentum(symbol, horizon=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Backtest 2Y", "Signal": "No trades", "Vote": "HOLD"})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Backtest 2Y tool error: {e}")
             details.append({"Tool": "Backtest 2Y", "Signal": "ERROR", "Vote": "-"})
 
@@ -1788,7 +1884,7 @@ def run_consensus_momentum(symbol, horizon=5):
             sig = f"P(up)={prob_up:.0%} Acc={accuracy:.0f}%"
             details.append({"Tool": "XGBoost", "Signal": sig, "Vote": vote})
             del model
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"XGBoost tool error: {e}")
             details.append({"Tool": "XGBoost", "Signal": "ERROR", "Vote": "-"})
 
@@ -1806,7 +1902,7 @@ def run_consensus_momentum(symbol, horizon=5):
             elif prob <= 0.45: votes_sell += 1; vote = "SELL"
             else: votes_hold += 1; vote = "HOLD"
             details.append({"Tool": "Monte Carlo", "Signal": f"Prob {prob * 100:.1f}% Exp {chg:+.1f}%", "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Monte Carlo tool error: {e}")
             details.append({"Tool": "Monte Carlo", "Signal": "ERROR", "Vote": "-"})
 
@@ -1831,10 +1927,11 @@ def run_consensus_momentum(symbol, horizon=5):
         else:
             verdict = "NEUTRAL"
 
-        sl = round(price - 1.5 * atr_val, 2)
-        tp1 = round(price + 2.5 * atr_val, 2)   # wider TP for momentum
-        tp2 = round(price + 4.0 * atr_val, 2)
-        tp3 = round(price + 6.0 * atr_val, 2)
+        levels = ATR_TARGETS["momentum"]
+        sl = round(price - levels["sl"] * atr_val, 2)
+        tp1 = round(price + levels["tp1"] * atr_val, 2)
+        tp2 = round(price + levels["tp2"] * atr_val, 2)
+        tp3 = round(price + levels["tp3"] * atr_val, 2)
 
         summary = [{
             "Symbol": symbol.upper(), "Strategy": "A-Momentum Alpha",
@@ -1861,11 +1958,11 @@ def run_consensus_momentum(symbol, horizon=5):
                     votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
                     sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
                 )
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.warning(f"[A] Telegram alert failed: {e}")
 
         # Auto-trade via Strategy A's account
-        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        # Send BUY/STRONG BUY/SELL/STRONG SELL â€” let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
@@ -1879,17 +1976,17 @@ def run_consensus_momentum(symbol, horizon=5):
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                     summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.error(f"[A] Auto-trade error for {symbol}: {e}")
 
         return summary + details
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e), "Strategy": "A-Momentum"}]
 
 
-def run_consensus_reversion(symbol, horizon=3):
-    """Strategy B: Mean Reversion — buy oversold stocks.
+def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
+    """Strategy B: Mean Reversion â€” buy oversold stocks.
 
     Tools: Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
     Entry: RSI < 35 + price near lower BB + volume confirmation
@@ -1904,7 +2001,7 @@ def run_consensus_reversion(symbol, horizon=3):
         votes_buy, votes_sell, votes_hold = 0, 0, 0
         details = []
 
-        df = fetch_yf(symbol)
+        df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
         if df is None:
             return [{"Error": f"No data for {symbol}"}]
         price = float(df["close"].iloc[-1])
@@ -1936,7 +2033,7 @@ def run_consensus_reversion(symbol, horizon=3):
                 else:
                     votes_hold += 1; vote = "HOLD"; sig = f"Mid-range ({pct_bb:.0f}%)"
             details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Bollinger Bands error: {e}")
             mid_bb = price  # fallback
             details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-"})
@@ -1955,7 +2052,7 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral RSI={rsi_val:.0f}"
             details.append({"Tool": "RSI", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"RSI error: {e}")
             rsi_val = 50
             details.append({"Tool": "RSI", "Signal": "ERROR", "Vote": "-"})
@@ -1975,7 +2072,7 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
             details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Volume-Price tool error: {e}")
             details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-"})
 
@@ -1997,7 +2094,7 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"Neutral (K={k_val:.0f})"
             details.append({"Tool": "Stochastic", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Stochastic tool error: {e}")
             details.append({"Tool": "Stochastic", "Signal": "ERROR", "Vote": "-"})
 
@@ -2021,7 +2118,7 @@ def run_consensus_reversion(symbol, horizon=3):
             else:
                 votes_hold += 1; vote = "HOLD"; sig = f"OBV Flat ({obv_slope:+.1f}%)"
             details.append({"Tool": "OBV", "Signal": sig, "Vote": vote})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"OBV tool error: {e}")
             details.append({"Tool": "OBV", "Signal": "ERROR", "Vote": "-"})
 
@@ -2047,10 +2144,11 @@ def run_consensus_reversion(symbol, horizon=3):
             verdict = "NEUTRAL"
 
         # Static SL 2%, TP at middle Bollinger Band or +1.5 ATR
-        sl = round(price * 0.98, 2)       # 2% static stop loss
+        levels = ATR_TARGETS["reversion"]
+        sl = round(price * (1 - levels["stop_pct"] / 100.0), 2)
         tp1 = round(mid_bb, 2)            # Target: middle BB (mean reversion target)
-        tp2 = round(price + 1.5 * atr_val, 2)
-        tp3 = round(price + 2.5 * atr_val, 2)
+        tp2 = round(price + levels["tp2"] * atr_val, 2)
+        tp3 = round(price + levels["tp3"] * atr_val, 2)
 
         summary = [{
             "Symbol": symbol.upper(), "Strategy": "B-Mean Reversion",
@@ -2076,10 +2174,10 @@ def run_consensus_reversion(symbol, horizon=3):
                     votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
                     sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
                 )
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.warning(f"[B] Telegram alert failed: {e}")
 
-        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        # Send BUY/STRONG BUY/SELL/STRONG SELL â€” let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
@@ -2093,21 +2191,21 @@ def run_consensus_reversion(symbol, horizon=3):
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                     summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.error(f"[B] Auto-trade error for {symbol}: {e}")
 
         return summary + details
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e), "Strategy": "B-Reversion"}]
 
 
-def run_consensus_ml(symbol, horizon=7, episodes=5):
-    """Strategy C: AI Ensemble — pure ML decision-making.
+def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None):
+    """Strategy C: AI Ensemble â€” pure ML decision-making.
 
     Tools: LSTM, Transformer, Stacking Ensemble, Double DQN, Policy Gradient
     Entry: 4+ of 5 ML models vote BUY
-    Exit: Trailing stop 2.5%, TP at models' average predicted price
+    Exit: default trailing stop, TP at models' average predicted price
     """
     try:
         is_halal, halal_reason = verify_halal(symbol)
@@ -2119,7 +2217,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
         details = []
         predicted_prices = []
 
-        df = fetch_yf(symbol)
+        df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
         if df is None:
             return [{"Error": f"No data for {symbol}"}]
         price = float(df["close"].iloc[-1])
@@ -2144,7 +2242,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD"})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"LSTM tool error: {e}")
             details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-"})
 
@@ -2167,7 +2265,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD"})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Transformer tool error: {e}")
             details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-"})
 
@@ -2190,7 +2288,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD"})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"Ensemble tool error: {e}")
             details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-"})
 
@@ -2212,7 +2310,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD"})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"DQN tool error: {e}")
             details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-"})
 
@@ -2234,7 +2332,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
             else:
                 votes_hold += 1
                 details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD"})
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.debug(f"PolicyGrad tool error: {e}")
             details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-"})
 
@@ -2291,10 +2389,10 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
                     votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
                     sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
                 )
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.warning(f"[C] Telegram alert failed: {e}")
 
-        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        # Send BUY/STRONG BUY/SELL/STRONG SELL â€” let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
@@ -2308,25 +2406,25 @@ def run_consensus_ml(symbol, horizon=7, episodes=5):
                 if trade_result:
                     summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
                     summary[0]["Trade_Reason"] = trade_result.get("reason", "")
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.error(f"[C] Auto-trade error for {symbol}: {e}")
 
         return summary + details
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e), "Strategy": "C-ML"}]
 
 
 def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10):
     try:
-        # الخطوة 1: جلب Active Buy Signals
+        # Ø§Ù„Ø®Ø·ÙˆØ© 1: Ø¬Ù„Ø¨ Active Buy Signals
         screener_results = run_screener()
         buy_signals = [r for r in screener_results if r.get("swing_score", 0) >= min_swing_score]
         
         if not buy_signals:
             return [{"Message": "No active buy signals found"}]
         
-        # حد أقصى للسرعة
+        # Ø­Ø¯ Ø£Ù‚ØµÙ‰ Ù„Ù„Ø³Ø±Ø¹Ø©
         buy_signals = buy_signals[:max_stocks]
         
         summary_header = [{
@@ -2346,7 +2444,7 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
                     row["Swing Score"] = stock.get("swing_score", 0)
                     row["ATR Pct"] = stock.get("atr_pct", 0)
                     results.append(row)
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 results.append({
                     "Symbol": symbol,
                     "Verdict": "ERROR",
@@ -2358,7 +2456,7 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
                     "Swing Score": stock.get("swing_score", 0),
                 })
         
-        # ترتيب حسب الثقة والتصويت
+        # ØªØ±ØªÙŠØ¨ Ø­Ø³Ø¨ Ø§Ù„Ø«Ù‚Ø© ÙˆØ§Ù„ØªØµÙˆÙŠØª
         results.sort(key=lambda x: (
             x.get("Votes BUY", 0) - x.get("Votes SELL", 0),
             x.get("Confidence %", 0)
@@ -2366,8 +2464,227 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
         
         return summary_header + results
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
+
+
+@dataclass(frozen=True)
+class ConsensusProfile:
+    name: str
+    strategy: str
+    weights: dict[str, float]
+    default_horizon: int
+    default_episodes: int
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _coerce_as_of(as_of):
+    if as_of is None or isinstance(as_of, datetime):
+        return as_of
+    try:
+        return pd.Timestamp(as_of).to_pydatetime()
+    except NON_FATAL_ANALYSIS_ERROR:
+        return None
+
+
+def _to_utc_datetimes(values):
+    ts = pd.to_datetime(values, errors="coerce")
+    if isinstance(ts, pd.Series):
+        if ts.dt.tz is None:
+            ts = ts.dt.tz_localize("America/New_York")
+        return ts.dt.tz_convert("UTC")
+    idx = pd.DatetimeIndex(ts)
+    if idx.tz is None:
+        idx = idx.tz_localize("America/New_York")
+    return idx.tz_convert("UTC")
+
+
+def _apply_signal_cutoff(df, as_of=None):
+    if df is None or len(df) == 0:
+        return df
+
+    cutoff = signal_cutoff(_coerce_as_of(as_of)).astimezone(timezone.utc)
+    if "date" in df.columns:
+        date_series = _to_utc_datetimes(df["date"])
+        mask = date_series <= cutoff
+        sliced = df.loc[mask.fillna(False)].copy()
+        return sliced if not sliced.empty else df.copy()
+
+    index_series = _to_utc_datetimes(df.index)
+    sliced = df.loc[index_series <= cutoff].copy()
+    return sliced if not sliced.empty else df.copy()
+
+
+def _load_consensus_df(symbol, df_override=None, as_of=None):
+    df = df_override.copy() if df_override is not None else fetch_yf(symbol)
+    if df is None:
+        return None
+    return _apply_signal_cutoff(df, as_of=as_of)
+
+
+def _persist_consensus_result(symbol: str, profile: str, result: list[dict]) -> None:
+    if not result or not isinstance(result, list):
+        return
+    summary = result[0] or {}
+    if summary.get("Error"):
+        return
+
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import ConsensusLog, SignalHistory
+
+        db = SessionLocal()
+        try:
+            payload = {
+                "profile": profile,
+                "rows": result[1:],
+            }
+            db.add(
+                ConsensusLog(
+                    symbol=symbol.upper(),
+                    profile=profile,
+                    verdict=summary.get("Verdict", "UNKNOWN"),
+                    confidence=float(summary.get("Confidence %", 0) or 0),
+                    votes_buy=int(summary.get("Votes BUY", 0) or 0),
+                    votes_sell=int(summary.get("Votes SELL", 0) or 0),
+                    votes_hold=int(summary.get("Votes HOLD", 0) or 0),
+                    price=float(summary.get("Price", 0) or 0),
+                    details=payload,
+                )
+            )
+            db.add(
+                SignalHistory(
+                    symbol=symbol.upper(),
+                    signal_type="consensus",
+                    signal=summary.get("Verdict", "UNKNOWN"),
+                    score=float(summary.get("Confidence %", 0) or 0),
+                    price=float(summary.get("Price", 0) or 0),
+                    stop_loss=float(summary.get("Stop Loss", 0) or 0),
+                    take_profit=float(summary.get("TP1", 0) or 0),
+                    confidence=float(summary.get("Confidence %", 0) or 0),
+                    details=payload,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+    except NON_FATAL_PERSISTENCE_ERROR as exc:
+        logger.warning("Consensus persistence skipped for %s/%s: %s", symbol, profile, exc)
+
+
+_legacy_run_consensus_base = run_consensus
+_legacy_run_consensus_momentum = run_consensus_momentum
+_legacy_run_consensus_reversion = run_consensus_reversion
+_legacy_run_consensus_ml = run_consensus_ml
+
+CONSENSUS_PROFILES = {
+    "base": ConsensusProfile(
+        name="base",
+        strategy="Base",
+        weights={"technical": 0.4, "stat": 0.3, "ml": 0.3},
+        default_horizon=5,
+        default_episodes=10,
+    ),
+    "momentum": ConsensusProfile(
+        name="momentum",
+        strategy="A-Momentum",
+        weights={"trend": 0.5, "confirmation": 0.3, "ml": 0.2},
+        default_horizon=5,
+        default_episodes=3,
+    ),
+    "reversion": ConsensusProfile(
+        name="reversion",
+        strategy="B-Reversion",
+        weights={"oversold": 0.5, "volatility": 0.3, "confirmation": 0.2},
+        default_horizon=3,
+        default_episodes=3,
+    ),
+    "ml": ConsensusProfile(
+        name="ml",
+        strategy="C-ML",
+        weights={"lstm": 0.34, "transformer": 0.33, "ensemble": 0.33},
+        default_horizon=7,
+        default_episodes=5,
+    ),
+}
+
+
+def run_consensus(symbol, horizon=5, episodes=10, profile="base", df_override=None, as_of=None):
+    profile_name = (profile or "base").lower()
+    meta = CONSENSUS_PROFILES.get(profile_name)
+    if meta is None:
+        return [{"Error": f"Unknown consensus profile: {profile_name}"}]
+    prepared_df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
+
+    if profile_name == "base":
+        result = _legacy_run_consensus_base(
+            symbol,
+            horizon=horizon or meta.default_horizon,
+            episodes=episodes or meta.default_episodes,
+            df_override=prepared_df,
+            as_of=as_of,
+        )
+    elif profile_name == "momentum":
+        result = _legacy_run_consensus_momentum(
+            symbol,
+            horizon=horizon or meta.default_horizon,
+            df_override=prepared_df,
+            as_of=as_of,
+        )
+    elif profile_name == "reversion":
+        result = _legacy_run_consensus_reversion(
+            symbol,
+            horizon=horizon or meta.default_horizon,
+            df_override=prepared_df,
+            as_of=as_of,
+        )
+    else:
+        result = _legacy_run_consensus_ml(
+            symbol,
+            horizon=horizon or meta.default_horizon,
+            episodes=episodes or meta.default_episodes,
+            df_override=prepared_df,
+            as_of=as_of,
+        )
+
+    _persist_consensus_result(symbol, profile_name, result)
+    return result
+
+
+def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
+    return run_consensus(
+        symbol,
+        horizon=horizon,
+        episodes=CONSENSUS_PROFILES["momentum"].default_episodes,
+        profile="momentum",
+        df_override=df_override,
+        as_of=as_of,
+    )
+
+
+def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
+    return run_consensus(
+        symbol,
+        horizon=horizon,
+        episodes=CONSENSUS_PROFILES["reversion"].default_episodes,
+        profile="reversion",
+        df_override=df_override,
+        as_of=as_of,
+    )
+
+
+def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None):
+    return run_consensus(
+        symbol,
+        horizon=horizon,
+        episodes=episodes,
+        profile="ml",
+        df_override=df_override,
+        as_of=as_of,
+    )
 
 
 # Pipeline uses same S&P 500 halal universe
@@ -2388,7 +2705,7 @@ def _quick_filter_one(symbol):
         score = sum([price > ema21_val, ema9_val > ema21_val, 30 <= rsi_val <= 75, vol_ratio >= 0.8])
         if score >= 2:
             return {"symbol": symbol, "price": round(price,2), "rsi": round(rsi_val,1), "quick_score": score}
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.debug(f"Quick filter {symbol}: {e}")
     return None
 
@@ -2404,7 +2721,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         quick_results.sort(key=lambda x: x["quick_score"], reverse=True)
         top100 = quick_results[:100]
 
-        # المرحلة 2: Halal Screener
+        # Ø§Ù„Ù…Ø±Ø­Ù„Ø© 2: Halal Screener
         screener_results = []
         for item in top100:
             try:
@@ -2413,13 +2730,13 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
                 r = analyze(item["symbol"], df)
                 if r and r["swing_score"] >= 45:
                     screener_results.append(r)
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.debug(f"Pipeline screener {item['symbol']}: {e}")
                 continue
         screener_results.sort(key=lambda x: x["swing_score"], reverse=True)
         top30 = screener_results[:30]
 
-        # المرحلة 3: USX Pro
+        # Ø§Ù„Ù…Ø±Ø­Ù„Ø© 3: USX Pro
         top30_symbols = [r["symbol"] for r in top30]
         usx_filtered = []
         try:
@@ -2427,11 +2744,11 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
             usx_filtered = [x for x in usx_all if x.get("Symbol") in top30_symbols]
             usx_filtered.sort(key=lambda x: int(x.get("Score","0/10").split("/")[0]), reverse=True)
             top15 = [x["Symbol"] for x in usx_filtered[:15]]
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.warning(f"Pipeline USX stage failed: {e}")
             top15 = top30_symbols[:15]
 
-        # المرحلة 4: AI Consensus
+        # Ø§Ù„Ù…Ø±Ø­Ù„Ø© 4: AI Consensus
         final_results = []
         for symbol in top15:
             try:
@@ -2445,7 +2762,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
                     row["RSI"]         = screener_info.get("rsi", 0)
                     row["Signals"]     = screener_info.get("signals", "")
                     final_results.append(row)
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 final_results.append({"Symbol": symbol, "Verdict": "ERROR", "Confidence %": 0, "Action": str(e)[:30], "Swing Score": 0})
 
         final_results.sort(key=lambda x: (
@@ -2458,7 +2775,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         weak_buy   = [r for r in final_results if r.get("Verdict","") == "WEAK BUY"]
 
         header = [{
-            "Pipeline":         "Russell 1000 Halal → Full AI Pipeline",
+            "Pipeline":         "Russell 1000 Halal â†’ Full AI Pipeline",
             "Total Scanned":    len(RUSSELL_1000_HALAL),
             "After Quick Filter": len(top100),
             "After Screener":   len(top30),
@@ -2474,7 +2791,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
 
         return header + final_results
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 @app.get("/widgets.json")
@@ -2483,7 +2800,7 @@ async def widgets():
         # ===== MAIN: Ready to Trade (THE one screen) =====
         "ready_to_trade": {
             "name": "Ready to Trade",
-            "description": "Stocks that passed BOTH screener AND AI consensus — ready for execution",
+            "description": "Stocks that passed BOTH screener AND AI consensus â€” ready for execution",
             "category": "Trading", "type": "table",
             "endpoint": "/ready",
             "gridData": {"w": 20, "h": 12},
@@ -2537,7 +2854,7 @@ async def widgets():
     }
 
 # ============================================================
-# UNIFIED BACKGROUND CACHE — ALL endpoints serve cached results
+# UNIFIED BACKGROUND CACHE â€” ALL endpoints serve cached results
 # OpenBB Pro has ~30s widget timeout. No endpoint should ever
 # make it wait. Everything computes in background, serves instantly.
 # ============================================================
@@ -2571,7 +2888,7 @@ def _bg_compute(key, func, args=(), kwargs=None):
             _bg_cache[key] = result
             _cache_status[key] = "done"
             _cache_time[key] = time.time()
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Background compute {key} failed: {e}")
         with _cache_lock:
             _bg_cache[key] = [{"Error": str(e)}]
@@ -2618,7 +2935,7 @@ async def watchlist():
 
 @app.get("/bcf")
 async def bcf_screener(portfolio: float = 100000):
-    """Balanced Confluence Framework — moderate risk strategy."""
+    """Balanced Confluence Framework â€” moderate risk strategy."""
     validate_range(portfolio, "portfolio", 1000, 10_000_000)
     key = _cache_key("bcf", portfolio=portfolio)
     return _serve_or_compute(key, run_bcf_screener, args=(portfolio,), msg="Computing BCF screener...")
@@ -2696,9 +3013,31 @@ async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     validate_range(episodes, "episodes", 1, 50)
-    # No rate limiter — the background cache already deduplicates work
+    # No rate limiter â€” the background cache already deduplicates work
     key = _cache_key("consensus", symbol=s, horizon=horizon, episodes=episodes)
     return _serve_or_compute(key, run_consensus, args=(s, horizon, episodes), msg=f"Computing AI consensus for {s}...")
+
+@app.get("/consensus_momentum")
+async def consensus_momentum(symbol: str = "AAPL", horizon: int = 5):
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    key = _cache_key("consensus_momentum", symbol=s, horizon=horizon)
+    return _serve_or_compute(key, run_consensus_momentum, args=(s, horizon), msg=f"Computing momentum consensus for {s}...")
+
+@app.get("/consensus_reversion")
+async def consensus_reversion(symbol: str = "AAPL", horizon: int = 3):
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    key = _cache_key("consensus_reversion", symbol=s, horizon=horizon)
+    return _serve_or_compute(key, run_consensus_reversion, args=(s, horizon), msg=f"Computing reversion consensus for {s}...")
+
+@app.get("/consensus_ml")
+async def consensus_ml(symbol: str = "AAPL", horizon: int = 7, episodes: int = 5):
+    s = validate_symbol(symbol)
+    validate_range(horizon, "horizon", 1, 30)
+    validate_range(episodes, "episodes", 1, 50)
+    key = _cache_key("consensus_ml", symbol=s, horizon=horizon, episodes=episodes)
+    return _serve_or_compute(key, run_consensus_ml, args=(s, horizon, episodes), msg=f"Computing ML consensus for {s}...")
 
 @app.get("/batch_consensus")
 async def batch_consensus(min_swing_score: int = 55, horizon: int = 5, episodes: int = 5, max_stocks: int = 10):
@@ -2712,14 +3051,14 @@ async def pipeline(min_confidence: int = 40, max_final: int = 15, horizon: int =
 
 
 # ============================================================================
-# READY TO TRADE — Single clean screen showing only actionable stocks
+# READY TO TRADE â€” Single clean screen showing only actionable stocks
 # ============================================================================
 
 def run_ready_to_trade(min_swing=55, max_stocks=25):
-    """Full pipeline → only BUY/STRONG BUY stocks with all details.
+    """Full pipeline â†’ only BUY/STRONG BUY stocks with all details.
 
-    Flow: Screener (355 stocks) → Top by score → AI Consensus (14 tools)
-          → Filter: only BUY or STRONG BUY → Clean output with trade plan
+    Flow: Screener (355 stocks) â†’ Top by score â†’ AI Consensus (14 tools)
+          â†’ Filter: only BUY or STRONG BUY â†’ Clean output with trade plan
 
     Runs automatically at 9:00 AM ET (pre-market) so results are cached
     and ready when the market opens at 9:30 AM.
@@ -2777,7 +3116,7 @@ def run_ready_to_trade(min_swing=55, max_stocks=25):
                 else:
                     rejected.append(f"{symbol}({verdict})")
 
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.error(f"Ready-to-trade {symbol}: {e}")
             finally:
                 _flush_all_caches()
@@ -2790,10 +3129,10 @@ def run_ready_to_trade(min_swing=55, max_stocks=25):
         ), reverse=True)
 
         header = [{
-            "Pipeline": f"Scanned {len(screener_results)} → Top {len(candidates)} → AI Consensus → {len(ready)} READY",
+            "Pipeline": f"Scanned {len(screener_results)} â†’ Top {len(candidates)} â†’ AI Consensus â†’ {len(ready)} READY",
             "Ready to Trade": len(ready),
             "Rejected by AI": ", ".join(rejected) if rejected else "None",
-            "Status": "READY" if ready else "NO TRADES — AI consensus blocked all candidates",
+            "Status": "READY" if ready else "NO TRADES â€” AI consensus blocked all candidates",
         }]
 
         if not ready:
@@ -2801,7 +3140,7 @@ def run_ready_to_trade(min_swing=55, max_stocks=25):
 
         return header + ready
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
 
@@ -2814,7 +3153,8 @@ async def ready_to_trade(min_swing: int = 55, max_stocks: int = 25):
 
 
 @app.get("/refresh_ready")
-async def refresh_ready(min_swing: int = 55, max_stocks: int = 25):
+async def refresh_ready(min_swing: int = 55, max_stocks: int = 25, x_api_key: OperatorAPIKey = None):
+    _require_api_key(x_api_key)
     key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
     with _cache_lock:
         _bg_cache.pop(key, None)
@@ -2824,7 +3164,8 @@ async def refresh_ready(min_swing: int = 55, max_stocks: int = 25):
 
 # --- Refresh endpoints (clear cache + recompute) ---
 @app.get("/refresh_consensus")
-async def refresh_consensus(symbol: str = "AAPL"):
+async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
+    _require_api_key(x_api_key)
     s = validate_symbol(symbol)
     key = _cache_key("consensus", symbol=s, horizon=5, episodes=10)
     with _cache_lock:
@@ -2834,7 +3175,8 @@ async def refresh_consensus(symbol: str = "AAPL"):
     return {"Status": f"Consensus refresh started for {s}."}
 
 @app.get("/refresh_batch")
-async def refresh_batch():
+async def refresh_batch(x_api_key: OperatorAPIKey = None):
+    _require_api_key(x_api_key)
     key = _cache_key("batch_consensus", min=55, h=5, ep=5, max=10)
     with _cache_lock:
         _bg_cache.pop(key, None)
@@ -2843,7 +3185,8 @@ async def refresh_batch():
     return [{"Status": "Batch consensus refresh started"}]
 
 @app.get("/refresh_pipeline")
-async def refresh_pipeline():
+async def refresh_pipeline(x_api_key: OperatorAPIKey = None):
+    _require_api_key(x_api_key)
     key = _cache_key("pipeline", conf=40, max=15, h=5, ep=5)
     with _cache_lock:
         _bg_cache.pop(key, None)
@@ -2871,14 +3214,50 @@ def _precompute_consensus_for_top_buys():
         logger.info(f"Pre-warming consensus for {sym}...")
         _bg_compute(key, run_consensus, (sym, 5, 10))
 
-@app.on_event("startup")
-async def precompute_on_startup():
+async def _startup_bootstrap():
+    # Fail-fast configuration guard (M1 hardening).
+    # If AUTO_TRADE_ENABLED=True but required keys are missing or the base
+    # URL points at live while we're still in M1, refuse to boot.
+    try:
+        from app.config import assert_ready_for_auto_trade, ConfigurationError
+        assert_ready_for_auto_trade()
+    except ConfigurationError as e:
+        logger.critical(str(e))
+        # Disable auto-trade rather than crash the read-only UI; an operator
+        # who wants trading must fix the config and restart.
+        from app.config import settings as _s
+        _s.AUTO_TRADE_ENABLED = False
+        try:
+            from app.services.telegram_alert import send_message as _tg
+            _tg(f"STARTUP BLOCKED auto-trade\n{e}")
+        except NON_FATAL_ANALYSIS_ERROR:
+            logger.exception("Failed to send startup-blocked Telegram alert")
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.error(f"Config validation error (non-fatal): {e}", exc_info=True)
+
     # Initialize database tables
     try:
         init_db()
         logger.info("Database initialized successfully.")
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.warning(f"Database init failed (non-fatal, using in-memory caches): {e}")
+
+    # Reconcile broker positions with DB (M1 hardening).
+    # If the process was killed mid-order, this closes the accounting gap
+    # before any new signal can fire.
+    try:
+        from app.services.trading_engine import reconcile_all_strategies
+        recon = reconcile_all_strategies()
+        logger.info(f"Startup reconciliation complete: {recon}")
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.error(f"Startup reconciliation failed (non-fatal): {e}", exc_info=True)
+    try:
+        from app.services.regime import refresh_regime
+
+        snapshot = refresh_regime()
+        logger.info(f"Startup regime snapshot: {snapshot}")
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.error(f"Startup regime refresh failed (non-fatal): {e}", exc_info=True)
     logger.info("Pre-computing screener and USX data on startup...")
     threading.Thread(target=_bg_compute, args=(_cache_key("screener"), run_screener), daemon=True).start()
     # Wait for screener to finish before starting USX to avoid memory pressure
@@ -2897,8 +3276,15 @@ async def precompute_on_startup():
         from app.services.scheduler import start_scheduler
         start_scheduler()
         logger.info("Automated scheduler started successfully")
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.warning(f"Scheduler failed to start (non-fatal): {e}")
+    try:
+        from app.services.fill_watcher import start_fill_watcher
+
+        start_fill_watcher()
+        logger.info("Fill watcher started successfully")
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.warning(f"Fill watcher failed to start (non-fatal): {e}")
 
 # ============================================================
 # PHASE 2: AAOIFI Halal Screening Endpoints
@@ -2914,6 +3300,14 @@ def _json_safe(val, default=0):
     return val
 
 
+def _require_api_key(api_key: str | None):
+    """Fail closed on operator/admin endpoints unless X-API-Key is valid."""
+    if not settings.API_KEY:
+        raise HTTPException(status_code=503, detail="Operator API key not configured")
+    if api_key != settings.API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
 @app.get("/halal_status")
 async def halal_status(symbol: str = "AAPL"):
     """Get AAOIFI Halal compliance status for a single symbol."""
@@ -2921,14 +3315,14 @@ async def halal_status(symbol: str = "AAPL"):
     if not settings.FMP_API_KEY:
         return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
     try:
-        # Run in thread pool — get_halal_status does blocking HTTP (FMP + yfinance fallback)
+        # Run in thread pool â€” get_halal_status does blocking HTTP (FMP + yfinance fallback)
         result = await asyncio.to_thread(get_halal_status, s)
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Halal screening crashed for {s}: {e}")
         result = None
     if result is None:
         return [{"Error": f"Could not retrieve fundamental data for {s}"}]
-    # Format for OpenBB widget display — _json_safe guards against NaN from yfinance
+    # Format for OpenBB widget display â€” _json_safe guards against NaN from yfinance
     status = "HALAL" if result.get("is_halal") else "HARAM"
     return [{
         "Symbol": s,
@@ -2952,7 +3346,7 @@ async def halal_verify(symbol: str):
     """Quick halal verification gate check for any symbol.
 
     Returns whether the stock is allowed for trading.
-    Uses the 3-layer defense: sector exclusion → FMP AAOIFI → fail-closed.
+    Uses the 3-layer defense: sector exclusion â†’ FMP AAOIFI â†’ fail-closed.
     """
     s = validate_symbol(symbol)
     is_halal, reason = verify_halal(s)
@@ -3004,8 +3398,9 @@ async def screen_stocks_endpoint(max_stocks: int = 80):
 # ============================================================
 
 @app.get("/strategies")
-async def list_strategies():
+async def list_strategies(x_api_key: OperatorAPIKey = None):
     """List all configured strategies and their settings."""
+    _require_api_key(x_api_key)
     from app.config import STRATEGY_CONFIGS
     result = []
     for sid, cfg in STRATEGY_CONFIGS.items():
@@ -3024,8 +3419,9 @@ async def list_strategies():
 
 
 @app.get("/strategy/{strategy_id}/account")
-async def strategy_account(strategy_id: str):
+async def strategy_account(strategy_id: str, x_api_key: OperatorAPIKey = None):
     """Get account info for a specific strategy."""
+    _require_api_key(x_api_key)
     sid = strategy_id.upper()
     from app.config import STRATEGY_CONFIGS
     if sid not in STRATEGY_CONFIGS:
@@ -3038,8 +3434,9 @@ async def strategy_account(strategy_id: str):
 
 
 @app.get("/debug/alpaca")
-async def debug_alpaca():
-    """Debug Alpaca connection — shows key prefix, base URL, and test result."""
+async def debug_alpaca(x_api_key: OperatorAPIKey = None):
+    """Debug Alpaca connection â€” shows key prefix, base URL, and test result."""
+    _require_api_key(x_api_key)
     import httpx
     from app.config import STRATEGY_CONFIGS
     results = []
@@ -3056,7 +3453,7 @@ async def debug_alpaca():
                 })
                 status = resp.status_code
                 body = resp.text[:200]
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             status = "ERROR"
             body = str(e)[:200]
         results.append({
@@ -3072,8 +3469,9 @@ async def debug_alpaca():
 
 
 @app.get("/strategy/{strategy_id}/positions")
-async def strategy_positions(strategy_id: str):
+async def strategy_positions(strategy_id: str, x_api_key: OperatorAPIKey = None):
     """Get positions for a specific strategy."""
+    _require_api_key(x_api_key)
     sid = strategy_id.upper()
     from app.config import STRATEGY_CONFIGS
     if sid not in STRATEGY_CONFIGS:
@@ -3087,8 +3485,9 @@ async def strategy_positions(strategy_id: str):
 
 
 @app.get("/strategy/{strategy_id}/scan")
-async def strategy_scan(strategy_id: str, symbol: str = "AAPL"):
+async def strategy_scan(strategy_id: str, symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     """Manually run a strategy consensus for a symbol."""
+    _require_api_key(x_api_key)
     sid = strategy_id.upper()
     if sid == "A":
         return run_consensus_momentum(symbol)
@@ -3101,8 +3500,9 @@ async def strategy_scan(strategy_id: str, symbol: str = "AAPL"):
 
 
 @app.get("/strategies/comparison")
-async def strategy_comparison():
+async def strategy_comparison(x_api_key: OperatorAPIKey = None):
     """Get side-by-side comparison of all strategy accounts."""
+    _require_api_key(x_api_key)
     from app.config import STRATEGY_CONFIGS
     result = []
     total_equity = 0
@@ -3142,13 +3542,12 @@ async def strategy_comparison():
 # ============================================================
 
 @app.get("/portfolio/summary")
-async def portfolio_summary():
+async def portfolio_summary(x_api_key: OperatorAPIKey = None):
     """Get Alpaca account summary: equity, cash, buying power, P&L."""
-    # Use default key, or fall back to Strategy A key
-    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
-    if not has_key:
+    _require_api_key(x_api_key)
+    if not _has_alpaca_broker_config():
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = "A" if settings.ALPACA_API_KEY_A else None
+    sid = _primary_broker_strategy_id()
     account = alpaca_get_account(strategy_id=sid)
     if not account:
         return [{"Error": "Could not connect to Alpaca"}]
@@ -3169,12 +3568,12 @@ async def portfolio_summary():
     }]
 
 @app.get("/portfolio/positions")
-async def portfolio_positions():
+async def portfolio_positions(x_api_key: OperatorAPIKey = None):
     """Get all open positions with unrealized P&L."""
-    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
-    if not has_key:
+    _require_api_key(x_api_key)
+    if not _has_alpaca_broker_config():
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = "A" if settings.ALPACA_API_KEY_A else None
+    sid = _primary_broker_strategy_id()
     positions = alpaca_get_positions(strategy_id=sid)
     if not positions:
         return [{"Message": "No open positions"}]
@@ -3195,24 +3594,24 @@ async def portfolio_positions():
     return result
 
 @app.get("/portfolio/orders")
-async def portfolio_orders(status: str = "all", limit: int = 20):
+async def portfolio_orders(status: str = "all", limit: int = 20, x_api_key: OperatorAPIKey = None):
     """Get recent Alpaca orders."""
-    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
-    if not has_key:
+    _require_api_key(x_api_key)
+    if not _has_alpaca_broker_config():
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = "A" if settings.ALPACA_API_KEY_A else None
+    sid = _primary_broker_strategy_id()
     orders = alpaca_get_orders(status=status, limit=limit, strategy_id=sid)
     if not orders:
         return [{"Message": "No orders found"}]
     return orders
 
 @app.get("/portfolio/history")
-async def portfolio_history(period: str = "1M"):
+async def portfolio_history(period: str = "1M", x_api_key: OperatorAPIKey = None):
     """Get portfolio equity curve history."""
-    has_key = settings.ALPACA_API_KEY or settings.ALPACA_API_KEY_A
-    if not has_key:
+    _require_api_key(x_api_key)
+    if not _has_alpaca_broker_config():
         return [{"Error": "Alpaca API keys not configured"}]
-    sid = "A" if settings.ALPACA_API_KEY_A else None
+    sid = _primary_broker_strategy_id()
     valid_periods = ["1D", "1W", "1M", "3M", "1A", "all"]
     if period not in valid_periods:
         return [{"Error": f"Invalid period. Use one of: {valid_periods}"}]
@@ -3238,7 +3637,7 @@ async def signals_accuracy(period: int = 30):
     # Trigger outcome checking first
     try:
         threading.Thread(target=check_signal_outcomes, args=(5,), daemon=True).start()
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"check_signal_outcomes thread failed: {e}")
     return get_accuracy_report(period_days=period)
 
@@ -3250,24 +3649,27 @@ async def signals_history(symbol: str = "", limit: int = 50):
     return get_signal_history(symbol=s, limit=limit)
 
 @app.get("/signals/check_outcomes")
-async def signals_check_outcomes(days: int = 5):
+async def signals_check_outcomes(days: int = 5, x_api_key: OperatorAPIKey = None):
     """Manually trigger outcome checking for mature signals."""
+    _require_api_key(x_api_key)
     validate_range(days, "days", 1, 60)
     result = check_signal_outcomes(lookback_days=days)
     return [{"Action": "Outcome check complete", **result}]
 
 @app.get("/telegram/test")
-async def telegram_test():
+async def telegram_test(x_api_key: OperatorAPIKey = None):
     """Send a test message to Telegram."""
+    _require_api_key(x_api_key)
     if not settings.TELEGRAM_BOT_TOKEN or not settings.TELEGRAM_CHAT_ID:
         return [{"Error": "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not configured in .env"}]
     ok = tg_send("Test message from Halal Trading Bot\n\nTelegram alerts are working!")
-    return [{"Status": "sent" if ok else "failed", "Bot Token": f"...{settings.TELEGRAM_BOT_TOKEN[-6:]}", "Chat ID": settings.TELEGRAM_CHAT_ID}]
+    return [{"Status": "sent" if ok else "failed"}]
 
 
 @app.get("/telegram/test_chart")
-async def telegram_test_chart(symbol: str = "AAPL"):
+async def telegram_test_chart(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     """Test chart generation + Telegram photo sending. Returns diagnostic info."""
+    _require_api_key(x_api_key)
     symbol = validate_symbol(symbol)
     result = {"symbol": symbol, "steps": []}
 
@@ -3278,7 +3680,7 @@ async def telegram_test_chart(symbol: str = "AAPL"):
             result["steps"].append({"fetch_data": "FAILED", "reason": "No data or < 30 bars"})
             return result
         result["steps"].append({"fetch_data": "OK", "bars": len(df)})
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         result["steps"].append({"fetch_data": "ERROR", "error": str(e)})
         return result
 
@@ -3298,7 +3700,7 @@ async def telegram_test_chart(symbol: str = "AAPL"):
         else:
             result["steps"].append({"generate_chart": "FAILED", "reason": "Returned None"})
             return result
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         import traceback
         result["steps"].append({"generate_chart": "ERROR", "error": str(e), "traceback": traceback.format_exc()[-500:]})
         return result
@@ -3307,14 +3709,15 @@ async def telegram_test_chart(symbol: str = "AAPL"):
     try:
         ok = tg_send_photo(chart_bytes, caption=f"Test chart for {symbol} @ ${price:.2f}")
         result["steps"].append({"send_photo": "OK" if ok else "FAILED"})
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         result["steps"].append({"send_photo": "ERROR", "error": str(e)})
 
     return result
 
 @app.get("/telegram/daily_summary")
-async def telegram_daily_summary():
+async def telegram_daily_summary(x_api_key: OperatorAPIKey = None):
     """Manually trigger daily summary to Telegram."""
+    _require_api_key(x_api_key)
     if not settings.TELEGRAM_BOT_TOKEN:
         return [{"Error": "Telegram not configured"}]
     screener_key = _cache_key("screener")
@@ -3362,7 +3765,7 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
             f"\nAnalyzing with AI consensus..."
         )
 
-        # Step 3: Run consensus on each — this triggers chart alerts automatically
+        # Step 3: Run consensus on each â€” this triggers chart alerts automatically
         results = []
         for i, stock in enumerate(top_stocks):
             symbol = stock["symbol"]
@@ -3380,7 +3783,7 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
                     })
                 else:
                     results.append({"symbol": symbol, "error": "Consensus failed"})
-            except Exception as e:
+            except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.error(f"Post-market scan {symbol}: {e}")
                 results.append({"symbol": symbol, "error": str(e)})
 
@@ -3402,16 +3805,16 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
             f"\nResults:\n" + "\n".join(summary_lines) if summary_lines else "No signals"
         )
 
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Post-market scan failed: {e}")
         tg_send(f"POST-MARKET SCAN ERROR\n\n{str(e)[:200]}")
 
 
 @app.get("/api/v1/post_market_scan")
-async def post_market_scan(top_n: int = 5, min_score: int = 55):
+async def post_market_scan(top_n: int = 5, min_score: int = 55, x_api_key: OperatorAPIKey = None):
     """Post-market analysis: scan top stocks, send chart alerts via Telegram.
 
-    Runs in the BACKGROUND — returns immediately. Results sent to Telegram.
+    Runs in the BACKGROUND â€” returns immediately. Results sent to Telegram.
 
     Runs the screener, picks the top N stocks by swing score,
     runs consensus on each, and sends STRONG signals with professional
@@ -3419,10 +3822,11 @@ async def post_market_scan(top_n: int = 5, min_score: int = 55):
 
     Call this after market close (4 PM ET) for next-day trade ideas.
     """
+    _require_api_key(x_api_key)
     if not settings.TELEGRAM_BOT_TOKEN:
         return [{"Error": "Telegram not configured"}]
 
-    # Launch in background thread — don't block the HTTP response
+    # Launch in background thread â€” don't block the HTTP response
     thread = threading.Thread(
         target=_run_post_market_scan_bg,
         args=(top_n, min_score),
@@ -3438,21 +3842,45 @@ async def post_market_scan(top_n: int = 5, min_score: int = 55):
     }]
 
 
-# ══════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # AUTO-TRADING ENDPOINTS (Stage 1: Paper Trading)
-# ══════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.get("/api/v1/trading/status")
-async def trading_status():
+async def trading_status(x_api_key: OperatorAPIKey = None):
     """Get auto-trading status: enabled/disabled, risk dashboard, PDT tracker."""
-    # Use first available strategy account (multi-strategy setup has no legacy keys)
-    from app.config import STRATEGY_CONFIGS
-    sid = next(iter(STRATEGY_CONFIGS), None)
+    _require_api_key(x_api_key)
+    sid = _primary_broker_strategy_id()
+    broker_configured = _has_alpaca_broker_config()
+    if not broker_configured:
+        return {
+            "error": "Alpaca API keys not configured",
+            "broker_configured": False,
+            "broker_connected": False,
+            "auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
+            "min_confidence": settings.MIN_TRADE_CONFIDENCE,
+            "trade_risk_pct": settings.TRADE_RISK_PCT,
+            "max_position_pct": settings.MAX_POSITION_PCT,
+        }
+
     account = alpaca_get_account(strategy_id=sid)
     if not account:
-        return {"error": "Cannot connect to Alpaca"}
+        return {
+            "error": "Cannot connect to Alpaca",
+            "broker_configured": True,
+            "broker_connected": False,
+            "auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
+            "min_confidence": settings.MIN_TRADE_CONFIDENCE,
+            "trade_risk_pct": settings.TRADE_RISK_PCT,
+            "max_position_pct": settings.MAX_POSITION_PCT,
+            "strategy_id": sid or "default",
+        }
+
     positions = alpaca_get_positions(strategy_id=sid)
     risk = get_risk_status(account, positions)
+    risk["broker_configured"] = True
+    risk["broker_connected"] = True
+    risk["strategy_id"] = sid or "default"
     risk["auto_trade_enabled"] = settings.AUTO_TRADE_ENABLED
     risk["min_confidence"] = settings.MIN_TRADE_CONFIDENCE
     risk["trade_risk_pct"] = settings.TRADE_RISK_PCT
@@ -3461,45 +3889,51 @@ async def trading_status():
 
 
 @app.get("/api/v1/trading/history")
-async def trading_history(limit: int = 50):
+async def trading_history(limit: int = 50, x_api_key: OperatorAPIKey = None):
     """Get auto-trade execution history."""
+    _require_api_key(x_api_key)
     return get_trade_history(limit=limit)
 
 
 @app.get("/api/v1/trading/performance")
-async def trading_performance():
+async def trading_performance(x_api_key: OperatorAPIKey = None):
     """Get trading performance report: win rate, Sharpe, drawdown, profit factor."""
+    _require_api_key(x_api_key)
     return get_performance_report()
 
 
 @app.post("/api/v1/trading/enable")
-async def trading_enable():
+async def trading_enable(x_api_key: OperatorAPIKey = None):
     """Enable auto-trading (paper account only)."""
+    _require_api_key(x_api_key)
     settings.AUTO_TRADE_ENABLED = True
     tg_send("AUTO-TRADING ENABLED\n\nPaper account auto-execution is now active.\nOnly STRONG BUY/SELL signals will be executed.")
     return {"auto_trade_enabled": True, "message": "Paper trading auto-execution enabled"}
 
 
 @app.post("/api/v1/trading/disable")
-async def trading_disable():
+async def trading_disable(x_api_key: OperatorAPIKey = None):
     """Disable auto-trading (emergency stop)."""
+    _require_api_key(x_api_key)
     settings.AUTO_TRADE_ENABLED = False
     tg_send("AUTO-TRADING DISABLED\n\nAuto-execution has been stopped.\nAll existing positions remain open.")
     return {"auto_trade_enabled": False, "message": "Auto-trading disabled"}
 
 
-# ══════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # PARAMETER OPTIMIZATION ENDPOINT
-# ══════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.get("/api/v1/optimize")
-async def optimize_parameters(n_stocks: int = 10):
+async def optimize_parameters(n_stocks: int = 10, x_api_key: OperatorAPIKey = None):
     """Run parameter sweep optimization on historical data.
 
     Tests different consensus thresholds, SL/TP multipliers, and tool
     parameters to find optimal values. Results show improvement vs current defaults.
-    Runs in background — returns immediately, results sent to Telegram.
+    Runs in background â€” returns immediately, results sent to Telegram.
     """
+    _require_api_key(x_api_key)
+
     def _run_optimizer():
         try:
             from app.services.optimizer import optimize_params
@@ -3521,16 +3955,16 @@ async def optimize_parameters(n_stocks: int = 10):
                     f"Momentum ROC: {result['optimal_params']['momentum_roc_threshold']}%"
                 )
                 tg_send(msg)
-        except Exception as e:
+        except NON_FATAL_ANALYSIS_ERROR as e:
             logger.error(f"Optimizer error: {e}")
 
     threading.Thread(target=_run_optimizer, daemon=True).start()
     return [{"Status": "Optimizer started", "Message": "Results will be sent to Telegram"}]
 
 
-# ════════���═════════════════��═══════════════════════════════════════════
+# â•â•â•â•â•â•â•â•ï¿½ï¿½ï¿½â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•ï¿½ï¿½â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # INTRADAY DATA ENDPOINT
-# ══════════════════════════════════════════���═══════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•ï¿½ï¿½ï¿½â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.get("/api/v1/intraday/{symbol}")
 async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
@@ -3577,50 +4011,68 @@ async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
 
 @app.get("/health")
 async def health():
-    checks = {"openbb_forecast": False, "market_data": False, "database": False}
+    checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
         from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
         from openbb_forecast.models.lstm import LSTMForecaster
         import torch
         checks["openbb_forecast"] = True
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"openbb_forecast health check failed: {e}")
     try:
         df = fetch_yf("AAPL", period="1y")
         checks["market_data"] = df is not None and len(df) > 0
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"market_data health check failed: {e}")
     try:
         from app.db.database import engine
         with engine.connect() as conn:
             conn.execute(__import__("sqlalchemy").text("SELECT 1"))
         checks["database"] = True
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"database health check failed: {e}")
-    alpaca_configured = bool(
-        (settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY) or
-        (settings.ALPACA_API_KEY_A and settings.ALPACA_SECRET_KEY_A)
-    )
+    alpaca_configured = _has_alpaca_broker_config()
+    broker_connected = False
+    if alpaca_configured:
+        try:
+            broker_connected = bool(alpaca_get_account(strategy_id=_primary_broker_strategy_id()))
+            checks["broker"] = broker_connected
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.error(f"broker health check failed: {e}")
+            checks["broker"] = False
     fmp_configured = bool(settings.FMP_API_KEY)
     telegram_configured = bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
-    all_ok = all(checks.values())
+    core_ok = all(checks[name] for name in ("openbb_forecast", "market_data", "database"))
+    broker_ok = (not alpaca_configured) or broker_connected
+    all_ok = core_ok and broker_ok
+    if settings.AUTO_TRADE_ENABLED and not broker_connected:
+        all_ok = False
     return {
         "status": "ok" if all_ok else "degraded",
         "version": "17.0.0",
         "widgets": 10,
         "stocks": len(HALAL_STOCKS),
-        "data_source": "alpaca+yfinance" if alpaca_configured else "yfinance",
+        "data_source": "alpaca+yfinance" if broker_connected else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "telegram": "active" if telegram_configured else "not_configured",
+        "broker": (
+            "connected"
+            if broker_connected
+            else "configured_unavailable" if alpaca_configured else "not_configured"
+        ),
         "database": "connected" if checks["database"] else "unavailable",
-        "auto_trading": "enabled" if settings.AUTO_TRADE_ENABLED else "disabled",
+        "auto_trading": (
+            "enabled"
+            if settings.AUTO_TRADE_ENABLED and broker_connected
+            else "blocked_broker_unavailable" if settings.AUTO_TRADE_ENABLED else "disabled"
+        ),
         "config": "loaded",
         "dependencies": checks,
     }
 
-# ══════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CLAUDE AI AGENT ENDPOINTS
-# ══════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.post("/agent/chat")
 async def agent_chat(payload: dict):
@@ -3629,7 +4081,7 @@ async def agent_chat(payload: dict):
     Send a natural language message (Arabic or English) and get
     data-driven analysis using all available trading tools.
 
-    Request: {"message": "حلل لي سهم AAPL", "conversation_id": "optional"}
+    Request: {"message": "Ø­Ù„Ù„ Ù„ÙŠ Ø³Ù‡Ù… AAPL", "conversation_id": "optional"}
     """
     if not settings.ANTHROPIC_API_KEY:
         return {"error": "ANTHROPIC_API_KEY not configured. Add it to Railway environment variables."}
@@ -3645,14 +4097,14 @@ async def agent_chat(payload: dict):
         agent = get_agent()
         result = await agent.chat(message, conversation_id=conversation_id)
         return result
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Agent chat error: {e}")
         return {"error": f"Agent error: {str(e)}"}
 
 
 @app.get("/agent/analyze")
 async def agent_analyze(symbol: str = "AAPL"):
-    """AI Agent single-stock analysis — convenience endpoint for OpenBB widget.
+    """AI Agent single-stock analysis â€” convenience endpoint for OpenBB widget.
 
     Runs a comprehensive analysis: halal check + technical + consensus + trade plan.
     Returns the analysis as a table row for widget display.
@@ -3676,7 +4128,7 @@ async def agent_analyze(symbol: str = "AAPL"):
             "Tools Used": ", ".join(result.get("tools_used", [])),
             "Model": result.get("model", ""),
         }]
-    except Exception as e:
+    except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Agent analyze error: {e}")
         return [{"Error": f"Agent error: {str(e)}"}]
 
@@ -3689,13 +4141,259 @@ async def agent_health():
     return {
         "status": "ready" if configured else "not_configured",
         "model": settings.CLAUDE_MODEL,
-        "api_key_set": configured,
-        "api_key_prefix": settings.ANTHROPIC_API_KEY[:12] + "..." if configured else "",
+        "api_key_configured": configured,
         "tools_count": len(TOOL_SCHEMAS),
         "tools": [t["name"] for t in TOOL_SCHEMAS],
     }
 
 
+@app.get("/admin/config")
+async def admin_config(x_api_key: OperatorAPIKey = None):
+    """Operator sanity endpoint for current redacted config."""
+    _require_api_key(x_api_key)
+    return {
+        "settings": settings.redacted(),
+        "app_cfg": app_cfg.to_redacted_dict(),
+    }
+
+
+@app.get("/admin/guards")
+async def admin_guards(limit: int = 50, x_api_key: OperatorAPIKey = None):
+    """Return the latest guard audit rows."""
+    _require_api_key(x_api_key)
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import GuardLog
+
+        db = SessionLocal()
+        try:
+            rows = db.query(GuardLog).order_by(GuardLog.ts.desc()).limit(min(max(limit, 1), 200)).all()
+            return [
+                {
+                    "ts": row.ts.isoformat() if row.ts else "",
+                    "strategy_id": row.strategy_id,
+                    "symbol": row.symbol,
+                    "guard_name": row.guard_name,
+                    "passed": row.passed,
+                    "code": row.code,
+                    "reason": row.reason,
+                    "regime": row.regime,
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.error(f"/admin/guards failed: {e}", exc_info=True)
+        return [{"error": str(e)}]
+
+
+@app.post("/admin/killswitch")
+async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None):
+    """Toggle the global kill-switch."""
+    _require_api_key(x_api_key)
+    app_cfg.killed = killed
+    tg_send(
+        f"KILL SWITCH {'ENABLED' if killed else 'DISABLED'}\n\n"
+        f"All new trades will {'fail closed' if killed else 'resume normal guard evaluation'}."
+    )
+    return {"killed": app_cfg.killed}
+
+
+@app.post("/admin/regime")
+async def admin_regime(state: str | None = None, x_api_key: OperatorAPIKey = None):
+    """Force or clear the live regime."""
+    _require_api_key(x_api_key)
+
+    from app.services.regime import force_regime, refresh_regime
+
+    normalized = state.upper() if state else None
+    if normalized not in (None, "BULL", "NEUTRAL", "BEAR"):
+        raise HTTPException(status_code=400, detail="state must be one of BULL, NEUTRAL, BEAR, or omitted to clear")
+
+    snapshot = force_regime(normalized)
+    if normalized is None:
+        snapshot = refresh_regime()
+        tg_send("REGIME OVERRIDE CLEARED\n\nLive regime computation has resumed.")
+    else:
+        tg_send(f"REGIME OVERRIDE\n\nForced state: {normalized}")
+    return {
+        "state": snapshot.state,
+        "changed": snapshot.changed,
+        "computed_at": snapshot.computed_at.isoformat() if snapshot.computed_at else "",
+        "forced": normalized is not None,
+    }
+
+
+def _equity_curve_svg(history):
+    values = [float(item.get("Equity", 0) or 0) for item in history][-30:]
+    if len(values) < 2:
+        return "<p>No 30d equity curve available.</p>"
+
+    width = 520
+    height = 140
+    low = min(values)
+    high = max(values)
+    span = max(high - low, 1.0)
+    step = width / max(len(values) - 1, 1)
+    points = " ".join(
+        f"{idx * step:.1f},{height - (((value - low) / span) * (height - 20) + 10):.1f}"
+        for idx, value in enumerate(values)
+    )
+    return (
+        f"<svg viewBox='0 0 {width} {height}' width='100%' height='{height}' "
+        f"style='background:#faf7ef;border:1px solid #ddd;border-radius:12px'>"
+        f"<polyline fill='none' stroke='#0d5c63' stroke-width='3' points='{points}' />"
+        f"</svg>"
+    )
+
+
+def _render_ops_fragment(api_key: str | None) -> str:
+    from app.db.database import SessionLocal
+    from app.db.models import GuardLog, TradeHistory
+    from app.services.regime import get_regime
+
+    regime = get_regime()
+    db = SessionLocal()
+    try:
+        guards = db.query(GuardLog).order_by(GuardLog.ts.desc()).limit(100).all()
+        rejects = db.query(TradeHistory).filter(
+            TradeHistory.status.in_(["rejected", "canceled", "expired", "canceled_leg_missing"])
+        ).order_by(TradeHistory.created_at.desc()).limit(10).all()
+    finally:
+        db.close()
+
+    strategy_sections = []
+    for sid, cfg in STRATEGY_CONFIGS.items():
+        account = alpaca_get_account(strategy_id=sid) or {}
+        positions = alpaca_get_positions(strategy_id=sid) or []
+        position_rows = "".join(
+            f"<tr><td>{escape(str(position.get('symbol', '')))}</td>"
+            f"<td>{float(position.get('qty', 0) or 0):,.0f}</td>"
+            f"<td>${float(position.get('market_value', 0) or 0):,.2f}</td></tr>"
+            for position in positions
+        ) or "<tr><td colspan='3'>No open positions.</td></tr>"
+        strategy_sections.append(
+            f"<section style='padding:16px;border:1px solid #ddd;border-radius:14px;background:#fff'>"
+            f"<h3 style='margin:0 0 8px 0'>[{sid}] {escape(cfg.name)}</h3>"
+            f"<p style='margin:0 0 12px 0'>Equity: ${float(account.get('equity', 0) or 0):,.2f} | "
+            f"Positions: {len(positions)}</p>"
+            f"<table style='width:100%;border-collapse:collapse'>"
+            f"<tr><th align='left'>Symbol</th><th align='left'>Qty</th><th align='left'>Market Value</th></tr>"
+            f"{position_rows}</table></section>"
+        )
+
+    history = None
+    for sid in STRATEGY_CONFIGS:
+        payload = alpaca_get_portfolio_history(period="1M", timeframe="1D", strategy_id=sid)
+        if payload and payload.get("history"):
+            history = payload["history"]
+            break
+
+    guard_rows = "".join(
+        f"<tr><td>{escape(str(row.ts or ''))}</td><td>{escape(row.symbol)}</td>"
+        f"<td>{escape(row.guard_name)}</td><td>{'PASS' if row.passed else 'BLOCK'}</td>"
+        f"<td>{escape(row.reason)}</td></tr>"
+        for row in guards
+    ) or "<tr><td colspan='5'>No guard rows yet.</td></tr>"
+    reject_rows = "".join(
+        f"<tr><td>{escape(str(row.created_at or ''))}</td><td>{escape(row.symbol)}</td>"
+        f"<td>{escape(row.status or '')}</td><td>{escape(str(row.signal_details or {}))}</td></tr>"
+        for row in rejects
+    ) or "<tr><td colspan='4'>No rejected trades.</td></tr>"
+
+    headers_json = escape(json.dumps({"X-API-Key": api_key}) if api_key else "{}", quote=True)
+    return f"""
+    <div style="display:grid;gap:18px">
+      <section style="padding:18px;border-radius:16px;background:#fff3e6;border:1px solid #f0d3ad">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <h1 style="margin:0 0 8px 0">Ops Dashboard</h1>
+            <p style="margin:0">Regime: <strong>{escape(regime.state)}</strong> | Kill-switch: <strong>{app_cfg.killed}</strong></p>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button
+              hx-post="/admin/killswitch?killed=true"
+              hx-swap="none"
+              hx-headers='{headers_json}'
+              style="background:#b42318;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer"
+            >Enable Kill Switch</button>
+            <button
+              hx-post="/admin/killswitch?killed=false"
+              hx-swap="none"
+              hx-headers='{headers_json}'
+              style="background:#0d5c63;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer"
+            >Disable Kill Switch</button>
+          </div>
+        </div>
+      </section>
+      <section style="padding:18px;border-radius:16px;background:#fff;border:1px solid #ddd">
+        <h2 style="margin-top:0">30d Equity Curve</h2>
+        {_equity_curve_svg(history or [])}
+      </section>
+      <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
+        {''.join(strategy_sections) or '<p>No strategy accounts configured.</p>'}
+      </section>
+      <section style="padding:18px;border-radius:16px;background:#fff;border:1px solid #ddd">
+        <h2 style="margin-top:0">Today's Guard Log</h2>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><th align="left">Timestamp</th><th align="left">Symbol</th><th align="left">Guard</th><th align="left">Result</th><th align="left">Reason</th></tr>
+          {guard_rows}
+        </table>
+      </section>
+      <section style="padding:18px;border-radius:16px;background:#fff;border:1px solid #ddd">
+        <h2 style="margin-top:0">Last 10 Rejected Trades</h2>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><th align="left">Timestamp</th><th align="left">Symbol</th><th align="left">Status</th><th align="left">Details</th></tr>
+          {reject_rows}
+        </table>
+      </section>
+    </div>
+    """
+
+
+@app.get("/ops/body", response_class=HTMLResponse)
+async def ops_dashboard_body(x_api_key: OperatorAPIKey = None):
+    _require_api_key(x_api_key)
+    try:
+        return HTMLResponse(_render_ops_fragment(x_api_key))
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        logger.error(f"/ops/body failed: {e}", exc_info=True)
+        return HTMLResponse(f"<div><h2>Ops fragment error</h2><pre>{escape(str(e))}</pre></div>", status_code=500)
+
+
+@app.get("/ops", response_class=HTMLResponse)
+async def ops_dashboard(x_api_key: OperatorAPIKey = None):
+    """Operator dashboard shell with HTMX auto-refresh."""
+    _require_api_key(x_api_key)
+    headers_json = escape(json.dumps({"X-API-Key": x_api_key}) if x_api_key else "{}", quote=True)
+    body = _render_ops_fragment(x_api_key)
+    return HTMLResponse(
+        f"""
+        <html>
+          <head>
+            <title>Ops Dashboard</title>
+            <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+            <style>
+              body {{ font-family: Georgia, serif; background: linear-gradient(180deg, #f7f2ea 0%, #fcfbf8 100%); margin: 0; padding: 24px; color: #1f2933; }}
+              table th, table td {{ padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }}
+            </style>
+          </head>
+          <body>
+            <div
+              id="ops-shell"
+              hx-get="/ops/body"
+              hx-trigger="load, every 10s"
+              hx-swap="innerHTML"
+              hx-headers='{headers_json}'
+            >{body}</div>
+          </body>
+        </html>
+        """
+    )
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+

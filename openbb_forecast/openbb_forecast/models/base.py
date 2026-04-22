@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -32,10 +33,13 @@ class FoldResult:
 class BaseForecaster(ABC):
     """Abstract base for all forecasting models.
 
-    Subclasses must implement fit(), predict(), and reset().
+    Subclasses must implement fit(), predict(), reset(), save(), and load().
     The walk_forward_predict() pipeline handles data splitting, scaling,
     and sequence creation automatically.
     """
+
+    name: str = "base"
+    version: str = "unversioned"
 
     @abstractmethod
     def fit(self, X_train: np.ndarray, y_train: np.ndarray, **kwargs) -> None:
@@ -61,6 +65,15 @@ class BaseForecaster(ABC):
     def reset(self) -> None:
         """Reset model to fresh state. Called between walk-forward folds
         to prevent weight leakage across folds."""
+
+    @abstractmethod
+    def save(self, path: Path) -> None:
+        """Persist a trained model to disk."""
+
+    @classmethod
+    @abstractmethod
+    def load(cls, path: Path) -> "BaseForecaster":
+        """Load a persisted model from disk."""
 
     def walk_forward_predict(
         self,

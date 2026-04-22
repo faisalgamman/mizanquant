@@ -13,6 +13,9 @@ Rate limiting strategy:
 import time
 import logging
 import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 
@@ -24,10 +27,47 @@ logger = logging.getLogger("screener")
 _data_cache = {}
 _data_cache_ts = {}
 _DATA_CACHE_TTL = 300  # 5 minutes
+_YF_CACHE_CONFIGURED = False
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _session_bucket() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+
+        eastern = ZoneInfo("America/New_York")
+        return _utc_now().astimezone(eastern).date().isoformat()
+    except Exception:
+        return _utc_now().date().isoformat()
+
+
+def _cache_ttl_seconds() -> int:
+    try:
+        from app.services.guards.market_hours import is_market_open
+
+        return 60 if is_market_open() else _DATA_CACHE_TTL
+    except Exception:
+        return _DATA_CACHE_TTL
+
+
+def _configure_yfinance_cache(yf_module) -> None:
+    global _YF_CACHE_CONFIGURED
+    if _YF_CACHE_CONFIGURED:
+        return
+    cache_dir = Path("data") / "yfinance_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        yf_module.set_tz_cache_location(str(cache_dir))
+    except Exception:
+        logger.debug("Could not set yfinance timezone cache location", exc_info=True)
+    _YF_CACHE_CONFIGURED = True
 
 
 def _data_cache_get(key):
-    if time.time() - _data_cache_ts.get(key, 0) < _DATA_CACHE_TTL:
+    if time.time() - _data_cache_ts.get(key, 0) < _cache_ttl_seconds():
         return _data_cache.get(key)
     return None
 
@@ -35,6 +75,27 @@ def _data_cache_get(key):
 def _data_cache_set(key, value):
     _data_cache[key] = value
     _data_cache_ts[key] = time.time()
+
+
+def clear_market_data_cache():
+    _data_cache.clear()
+    _data_cache_ts.clear()
+
+
+def _dedupe_bars(bars, key_fn):
+    seen = set()
+    out = []
+    for bar in bars:
+        key = key_fn(bar)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(bar)
+    return out
+
+
+def _backoff_next(attempt: int = 0) -> float:
+    return min(30.0, 1.0 * (2 ** attempt))
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +167,7 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
 
         # Convert period to start/end dates
         if not start or not end:
-            from datetime import datetime, timedelta
-            end_dt = datetime.now()
+            end_dt = _utc_now()
             period_map = {"1y": 365, "2y": 730, "5y": 1825}
             days = period_map.get(period, 730)
             start_dt = end_dt - timedelta(days=days)
@@ -138,22 +198,27 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
                 with httpx.Client(timeout=30) as client:
                     all_bars = []
                     next_page = None
+                    page_retry = 0
 
                     while True:
+                        page_params = dict(params)
                         if next_page:
-                            params["page_token"] = next_page
-                        resp = client.get(url, headers=headers, params=params)
+                            page_params["page_token"] = next_page
+                        resp = client.get(url, headers=headers, params=page_params)
 
-                        # Handle 429 rate limit
                         if resp.status_code == 429:
-                            wait_time = retry_delay * (2 ** attempt)
+                            wait_time = _backoff_next(page_retry)
                             logger.warning(
-                                f"Alpaca 429 for {symbol} (attempt {attempt+1}/{max_retries}), "
-                                f"waiting {wait_time:.1f}s"
+                                f"Alpaca 429 for {symbol} page={next_page or 'first'} "
+                                f"(attempt {page_retry + 1}), waiting {wait_time:.1f}s"
                             )
                             time.sleep(wait_time)
-                            break  # break inner loop, retry outer loop
+                            page_retry += 1
+                            if page_retry >= max_retries:
+                                break
+                            continue
 
+                        page_retry = 0
                         resp.raise_for_status()
                         data = resp.json()
 
@@ -162,23 +227,18 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
 
                         next_page = data.get("next_page_token")
                         if not next_page:
-                            # Success — return data
                             if not all_bars:
                                 return None
-
+                            all_bars = _dedupe_bars(all_bars, key_fn=lambda b: b.get("t"))
                             df = pd.DataFrame(all_bars)
                             df = df.rename(columns={
                                 "t": "date", "o": "open", "h": "high",
                                 "l": "low", "c": "close", "v": "volume",
                             })
-                            df["date"] = pd.to_datetime(df["date"])
+                            df["date"] = pd.to_datetime(df["date"], utc=True)
                             df = df[["date", "open", "high", "low", "close", "volume"]].sort_values("date").reset_index(drop=True)
-                            return df if len(df) >= 200 else None
-                    else:
-                        # while loop completed without break — should not reach here normally
-                        continue
-
-                    # If we broke out of inner loop (429), continue to next retry attempt
+                            min_rows = 40 if start and end else 200
+                            return df if len(df) >= min_rows else None
                     continue
 
             finally:
@@ -193,7 +253,7 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
         return None
 
 
-def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10):
+def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, end=None):
     """Fetch intraday bars from Alpaca Market Data API v2.
 
     Supports: 1Min, 5Min, 15Min, 1Hour timeframes.
@@ -211,7 +271,7 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10):
     if not symbol:
         return None
 
-    cache_key = f"{symbol}|intraday|{timeframe}|{days_back}"
+    cache_key = f"{symbol}|intraday|{timeframe}|{days_back}|{start}|{end}|{_session_bucket()}"
     cached = _data_cache_get(cache_key)
     if cached is not None:
         return cached
@@ -222,15 +282,13 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10):
             return None
 
         import httpx
-        from datetime import datetime, timedelta
-
         headers = {
             "APCA-API-KEY-ID": settings.ALPACA_API_KEY,
             "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
         }
 
-        end_dt = datetime.now()
-        start_dt = end_dt - timedelta(days=days_back)
+        end_dt = _utc_now() if end is None else pd.Timestamp(end).to_pydatetime()
+        start_dt = (end_dt - timedelta(days=days_back)) if start is None else pd.Timestamp(start).to_pydatetime()
 
         url = "https://data.alpaca.markets/v2/stocks/bars"
         params = {
@@ -249,18 +307,25 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10):
             with httpx.Client(timeout=30) as client:
                 all_bars = []
                 next_page = None
+                page_retry = 0
 
                 while True:
+                    page_params = dict(params)
                     if next_page:
-                        params["page_token"] = next_page
-                    resp = client.get(url, headers=headers, params=params)
+                        page_params["page_token"] = next_page
+                    resp = client.get(url, headers=headers, params=page_params)
 
                     if resp.status_code == 429:
-                        time.sleep(2)
-                        resp = client.get(url, headers=headers, params=params)
-                        if resp.status_code != 200:
-                            return None
+                        wait_time = _backoff_next(page_retry)
+                        logger.warning(
+                            f"Intraday 429 for {symbol} page={next_page or 'first'} "
+                            f"(attempt {page_retry + 1}), waiting {wait_time:.1f}s"
+                        )
+                        time.sleep(wait_time)
+                        page_retry += 1
+                        continue
 
+                    page_retry = 0
                     resp.raise_for_status()
                     data = resp.json()
                     bars = data.get("bars", {}).get(symbol, [])
@@ -273,12 +338,13 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10):
                 if not all_bars:
                     return None
 
+                all_bars = _dedupe_bars(all_bars, key_fn=lambda b: b.get("t"))
                 df = pd.DataFrame(all_bars)
                 df = df.rename(columns={
                     "t": "date", "o": "open", "h": "high",
                     "l": "low", "c": "close", "v": "volume",
                 })
-                df["date"] = pd.to_datetime(df["date"])
+                df["date"] = pd.to_datetime(df["date"], utc=True)
                 df = df[["date", "open", "high", "low", "close", "volume"]].sort_values("date").reset_index(drop=True)
 
                 if len(df) > 0:
@@ -301,6 +367,7 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 
     try:
         import yfinance as yf
+        _configure_yfinance_cache(yf)
         t = yf.Ticker(symbol)
         if start and end:
             df = t.history(start=start, end=end, auto_adjust=True)
@@ -313,7 +380,8 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
         df.columns = [c.lower() for c in df.columns]
         for col in ["dividends", "stock splits", "capital gains"]:
             df.drop(columns=[col], errors="ignore", inplace=True)
-        return df if len(df) >= 200 else None
+        min_rows = 40 if start and end else 200
+        return df if len(df) >= min_rows else None
     except Exception as e:
         logger.error(f"yfinance {symbol}: {e}")
         return None
@@ -325,7 +393,7 @@ def fetch(symbol, period="2y", start=None, end=None):
     if not symbol:
         return None
 
-    cache_key = f"{symbol}|{period}|{start}|{end}"
+    cache_key = f"{symbol}|{period}|{start}|{end}|{_session_bucket()}"
     cached = _data_cache_get(cache_key)
     if cached is not None:
         return cached

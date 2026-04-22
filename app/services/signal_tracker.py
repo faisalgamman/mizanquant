@@ -8,7 +8,7 @@ Must run for 2-4 weeks on paper trading to establish track record.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -21,6 +21,10 @@ from app.db.models import SignalHistory
 logger = logging.getLogger("screener")
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def check_signal_outcomes(lookback_days: int = 5):
     """Check outcomes for signals that are old enough to evaluate.
 
@@ -29,7 +33,7 @@ def check_signal_outcomes(lookback_days: int = 5):
     """
     from app.services.market_data import fetch as fetch_market_data
 
-    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+    cutoff = _utc_now() - timedelta(days=lookback_days)
 
     try:
         db = SessionLocal()
@@ -53,7 +57,7 @@ def check_signal_outcomes(lookback_days: int = 5):
                         ret_pct = ((current_price - signal.price) / signal.price) * 100
 
                         signal.outcome_price = current_price
-                        signal.outcome_date = datetime.utcnow()
+                        signal.outcome_date = _utc_now()
                         signal.outcome_return_pct = round(ret_pct, 2)
                         updated += 1
                 except Exception as e:
@@ -73,7 +77,7 @@ def get_accuracy_report(period_days: int = 30) -> list[dict]:
 
     Returns breakdown by signal type with hit rates and avg returns.
     """
-    cutoff = datetime.utcnow() - timedelta(days=period_days)
+    cutoff = _utc_now() - timedelta(days=period_days)
 
     try:
         db = SessionLocal()

@@ -1,0 +1,11 @@
+{
+  "feature_list_hash": "close_only_v1",
+  "name": "transformer",
+  "test_acc": 0.5,
+  "test_sharpe": -8.5684,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.5378,
+  "val_sharpe": -3.3769,
+  "version": "20260417"
+}
