@@ -29,6 +29,7 @@ from app.services.halal_screening import (
 )
 from app.services.alpaca_client import (
     get_account as alpaca_get_account,
+    get_last_error as alpaca_get_last_error,
     get_positions as alpaca_get_positions,
     get_orders as alpaca_get_orders,
     get_portfolio_history as alpaca_get_portfolio_history,
@@ -3865,10 +3866,13 @@ async def trading_status(x_api_key: OperatorAPIKey = None):
 
     account = alpaca_get_account(strategy_id=sid)
     if not account:
+        broker_error = alpaca_get_last_error(strategy_id=sid)
         return {
             "error": "Cannot connect to Alpaca",
             "broker_configured": True,
             "broker_connected": False,
+            "broker_reason": broker_error.get("reason") or "unknown",
+            "broker_status_code": broker_error.get("status_code"),
             "auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
             "min_confidence": settings.MIN_TRADE_CONFIDENCE,
             "trade_risk_pct": settings.TRADE_RISK_PCT,
@@ -4033,13 +4037,17 @@ async def health():
         logger.error(f"database health check failed: {e}")
     alpaca_configured = _has_alpaca_broker_config()
     broker_connected = False
+    broker_error = {}
     if alpaca_configured:
         try:
             broker_connected = bool(alpaca_get_account(strategy_id=_primary_broker_strategy_id()))
             checks["broker"] = broker_connected
+            if not broker_connected:
+                broker_error = alpaca_get_last_error(strategy_id=_primary_broker_strategy_id())
         except NON_FATAL_ANALYSIS_ERROR as e:
             logger.error(f"broker health check failed: {e}")
             checks["broker"] = False
+            broker_error = alpaca_get_last_error(strategy_id=_primary_broker_strategy_id())
     fmp_configured = bool(settings.FMP_API_KEY)
     telegram_configured = bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
     core_ok = all(checks[name] for name in ("openbb_forecast", "market_data", "database"))
@@ -4055,11 +4063,14 @@ async def health():
         "data_source": "alpaca+yfinance" if broker_connected else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "telegram": "active" if telegram_configured else "not_configured",
+        "operator_api": "configured" if settings.API_KEY else "not_configured",
         "broker": (
             "connected"
             if broker_connected
             else "configured_unavailable" if alpaca_configured else "not_configured"
         ),
+        "broker_reason": broker_error.get("reason") if broker_error else "",
+        "broker_status_code": broker_error.get("status_code") if broker_error else None,
         "database": "connected" if checks["database"] else "unavailable",
         "auto_trading": (
             "enabled"
