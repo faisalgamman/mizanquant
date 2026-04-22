@@ -15,14 +15,49 @@ Schedule:
 
 import gc
 import logging
+import os
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger("screener")
 
 _scheduler_thread = None
 _scheduler_running = False
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _script_env() -> dict[str, str]:
+    root = _repo_root()
+    pythonpath_parts = [
+        str(root / ".vendor"),
+        str(root),
+        str(root / "openbb_forecast"),
+    ]
+    existing = os.environ.get("PYTHONPATH")
+    if existing:
+        pythonpath_parts.append(existing)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(part for part in pythonpath_parts if part)
+    return env
+
+
+def _run_repo_script(script_rel_path: str, *args: str) -> subprocess.CompletedProcess:
+    root = _repo_root()
+    return subprocess.run(
+        [sys.executable, script_rel_path, *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+        env=_script_env(),
+    )
 
 
 def _get_eastern_now():
@@ -79,12 +114,39 @@ def _scheduler_loop():
     last_post_market = ""
     last_pre_market = ""
     last_optimizer = ""
+    last_train_models = ""
+    last_signal_audit = ""
+    last_reference_refresh = ""
     SCAN_INTERVAL = 1800  # 30 minutes between scans
 
     while _scheduler_running:
         try:
             now = _get_eastern_now()
             today_str = now.strftime("%Y-%m-%d")
+
+            if _is_weekday(now) and now.hour == 1 and last_reference_refresh != today_str:
+                last_reference_refresh = today_str
+                logger.info("Reference-data refresh: updating tradable assets and earnings caches...")
+                try:
+                    _run_reference_data_refresh()
+                except Exception as e:
+                    logger.error(f"Reference-data refresh failed: {e}")
+
+            if _is_weekday(now) and now.hour == 2 and last_train_models != today_str:
+                last_train_models = today_str
+                logger.info("Nightly retrain: running persisted-model refresh...")
+                try:
+                    _run_train_models()
+                except Exception as e:
+                    logger.error(f"Nightly retrain failed: {e}")
+
+            if _is_weekday(now) and now.hour == 16 and now.minute >= 30 and last_signal_audit != today_str:
+                last_signal_audit = today_str
+                logger.info("Signal audit: checking live verdict drift...")
+                try:
+                    _run_signal_audit()
+                except Exception as e:
+                    logger.error(f"Signal audit failed: {e}")
 
             # --- WEEKLY OPTIMIZER: Sunday 10:00 AM ET (once per week) ---
             if now.weekday() == 6 and now.hour == 10 and last_optimizer != today_str:
@@ -200,6 +262,12 @@ def _run_market_scan():
     """Market hours: run all 3 strategies SEQUENTIALLY on their target stocks."""
     import halal_screener as hs
     from app.config import STRATEGY_CONFIGS
+    from app.services.regime import refresh_regime
+
+    try:
+        refresh_regime()
+    except Exception as e:
+        logger.error(f"Regime refresh failed before market scan: {e}", exc_info=True)
 
     # Run screener (uses cache if fresh)
     results = hs.run_screener()
@@ -380,6 +448,28 @@ def _run_optimizer():
     )
 
     gc.collect()
+
+
+def _run_train_models():
+    """Nightly persisted-model retraining hook."""
+    completed = _run_repo_script("scripts/train_models.py")
+    logger.info("train_models.py completed: %s", completed.stdout.strip())
+
+
+def _run_signal_audit():
+    """Daily signal drift audit hook."""
+    completed = _run_repo_script("scripts/audit_signals.py")
+    logger.info("audit_signals.py completed: %s", completed.stdout.strip())
+
+
+def _run_reference_data_refresh():
+    """Nightly refresh for tradable assets and cached earnings metadata."""
+    from app.services.reference_data import get_tradable_symbols, refresh_earnings_calendar
+
+    symbols = sorted(get_tradable_symbols(force_refresh=True))
+    if symbols:
+        refresh_earnings_calendar(symbols[:355])
+    logger.info("reference-data refresh completed: symbols=%s", len(symbols))
 
 
 def start_scheduler():

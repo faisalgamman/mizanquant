@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 *.db
 .pytest_cache/
+.tmp_pytest/
+.vendor/
+logs/
+test_artifacts/

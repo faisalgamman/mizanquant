@@ -17,14 +17,23 @@ Setup:
 import logging
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 
 from app.config import settings
+from app.services.notify import send_message as queued_send_message, send_photo as queued_send_photo
 
 logger = logging.getLogger("screener")
+
+
+def _utc_label() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def _utc_day() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 _TELEGRAM_PHOTO_API = "https://api.telegram.org/bot{token}/sendPhoto"
@@ -60,61 +69,12 @@ def _is_configured() -> bool:
 
 def send_message(text: str) -> bool:
     """Send a plain text message to the configured Telegram chat."""
-    if not _is_configured():
-        return False
-
-    global _last_send
-    with _send_lock:
-        elapsed = time.time() - _last_send
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
-        _last_send = time.time()
-
-    url = _TELEGRAM_API.format(token=settings.TELEGRAM_BOT_TOKEN)
-    payload = {
-        "chat_id": settings.TELEGRAM_CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": True,
-    }
-
-    try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
-            return True
-    except Exception as e:
-        logger.error(f"Telegram send failed: {e}")
-        return False
+    return queued_send_message(text)
 
 
 def send_photo(image_bytes: bytes, caption: str = "") -> bool:
     """Send a photo (PNG bytes) to the configured Telegram chat."""
-    if not _is_configured():
-        return False
-
-    global _last_send
-    with _send_lock:
-        elapsed = time.time() - _last_send
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
-        _last_send = time.time()
-
-    url = _TELEGRAM_PHOTO_API.format(token=settings.TELEGRAM_BOT_TOKEN)
-
-    try:
-        with httpx.Client(timeout=30) as client:
-            files = {"photo": ("chart.png", image_bytes, "image/png")}
-            data = {
-                "chat_id": settings.TELEGRAM_CHAT_ID,
-            }
-            if caption:
-                data["caption"] = caption[:1024]  # Telegram caption limit
-            resp = client.post(url, data=data, files=files)
-            resp.raise_for_status()
-            return True
-    except Exception as e:
-        logger.error(f"Telegram send_photo failed: {e}")
-        return False
+    return queued_send_photo(image_bytes, caption=caption)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +96,7 @@ def alert_strong_signal(symbol: str, signal_type: str, score: float,
     )
     if details:
         text += f"\n{details}"
-    text += f"\n\n{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"
+    text += f"\n\n{_utc_label()} UTC"
     return send_message(text)
 
 
@@ -166,7 +126,7 @@ def alert_consensus(symbol: str, verdict: str, confidence: float,
         f"Votes: BUY {votes_buy} | SELL {votes_sell} | HOLD {votes_hold}\n"
         f"SL: ${stop_loss:.2f} | TP: ${tp1:.2f}\n"
         f"\n"
-        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"
+        f"{_utc_label()} UTC"
     )
     return send_message(text)
 
@@ -178,7 +138,7 @@ def alert_daily_summary(screener_data: list, portfolio_data: dict = None):
 
     text = (
         f"DAILY PRE-MARKET SUMMARY\n"
-        f"{datetime.utcnow().strftime('%Y-%m-%d')}\n"
+        f"{_utc_day()}\n"
         f"\n"
         f"Stocks Screened: {len(screener_data)}\n"
         f"STRONG BUY: {len(strong_buys)}\n"
@@ -252,7 +212,7 @@ def alert_signal_with_chart(
             f"Confidence: {confidence:.0f}%\n"
             f"Votes: BUY {votes_buy} | SELL {votes_sell} | HOLD {votes_hold}\n"
             f"\n"
-            f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"
+            f"{_utc_label()} UTC"
         )
 
         # Generate chart if we have data
@@ -341,7 +301,7 @@ def alert_strategy_comparison():
 
     total_sign = "+" if total_pnl >= 0 else ""
     lines.append(f"TOTAL: ${total_equity:,.2f} | Net P&L: {total_sign}${total_pnl:,.2f}")
-    lines.append(f"\n{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
+    lines.append(f"\n{_utc_label()} UTC")
 
     return send_message("\n".join(lines))
 
@@ -353,6 +313,6 @@ def alert_system_health(issue: str, severity: str = "WARNING"):
         f"\n"
         f"{issue}\n"
         f"\n"
-        f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"
+        f"{_utc_label()} UTC"
     )
     return send_message(text)
