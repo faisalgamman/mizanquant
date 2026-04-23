@@ -54,7 +54,12 @@ def check_signal_outcomes(lookback_days: int = 5):
                     df = fetch_market_data(signal.symbol, period="1y")
                     if df is not None and len(df) > 0:
                         current_price = float(df["close"].iloc[-1])
-                        ret_pct = ((current_price - signal.price) / signal.price) * 100
+                        price_chg = ((current_price - signal.price) / signal.price) * 100
+                        # Normalise: outcome_return_pct > 0 always means profitable.
+                        # For SELL signals the trade profits when price falls, so negate.
+                        sig_text = (signal.signal or "").upper()
+                        is_sell = "SELL" in sig_text and "BUY" not in sig_text
+                        ret_pct = -price_chg if is_sell else price_chg
 
                         signal.outcome_price = current_price
                         signal.outcome_date = _utc_now()
@@ -100,23 +105,28 @@ def get_accuracy_report(period_days: int = 30) -> list[dict]:
                 by_type[key].append(s)
 
             results = []
-            # Overall stats
+            # outcome_return_pct is direction-normalised: positive = profitable for
+            # both BUY and SELL signals (SELL returns are negated at recording time).
             all_returns = [s.outcome_return_pct for s in signals if s.outcome_return_pct is not None]
             buy_signals = [s for s in signals if "BUY" in (s.signal or "").upper()]
-            buy_returns = [s.outcome_return_pct for s in buy_signals if s.outcome_return_pct is not None]
-
-            buy_wins = [r for r in buy_returns if r > 0]
-            buy_losses = [r for r in buy_returns if r <= 0]
+            sell_signals = [s for s in signals
+                            if "SELL" in (s.signal or "").upper()
+                            and "BUY" not in (s.signal or "").upper()]
+            actionable = buy_signals + sell_signals
+            act_returns = [s.outcome_return_pct for s in actionable if s.outcome_return_pct is not None]
+            wins = [r for r in act_returns if r > 0]
+            losses = [r for r in act_returns if r <= 0]
 
             results.append({
                 "Source": "OVERALL",
                 "Total Signals": len(signals),
                 "Buy Signals": len(buy_signals),
+                "Sell Signals": len(sell_signals),
                 "Avg Return %": round(np.mean(all_returns), 2) if all_returns else 0,
-                "Buy Win Rate %": round(len(buy_wins) / len(buy_returns) * 100, 1) if buy_returns else 0,
-                "Avg Win %": round(np.mean(buy_wins), 2) if buy_wins else 0,
-                "Avg Loss %": round(np.mean(buy_losses), 2) if buy_losses else 0,
-                "Profit Factor": round(abs(sum(buy_wins)) / abs(sum(buy_losses)), 2) if buy_losses and sum(buy_losses) != 0 else 0,
+                "Win Rate %": round(len(wins) / len(act_returns) * 100, 1) if act_returns else 0,
+                "Avg Win %": round(np.mean(wins), 2) if wins else 0,
+                "Avg Loss %": round(np.mean(losses), 2) if losses else 0,
+                "Profit Factor": round(abs(sum(wins)) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 0,
                 "Period": f"{period_days} days",
             })
 
@@ -124,16 +134,21 @@ def get_accuracy_report(period_days: int = 30) -> list[dict]:
             for signal_type, type_signals in sorted(by_type.items()):
                 returns = [s.outcome_return_pct for s in type_signals if s.outcome_return_pct is not None]
                 buys = [s for s in type_signals if "BUY" in (s.signal or "").upper()]
-                buy_ret = [s.outcome_return_pct for s in buys if s.outcome_return_pct is not None]
-                wins = [r for r in buy_ret if r > 0]
-                losses = [r for r in buy_ret if r <= 0]
+                sells = [s for s in type_signals
+                         if "SELL" in (s.signal or "").upper()
+                         and "BUY" not in (s.signal or "").upper()]
+                act = buys + sells
+                act_ret = [s.outcome_return_pct for s in act if s.outcome_return_pct is not None]
+                wins = [r for r in act_ret if r > 0]
+                losses = [r for r in act_ret if r <= 0]
 
                 results.append({
                     "Source": signal_type.upper(),
                     "Total Signals": len(type_signals),
                     "Buy Signals": len(buys),
+                    "Sell Signals": len(sells),
                     "Avg Return %": round(np.mean(returns), 2) if returns else 0,
-                    "Buy Win Rate %": round(len(wins) / len(buy_ret) * 100, 1) if buy_ret else 0,
+                    "Win Rate %": round(len(wins) / len(act_ret) * 100, 1) if act_ret else 0,
                     "Avg Win %": round(np.mean(wins), 2) if wins else 0,
                     "Avg Loss %": round(np.mean(losses), 2) if losses else 0,
                     "Profit Factor": round(abs(sum(wins)) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 0,
@@ -173,6 +188,7 @@ def get_signal_history(symbol: str = None, limit: int = 50) -> list[dict]:
                 if s.outcome_price is not None:
                     row["Outcome Price"] = round(s.outcome_price, 2)
                     row["Return %"] = s.outcome_return_pct
+                    # outcome_return_pct is direction-normalised: positive = profit
                     row["Result"] = "WIN" if s.outcome_return_pct and s.outcome_return_pct > 0 else "LOSS"
                 else:
                     row["Outcome Price"] = "Pending"
