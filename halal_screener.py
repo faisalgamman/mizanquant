@@ -117,7 +117,7 @@ VALID_SYMBOLS = set()  # populated after HALAL_STOCKS is defined
 
 def validate_symbol(symbol: str) -> str:
     s = symbol.upper().strip()
-    if not re.match(r'^[A-Z]{1,6}$', s):
+    if not re.match(r'^[A-Z]{1,6}(\.[A-Z])?$', s):
         raise HTTPException(status_code=400, detail=f"Invalid symbol format: {symbol}")
     return s
 
@@ -292,10 +292,9 @@ def cache_set(k, v):
     _cache[k] = v
     _cache_ts[k] = time.time()
 
-# Model cache: stores trained models with TTL
-# 8GB RAM tier â€” can hold more models for faster consensus
-MODEL_CACHE_TTL = min(settings.MODEL_CACHE_TTL, 1800)  # 30 min cache
-MODEL_CACHE_MAX = 20  # more models in cache for faster repeat consensus
+# Model cache: stores trained models with TTL (capped at 30 min)
+MODEL_CACHE_TTL = min(settings.MODEL_CACHE_TTL, 1800)
+MODEL_CACHE_MAX = 20
 _model_cache = {}
 _model_cache_ts = {}
 
@@ -1713,9 +1712,9 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
         except NON_FATAL_ANALYSIS_ERROR as e:
             logger.error(f"record_signal failed (non-critical): {e}")
 
-        # Telegram alert: chart + breakdown for STRONG BUY only
+        # Telegram: chart + breakdown for all actionable verdicts
         try:
-            if verdict == "STRONG BUY":
+            if verdict not in ("NEUTRAL", "HOLD"):
                 alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=verdict,
                     confidence=confidence, price=round(price, 2),
@@ -1943,8 +1942,8 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
         }]
 
-        # Telegram: chart + breakdown for STRONG BUY only
-        if verdict == "STRONG BUY":
+        # Telegram: chart + breakdown for all actionable verdicts
+        if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=f"[A] Momentum: {verdict}",
@@ -2160,7 +2159,8 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
         }]
 
-        if verdict == "STRONG BUY":
+        # Telegram: chart + breakdown for all actionable verdicts
+        if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=f"[B] Reversion: {verdict}",
@@ -2375,7 +2375,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
         }]
 
-        if verdict == "STRONG BUY":
+        # Telegram: chart + breakdown for all actionable verdicts
+        if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 alert_signal_with_chart(
                     symbol=symbol.upper(), verdict=f"[C] AI: {verdict}",
