@@ -630,7 +630,7 @@ def on_signal(
 ) -> Optional[dict]:
     """Called automatically when consensus generates a signal.
 
-    Only acts on STRONG BUY/SELL with confidence >= threshold.
+    Acts on BUY/WEAK BUY/SELL/WEAK SELL with confidence >= threshold.
     This is the main entry point from halal_screener.py.
     """
     if not settings.AUTO_TRADE_ENABLED:
