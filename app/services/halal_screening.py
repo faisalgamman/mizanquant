@@ -13,6 +13,7 @@ Free tier: 250 requests/day. Each symbol needs 3 API calls
 """
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -81,15 +82,17 @@ HARAM_INDUSTRIES = {
 # Rate limiting for FMP API (250/day = ~10/min to be safe)
 _fmp_last_call = 0.0
 _FMP_MIN_INTERVAL = 0.5  # seconds between calls
+_fmp_lock = threading.Lock()
 
 
 def _fmp_rate_limit():
-    """Simple rate limiter for FMP API calls."""
+    """Thread-safe rate limiter for FMP API calls."""
     global _fmp_last_call
-    elapsed = time.time() - _fmp_last_call
-    if elapsed < _FMP_MIN_INTERVAL:
-        time.sleep(_FMP_MIN_INTERVAL - elapsed)
-    _fmp_last_call = time.time()
+    with _fmp_lock:
+        elapsed = time.time() - _fmp_last_call
+        if elapsed < _FMP_MIN_INTERVAL:
+            time.sleep(_FMP_MIN_INTERVAL - elapsed)
+        _fmp_last_call = time.time()
 
 
 def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
