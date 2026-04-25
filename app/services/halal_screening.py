@@ -13,8 +13,9 @@ Free tier: 250 requests/day. Each symbol needs 3 API calls
 """
 
 import logging
+import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -25,6 +26,10 @@ from app.db.database import SessionLocal
 from app.db.models import ScreeningResult
 
 logger = logging.getLogger("screener")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -77,15 +82,17 @@ HARAM_INDUSTRIES = {
 # Rate limiting for FMP API (250/day = ~10/min to be safe)
 _fmp_last_call = 0.0
 _FMP_MIN_INTERVAL = 0.5  # seconds between calls
+_fmp_lock = threading.Lock()
 
 
 def _fmp_rate_limit():
-    """Simple rate limiter for FMP API calls."""
+    """Thread-safe rate limiter for FMP API calls."""
     global _fmp_last_call
-    elapsed = time.time() - _fmp_last_call
-    if elapsed < _FMP_MIN_INTERVAL:
-        time.sleep(_FMP_MIN_INTERVAL - elapsed)
-    _fmp_last_call = time.time()
+    with _fmp_lock:
+        elapsed = time.time() - _fmp_last_call
+        if elapsed < _FMP_MIN_INTERVAL:
+            time.sleep(_FMP_MIN_INTERVAL - elapsed)
+        _fmp_last_call = time.time()
 
 
 def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
@@ -336,7 +343,7 @@ def screen_and_store(symbol: str) -> Optional[dict]:
                 existing.liquidity_ratio = result["liquidity_ratio"]
                 existing.is_halal = result["is_halal"]
                 existing.sector = result.get("sector", "")
-                existing.last_screened = datetime.utcnow()
+                existing.last_screened = _utc_now()
                 existing.details = result
             else:
                 row = ScreeningResult(
@@ -347,7 +354,7 @@ def screen_and_store(symbol: str) -> Optional[dict]:
                     liquidity_ratio=result["liquidity_ratio"],
                     is_halal=result["is_halal"],
                     sector=result.get("sector", ""),
-                    last_screened=datetime.utcnow(),
+                    last_screened=_utc_now(),
                     details=result,
                 )
                 db.add(row)
@@ -371,7 +378,7 @@ def get_halal_status(symbol: str) -> Optional[dict]:
             ).first()
 
             if row and row.last_screened:
-                age_days = (datetime.utcnow() - row.last_screened).days
+                age_days = (_utc_now() - row.last_screened).days
                 if age_days < 7:  # Cache for 7 days (data is quarterly)
                     return row.details if row.details else {
                         "symbol": row.symbol,
@@ -440,7 +447,7 @@ def batch_screen(symbols: list[str], max_per_run: int = 80) -> dict:
     stats = {"screened": 0, "halal": 0, "haram": 0, "errors": 0, "skipped": 0}
 
     # Skip symbols already screened within 7 days
-    fresh_cutoff = datetime.utcnow() - timedelta(days=7)
+    fresh_cutoff = _utc_now() - timedelta(days=7)
     try:
         db = SessionLocal()
         try:

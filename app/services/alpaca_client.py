@@ -11,7 +11,7 @@ Supports multi-account via optional strategy_id parameter:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -19,6 +19,35 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger("screener")
+_last_api_errors: dict[str, dict] = {}
+
+
+def _error_slot(strategy_id: str = None) -> str:
+    return strategy_id or "_default"
+
+
+def _set_last_error(strategy_id: str = None, *, reason: str = "", status_code: int | None = None):
+    _last_api_errors[_error_slot(strategy_id)] = {
+        "reason": reason,
+        "status_code": status_code,
+    }
+
+
+def get_last_error(strategy_id: str = None) -> dict:
+    """Return the most recent Alpaca client error for the requested account."""
+    return dict(_last_api_errors.get(_error_slot(strategy_id), {}))
+
+
+def _classify_http_error(status_code: int) -> str:
+    if status_code == 401:
+        return "unauthorized"
+    if status_code == 403:
+        return "forbidden"
+    if status_code == 429:
+        return "rate_limited"
+    if 500 <= status_code <= 599:
+        return "upstream_error"
+    return "http_error"
 
 
 def _get_headers(strategy_id: str = None) -> dict:
@@ -72,13 +101,20 @@ def _api_get(endpoint: str, strategy_id: str = None) -> Optional[dict | list]:
         with httpx.Client(timeout=15) as client:
             resp = client.get(url, headers=_get_headers(strategy_id))
             resp.raise_for_status()
+            _set_last_error(strategy_id, reason="", status_code=resp.status_code)
             return resp.json()
     except httpx.HTTPStatusError as e:
         sid = f" [Strategy {strategy_id}]" if strategy_id else ""
+        _set_last_error(
+            strategy_id,
+            reason=_classify_http_error(e.response.status_code),
+            status_code=e.response.status_code,
+        )
         logger.error(f"Alpaca API{sid} {e.response.status_code} for {endpoint}: {e.response.text[:200]}")
         return None
     except Exception as e:
         sid = f" [Strategy {strategy_id}]" if strategy_id else ""
+        _set_last_error(strategy_id, reason="network_error", status_code=None)
         logger.error(f"Alpaca API{sid} error for {endpoint}: {e}")
         return None
 
@@ -141,16 +177,32 @@ def get_orders(status: str = "all", limit: int = 50, strategy_id: str = None) ->
 
     orders = []
     for order in data:
+        legs = order.get("legs") or []
         orders.append({
+            "id": order.get("id", ""),
             "symbol": order.get("symbol", ""),
             "side": order.get("side", ""),
             "type": order.get("type", ""),
+            "order_class": order.get("order_class", ""),
+            "client_order_id": order.get("client_order_id", ""),
+            "parent_order_id": order.get("parent_order_id", ""),
             "qty": order.get("qty", "0"),
             "filled_qty": order.get("filled_qty", "0"),
             "status": order.get("status", ""),
             "filled_avg_price": order.get("filled_avg_price", ""),
             "submitted_at": order.get("submitted_at", "")[:19] if order.get("submitted_at") else "",
             "filled_at": order.get("filled_at", "")[:19] if order.get("filled_at") else "",
+            "legs": [
+                {
+                    "id": leg.get("id", ""),
+                    "symbol": leg.get("symbol", order.get("symbol", "")),
+                    "side": leg.get("side", ""),
+                    "type": leg.get("type", ""),
+                    "status": leg.get("status", ""),
+                    "client_order_id": leg.get("client_order_id", ""),
+                }
+                for leg in legs
+            ],
         })
 
     return orders
@@ -175,7 +227,7 @@ def get_portfolio_history(period: str = "1M", timeframe: str = "1D", strategy_id
 
     history = []
     for i, ts in enumerate(timestamps):
-        dt = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
         history.append({
             "Date": dt,
             "Equity": round(equity_values[i], 2) if i < len(equity_values) and equity_values[i] else 0,

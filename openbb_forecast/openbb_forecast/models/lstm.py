@@ -9,12 +9,15 @@ Key differences from original:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from openbb_forecast.models.base import BaseForecaster
+from openbb_forecast.models.persistence import default_version, write_metadata
 
 
 class LSTMNetwork(nn.Module):
@@ -69,6 +72,8 @@ class LSTMForecaster(BaseForecaster):
         device: 'cuda', 'cpu', or 'auto'.
     """
 
+    name = "lstm"
+
     def __init__(
         self,
         hidden_size: int = 128,
@@ -77,9 +82,11 @@ class LSTMForecaster(BaseForecaster):
         learning_rate: float = 0.001,
         dropout: float = 0.2,
         batch_size: int = 32,
-        patience: int = 10,
+        patience: int = 20,
         device: str = "auto",
+        version: str | None = None,
     ):
+        self.version = version or default_version()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.epochs = epochs
@@ -192,3 +199,40 @@ class LSTMForecaster(BaseForecaster):
         with torch.no_grad():
             preds = self._model(X_t).cpu().numpy()
         return preds
+
+    def save(self, path: Path) -> None:
+        if self._model is None:
+            raise RuntimeError("Model not trained. Call fit() before save().")
+        payload = {
+            "config": {
+                "hidden_size": self.hidden_size,
+                "num_layers": self.num_layers,
+                "epochs": self.epochs,
+                "learning_rate": self.learning_rate,
+                "dropout": self.dropout,
+                "batch_size": self.batch_size,
+                "patience": self.patience,
+                "device": str(self.device),
+                "version": self.version,
+            },
+            "input_size": self._input_size,
+            "output_size": self._output_size,
+            "state_dict": self._model.state_dict(),
+        }
+        torch.save(payload, path)
+        write_metadata(
+            path.with_suffix(".meta.json"),
+            {"name": self.name, "version": self.version, "trained_on": default_version()},
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> "LSTMForecaster":
+        payload = torch.load(path, map_location="cpu")
+        config = payload.get("config", {})
+        model = cls(**config)
+        model._input_size = payload["input_size"]
+        model._output_size = payload["output_size"]
+        model._model = model._build_model(model._input_size, model._output_size)
+        model._model.load_state_dict(payload["state_dict"])
+        model._model.eval()
+        return model

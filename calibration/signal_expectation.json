@@ -1,0 +1,22 @@
+{
+  "base": {
+    "BUY": 22.58,
+    "NEUTRAL": 70.97,
+    "SELL": 6.45
+  },
+  "ml": {
+    "BUY": 20.48,
+    "NEUTRAL": 73.42,
+    "SELL": 6.11
+  },
+  "momentum": {
+    "BUY": 22.7,
+    "NEUTRAL": 71.18,
+    "SELL": 6.12
+  },
+  "reversion": {
+    "BUY": 16.41,
+    "NEUTRAL": 70.89,
+    "SELL": 12.7
+  }
+}
