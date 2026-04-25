@@ -1829,6 +1829,25 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
         sma50_val = float(close.rolling(50).mean().iloc[-1])
         above_sma50 = price > sma50_val
 
+        # --- Tool 0a: Strategy regime router (Chan Ch.6) ---
+        # If the asset is classified "ranging" (mean-reverting), running
+        # a momentum strategy on it is structurally wrong — vote SELL.
+        try:
+            from app.services.strategy_regime import classify_strategy_regime
+            sr = classify_strategy_regime(close.tail(300))
+            if sr.label == "trending":
+                votes_buy += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Trending ({sr.reason})", "Vote": "BUY"})
+            elif sr.label == "ranging":
+                votes_sell += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Ranging — wrong strategy ({sr.reason})", "Vote": "SELL"})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Noisy ({sr.reason})", "Vote": "HOLD"})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Regime Router error: {e}")
+            details.append({"Tool": "Regime Router", "Signal": "ERROR", "Vote": "-"})
+
         # --- Tool 0: Momentum Quality gate (Chan Ch.5) ---
         # t-statistic of returns + 12-1 momentum + Hurst persistence.
         # Vetoes momentum entries on series whose past returns are not
@@ -2074,6 +2093,25 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
         price = float(df["close"].iloc[-1])
         atr_val = float(atr(df).iloc[-1])
         close = df["close"]
+
+        # --- Tool 0a: Strategy regime router (Chan Ch.6) ---
+        # If the asset is "trending", running a mean-reversion strategy
+        # on it is structurally wrong — vote SELL on the entry.
+        try:
+            from app.services.strategy_regime import classify_strategy_regime
+            sr = classify_strategy_regime(close.tail(300))
+            if sr.label == "ranging":
+                votes_buy += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Ranging ({sr.reason})", "Vote": "BUY"})
+            elif sr.label == "trending":
+                votes_sell += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Trending — wrong strategy ({sr.reason})", "Vote": "SELL"})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Noisy ({sr.reason})", "Vote": "HOLD"})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Regime Router error: {e}")
+            details.append({"Tool": "Regime Router", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 0: Stationarity gate (Chan Ch.3) ---
         try:
