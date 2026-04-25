@@ -2028,9 +2028,15 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
 def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
     """Strategy B: Mean Reversion â€” buy oversold stocks.
 
-    Tools: Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
+    Tools: Stationarity gate, Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
     Entry: RSI < 35 + price near lower BB + volume confirmation
     Exit: Static SL 2%, TP when RSI > 60 or price hits middle BB
+
+    Per Chan Ch.3 a mean-reversion strategy is only valid on a series
+    that actually mean-reverts. We compute an ADF/Hurst/half-life
+    report on the last 250 closes and cast a SELL vote when the gate
+    fails — this dilutes BUY conviction on trending or random-walk
+    series without hard-blocking the run.
     """
     try:
         is_halal, halal_reason = verify_halal(symbol)
@@ -2047,6 +2053,25 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
         price = float(df["close"].iloc[-1])
         atr_val = float(atr(df).iloc[-1])
         close = df["close"]
+
+        # --- Tool 0: Stationarity gate (Chan Ch.3) ---
+        try:
+            from app.services.stationarity import stationarity_report
+            window = close.tail(250)
+            rep = stationarity_report(window, max_half_life_bars=30.0)
+            if rep.is_mean_reverting:
+                votes_buy += 1
+                details.append({"Tool": "Stationarity",
+                                "Signal": f"Mean-reverting (H={rep.hurst:.2f}, ADF p={rep.adf_pvalue:.2f}, t1/2={rep.half_life:.1f})",
+                                "Vote": "BUY"})
+            else:
+                votes_sell += 1
+                details.append({"Tool": "Stationarity",
+                                "Signal": f"Not mean-reverting: {rep.reason}",
+                                "Vote": "SELL"})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Stationarity gate error: {e}")
+            details.append({"Tool": "Stationarity", "Signal": "ERROR", "Vote": "-"})
 
         # --- Tool 1: Bollinger Bands ---
         try:
