@@ -3,3 +3,16 @@ __pycache__/
 *.pyc
 *.db
 .pytest_cache/
+
+# Local tool / IDE state — not part of the deployed app
+.claude/
+.vscode/
+.idea/
+
+# Generated reports — produced at runtime, not source
+reports/
+*.docx
+
+# Standalone experimental copilot service — not part of Railway deploy
+# (the production copilot lives at /agent/chat in halal_screener.py)
+copilot.py
