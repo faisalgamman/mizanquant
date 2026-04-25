@@ -412,7 +412,27 @@ def run_screener():
     cache_set("all", results)
     return results
 
+# Round-trip transaction cost in basis points (commission + slippage + spread).
+# Chan Ch.2: a backtest without costs systematically overstates edge.
+BACKTEST_COST_BPS = 20.0  # 0.20% per side -> 0.40% round-trip
+
+
+def _apply_costs(price: float, side: str) -> float:
+    """Apply transaction cost to a fill price.
+    side='buy' -> price worsened up; side='sell' -> price worsened down.
+    """
+    slip = price * (BACKTEST_COST_BPS / 10_000.0)
+    return price + slip if side == "buy" else price - slip
+
+
 def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
+    """Walk-forward backtest with NO same-bar look-ahead and transaction costs.
+
+    Key invariants (Chan Ch.2):
+      - Signals computed using close[i] are acted on at OPEN of bar i+1.
+      - All fills pay BACKTEST_COST_BPS in slippage/commission per leg.
+      - Stop-loss / take-profit checked using next bar's high/low after entry.
+    """
     try:
         df = fetch_yf(symbol, start=start_date, end=end_date)
         if df is None: return [{"Error": f"No data for {symbol}"}]
@@ -432,33 +452,41 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
         in_trade = False
         entry_idx = entry_price = sl = tp = pos_size = 0
         trade_returns = []
-        for i in range(len(df)):
+        n = len(df)
+        # Stop one bar early: signal at i-1 needs bar i to fill.
+        for i in range(n):
             row = df.iloc[i]
             if in_trade:
                 days = i - entry_idx
                 if float(row["low"]) <= sl:
-                    pnl = (sl - entry_price) * pos_size
+                    exit_price = _apply_costs(sl, "sell")
+                    pnl = (exit_price - entry_price) * pos_size
                     port += pnl
-                    ret = (sl - entry_price) / entry_price
+                    ret = (exit_price - entry_price) / entry_price
                     trade_returns.append(ret)
-                    trades.append({"Entry Date": str(df.iloc[entry_idx]["date"])[:10], "Exit Date": str(row["date"])[:10], "Entry": round(entry_price, 2), "Exit": round(sl, 2), "Result": "Stop Loss", "PnL": round(pnl, 2), "Portfolio": round(port, 2), "Days": days, "Score": int(df.iloc[entry_idx]["score"])})
+                    trades.append({"Entry Date": str(df.iloc[entry_idx]["date"])[:10], "Exit Date": str(row["date"])[:10], "Entry": round(entry_price, 2), "Exit": round(exit_price, 2), "Result": "Stop Loss", "PnL": round(pnl, 2), "Portfolio": round(port, 2), "Days": days, "Score": int(df.iloc[entry_idx]["score"])})
                     in_trade = False
                 elif float(row["high"]) >= tp:
-                    pnl = (tp - entry_price) * pos_size
+                    exit_price = _apply_costs(tp, "sell")
+                    pnl = (exit_price - entry_price) * pos_size
                     port += pnl
-                    ret = (tp - entry_price) / entry_price
+                    ret = (exit_price - entry_price) / entry_price
                     trade_returns.append(ret)
-                    trades.append({"Entry Date": str(df.iloc[entry_idx]["date"])[:10], "Exit Date": str(row["date"])[:10], "Entry": round(entry_price, 2), "Exit": round(tp, 2), "Result": "Take Profit", "PnL": round(pnl, 2), "Portfolio": round(port, 2), "Days": days, "Score": int(df.iloc[entry_idx]["score"])})
+                    trades.append({"Entry Date": str(df.iloc[entry_idx]["date"])[:10], "Exit Date": str(row["date"])[:10], "Entry": round(entry_price, 2), "Exit": round(exit_price, 2), "Result": "Take Profit", "PnL": round(pnl, 2), "Portfolio": round(port, 2), "Days": days, "Score": int(df.iloc[entry_idx]["score"])})
                     in_trade = False
                 elif days >= hold_days:
-                    pnl = (float(row["close"]) - entry_price) * pos_size
+                    exit_price = _apply_costs(float(row["close"]), "sell")
+                    pnl = (exit_price - entry_price) * pos_size
                     port += pnl
-                    ret = (float(row["close"]) - entry_price) / entry_price
+                    ret = (exit_price - entry_price) / entry_price
                     trade_returns.append(ret)
-                    trades.append({"Entry Date": str(df.iloc[entry_idx]["date"])[:10], "Exit Date": str(row["date"])[:10], "Entry": round(entry_price, 2), "Exit": round(float(row["close"]), 2), "Result": "Time Stop", "PnL": round(pnl, 2), "Portfolio": round(port, 2), "Days": days, "Score": int(df.iloc[entry_idx]["score"])})
+                    trades.append({"Entry Date": str(df.iloc[entry_idx]["date"])[:10], "Exit Date": str(row["date"])[:10], "Entry": round(entry_price, 2), "Exit": round(exit_price, 2), "Result": "Time Stop", "PnL": round(pnl, 2), "Portfolio": round(port, 2), "Days": days, "Score": int(df.iloc[entry_idx]["score"])})
                     in_trade = False
-            if not in_trade and float(df.iloc[i]["score"]) >= 55:
-                entry_price = float(df.iloc[i]["close"])
+            # Signal evaluated at bar i; entry happens at OPEN of bar i+1.
+            # This eliminates the same-bar look-ahead (Chan Ch.2).
+            if not in_trade and i + 1 < n and float(df.iloc[i]["score"]) >= 55:
+                next_open_raw = float(df.iloc[i + 1].get("open", df.iloc[i + 1]["close"]))
+                entry_price = _apply_costs(next_open_raw, "buy")
                 atr_v = float(df.iloc[i]["atr_v"])
                 sl = entry_price - atr_v
                 tp = entry_price + (2 * atr_v)
@@ -466,11 +494,15 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
                 pos_size = int((port * (risk_pct / 100)) / risk) if risk > 0 else 0
                 if pos_size > 0:
                     in_trade = True
-                    entry_idx = i
+                    entry_idx = i + 1  # entry bar is the NEXT bar
         if not trades: return [{"Symbol": symbol, "Message": "No trades found"}]
         wins = [t for t in trades if t["Result"] == "Take Profit"]
         losses = [t for t in trades if t["Result"] == "Stop Loss"]
         metrics = calc_metrics(trade_returns)
+        # Chan Ch.2 / Bailey & Lopez de Prado: Deflated Sharpe penalises trial count.
+        from app.services.backtest_qc import deflated_sharpe, permutation_pvalue
+        dsr = deflated_sharpe(trade_returns, n_trials=1)
+        pval = permutation_pvalue(trade_returns, n_perm=200)
         summary = [{"Symbol": symbol, "Period": f"{start_date} to {end_date}",
                     "Total Trades": len(trades), "Winners": len(wins), "Losers": len(losses),
                     "Win Rate %": round(len(wins) / len(trades) * 100, 1),
@@ -479,6 +511,8 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
                     "Return %": round((port - portfolio) / portfolio * 100, 2),
                     "Avg Win": round(sum(t["PnL"] for t in wins) / len(wins), 2) if wins else 0,
                     "Avg Loss": round(sum(t["PnL"] for t in losses) / len(losses), 2) if losses else 0,
+                    "Deflated Sharpe": round(dsr, 3),
+                    "Permutation p-value": round(pval, 3),
                     **metrics}]
         return summary + trades
     except Exception as e:
@@ -1259,8 +1293,14 @@ def run_consensus(symbol, horizon=5, episodes=10):
                 ret = float(bt[0]["Return %"])
                 win_rate_v = float(bt[0].get("Win Rate %", 0))
                 sharpe = float(bt[0].get("Sharpe Ratio", 0))
-                sig = f"Return {ret:.1f}% WR {win_rate_v:.0f}%"
-                if ret > 5 and win_rate_v > 50 and sharpe > 0.5:
+                # Chan Ch.2 gating: a positive return without a positive
+                # Deflated Sharpe AND a permutation p-value <= 0.10 is
+                # statistically indistinguishable from luck.
+                dsr  = float(bt[0].get("Deflated Sharpe", 0))
+                pval = float(bt[0].get("Permutation p-value", 1.0))
+                stat_ok = (dsr >= 0.60) and (pval <= 0.10)
+                sig = f"Return {ret:.1f}% WR {win_rate_v:.0f}% DSR {dsr:.2f} p={pval:.2f}"
+                if ret > 5 and win_rate_v > 50 and sharpe > 0.5 and stat_ok:
                     votes_buy += 1; vote = "BUY"
                 elif ret < -5 or (win_rate_v < 40 and sharpe < 0):
                     votes_sell += 1; vote = "SELL"
