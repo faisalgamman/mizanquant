@@ -1,0 +1,11 @@
+{
+  "feature_list_hash": "close_only_v1",
+  "name": "ensemble",
+  "test_acc": 0.5323,
+  "test_sharpe": 53.5906,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.4412,
+  "val_sharpe": 43.4118,
+  "version": "20260422"
+}

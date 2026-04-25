@@ -1,0 +1,11 @@
+{
+  "feature_list_hash": "close_only_v1",
+  "name": "lstm",
+  "test_acc": 0.5,
+  "test_sharpe": -12.8067,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.5378,
+  "val_sharpe": -2.5087,
+  "version": "20260422"
+}

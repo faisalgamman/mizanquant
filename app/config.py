@@ -1,9 +1,24 @@
-"""Application configuration loaded from environment variables and .env file."""
+"""Application configuration loaded from environment variables and .env file.
 
+Fail-fast policy (Milestone 1, senior-engineer hardening):
+- When AUTO_TRADE_ENABLED=True, the required broker + notification credentials
+  must be present at boot, otherwise the app refuses to start. This prevents
+  silent "paper-mode only" fallbacks that previously masked missing keys.
+- Secrets are never logged in full. Use `settings.redacted()` if you need a
+  safe-to-log representation.
+"""
+
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger("screener")
+
+
+class ConfigurationError(RuntimeError):
+    """Raised when required configuration is missing or inconsistent."""
 
 
 class Settings(BaseSettings):
@@ -59,7 +74,8 @@ class Settings(BaseSettings):
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
     # --- Phase 5: API authentication ---
-    # Empty string means no authentication is required.
+    # Required for operator/admin/trading endpoints. If left empty, those
+    # endpoints fail closed and auto-trading validation will refuse to arm.
     API_KEY: str = ""
 
     # --- Risk management (legacy single-account defaults) ---
@@ -82,8 +98,97 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
+    # ------------------------------------------------------------------
+    # Safety helpers
+    # ------------------------------------------------------------------
+
+    def validate_for_live(self) -> list[str]:
+        """Return a list of human-readable errors preventing live trading.
+
+        Called at boot when AUTO_TRADE_ENABLED=True. Empty list means OK.
+        """
+        errors: list[str] = []
+
+        # At least one Alpaca account must be configured
+        any_strategy_keys = any(
+            getattr(self, f"ALPACA_API_KEY_{sid}") and getattr(self, f"ALPACA_SECRET_KEY_{sid}")
+            for sid in ("A", "B", "C")
+        )
+        legacy_keys = bool(self.ALPACA_API_KEY and self.ALPACA_SECRET_KEY)
+        if not (any_strategy_keys or legacy_keys):
+            errors.append(
+                "AUTO_TRADE_ENABLED=True but no Alpaca credentials found "
+                "(set ALPACA_API_KEY[_A/B/C] and ALPACA_SECRET_KEY[_A/B/C])."
+            )
+
+        # Base URL must be paper while we're still in M1; force explicit opt-in for live.
+        if "paper-api" not in self.ALPACA_BASE_URL:
+            errors.append(
+                f"ALPACA_BASE_URL is '{self.ALPACA_BASE_URL}'. Live endpoints are "
+                "blocked until Milestone 5 acceptance criteria are met. "
+                "Use https://paper-api.alpaca.markets during hardening."
+            )
+
+        # Telegram for ops alerts (kill-switch notifications)
+        if not (self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID):
+            errors.append(
+                "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — "
+                "kill-switch and reconciliation alerts would be invisible."
+            )
+
+        if not self.API_KEY:
+            errors.append(
+                "API_KEY missing — operator/trading endpoints would fail closed. "
+                "Set a strong X-API-Key secret before enabling auto-trading."
+            )
+
+        # Sanity ranges
+        if not 0 < self.TRADE_RISK_PCT <= 5:
+            errors.append(f"TRADE_RISK_PCT={self.TRADE_RISK_PCT} outside (0, 5].")
+        if not 0 < self.DAILY_LOSS_LIMIT_PCT <= 10:
+            errors.append(f"DAILY_LOSS_LIMIT_PCT={self.DAILY_LOSS_LIMIT_PCT} outside (0, 10].")
+        if not 0 < self.MAX_POSITION_PCT <= 100:
+            errors.append(f"MAX_POSITION_PCT={self.MAX_POSITION_PCT} outside (0, 100].")
+        if self.MAX_OPEN_POSITIONS < 1:
+            errors.append("MAX_OPEN_POSITIONS must be >= 1.")
+
+        return errors
+
+    def redacted(self) -> dict:
+        """Return settings with secret fields masked — safe for logging."""
+        secret_fields = {
+            "ALPACA_API_KEY", "ALPACA_SECRET_KEY",
+            "ALPACA_API_KEY_A", "ALPACA_SECRET_KEY_A",
+            "ALPACA_API_KEY_B", "ALPACA_SECRET_KEY_B",
+            "ALPACA_API_KEY_C", "ALPACA_SECRET_KEY_C",
+            "FMP_API_KEY", "TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "API_KEY",
+        }
+        out: dict = {}
+        for k, v in self.model_dump().items():
+            if k in secret_fields and v:
+                out[k] = f"***{str(v)[-4:]}" if len(str(v)) >= 4 else "***"
+            else:
+                out[k] = v
+        return out
+
 
 settings = Settings()
+
+
+def assert_ready_for_auto_trade() -> None:
+    """Fail-fast guard — call at boot if AUTO_TRADE_ENABLED=True.
+
+    Raises ConfigurationError if anything critical is missing.
+    """
+    if not settings.AUTO_TRADE_ENABLED:
+        return
+    errors = settings.validate_for_live()
+    if errors:
+        bullet = "\n  - ".join(errors)
+        raise ConfigurationError(
+            f"Refusing to start auto-trading with invalid configuration:\n  - {bullet}"
+        )
+    logger.info("Configuration validated for auto-trading (paper).")
 
 
 # ---------------------------------------------------------------------------

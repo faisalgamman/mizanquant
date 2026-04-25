@@ -10,6 +10,9 @@ Key differences from original:
 
 from __future__ import annotations
 
+import pickle
+from pathlib import Path
+
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
@@ -17,6 +20,7 @@ from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 
 from openbb_forecast.models.base import BaseForecaster
+from openbb_forecast.models.persistence import default_version, write_metadata
 
 
 class StackingForecaster(BaseForecaster):
@@ -41,6 +45,8 @@ class StackingForecaster(BaseForecaster):
         ridge_alpha: Regularization strength for meta-learner.
     """
 
+    name = "ensemble"
+
     def __init__(
         self,
         n_inner_splits: int = 3,
@@ -48,7 +54,9 @@ class StackingForecaster(BaseForecaster):
         rf_params: dict | None = None,
         gbr_params: dict | None = None,
         ridge_alpha: float = 1.0,
+        version: str | None = None,
     ):
+        self.version = version or default_version()
         self.n_inner_splits = n_inner_splits
         self.ridge_alpha = ridge_alpha
 
@@ -161,3 +169,37 @@ class StackingForecaster(BaseForecaster):
             # Repeat single prediction across horizon (ensemble predicts first step)
             return np.tile(meta_preds.reshape(-1, 1), (1, self._output_dim))
         return meta_preds.reshape(-1, 1)
+
+    def save(self, path: Path) -> None:
+        if not self._base_models or self._meta_model is None:
+            raise RuntimeError("Model not trained. Call fit() before save().")
+        payload = {
+            "config": {
+                "n_inner_splits": self.n_inner_splits,
+                "xgb_params": self._xgb_params,
+                "rf_params": self._rf_params,
+                "gbr_params": self._gbr_params,
+                "ridge_alpha": self.ridge_alpha,
+                "version": self.version,
+            },
+            "base_models": self._base_models,
+            "meta_model": self._meta_model,
+            "output_dim": getattr(self, "_output_dim", 1),
+        }
+        with path.open("wb") as fh:
+            pickle.dump(payload, fh)
+        write_metadata(
+            path.with_suffix(".meta.json"),
+            {"name": self.name, "version": self.version, "trained_on": default_version()},
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> "StackingForecaster":
+        with path.open("rb") as fh:
+            payload = pickle.load(fh)
+        config = payload.get("config", {})
+        model = cls(**config)
+        model._base_models = payload["base_models"]
+        model._meta_model = payload["meta_model"]
+        model._output_dim = payload.get("output_dim", 1)
+        return model

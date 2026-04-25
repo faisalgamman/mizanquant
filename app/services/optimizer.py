@@ -15,9 +15,15 @@ import logging
 import itertools
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.core.config import app_cfg
 
 logger = logging.getLogger("screener")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -32,8 +38,8 @@ PARAM_GRID = {
 
     # SL/TP ATR multipliers
     "sl_atr_mult": [1.0, 1.5, 2.0],
-    "tp1_atr_mult": [1.5, 2.0, 2.5],
-    "tp2_atr_mult": [2.5, 3.0, 4.0],
+    "tp1_atr_mult": [app_cfg.thresholds.atr_targets["base"]["tp1"], 2.0, app_cfg.thresholds.atr_targets["base"]["tp2"]],
+    "tp2_atr_mult": [app_cfg.thresholds.atr_targets["base"]["tp2"], 3.0, 4.0],
 
     # Tool thresholds
     "mc_prob_buy": [0.55, 0.60, 0.65],
@@ -50,9 +56,9 @@ DEFAULT_PARAMS = {
     "strong_buy_votes": 7,
     "strong_sell_votes": 7,
     "min_confidence": 60,
-    "sl_atr_mult": 1.5,
-    "tp1_atr_mult": 1.5,
-    "tp2_atr_mult": 2.5,
+    "sl_atr_mult": app_cfg.thresholds.atr_targets["base"]["sl"],
+    "tp1_atr_mult": app_cfg.thresholds.atr_targets["base"]["tp1"],
+    "tp2_atr_mult": app_cfg.thresholds.atr_targets["base"]["tp2"],
     "mc_prob_buy": 0.60,
     "mc_prob_sell": 0.45,
     "xgb_prob_buy": 0.60,
@@ -443,7 +449,7 @@ def optimize_params(symbols: list = None, n_samples: int = 10) -> dict:
                 round(final.get("deflated_sharpe", 0) - baseline.get("deflated_sharpe", 0), 3),
         },
         "stocks_tested": list(stock_data.keys()),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": _utc_now().isoformat(),
         "top_verdict_combos": sorted(verdict_results, key=_score, reverse=True)[:3],
         "top_sltp_combos":    sorted(sltp_results,    key=_score, reverse=True)[:3],
         "top_tool_combos":    sorted(tool_results,    key=_score, reverse=True)[:3],
