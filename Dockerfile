@@ -15,15 +15,9 @@ ENV MPLCONFIGDIR=/tmp/matplotlib
 # Install PyTorch CPU-only (no CUDA = ~200MB instead of 2GB)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install all other dependencies
-RUN pip install --no-cache-dir \
-    fastapi uvicorn yfinance pandas numpy \
-    xgboost scikit-learn \
-    requests httpx \
-    pydantic-settings python-dotenv poetry-core \
-    sqlalchemy psycopg2-binary \
-    matplotlib python-multipart \
-    anthropic
+# Install all other dependencies from requirements.txt (single source of truth)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt poetry-core
 
 COPY . .
 
