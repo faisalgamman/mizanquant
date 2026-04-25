@@ -1829,6 +1829,27 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
         sma50_val = float(close.rolling(50).mean().iloc[-1])
         above_sma50 = price > sma50_val
 
+        # --- Tool 0: Momentum Quality gate (Chan Ch.5) ---
+        # t-statistic of returns + 12-1 momentum + Hurst persistence.
+        # Vetoes momentum entries on series whose past returns are not
+        # statistically distinguishable from drift-of-noise.
+        try:
+            from app.services.momentum_quality import momentum_quality_score
+            mom_rep = momentum_quality_score(close.tail(300))
+            if mom_rep.verdict == "trending":
+                votes_buy += 1; vote = "BUY"
+                sig = f"Trending (t={mom_rep.tstat:.1f}, mom={mom_rep.mom_12_1*100:+.1f}%, H={mom_rep.hurst:.2f})"
+            elif mom_rep.verdict == "mean_reverting":
+                votes_sell += 1; vote = "SELL"
+                sig = f"Mean-reverting (H={mom_rep.hurst:.2f}) — anti-momentum"
+            else:
+                votes_hold += 1; vote = "HOLD"
+                sig = f"Neutral: {mom_rep.reason}"
+            details.append({"Tool": "Momentum Quality", "Signal": sig, "Vote": vote})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Momentum Quality gate error: {e}")
+            details.append({"Tool": "Momentum Quality", "Signal": "ERROR", "Vote": "-"})
+
         # --- Tool 1: EMA Alignment (2x weight for strong trends) ---
         try:
             ema21_val = float(ema(close, 21).iloc[-1])
