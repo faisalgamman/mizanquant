@@ -48,15 +48,21 @@ def _get_strategy_params(strategy_id: str = None, regime_state: str = "NEUTRAL")
     }
 
 
-def _stats_from_db(strategy_id: str = None, lookback_trades: int = 50) -> tuple[float, float, int]:
-    """Return win-rate, payoff ratio, and number of sampled trades."""
+def _pnls_pct_from_db(strategy_id: str = None, lookback_trades: int = 50) -> list[float]:
+    """Return per-trade returns expressed as fractions (0.05 = +5%).
+
+    These feed the continuous Kelly estimator. We read `pnl_pct` (already
+    a percentage), divide by 100, and skip rows where it is null or
+    non-finite. Returned newest-first to match the SQL order, but Kelly
+    is order-invariant so it doesn't matter.
+    """
     try:
         from app.db.database import SessionLocal
         from app.db.models import TradeHistory
 
         db = SessionLocal()
         try:
-            query = db.query(TradeHistory).filter(TradeHistory.pnl.isnot(None))
+            query = db.query(TradeHistory).filter(TradeHistory.pnl_pct.isnot(None))
             if strategy_id:
                 query = query.filter(TradeHistory.strategy_id == strategy_id)
             trades = query.order_by(TradeHistory.created_at.desc()).limit(lookback_trades).all()
@@ -64,16 +70,17 @@ def _stats_from_db(strategy_id: str = None, lookback_trades: int = 50) -> tuple[
             db.close()
     except Exception as exc:
         logger.debug("Could not load Kelly stats from DB: %s", exc)
-        return 0.0, 1.0, 0
+        return []
 
-    pnls = [float(trade.pnl or 0) for trade in trades if trade.pnl is not None]
-    if not pnls:
-        return 0.0, 1.0, 0
-    wins = [p for p in pnls if p > 0]
-    losses = [abs(p) for p in pnls if p < 0]
-    win_rate = len(wins) / len(pnls)
-    payoff = (sum(wins) / len(wins)) / (sum(losses) / len(losses)) if wins and losses else 1.0
-    return win_rate, max(payoff, 1e-6), len(pnls)
+    out: list[float] = []
+    for trade in trades:
+        try:
+            v = float(trade.pnl_pct) / 100.0
+        except (TypeError, ValueError):
+            continue
+        if v == v and v != float("inf") and v != float("-inf"):
+            out.append(v)
+    return out
 
 
 def calculate_position_size(
@@ -92,10 +99,19 @@ def calculate_position_size(
     params = _get_strategy_params(strategy_id, regime.state)
     risk_pct = params["trade_risk_pct"]
 
-    win_rate, payoff, trade_count = _stats_from_db(strategy_id=strategy_id, lookback_trades=50)
-    if trade_count >= app_cfg.risk.kelly_enabled_after_trades:
-        kelly = max(0.0, win_rate - (1.0 - win_rate) / max(payoff, 1e-6))
-        risk_pct = min(risk_pct, 0.5 * kelly)
+    from app.services.kelly import kelly_from_db_pnls
+
+    pnls_pct = _pnls_pct_from_db(strategy_id=strategy_id, lookback_trades=50)
+    kelly_diag: dict = {"kelly_used": False, "kelly_fraction": 0.0, "n_trades": len(pnls_pct)}
+    if len(pnls_pct) >= app_cfg.risk.kelly_enabled_after_trades:
+        risk_pct, kelly_diag = kelly_from_db_pnls(
+            pnls_pct,
+            static_risk_pct=risk_pct,
+            fractional=0.5,
+            n_prior=30,
+            n_min=app_cfg.risk.kelly_enabled_after_trades,
+        )
+        kelly_diag["n_trades"] = len(pnls_pct)
 
     max_risk_dollars = total_equity * risk_pct
     max_position_value = min(
@@ -128,6 +144,7 @@ def calculate_position_size(
         "max_risk_budget": round(max_risk_dollars, 2),
         "regime": regime.state,
         "effective_risk_pct": round(risk_pct * 100, 4),
+        "kelly": kelly_diag,
     }
 
 
