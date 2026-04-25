@@ -78,22 +78,29 @@ def deflated_sharpe(
     if std <= 0:
         return 0.0
 
-    sr = mean / std * math.sqrt(annualization)
+    # Per-period Sharpe — Lo (2002) / Mertens (2002) variance formula
+    # is defined on the *per-period* SR, NOT the annualized one. Mixing
+    # those scales caused var_sr to flip negative on strong-edge samples
+    # and the DSR to collapse to 0.
+    sr_period = mean / std
 
-    # Skewness & excess kurtosis of returns
     skew = float(stats.skew(r))
-    kurt = float(stats.kurtosis(r, fisher=True))  # excess kurtosis
+    kurt = float(stats.kurtosis(r, fisher=True))
 
-    # Expected max Sharpe under H0 (no edge, n_trials independent strategies)
-    sr0 = _expected_max_z(max(n_trials, 1)) / math.sqrt(annualization)
+    # Threshold under H0: best of n_trials i.i.d. standard normals,
+    # rescaled from "z over n samples" back to per-period Sharpe.
+    sr0_period = _expected_max_z(max(n_trials, 1)) / math.sqrt(n)
 
-    # Variance of estimated Sharpe under non-normal returns
-    # Mertens (2002) / Lo (2002):
-    var_sr = (1.0 - skew * sr + (kurt / 4.0) * sr * sr) / (n - 1)
-    if var_sr <= 0:
-        return 0.0
+    var_sr_period = (
+        1.0 - skew * sr_period + (kurt / 4.0) * sr_period * sr_period
+    ) / (n - 1)
+    # Lo's formula admits negative variance for heavy-tailed samples
+    # with very large per-period Sharpe; clip to a tiny positive so the
+    # standard error is finite and the test still produces a verdict.
+    if var_sr_period <= 0:
+        var_sr_period = 1.0 / max(n - 1, 1)
 
-    z = (sr - sr0 * math.sqrt(annualization)) / math.sqrt(var_sr * annualization)
+    z = (sr_period - sr0_period) / math.sqrt(var_sr_period)
     return float(stats.norm.cdf(z))
 
 
