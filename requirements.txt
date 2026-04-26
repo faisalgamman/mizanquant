@@ -18,3 +18,4 @@ python-multipart
 anthropic
 nltk
 statsmodels
+ib_insync
