@@ -4430,11 +4430,29 @@ async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPI
                         "error": f"{type(exc).__name__}: {exc}"}
 
             ib = ib_insync.IB()
-            try:
-                ib.connect(host, port, clientId=int(client_id), timeout=10.0)
-            except Exception as exc:
+            # Try the configured client_id first; if it times out, retry
+            # with a high random id in case of collision with a stale
+            # session or another concurrent connection.
+            import random as _random
+            attempts = [int(client_id), _random.randint(900, 999)]
+            errors: list[str] = []
+            connected = False
+            used_id = attempts[0]
+            for cid in attempts:
+                try:
+                    ib.connect(host, port, clientId=cid, timeout=30.0)
+                    connected = True
+                    used_id = cid
+                    break
+                except Exception as exc:
+                    errors.append(f"clientId={cid}: {type(exc).__name__}: {exc}")
+                    try:
+                        ib.disconnect()
+                    except Exception:
+                        pass
+            if not connected:
                 return {"phase": "connect", "account": None, "n_positions": 0,
-                        "error": f"{type(exc).__name__}: {exc}"}
+                        "error": " | ".join(errors)}
 
             try:
                 vals = ib.accountValues()
