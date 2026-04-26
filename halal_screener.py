@@ -4410,19 +4410,12 @@ async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPI
         out["tcp_error"] = last_err
         return out
 
-    # Layer 3: ib_insync handshake.
-    # ib_insync runs its own asyncio loop; calling it directly from an
-    # async FastAPI endpoint silently deadlocks (no exception, no
-    # connection). Run the whole probe in a worker thread so ib_insync
-    # gets its own loop. This is a probe-only workaround — the trading
-    # engine calls the broker from sync contexts (threads/scheduler)
-    # where this collision does not occur.
-    try:
-        from app.services.broker.ibkr_adapter import IBBroker
-    except Exception as exc:
-        out["ib_error"] = f"adapter import failed: {exc}"
-        return out
-
+    # Layer 3: bypass the broker adapter and talk to ib_insync
+    # directly so any exception during connect/handshake is surfaced
+    # in the response. The adapter logs and swallows errors by design
+    # (so production callers degrade gracefully) — the probe needs to
+    # see them. Run in a worker thread so ib_insync gets its own
+    # asyncio loop and does not deadlock with FastAPI's.
     def _probe():
         try:
             import asyncio as _asyncio
@@ -4430,18 +4423,50 @@ async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPI
                 _asyncio.set_event_loop(_asyncio.new_event_loop())
             except Exception:
                 pass
-            broker = IBBroker()
-            account = broker.get_account(strategy_id=strategy_id)
-            positions = broker.get_positions(strategy_id=strategy_id)
-            return {"account": account, "n_positions": len(positions), "error": ""}
+            try:
+                import ib_insync  # type: ignore
+            except Exception as exc:
+                return {"phase": "import", "account": None, "n_positions": 0,
+                        "error": f"{type(exc).__name__}: {exc}"}
+
+            ib = ib_insync.IB()
+            try:
+                ib.connect(host, port, clientId=int(client_id), timeout=10.0)
+            except Exception as exc:
+                return {"phase": "connect", "account": None, "n_positions": 0,
+                        "error": f"{type(exc).__name__}: {exc}"}
+
+            try:
+                vals = ib.accountValues()
+                positions = ib.positions()
+                acct = {}
+                for v in vals:
+                    if getattr(v, "tag", "") == "TotalCashValue":
+                        acct["cash"] = str(getattr(v, "value", ""))
+                    elif getattr(v, "tag", "") == "NetLiquidation":
+                        acct["equity"] = str(getattr(v, "value", ""))
+                    elif getattr(v, "tag", "") == "BuyingPower":
+                        acct["buying_power"] = str(getattr(v, "value", ""))
+                acct["status"] = "ACTIVE"
+                return {"phase": "ok", "account": acct,
+                        "n_positions": len(positions), "error": ""}
+            except Exception as exc:
+                return {"phase": "read", "account": None, "n_positions": 0,
+                        "error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                try:
+                    ib.disconnect()
+                except Exception:
+                    pass
         except Exception as exc:
-            return {"account": None, "n_positions": 0,
+            return {"phase": "outer", "account": None, "n_positions": 0,
                     "error": f"{type(exc).__name__}: {exc}"}
 
     res = await asyncio.to_thread(_probe)
     out["account"] = res["account"]
     out["n_positions"] = res["n_positions"]
     out["ib_error"] = res["error"]
+    out["ib_phase"] = res.get("phase", "")
     out["connected"] = res["account"] is not None
     return out
 
