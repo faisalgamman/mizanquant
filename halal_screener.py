@@ -4410,23 +4410,39 @@ async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPI
         out["tcp_error"] = last_err
         return out
 
-    # Layer 3: ib_insync handshake
+    # Layer 3: ib_insync handshake.
+    # ib_insync runs its own asyncio loop; calling it directly from an
+    # async FastAPI endpoint silently deadlocks (no exception, no
+    # connection). Run the whole probe in a worker thread so ib_insync
+    # gets its own loop. This is a probe-only workaround — the trading
+    # engine calls the broker from sync contexts (threads/scheduler)
+    # where this collision does not occur.
     try:
         from app.services.broker.ibkr_adapter import IBBroker
     except Exception as exc:
         out["ib_error"] = f"adapter import failed: {exc}"
         return out
 
-    try:
-        broker = IBBroker()
-        account = broker.get_account(strategy_id=strategy_id)
-        positions = broker.get_positions(strategy_id=strategy_id)
-        out["connected"] = account is not None
-        out["account"] = account
-        out["n_positions"] = len(positions)
-    except Exception as exc:
-        out["ib_error"] = f"{type(exc).__name__}: {exc}"
+    def _probe():
+        try:
+            import asyncio as _asyncio
+            try:
+                _asyncio.set_event_loop(_asyncio.new_event_loop())
+            except Exception:
+                pass
+            broker = IBBroker()
+            account = broker.get_account(strategy_id=strategy_id)
+            positions = broker.get_positions(strategy_id=strategy_id)
+            return {"account": account, "n_positions": len(positions), "error": ""}
+        except Exception as exc:
+            return {"account": None, "n_positions": 0,
+                    "error": f"{type(exc).__name__}: {exc}"}
 
+    res = await asyncio.to_thread(_probe)
+    out["account"] = res["account"]
+    out["n_positions"] = res["n_positions"]
+    out["ib_error"] = res["error"]
+    out["connected"] = res["account"] is not None
     return out
 
 
