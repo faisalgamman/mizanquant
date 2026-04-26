@@ -4338,33 +4338,96 @@ async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None
 
 @app.get("/admin/ibkr_ping")
 async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
-    """Smoke-test the IB Gateway connection without flipping the
-    broker. Constructs an IBBroker directly, calls get_account(), and
-    returns whatever comes back. Use this once after adding
-    IBKR_HOST/PORT/CLIENT_ID env vars to verify the gateway is
-    reachable before setting STRATEGY_BROKER_A=ibkr."""
+    """Smoke-test the IB Gateway connection. Layered diagnostics:
+
+    1. DNS — does the hostname resolve?
+    2. TCP — does a plain socket connect to host:port succeed?
+    3. ib_insync — does the IB API handshake complete, and can we read
+       the account?
+
+    The first failing layer is the actual problem. Any "connected: false"
+    response now includes a `tcp_ok` and a `ib_error` field so the
+    operator does not need to read service logs for routine debugging.
+    """
     _require_api_key(x_api_key)
 
+    import socket
+
+    host = os.environ.get("IBKR_HOST", "127.0.0.1")
+    try:
+        port = int(os.environ.get("IBKR_PORT", "4002"))
+    except ValueError:
+        port = 4002
+    client_id_env = (
+        f"IBKR_CLIENT_ID_{strategy_id.upper()}" if strategy_id else "IBKR_CLIENT_ID"
+    )
+    client_id = os.environ.get(client_id_env, os.environ.get("IBKR_CLIENT_ID", "1"))
+
+    out: dict = {
+        "host": host,
+        "port": port,
+        "client_id": client_id,
+        "dns_ok": False,
+        "resolved_addrs": [],
+        "tcp_ok": False,
+        "tcp_error": "",
+        "connected": False,
+        "ib_error": "",
+        "account": None,
+        "n_positions": 0,
+    }
+
+    # Layer 1: DNS
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        out["resolved_addrs"] = sorted({info[4][0] for info in infos})
+        out["dns_ok"] = bool(out["resolved_addrs"])
+    except Exception as exc:
+        out["tcp_error"] = f"DNS failed: {exc}"
+        return out
+
+    # Layer 2: raw TCP connect
+    last_err = ""
+    for info in infos:
+        family, socktype, proto, _, sockaddr = info
+        s = socket.socket(family, socktype, proto)
+        s.settimeout(5.0)
+        try:
+            s.connect(sockaddr)
+            out["tcp_ok"] = True
+            try:
+                s.close()
+            except Exception:
+                pass
+            break
+        except Exception as exc:
+            last_err = f"{sockaddr}: {exc}"
+            try:
+                s.close()
+            except Exception:
+                pass
+    if not out["tcp_ok"]:
+        out["tcp_error"] = last_err
+        return out
+
+    # Layer 3: ib_insync handshake
     try:
         from app.services.broker.ibkr_adapter import IBBroker
     except Exception as exc:
-        return {"connected": False, "error": f"adapter import failed: {exc}"}
+        out["ib_error"] = f"adapter import failed: {exc}"
+        return out
 
-    broker = IBBroker()
-    account = broker.get_account(strategy_id=strategy_id)
-    positions = broker.get_positions(strategy_id=strategy_id)
+    try:
+        broker = IBBroker()
+        account = broker.get_account(strategy_id=strategy_id)
+        positions = broker.get_positions(strategy_id=strategy_id)
+        out["connected"] = account is not None
+        out["account"] = account
+        out["n_positions"] = len(positions)
+    except Exception as exc:
+        out["ib_error"] = f"{type(exc).__name__}: {exc}"
 
-    return {
-        "connected": account is not None,
-        "account": account,
-        "n_positions": len(positions),
-        "host": os.environ.get("IBKR_HOST", "127.0.0.1"),
-        "port": os.environ.get("IBKR_PORT", "4002"),
-        "client_id": os.environ.get(
-            f"IBKR_CLIENT_ID_{strategy_id.upper()}" if strategy_id else "IBKR_CLIENT_ID",
-            os.environ.get("IBKR_CLIENT_ID", "1"),
-        ),
-    }
+    return out
 
 
 @app.post("/admin/rearm_orphans")
