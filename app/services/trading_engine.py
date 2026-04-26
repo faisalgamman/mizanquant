@@ -440,7 +440,13 @@ def execute_buy(
             "qty": str(qty),
             "side": "buy",
             "type": "market",
-            "time_in_force": "day",
+            # GTC, not day — bracket child legs (SL/TP) inherit the parent's
+            # time-in-force, and `day` causes Alpaca to expire any unfilled
+            # SL/TP at session close. The position then survives into the
+            # next session with no automatic exit, which is the
+            # "buys but never sells" symptom on paper trading. With GTC
+            # the SL/TP remain armed until they trigger or are canceled.
+            "time_in_force": "gtc",
             "order_class": "bracket",
             "client_order_id": _stable_client_order_id(
                 strategy_id,
@@ -951,6 +957,149 @@ def reconcile_all_strategies() -> dict[str, dict]:
     if settings.ALPACA_API_KEY:
         results["_default"] = reconcile_positions(strategy_id=None)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Orphan position re-armer (positions whose bracket legs expired)
+# ---------------------------------------------------------------------------
+
+def rearm_orphan_position(
+    symbol: str,
+    strategy_id: str | None = None,
+    fallback_stop_pct: float = 0.03,
+    fallback_take_pct: float = 0.06,
+) -> dict:
+    """Submit standalone GTC stop-loss and take-profit orders for a
+    position whose original bracket legs expired (the legacy bug where
+    bracket parents were submitted with time_in_force=day).
+
+    Looks up the original trade in DB to recover the intended stop and
+    target; falls back to ±3%/+6% off the current entry price when the
+    DB row is missing.
+
+    Returns a dict summarising what was submitted. Idempotent: if the
+    position already has an open stop and limit on the broker side,
+    skips re-arming.
+    """
+    label = _strategy_label(strategy_id) or "(default)"
+    result = {"symbol": symbol, "rearmed": False, "reason": "", "stop_loss": None, "take_profit": None}
+
+    positions = alpaca_get_positions(strategy_id=strategy_id) or []
+    pos = next((p for p in positions if p["symbol"] == symbol), None)
+    if not pos:
+        result["reason"] = "not holding symbol"
+        return result
+
+    qty = int(float(pos.get("qty") or 0))
+    entry = float(pos.get("avg_entry_price") or 0)
+    if qty <= 0 or entry <= 0:
+        result["reason"] = "invalid qty/entry"
+        return result
+
+    # Skip if a stop and limit are already open for this symbol.
+    open_orders = alpaca_get_orders(status="open", limit=200, strategy_id=strategy_id) or []
+    has_stop = any(
+        (o.get("symbol") == symbol and o.get("side") == "sell" and "stop" in (o.get("type") or ""))
+        for o in open_orders
+    )
+    has_limit = any(
+        (o.get("symbol") == symbol and o.get("side") == "sell" and o.get("type") == "limit")
+        for o in open_orders
+    )
+    if has_stop and has_limit:
+        result["reason"] = "already armed"
+        return result
+
+    # Recover the intended SL/TP from DB (latest trade row for this symbol).
+    sl, tp = None, None
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import TradeHistory
+
+        db = SessionLocal()
+        try:
+            q = db.query(TradeHistory).filter(TradeHistory.symbol == symbol)
+            if strategy_id:
+                q = q.filter(TradeHistory.strategy_id == strategy_id)
+            tr = q.order_by(TradeHistory.created_at.desc()).first()
+            if tr:
+                sl = float(tr.stop_loss) if tr.stop_loss else None
+                tp = float(tr.take_profit) if tr.take_profit else None
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning(f"{label} rearm: DB lookup failed for {symbol}: {exc}")
+
+    if not sl or sl >= entry:
+        sl = round(entry * (1.0 - fallback_stop_pct), 2)
+    if not tp or tp <= entry:
+        tp = round(entry * (1.0 + fallback_take_pct), 2)
+
+    submitted: list[str] = []
+
+    if not has_stop:
+        stop_payload = {
+            "symbol": symbol,
+            "qty": str(qty),
+            "side": "sell",
+            "type": "stop",
+            "time_in_force": "gtc",
+            "stop_price": str(sl),
+        }
+        if _submit_order(stop_payload, strategy_id=strategy_id):
+            submitted.append(f"STOP@{sl}")
+
+    if not has_limit:
+        tp_payload = {
+            "symbol": symbol,
+            "qty": str(qty),
+            "side": "sell",
+            "type": "limit",
+            "time_in_force": "gtc",
+            "limit_price": str(tp),
+        }
+        if _submit_order(tp_payload, strategy_id=strategy_id):
+            submitted.append(f"TP@{tp}")
+
+    result["rearmed"] = bool(submitted)
+    result["reason"] = ", ".join(submitted) if submitted else "no submission"
+    result["stop_loss"] = sl
+    result["take_profit"] = tp
+    logger.info(f"{label} rearm {symbol}: {result['reason']}")
+    return result
+
+
+def rearm_all_orphans(strategy_id: str | None = None) -> list[dict]:
+    """Walk every position in the strategy's account and call
+    rearm_orphan_position for any that lacks a stop+limit pair.
+    Returns a list of result dicts (one per position acted on)."""
+    out: list[dict] = []
+    positions = alpaca_get_positions(strategy_id=strategy_id) or []
+    open_orders = alpaca_get_orders(status="open", limit=200, strategy_id=strategy_id) or []
+
+    armed_symbols: set[str] = set()
+    by_sym: dict[str, dict] = {}
+    for o in open_orders:
+        if o.get("side") != "sell":
+            continue
+        sym = o.get("symbol")
+        if not sym:
+            continue
+        slot = by_sym.setdefault(sym, {"stop": False, "limit": False})
+        if "stop" in (o.get("type") or ""):
+            slot["stop"] = True
+        if o.get("type") == "limit":
+            slot["limit"] = True
+    for sym, flags in by_sym.items():
+        if flags["stop"] and flags["limit"]:
+            armed_symbols.add(sym)
+
+    for pos in positions:
+        sym = pos["symbol"]
+        if sym in armed_symbols:
+            continue
+        out.append(rearm_orphan_position(sym, strategy_id=strategy_id))
+    return out
 
 
 # ---------------------------------------------------------------------------
