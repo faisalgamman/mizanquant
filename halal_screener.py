@@ -4336,6 +4336,27 @@ async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None
     return {"killed": app_cfg.killed}
 
 
+@app.post("/admin/rearm_orphans")
+async def admin_rearm_orphans(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
+    """Re-attach GTC stop-loss + take-profit to every position whose
+    bracket legs expired. Use this once after deploying the
+    time_in_force=gtc fix to recover positions stuck without an
+    automatic exit ("buys but never sells")."""
+    _require_api_key(x_api_key)
+
+    from app.config import STRATEGY_CONFIGS
+    from app.services.trading_engine import rearm_all_orphans
+
+    if strategy_id:
+        results = rearm_all_orphans(strategy_id=strategy_id)
+        return {"strategy": strategy_id, "actions": results}
+
+    out = {}
+    for sid in list(STRATEGY_CONFIGS.keys()):
+        out[sid] = rearm_all_orphans(strategy_id=sid)
+    return {"actions_by_strategy": out}
+
+
 @app.post("/admin/regime")
 async def admin_regime(state: str | None = None, x_api_key: OperatorAPIKey = None):
     """Force or clear the live regime."""
