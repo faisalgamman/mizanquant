@@ -4336,6 +4336,37 @@ async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None
     return {"killed": app_cfg.killed}
 
 
+@app.get("/admin/ibkr_ping")
+async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
+    """Smoke-test the IB Gateway connection without flipping the
+    broker. Constructs an IBBroker directly, calls get_account(), and
+    returns whatever comes back. Use this once after adding
+    IBKR_HOST/PORT/CLIENT_ID env vars to verify the gateway is
+    reachable before setting STRATEGY_BROKER_A=ibkr."""
+    _require_api_key(x_api_key)
+
+    try:
+        from app.services.broker.ibkr_adapter import IBBroker
+    except Exception as exc:
+        return {"connected": False, "error": f"adapter import failed: {exc}"}
+
+    broker = IBBroker()
+    account = broker.get_account(strategy_id=strategy_id)
+    positions = broker.get_positions(strategy_id=strategy_id)
+
+    return {
+        "connected": account is not None,
+        "account": account,
+        "n_positions": len(positions),
+        "host": os.environ.get("IBKR_HOST", "127.0.0.1"),
+        "port": os.environ.get("IBKR_PORT", "4002"),
+        "client_id": os.environ.get(
+            f"IBKR_CLIENT_ID_{strategy_id.upper()}" if strategy_id else "IBKR_CLIENT_ID",
+            os.environ.get("IBKR_CLIENT_ID", "1"),
+        ),
+    }
+
+
 @app.post("/admin/rearm_orphans")
 async def admin_rearm_orphans(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
     """Re-attach GTC stop-loss + take-profit to every position whose
