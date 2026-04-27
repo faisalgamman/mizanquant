@@ -119,6 +119,18 @@ def _scheduler_loop():
     last_reference_refresh = ""
     SCAN_INTERVAL = 1800  # 30 minutes between scans
 
+    # Intraday signals-advisor scan slots (US/Eastern, weekdays only).
+    # Pre-market 9:00 is already handled by _run_pre_market; these four
+    # are additional STRONG-BUY-only Telegram pushes throughout the
+    # session for manual execution on IBKR.
+    SIGNALS_SLOTS = [
+        (10, 30, "10:30 AM ET (post-open)"),
+        (12, 0,  "12:00 PM ET (mid-session)"),
+        (14, 30, "2:30 PM ET (pre-close)"),
+        (16, 30, "4:30 PM ET (post-close)"),
+    ]
+    last_signals_slot: dict[str, str] = {}
+
     while _scheduler_running:
         try:
             now = _get_eastern_now()
@@ -185,6 +197,23 @@ def _scheduler_loop():
                     _run_post_market()
                 except Exception as e:
                     logger.error(f"Post-market scan failed: {e}")
+
+            # --- INTRADAY SIGNALS SCANS: 10:30 / 12:00 / 14:30 / 16:30 ET ---
+            # Independent block — runs alongside any other branch above.
+            # Pushes STRONG-BUY Telegram alerts (signals advisor) for
+            # manual execution on IBKR. Each slot fires once per weekday.
+            if _is_weekday(now):
+                for hour, minute, label in SIGNALS_SLOTS:
+                    slot_key = f"{hour:02d}:{minute:02d}"
+                    if (now.hour == hour and now.minute >= minute
+                            and last_signals_slot.get(slot_key) != today_str):
+                        last_signals_slot[slot_key] = today_str
+                        logger.info(f"Intraday signals scan: {label}")
+                        try:
+                            _run_signals_scan(label)
+                        except Exception as e:
+                            logger.error(f"Intraday signals scan failed ({label}): {e}", exc_info=True)
+                        break  # only fire one slot per loop iteration
 
             # Sleep 60 seconds between checks
             time.sleep(60)
@@ -357,6 +386,33 @@ def _run_market_scan():
         gc.collect()
 
     logger.info("Multi-strategy market scan complete")
+
+
+def _run_signals_scan(label: str = "intraday"):
+    """Run the signals advisor (full halal universe, all 3 strategies)
+    and push STRONG BUY alerts to Telegram. Used by the intraday slots
+    (10:30/12:00/14:30/16:30 ET) so the operator gets manual-execution
+    candidates throughout the session, not only at pre-market."""
+    from app.services.signals_advisor import scan_and_notify_strong_buys
+    from app.services.telegram_alert import send_message as tg_send
+
+    summary = scan_and_notify_strong_buys(
+        strategy_ids=("A", "B", "C"),
+        min_confidence=70.0,
+        account_usd=5000.0,
+    )
+    sent = summary.get("sent", 0)
+    by_strat = summary.get("by_strategy", {})
+    total = sum(int(v) for v in by_strat.values())
+    if total > 0:
+        tg_send(
+            f"PRE-MARKET SIGNALS — {label}: {total} STRONG BUY across A/B/C\n"
+            f"A={by_strat.get('A',0)} B={by_strat.get('B',0)} C={by_strat.get('C',0)}\n"
+            f"Sent {sent} individual alerts above. Review and execute manually on IBKR."
+        )
+    logger.info(
+        f"signals advisor [{label}]: total={total} sent={sent} by_strategy={by_strat}"
+    )
 
 
 def _run_post_market():
