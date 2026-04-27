@@ -4342,21 +4342,30 @@ async def admin_scan_signals(
     min_confidence: float = 70.0,
     account_usd: float = 5000.0,
     dry_run: bool = False,
+    symbols: str = "",
     x_api_key: OperatorAPIKey = None,
 ):
-    """Scan the halal universe for STRONG BUY signals and push one
-    Telegram alert per signal. Independent of auto-trading: this does
-    NOT place broker orders, it only notifies the operator for manual
-    execution (e.g. on Interactive Brokers).
+    """Scan for STRONG BUY signals and push one Telegram alert per
+    signal. Independent of auto-trading — does NOT place broker
+    orders, only notifies for manual execution on IBKR.
 
     Query params:
-      strategy        — any subset of "ABC" (default "ABC", run all 3)
-      min_confidence  — minimum % to include a signal (default 70)
-      account_usd     — assumed account size for share-count suggestion
-      dry_run         — true to compute signals without sending to Telegram
+      strategy        any subset of "ABC" (default "ABC")
+      min_confidence  minimum % to include (default 70)
+      account_usd     account size for share-count suggestion
+      dry_run         true skips Telegram (returns preview JSON only)
+      symbols         comma-separated tickers to scan; if empty, scans
+                      the full halal universe (~357 stocks). The full
+                      scan takes 10-15 minutes — too long for a
+                      synchronous HTTP request, so it runs as a
+                      background task. Use `symbols=AAPL,MSFT,NVDA`
+                      for a fast synchronous test.
 
-    Returns a JSON summary with per-strategy counts and the formatted
-    text of every signal generated.
+    Returns:
+      - dry_run=true OR symbols specified: synchronous JSON with full
+        results.
+      - default (full universe scan): 202 Accepted with a "queued"
+        message; signals stream to Telegram as they are found.
     """
     _require_api_key(x_api_key)
     from app.services.signals_advisor import scan_and_notify_strong_buys
@@ -4364,12 +4373,47 @@ async def admin_scan_signals(
     sids = tuple(c for c in strategy.upper() if c in "ABC")
     if not sids:
         sids = ("A", "B", "C")
-    return scan_and_notify_strong_buys(
-        strategy_ids=sids,
-        min_confidence=min_confidence,
-        account_usd=account_usd,
-        dry_run=dry_run,
-    )
+
+    # Parse symbol list (if provided).
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] or None
+
+    # Synchronous path: dry-run OR small explicit symbol list (<= 20
+    # tickers). These complete in seconds and the operator wants the
+    # JSON back immediately.
+    if dry_run or (syms is not None and len(syms) <= 20):
+        return scan_and_notify_strong_buys(
+            strategy_ids=sids,
+            symbols=syms,
+            min_confidence=min_confidence,
+            account_usd=account_usd,
+            dry_run=dry_run,
+        )
+
+    # Background path: full universe (or > 20 symbols). Spin off a
+    # daemon thread so the HTTP request returns now; results land on
+    # Telegram as the scan progresses. We can't use FastAPI's
+    # BackgroundTasks here because the operator may have a long-lived
+    # request timeout we don't control (Railway proxy ~5 min).
+    import threading
+    def _run_in_bg():
+        try:
+            scan_and_notify_strong_buys(
+                strategy_ids=sids,
+                symbols=syms,
+                min_confidence=min_confidence,
+                account_usd=account_usd,
+                dry_run=False,
+            )
+        except Exception as e:
+            logger.exception(f"background scan_signals failed: {e}")
+    threading.Thread(target=_run_in_bg, daemon=True, name="scan_signals").start()
+    return {
+        "queued": True,
+        "scope": "full universe (~357 halal stocks)" if not syms else f"{len(syms)} symbols",
+        "strategies": list(sids),
+        "min_confidence": min_confidence,
+        "note": "Signals will arrive on Telegram as they are found (~10-15 min).",
+    }
 
 
 @app.get("/admin/alpaca_check")
