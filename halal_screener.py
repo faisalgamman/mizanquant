@@ -4336,6 +4336,50 @@ async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None
     return {"killed": app_cfg.killed}
 
 
+@app.get("/admin/alpaca_check")
+async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
+    """Probe each Alpaca credential set (default + A/B/C) and report
+    which one is failing with 401. Use this to identify exactly which
+    ALPACA_API_KEY_* / ALPACA_SECRET_KEY_* pair is invalid on Railway."""
+    _require_api_key(x_api_key)
+
+    from app.config import STRATEGY_CONFIGS, settings as _settings
+    from app.services.alpaca_client import get_account, get_last_error
+
+    results: dict = {}
+
+    # Default / legacy account (no strategy suffix)
+    if _settings.ALPACA_API_KEY:
+        acct = get_account(strategy_id=None)
+        err = get_last_error(strategy_id=None)
+        results["DEFAULT"] = {
+            "configured": True,
+            "account_status": acct.get("status") if acct else None,
+            "equity": acct.get("equity") if acct else None,
+            "last_error": err,
+        }
+    else:
+        results["DEFAULT"] = {"configured": False}
+
+    # Per-strategy accounts
+    for sid in ("A", "B", "C"):
+        cfg = STRATEGY_CONFIGS.get(sid)
+        if not cfg or not cfg.alpaca_api_key:
+            results[sid] = {"configured": False}
+            continue
+        acct = get_account(strategy_id=sid)
+        err = get_last_error(strategy_id=sid)
+        results[sid] = {
+            "configured": True,
+            "name": cfg.name,
+            "account_status": acct.get("status") if acct else None,
+            "equity": acct.get("equity") if acct else None,
+            "last_error": err,
+        }
+
+    return {"results": results, "base_url": _settings.ALPACA_BASE_URL}
+
+
 @app.get("/admin/ibkr_ping")
 async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
     """Smoke-test the IB Gateway connection. Layered diagnostics:
