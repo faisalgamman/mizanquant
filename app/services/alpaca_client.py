@@ -104,7 +104,7 @@ def _api_get(endpoint: str, strategy_id: str = None) -> Optional[dict | list]:
             _set_last_error(strategy_id, reason="", status_code=resp.status_code)
             return resp.json()
     except httpx.HTTPStatusError as e:
-        sid = f" [Strategy {strategy_id}]" if strategy_id else ""
+        sid = f" [Strategy {strategy_id}]" if strategy_id else " [Strategy DEFAULT/legacy]"
         _set_last_error(
             strategy_id,
             reason=_classify_http_error(e.response.status_code),
@@ -113,7 +113,7 @@ def _api_get(endpoint: str, strategy_id: str = None) -> Optional[dict | list]:
         logger.error(f"Alpaca API{sid} {e.response.status_code} for {endpoint}: {e.response.text[:200]}")
         return None
     except Exception as e:
-        sid = f" [Strategy {strategy_id}]" if strategy_id else ""
+        sid = f" [Strategy {strategy_id}]" if strategy_id else " [Strategy DEFAULT/legacy]"
         _set_last_error(strategy_id, reason="network_error", status_code=None)
         logger.error(f"Alpaca API{sid} error for {endpoint}: {e}")
         return None
