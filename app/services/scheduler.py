@@ -255,6 +255,39 @@ def _run_pre_market():
     # Send multi-strategy comparison
     alert_strategy_comparison()
 
+    # --- Signals Advisor: STRONG BUY scan across the halal universe ---
+    # Sends one Telegram alert per qualifying signal (per strategy) so the
+    # operator can execute manually on IBKR. Independent of auto-trade.
+    try:
+        logger.info("Pre-market: running signals advisor (full universe)...")
+        from app.services.signals_advisor import scan_and_notify_strong_buys
+
+        summary = scan_and_notify_strong_buys(
+            strategy_ids=("A", "B", "C"),
+            min_confidence=70.0,
+            account_usd=5000.0,
+        )
+        logger.info(
+            "Signals advisor: sent=%s by_strategy=%s",
+            summary.get("sent"),
+            summary.get("by_strategy"),
+        )
+        # Send a header summary so the operator sees totals at a glance.
+        sent = summary.get("sent", 0)
+        by_strat = summary.get("by_strategy", {})
+        total = sum(int(v) for v in by_strat.values())
+        if total > 0:
+            tg_send(
+                f"PRE-MARKET SIGNALS — {total} STRONG BUY across A/B/C\n"
+                f"A={by_strat.get('A',0)} B={by_strat.get('B',0)} C={by_strat.get('C',0)}\n"
+                f"Sent {sent} individual Telegram alerts above. "
+                "Review and execute manually on IBKR."
+            )
+        else:
+            tg_send("PRE-MARKET SIGNALS — no STRONG BUY met the 70% threshold today.")
+    except Exception as e:
+        logger.error(f"Signals advisor pre-market scan failed: {e}", exc_info=True)
+
     gc.collect()
 
 

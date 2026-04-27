@@ -4336,6 +4336,42 @@ async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None
     return {"killed": app_cfg.killed}
 
 
+@app.post("/admin/scan_signals")
+async def admin_scan_signals(
+    strategy: str = "ABC",
+    min_confidence: float = 70.0,
+    account_usd: float = 5000.0,
+    dry_run: bool = False,
+    x_api_key: OperatorAPIKey = None,
+):
+    """Scan the halal universe for STRONG BUY signals and push one
+    Telegram alert per signal. Independent of auto-trading: this does
+    NOT place broker orders, it only notifies the operator for manual
+    execution (e.g. on Interactive Brokers).
+
+    Query params:
+      strategy        — any subset of "ABC" (default "ABC", run all 3)
+      min_confidence  — minimum % to include a signal (default 70)
+      account_usd     — assumed account size for share-count suggestion
+      dry_run         — true to compute signals without sending to Telegram
+
+    Returns a JSON summary with per-strategy counts and the formatted
+    text of every signal generated.
+    """
+    _require_api_key(x_api_key)
+    from app.services.signals_advisor import scan_and_notify_strong_buys
+
+    sids = tuple(c for c in strategy.upper() if c in "ABC")
+    if not sids:
+        sids = ("A", "B", "C")
+    return scan_and_notify_strong_buys(
+        strategy_ids=sids,
+        min_confidence=min_confidence,
+        account_usd=account_usd,
+        dry_run=dry_run,
+    )
+
+
 @app.get("/admin/alpaca_check")
 async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
     """Probe each Alpaca credential set (default + A/B/C) and report
