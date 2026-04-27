@@ -293,7 +293,7 @@ def _run_pre_market():
 
         summary = scan_and_notify_strong_buys(
             strategy_ids=("A", "B", "C"),
-            min_confidence=70.0,
+            min_confidence=60.0,
             account_usd=5000.0,
         )
         logger.info(
@@ -313,7 +313,7 @@ def _run_pre_market():
                 "Review and execute manually on IBKR."
             )
         else:
-            tg_send("PRE-MARKET SIGNALS — no STRONG BUY met the 70% threshold today.")
+            tg_send("PRE-MARKET SIGNALS — no STRONG BUY met the 60% threshold today.")
     except Exception as e:
         logger.error(f"Signals advisor pre-market scan failed: {e}", exc_info=True)
 
@@ -396,9 +396,14 @@ def _run_signals_scan(label: str = "intraday"):
     from app.services.signals_advisor import scan_and_notify_strong_buys
     from app.services.telegram_alert import send_message as tg_send
 
+    # Confidence threshold lowered 70 -> 60 to roughly double the
+    # daily signal count. This helps the operator accumulate enough
+    # trades for Phase 8 graduation (30 closed trades in 14 days)
+    # without having to expand the universe yet. Manual review on
+    # IBKR provides the second-pass quality filter.
     summary = scan_and_notify_strong_buys(
         strategy_ids=("A", "B", "C"),
-        min_confidence=70.0,
+        min_confidence=60.0,
         account_usd=5000.0,
     )
     sent = summary.get("sent", 0)
