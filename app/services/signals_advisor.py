@@ -92,7 +92,7 @@ def _scan_one(symbol: str, runner, label: str) -> dict | None:
 def scan_universe_for_strategy(
     strategy_id: str,
     symbols: list[str] | None = None,
-    max_workers: int = 4,
+    max_workers: int = 8,
     min_confidence: float = 70.0,
 ) -> list[dict]:
     """Scan the halal universe with one strategy. Returns the rows
@@ -205,7 +205,7 @@ def _format_signal(
 def scan_and_notify_strong_buys(
     strategy_ids: tuple[str, ...] = ("A", "B", "C"),
     symbols: list[str] | None = None,
-    max_workers: int = 4,
+    max_workers: int = 8,
     min_confidence: float = 70.0,
     account_usd: float = _DEFAULT_ACCOUNT_USD,
     risk_pct: float = _DEFAULT_RISK_PCT,

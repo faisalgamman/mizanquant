@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # endpoints fail closed and auto-trading validation will refuse to arm.
     API_KEY: str = ""
 
+    # Telegram noise filter: when True, only messages tagged as BUY
+    # signals reach the chat. Everything else (daily summaries, trade
+    # confirmations, regime changes, reconciliation alerts, post-market
+    # reports, etc.) is silently suppressed. Set False to restore the
+    # full feed.
+    TELEGRAM_BUY_ONLY: bool = True
+
     # --- Risk management (legacy single-account defaults) ---
     RISK_CAPITAL: float = 3000.0
     RISK_PCT: float = 1.0

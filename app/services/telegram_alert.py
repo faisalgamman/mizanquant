@@ -67,13 +67,52 @@ def _is_configured() -> bool:
     return bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
 
 
+# Marker tokens that identify a BUY signal message. When
+# TELEGRAM_BUY_ONLY is enabled, send_message will silently drop any
+# text that does not contain at least one of these markers. The
+# signals_advisor formats messages with the exact "STRONG BUY SIGNAL"
+# header, and the pre-market summary uses "PRE-MARKET SIGNALS"; both
+# pass through. Trade-execution confirmations, daily summaries, regime
+# changes, reconciliation alerts, etc. do not contain these markers
+# and are suppressed.
+_BUY_SIGNAL_MARKERS = (
+    "STRONG BUY SIGNAL",     # signals_advisor per-symbol alert
+    "PRE-MARKET SIGNALS",    # signals_advisor daily header
+    "READY TO TRADE",        # legacy ready-to-trade alert (also buy-side)
+)
+
+
+def _is_buy_signal_message(text: str) -> bool:
+    """True if the message content qualifies as a buy-signal alert."""
+    upper = (text or "").upper()
+    return any(marker in upper for marker in _BUY_SIGNAL_MARKERS)
+
+
 def send_message(text: str) -> bool:
-    """Send a plain text message to the configured Telegram chat."""
+    """Send a plain text message to the configured Telegram chat.
+
+    Honours `settings.TELEGRAM_BUY_ONLY`: when True, anything that is
+    not a buy-signal alert is silently dropped (returns True so the
+    caller doesn't think the alert pipeline is broken). Set
+    `TELEGRAM_BUY_ONLY=false` on Railway to restore the full feed.
+    """
+    if getattr(settings, "TELEGRAM_BUY_ONLY", False) and not _is_buy_signal_message(text):
+        # Drop everything that isn't a buy signal. We keep this
+        # quiet — no logger.warning — because by design dozens of
+        # callsites will hit this path on a normal day.
+        return True
     return queued_send_message(text)
 
 
 def send_photo(image_bytes: bytes, caption: str = "") -> bool:
-    """Send a photo (PNG bytes) to the configured Telegram chat."""
+    """Send a photo (PNG bytes) to the configured Telegram chat.
+
+    Photos (chart screenshots) are also gated by TELEGRAM_BUY_ONLY: when
+    enabled, charts are dropped because the operator only wants action
+    signals, not visual noise.
+    """
+    if getattr(settings, "TELEGRAM_BUY_ONLY", False) and not _is_buy_signal_message(caption):
+        return True
     return queued_send_photo(image_bytes, caption=caption)
 
 
