@@ -173,12 +173,38 @@ def _send_photo_now(image_bytes: bytes, caption: str = "", chat_id: str | None =
     return True
 
 
+_BUY_SIGNAL_MARKERS = (
+    "STRONG BUY SIGNAL",
+    "PRE-MARKET SIGNALS",
+    "READY TO TRADE",
+)
+
+
+def _is_buy_signal(text: str) -> bool:
+    upper = (text or "").upper()
+    return any(marker in upper for marker in _BUY_SIGNAL_MARKERS)
+
+
+def _filtered_out_by_buy_only(text: str) -> bool:
+    """Central buy-only gate. Honoured by every notification that reaches
+    Telegram, regardless of which entry point (send_message, send_photo,
+    notify(template, ...)) was used. When TELEGRAM_BUY_ONLY is True,
+    suppress anything that doesn't carry a buy-signal marker."""
+    if not getattr(settings, "TELEGRAM_BUY_ONLY", False):
+        return False
+    return not _is_buy_signal(text)
+
+
 def _process_task(task: NotificationTask) -> None:
     if not _is_configured():
         return
     if task.kind == "photo" and task.image_bytes is not None:
+        if _filtered_out_by_buy_only(task.caption):
+            return
         _send_photo_now(task.image_bytes, caption=task.caption)
     else:
+        if _filtered_out_by_buy_only(task.text):
+            return
         _send_text_now(task.text)
         if task.critical and app_cfg.notify.critical_channel:
             _send_text_now(task.text, chat_id=app_cfg.notify.critical_channel)
