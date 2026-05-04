@@ -120,13 +120,19 @@ def _scheduler_loop():
     SCAN_INTERVAL = 1800  # 30 minutes between scans
 
     # Intraday signals-advisor scan slots (US/Eastern, weekdays only).
-    # Pre-market 9:00 is already handled by _run_pre_market; these four
-    # are additional STRONG-BUY-only Telegram pushes throughout the
-    # session for manual execution on IBKR.
+    # Pre-market 9:00 is already handled by _run_pre_market; these
+    # additional slots push STRONG-BUY-only Telegram alerts throughout
+    # the session for manual execution on IBKR. Now hourly to maximise
+    # coverage now that Stage 1 (USX V4) is doing the heavy filtering
+    # before the expensive AI consensus runs.
     SIGNALS_SLOTS = [
-        (10, 30, "10:30 AM ET (post-open)"),
-        (12, 0,  "12:00 PM ET (mid-session)"),
-        (14, 30, "2:30 PM ET (pre-close)"),
+        (9, 45,  "9:45 AM ET (post-open)"),
+        (10, 30, "10:30 AM ET"),
+        (11, 30, "11:30 AM ET"),
+        (12, 30, "12:30 PM ET"),
+        (13, 30, "1:30 PM ET"),
+        (14, 30, "2:30 PM ET"),
+        (15, 30, "3:30 PM ET (pre-close)"),
         (16, 30, "4:30 PM ET (post-close)"),
     ]
     last_signals_slot: dict[str, str] = {}
