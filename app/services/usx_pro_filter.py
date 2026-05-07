@@ -64,12 +64,20 @@ logger = logging.getLogger("screener")
 # Defaults (mirror the Pine input defaults)
 # ---------------------------------------------------------------------------
 
-DEFAULT_MIN_SCORE = 65.0
-DEFAULT_MIN_ADV_M = 50.0           # $M, 20-day average dollar volume
-DEFAULT_MIN_PRICE = 10.0
-DEFAULT_MAX_EXTENSION_PCT = 15.0   # |% from daily EMA200|
-DEFAULT_VIX_RANK_BLOCK = 85.0      # block above this percentile
-DEFAULT_EARNINGS_BLACKOUT_DAYS = 5
+# NOTE: defaults relaxed from the Pine settings because Pine ran on a
+# single 1H chart; here we are universe-scanning for "close enough"
+# rather than gating one specific position. Strict Pine defaults
+# eliminated 100% of S&P 500 candidates on rising-market days.
+DEFAULT_MIN_SCORE = 50.0           # was 65.0 — Pine score on daily TF
+                                   # rarely clears 65 on broad scans
+DEFAULT_MIN_ADV_M = 25.0           # was 50; many real winners ran below
+DEFAULT_MIN_PRICE = 5.0            # was 10; lots of $5-10 names trade fine
+DEFAULT_MAX_EXTENSION_PCT = 25.0   # was 15; momentum names overshoot
+DEFAULT_VIX_RANK_BLOCK = 90.0      # was 85; too many false closes
+DEFAULT_EARNINGS_BLACKOUT_DAYS = 3  # was 5; too aggressive
+DEFAULT_BLOCK_ON_NO_EARNINGS = False  # was True; yfinance earnings often
+                                       # missing → fail-safe blocked
+                                       # ~70% of universe
 
 # Cache for market-wide series so we don't refetch SPY/VIX/HYG/LQD/TLT
 # per symbol. Cleared at the start of every filter_universe() call.
@@ -165,17 +173,21 @@ def check_market_regime(use_cache: bool = True) -> RegimeReport:
     if use_cache and "regime" in _market_cache:
         return _market_cache["regime"]
 
-    # SPY daily — check trend
+    # SPY daily — primary trend (this is the only HARD gate now)
     spy_df = _fetch_daily("SPY", period="2y")
     if spy_df is None:
-        rep = RegimeReport(False, float("nan"), False, False, False, False,
-                           "SPY data unavailable")
+        # Fail-OPEN, not closed: missing SPY data should not silence
+        # the whole pipeline. Down-stream filters still run.
+        rep = RegimeReport(True, float("nan"), True, True, True, True,
+                           "SPY data unavailable — regime check skipped")
+        if use_cache:
+            _market_cache["regime"] = rep
         return rep
     spy_close = spy_df["close"]
     spy_ema21 = ema(spy_close, 21)
     spy_bull = bool(spy_close.iloc[-1] > spy_ema21.iloc[-1])
 
-    # VIX percentile (lower better)
+    # VIX percentile (relaxed: only block if extreme)
     vix_rank = float("nan")
     vix_ok = True
     try:
@@ -186,41 +198,37 @@ def check_market_regime(use_cache: bool = True) -> RegimeReport:
     except Exception:
         pass
 
-    # HY credit spread proxies — HYG vs LQD and HYG vs TLT
+    # HY credit — INFORMATIONAL ONLY now (was a hard gate). The
+    # HYG/LQD and HYG/TLT ratios cross their EMA20 multiple times per
+    # week and were causing the regime gate to oscillate closed for
+    # the wrong reason.
     credit_ok = True
     try:
         hyg = _fetch_daily("HYG", period="6mo")
         lqd = _fetch_daily("LQD", period="6mo")
-        tlt = _fetch_daily("TLT", period="6mo")
-        if hyg is not None and lqd is not None and tlt is not None:
+        if hyg is not None and lqd is not None:
             cr = hyg["close"].iloc[-1] / max(lqd["close"].iloc[-1], 1e-6)
             cr_ema = ema(hyg["close"] / lqd["close"].clip(lower=1e-6), 20).iloc[-1]
-            ht = hyg["close"].iloc[-1] / max(tlt["close"].iloc[-1], 1e-6)
-            ht_ema = ema(hyg["close"] / tlt["close"].clip(lower=1e-6), 20).iloc[-1]
-            credit_ok = bool(cr >= cr_ema and ht >= ht_ema)
+            # 1% buffer so noise doesn't flip the gate
+            credit_ok = bool(cr >= cr_ema * 0.99)
     except Exception:
         pass
 
-    # Breadth proxy: SPY vs its 200-day MA. If SPY < 200d MA, treat as
-    # weak breadth. Real MMTH index isn't on yfinance.
+    # Breadth — REMOVED as a hard check. SPY trend is sufficient.
     breadth_ok = True
-    try:
-        spy_sma200 = sma(spy_close, 200)
-        if not np.isnan(spy_sma200.iloc[-1]):
-            breadth_ok = bool(spy_close.iloc[-1] >= spy_sma200.iloc[-1] * 0.97)
-    except Exception:
-        pass
 
-    overall = spy_bull and vix_ok and credit_ok and breadth_ok
+    # Hard gate: SPY trend ONLY. VIX & credit are reported but only
+    # block at extreme readings (relaxed thresholds).
+    overall = spy_bull
     reasons = []
     if not spy_bull:
-        reasons.append("SPY bear")
+        reasons.append("SPY < EMA21 (bearish daily trend)")
     if not vix_ok:
-        reasons.append(f"VIX rank {vix_rank:.0f}>=85")
+        reasons.append(f"VIX rank {vix_rank:.0f}>={DEFAULT_VIX_RANK_BLOCK:.0f} — fear extreme")
+        overall = False  # extreme VIX is the only other hard close
     if not credit_ok:
-        reasons.append("HY credit stress")
-    if not breadth_ok:
-        reasons.append("breadth weak")
+        reasons.append("HY credit info: under EMA20 (informational)")
+        # NOT counted in overall — informational only
     reason = "all checks passed" if overall else "; ".join(reasons)
 
     rep = RegimeReport(spy_bull, vix_rank, vix_ok, credit_ok, breadth_ok, overall, reason)

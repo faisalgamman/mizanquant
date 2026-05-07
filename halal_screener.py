@@ -1,4 +1,4 @@
-﻿import asyncio, time, logging, os, uuid, threading, re, gc, json, pandas as pd, numpy as np
+import asyncio, time, logging, os, uuid, threading, re, gc, json, pandas as pd, numpy as np
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
@@ -151,7 +151,7 @@ _rate_limits = defaultdict(list)
 _rate_lock = threading.Lock()
 
 def check_rate_limit(endpoint: str, max_concurrent: int = 2):
-    """Soft rate limiter â€” returns True if OK, False if over limit.
+    """Soft rate limiter — returns True if OK, False if over limit.
     Never raises HTTPException so OpenBB Pro widgets don't break."""
     with _rate_lock:
         _rate_limits[endpoint] = [t for t in _rate_limits[endpoint] if time.time() - t < 60]
@@ -160,7 +160,7 @@ def check_rate_limit(endpoint: str, max_concurrent: int = 2):
         _rate_limits[endpoint].append(time.time())
         return True
 
-# S&P 500 universe â€” excluding obvious haram sectors:
+# S&P 500 universe — excluding obvious haram sectors:
 # Banks/financials (interest-based), insurance, alcohol, gambling, tobacco, weapons
 # Each stock still goes through AAOIFI screening for final halal verification
 _HARAM_EXCLUDE = {
@@ -176,19 +176,19 @@ _HARAM_EXCLUDE = {
     "BF.B","STZ","TAP","MO","PM","SAM",
     # Gambling & casinos
     "WYNN","LVS","MGM","CCL","NCLH","RCL",
-    # Weapons/defense (controversial â€” kept some dual-use industrials)
+    # Weapons/defense (controversial — kept some dual-use industrials)
     "LMT","NOC","GD","RTX","HII","LHX","BA",
     # Conventional media with haram content
     "FOX","FOXA","NFLX","DIS","WBD","LYV",
-    # Utilities â€” almost all fail AAOIFI debt screen (>33% debt/market cap)
+    # Utilities — almost all fail AAOIFI debt screen (>33% debt/market cap)
     "AEE","AEP","AES","ATO","CEG","CMS","CNP","D","DTE","DUK","ED",
     "EIX","ES","ETR","EVRG","EXC","FE","LNT","NEE","NI","NRG","PCG",
     "PEG","PPL","SO","SRE","VST","WEC","XEL",
-    # REITs â€” interest-based income structure, high leverage
+    # REITs — interest-based income structure, high leverage
     "AMT","ARE","AVB","BXP","CCI","CPT","DLR","DOC","EQIX","EQR",
     "ESS","EXR","FRT","HST","INVH","IRM","KIM","MAA","O","PLD",
     "PSA","REG","SBAC","SPG","UDR","VICI","VTR","WELL",
-    # Payment processors / fintech â€” significant interest income from credit
+    # Payment processors / fintech — significant interest income from credit
     "AXP","SYF","CPAY",
 }
 
@@ -271,7 +271,7 @@ _SP500_DELISTED_HALAL = [
     "VIAC",  # ViacomCBS (now PARA)
 ]
 
-# For backtesting only â€” includes delisted stocks to avoid survivorship bias
+# For backtesting only — includes delisted stocks to avoid survivorship bias
 HALAL_STOCKS_BACKTEST = HALAL_STOCKS + [
     s for s in _SP500_DELISTED_HALAL if s not in _HARAM_EXCLUDE
 ]
@@ -301,7 +301,7 @@ _model_cache_ts = {}
 def model_cache_get(key):
     if time.time() - _model_cache_ts.get(key, 0) < MODEL_CACHE_TTL:
         return _model_cache.get(key)
-    # Expired â€” remove it
+    # Expired — remove it
     _model_cache.pop(key, None)
     _model_cache_ts.pop(key, None)
     return None
@@ -317,7 +317,7 @@ def model_cache_set(key, model_data):
     _model_cache_ts[key] = time.time()
 
 def _flush_all_caches():
-    """Emergency memory cleanup â€” flush all caches."""
+    """Emergency memory cleanup — flush all caches."""
     _model_cache.clear()
     _model_cache_ts.clear()
     _cache.clear()
@@ -331,7 +331,7 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 
 
 # ---------------------------------------------------------------------------
-# Halal verification gate â€” blocks unverified / haram stocks from trading
+# Halal verification gate — blocks unverified / haram stocks from trading
 # ---------------------------------------------------------------------------
 # Runtime cache of halal verification results.
 _VERIFIED_HARAM = set()  # symbols confirmed haram via FMP
@@ -348,11 +348,11 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
     """Check if a symbol is verified halal. Returns (is_halal, reason).
 
     Priority:
-    1. If in _HARAM_EXCLUDE â†’ blocked (sector-level exclusion)
-    2. If already verified this session â†’ use cached result
-    3. If in curated HALAL_STOCKS list â†’ allowed (already sector-filtered)
-    4. If FMP data available â†’ run live AAOIFI screening
-    5. If not in curated list AND FMP unavailable â†’ blocked
+    1. If in _HARAM_EXCLUDE → blocked (sector-level exclusion)
+    2. If already verified this session → use cached result
+    3. If in curated HALAL_STOCKS list → allowed (already sector-filtered)
+    4. If FMP data available → run live AAOIFI screening
+    5. If not in curated list AND FMP unavailable → blocked
     """
     sym = symbol.upper().strip()
 
@@ -360,20 +360,20 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
     if sym in _HARAM_EXCLUDE:
         return False, "Excluded sector (banks/insurance/alcohol/gambling/weapons/utilities/REITs)"
 
-    # 2. Session cache â€” fast path
+    # 2. Session cache — fast path
     if sym in _VERIFIED_HALAL:
         return True, "Verified halal"
     if sym in _VERIFIED_HARAM:
         return False, "Verified haram (AAOIFI screening failed)"
 
-    # 3. Curated list â€” stocks already passed sector exclusion
+    # 3. Curated list — stocks already passed sector exclusion
     # This is the fast path that avoids FMP API calls for known stocks
     curated = _get_curated_set()
     if sym in curated:
         _VERIFIED_HALAL.add(sym)
         return True, "Halal (curated S&P 500 list, sector-verified)"
 
-    # 4. Not in curated list â€” must verify via FMP AAOIFI screening
+    # 4. Not in curated list — must verify via FMP AAOIFI screening
     try:
         result = get_halal_status(sym)
         if result is not None:
@@ -393,9 +393,9 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
                     reasons.append(f"liquidity {result.get('liquidity_ratio', '?')}% > 33%")
                 return False, f"Haram: {', '.join(reasons)}" if reasons else "Verified haram"
         else:
-            # FMP unavailable AND not in curated list â†’ block
-            logger.warning(f"Halal gate: {sym} BLOCKED â€” not in curated list, no FMP data")
-            return False, "Cannot verify â€” not in curated list and no financial data"
+            # FMP unavailable AND not in curated list → block
+            logger.warning(f"Halal gate: {sym} BLOCKED — not in curated list, no FMP data")
+            return False, "Cannot verify — not in curated list and no financial data"
     except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Halal verification error for {sym}: {e}")
         return False, f"Verification error: {e}"
@@ -454,7 +454,7 @@ def analyze(symbol, df):
         return None
 
 def _analyze_one(symbol):
-    # Halal gate â€” skip stocks that fail AAOIFI verification
+    # Halal gate — skip stocks that fail AAOIFI verification
     is_halal, reason = verify_halal(symbol)
     if not is_halal:
         return None
@@ -1101,11 +1101,11 @@ def _get_news_sentiment_compound(symbol):
         return float(np.mean(scores)) if scores else 0.0
     except NON_FATAL_ANALYSIS_ERROR as e:
         logger.debug(f"Sentiment fetch failed for {symbol}: {e}")
-        return 0.0  # neutral fallback â€” don't block trade on data failure
+        return 0.0  # neutral fallback — don't block trade on data failure
 
 
 def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
-    """Balanced Confluence Framework â€” 5-gate AND-logic screener.
+    """Balanced Confluence Framework — 5-gate AND-logic screener.
 
     Gates:
       1. Technical Consensus: swing score >= 60 AND USX score >= 7
@@ -1120,7 +1120,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
     Portfolio: max 5 positions, max 2 per GICS sector.
     """
     try:
-        # --- Gate 4: Regime Filter â€” SPY above 50-day SMA ---
+        # --- Gate 4: Regime Filter — SPY above 50-day SMA ---
         spy_df = fetch_yf("SPY", period="1y")
         if spy_df is None or len(spy_df) < 50:
             return [{"Message": "Cannot fetch SPY data for regime filter"}]
@@ -1131,7 +1131,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
 
         if spy_price < spy_sma50:
             return [{
-                "Message": "BCF BLOCKED â€” Bear regime detected",
+                "Message": "BCF BLOCKED — Bear regime detected",
                 "SPY": round(spy_price, 2),
                 "SPY SMA50": round(spy_sma50, 2),
                 "Reason": "SPY below 50-day SMA. No long entries allowed.",
@@ -1208,7 +1208,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
                 logger.debug(f"BCF Gate 5 (Backtest) failed for {symbol}: {e}")
                 continue
 
-            # --- All 5 gates passed â€” compute position sizing ---
+            # --- All 5 gates passed — compute position sizing ---
             price = float(df["close"].iloc[-1])
             atr_val = float(atr(df).iloc[-1])
 
@@ -1616,7 +1616,7 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
             logger.debug(f"Transformer tool error: {e}")
             details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- 12. Stacking Ensemble (XGB + RF + GBM â†’ Ridge) ---
+        # --- 12. Stacking Ensemble (XGB + RF + GBM → Ridge) ---
         try:
             ens_r = run_ensemble(symbol, horizon, df=df)
             if ens_r and len(ens_r) > 1:
@@ -1695,7 +1695,7 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # Verdict thresholds â€” scaled to actual voting tools
+        # Verdict thresholds — scaled to actual voting tools
         # With 14 tools, ~10-12 actually vote (DQN/PolicyGrad often SKIP)
         # STRONG needs >60% of votes, BUY needs plurality with >=45% confidence
         if votes_buy >= 7:
@@ -1803,7 +1803,7 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
 # ============================================================================
 
 def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
-    """Strategy A: Momentum Alpha â€” trend-following with 5 tools.
+    """Strategy A: Momentum Alpha — trend-following with 5 tools.
 
     Tools: EMA Alignment (2x), Momentum ROC+ADX, Backtest 2Y, XGBoost, Monte Carlo
     Entry: 4+ of 5 tools BUY + price > SMA50
@@ -1825,7 +1825,7 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
         atr_val = float(atr(df).iloc[-1])
         close = df["close"]
 
-        # SMA50 gate â€” only buy if above 50-day SMA (trend filter)
+        # SMA50 gate — only buy if above 50-day SMA (trend filter)
         sma50_val = float(close.rolling(50).mean().iloc[-1])
         above_sma50 = price > sma50_val
 
@@ -1840,7 +1840,7 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
                 details.append({"Tool": "Regime Router", "Signal": f"Trending ({sr.reason})", "Vote": "BUY"})
             elif sr.label == "ranging":
                 votes_sell += 1
-                details.append({"Tool": "Regime Router", "Signal": f"Ranging — wrong strategy ({sr.reason})", "Vote": "SELL"})
+                details.append({"Tool": "Regime Router", "Signal": f"Ranging � wrong strategy ({sr.reason})", "Vote": "SELL"})
             else:
                 votes_hold += 1
                 details.append({"Tool": "Regime Router", "Signal": f"Noisy ({sr.reason})", "Vote": "HOLD"})
@@ -1860,7 +1860,7 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
                 sig = f"Trending (t={mom_rep.tstat:.1f}, mom={mom_rep.mom_12_1*100:+.1f}%, H={mom_rep.hurst:.2f})"
             elif mom_rep.verdict == "mean_reverting":
                 votes_sell += 1; vote = "SELL"
-                sig = f"Mean-reverting (H={mom_rep.hurst:.2f}) — anti-momentum"
+                sig = f"Mean-reverting (H={mom_rep.hurst:.2f}) � anti-momentum"
             else:
                 votes_hold += 1; vote = "HOLD"
                 sig = f"Neutral: {mom_rep.reason}"
@@ -2042,7 +2042,7 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
                 logger.warning(f"[A] Telegram alert failed: {e}")
 
         # Auto-trade via Strategy A's account
-        # Send BUY/STRONG BUY/SELL/STRONG SELL â€” let on_signal() decide
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
@@ -2066,7 +2066,7 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
 
 
 def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
-    """Strategy B: Mean Reversion â€” buy oversold stocks.
+    """Strategy B: Mean Reversion — buy oversold stocks.
 
     Tools: Stationarity gate, Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
     Entry: RSI < 35 + price near lower BB + volume confirmation
@@ -2075,7 +2075,7 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
     Per Chan Ch.3 a mean-reversion strategy is only valid on a series
     that actually mean-reverts. We compute an ADF/Hurst/half-life
     report on the last 250 closes and cast a SELL vote when the gate
-    fails — this dilutes BUY conviction on trending or random-walk
+    fails � this dilutes BUY conviction on trending or random-walk
     series without hard-blocking the run.
     """
     try:
@@ -2096,7 +2096,7 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
 
         # --- Tool 0a: Strategy regime router (Chan Ch.6) ---
         # If the asset is "trending", running a mean-reversion strategy
-        # on it is structurally wrong — vote SELL on the entry.
+        # on it is structurally wrong � vote SELL on the entry.
         try:
             from app.services.strategy_regime import classify_strategy_regime
             sr = classify_strategy_regime(close.tail(300))
@@ -2105,7 +2105,7 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
                 details.append({"Tool": "Regime Router", "Signal": f"Ranging ({sr.reason})", "Vote": "BUY"})
             elif sr.label == "trending":
                 votes_sell += 1
-                details.append({"Tool": "Regime Router", "Signal": f"Trending — wrong strategy ({sr.reason})", "Vote": "SELL"})
+                details.append({"Tool": "Regime Router", "Signal": f"Trending � wrong strategy ({sr.reason})", "Vote": "SELL"})
             else:
                 votes_hold += 1
                 details.append({"Tool": "Regime Router", "Signal": f"Noisy ({sr.reason})", "Vote": "HOLD"})
@@ -2302,7 +2302,7 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
             except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.warning(f"[B] Telegram alert failed: {e}")
 
-        # Send BUY/STRONG BUY/SELL/STRONG SELL â€” let on_signal() decide
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
@@ -2326,7 +2326,7 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
 
 
 def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None):
-    """Strategy C: AI Ensemble â€” pure ML decision-making.
+    """Strategy C: AI Ensemble — pure ML decision-making.
 
     Tools: LSTM, Transformer, Stacking Ensemble, Double DQN, Policy Gradient
     Entry: 4+ of 5 ML models vote BUY
@@ -2518,7 +2518,7 @@ def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None
             except NON_FATAL_ANALYSIS_ERROR as e:
                 logger.warning(f"[C] Telegram alert failed: {e}")
 
-        # Send BUY/STRONG BUY/SELL/STRONG SELL â€” let on_signal() decide
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
         if verdict not in ("NEUTRAL", "HOLD"):
             try:
                 trade_result = auto_trade_signal(
@@ -2543,14 +2543,14 @@ def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None
 
 def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10):
     try:
-        # Ø§Ù„Ø®Ø·ÙˆØ© 1: Ø¬Ù„Ø¨ Active Buy Signals
+        # الخطوة 1: جلب Active Buy Signals
         screener_results = run_screener()
         buy_signals = [r for r in screener_results if r.get("swing_score", 0) >= min_swing_score]
         
         if not buy_signals:
             return [{"Message": "No active buy signals found"}]
         
-        # Ø­Ø¯ Ø£Ù‚ØµÙ‰ Ù„Ù„Ø³Ø±Ø¹Ø©
+        # حد أقصى للسرعة
         buy_signals = buy_signals[:max_stocks]
         
         summary_header = [{
@@ -2582,7 +2582,7 @@ def run_batch_consensus(min_swing_score=55, horizon=5, episodes=5, max_stocks=10
                     "Swing Score": stock.get("swing_score", 0),
                 })
         
-        # ØªØ±ØªÙŠØ¨ Ø­Ø³Ø¨ Ø§Ù„Ø«Ù‚Ø© ÙˆØ§Ù„ØªØµÙˆÙŠØª
+        # ترتيب حسب الثقة والتصويت
         results.sort(key=lambda x: (
             x.get("Votes BUY", 0) - x.get("Votes SELL", 0),
             x.get("Confidence %", 0)
@@ -2847,7 +2847,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         quick_results.sort(key=lambda x: x["quick_score"], reverse=True)
         top100 = quick_results[:100]
 
-        # Ø§Ù„Ù…Ø±Ø­Ù„Ø© 2: Halal Screener
+        # المرحلة 2: Halal Screener
         screener_results = []
         for item in top100:
             try:
@@ -2862,7 +2862,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         screener_results.sort(key=lambda x: x["swing_score"], reverse=True)
         top30 = screener_results[:30]
 
-        # Ø§Ù„Ù…Ø±Ø­Ù„Ø© 3: USX Pro
+        # المرحلة 3: USX Pro
         top30_symbols = [r["symbol"] for r in top30]
         usx_filtered = []
         try:
@@ -2874,7 +2874,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
             logger.warning(f"Pipeline USX stage failed: {e}")
             top15 = top30_symbols[:15]
 
-        # Ø§Ù„Ù…Ø±Ø­Ù„Ø© 4: AI Consensus
+        # المرحلة 4: AI Consensus
         final_results = []
         for symbol in top15:
             try:
@@ -2901,7 +2901,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         weak_buy   = [r for r in final_results if r.get("Verdict","") == "WEAK BUY"]
 
         header = [{
-            "Pipeline":         "Russell 1000 Halal â†’ Full AI Pipeline",
+            "Pipeline":         "Russell 1000 Halal → Full AI Pipeline",
             "Total Scanned":    len(RUSSELL_1000_HALAL),
             "After Quick Filter": len(top100),
             "After Screener":   len(top30),
@@ -2920,13 +2920,12 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
     except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
-@app.get("/widgets.json")
 async def widgets():
     return {
         # ===== MAIN: Ready to Trade (THE one screen) =====
         "ready_to_trade": {
             "name": "Ready to Trade",
-            "description": "Stocks that passed BOTH screener AND AI consensus â€” ready for execution",
+            "description": "Stocks that passed BOTH screener AND AI consensus — ready for execution",
             "category": "Trading", "type": "table",
             "endpoint": "/ready",
             "gridData": {"w": 20, "h": 12},
@@ -2980,7 +2979,7 @@ async def widgets():
     }
 
 # ============================================================
-# UNIFIED BACKGROUND CACHE â€” ALL endpoints serve cached results
+# UNIFIED BACKGROUND CACHE — ALL endpoints serve cached results
 # OpenBB Pro has ~30s widget timeout. No endpoint should ever
 # make it wait. Everything computes in background, serves instantly.
 # ============================================================
@@ -3034,12 +3033,10 @@ def _serve_or_compute(key, func, args=(), kwargs=None, msg="Computing in backgro
     return [{"Status": msg, "Info": "Data is being computed. Refresh the widget in 1-3 minutes."}]
 
 # --- Screener-based endpoints (screener, buys, watchlist) ---
-@app.get("/screener")
 async def screener():
     key = _cache_key("screener")
     return _serve_or_compute(key, run_screener, msg="Computing halal screener...")
 
-@app.get("/buys")
 async def buys():
     key = _cache_key("screener")
     cached, status = _get_cached(key)
@@ -3049,7 +3046,6 @@ async def buys():
         threading.Thread(target=_bg_compute, args=(key, run_screener), daemon=True).start()
     return [{"Status": "Computing buy signals...", "Info": "Refresh in 1-2 minutes."}]
 
-@app.get("/watchlist")
 async def watchlist():
     key = _cache_key("screener")
     cached, status = _get_cached(key)
@@ -3059,15 +3055,13 @@ async def watchlist():
         threading.Thread(target=_bg_compute, args=(key, run_screener), daemon=True).start()
     return [{"Status": "Computing watchlist...", "Info": "Refresh in 1-2 minutes."}]
 
-@app.get("/bcf")
 async def bcf_screener(portfolio: float = 100000):
-    """Balanced Confluence Framework â€” moderate risk strategy."""
+    """Balanced Confluence Framework — moderate risk strategy."""
     validate_range(portfolio, "portfolio", 1000, 10_000_000)
     key = _cache_key("bcf", portfolio=portfolio)
     return _serve_or_compute(key, run_bcf_screener, args=(portfolio,), msg="Computing BCF screener...")
 
 # --- Single-symbol endpoints ---
-@app.get("/backtest")
 async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_date: str = "2024-12-31", portfolio: float = 100000, risk_pct: float = 1.0, hold_days: int = 3):
     s = validate_symbol(symbol)
     validate_date(start_date); validate_date(end_date)
@@ -3077,7 +3071,6 @@ async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_dat
     key = _cache_key("backtest", symbol=s, start=start_date, end=end_date, portfolio=portfolio, risk=risk_pct, hold=hold_days)
     return _serve_or_compute(key, run_backtest, args=(s, start_date, end_date, portfolio, risk_pct, hold_days), msg=f"Computing backtest for {s}...")
 
-@app.get("/monte_carlo")
 async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1000):
     s = validate_symbol(symbol)
     validate_range(days, "days", 1, 365)
@@ -3085,7 +3078,6 @@ async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1
     key = _cache_key("monte_carlo", symbol=s, days=days, sims=simulations)
     return _serve_or_compute(key, run_monte_carlo, args=(s, days, simulations), msg=f"Running Monte Carlo for {s}...")
 
-@app.get("/lstm")
 async def lstm(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
@@ -3094,7 +3086,6 @@ async def lstm(symbol: str = "AAPL", horizon: int = 5):
     key = _cache_key("lstm", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_lstm, args=(s, horizon), msg=f"Running LSTM for {s}...")
 
-@app.get("/transformer")
 async def transformer(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
@@ -3103,14 +3094,12 @@ async def transformer(symbol: str = "AAPL", horizon: int = 5):
     key = _cache_key("transformer", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_transformer, args=(s, horizon), msg=f"Running Transformer for {s}...")
 
-@app.get("/ensemble")
 async def ensemble(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     key = _cache_key("ensemble", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_ensemble, args=(s, horizon), msg=f"Running Ensemble for {s}...")
 
-@app.get("/dqn")
 async def dqn(symbol: str = "AAPL", episodes: int = 20):
     s = validate_symbol(symbol)
     validate_range(episodes, "episodes", 1, 100)
@@ -3119,7 +3108,6 @@ async def dqn(symbol: str = "AAPL", episodes: int = 20):
     key = _cache_key("dqn", symbol=s, episodes=episodes)
     return _serve_or_compute(key, run_dqn, args=(s, episodes), msg=f"Running DQN for {s}...")
 
-@app.get("/policy_gradient")
 async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
     s = validate_symbol(symbol)
     validate_range(episodes, "episodes", 1, 100)
@@ -3128,36 +3116,31 @@ async def policy_gradient(symbol: str = "AAPL", episodes: int = 20):
     key = _cache_key("policy_gradient", symbol=s, episodes=episodes)
     return _serve_or_compute(key, run_policy_gradient, args=(s, episodes), msg=f"Running Policy Gradient for {s}...")
 
-@app.get("/usx")
 async def usx(min_score: int = 7):
     validate_range(min_score, "min_score", 1, 10)
     key = _cache_key("usx", min_score=min_score)
     return _serve_or_compute(key, run_usx_screener, args=(min_score,), msg="Computing USX screener...")
 
-@app.get("/consensus")
 async def consensus(symbol: str = "AAPL", horizon: int = 5, episodes: int = 10):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     validate_range(episodes, "episodes", 1, 50)
-    # No rate limiter â€” the background cache already deduplicates work
+    # No rate limiter — the background cache already deduplicates work
     key = _cache_key("consensus", symbol=s, horizon=horizon, episodes=episodes)
     return _serve_or_compute(key, run_consensus, args=(s, horizon, episodes), msg=f"Computing AI consensus for {s}...")
 
-@app.get("/consensus_momentum")
 async def consensus_momentum(symbol: str = "AAPL", horizon: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     key = _cache_key("consensus_momentum", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_consensus_momentum, args=(s, horizon), msg=f"Computing momentum consensus for {s}...")
 
-@app.get("/consensus_reversion")
 async def consensus_reversion(symbol: str = "AAPL", horizon: int = 3):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
     key = _cache_key("consensus_reversion", symbol=s, horizon=horizon)
     return _serve_or_compute(key, run_consensus_reversion, args=(s, horizon), msg=f"Computing reversion consensus for {s}...")
 
-@app.get("/consensus_ml")
 async def consensus_ml(symbol: str = "AAPL", horizon: int = 7, episodes: int = 5):
     s = validate_symbol(symbol)
     validate_range(horizon, "horizon", 1, 30)
@@ -3165,26 +3148,24 @@ async def consensus_ml(symbol: str = "AAPL", horizon: int = 7, episodes: int = 5
     key = _cache_key("consensus_ml", symbol=s, horizon=horizon, episodes=episodes)
     return _serve_or_compute(key, run_consensus_ml, args=(s, horizon, episodes), msg=f"Computing ML consensus for {s}...")
 
-@app.get("/batch_consensus")
 async def batch_consensus(min_swing_score: int = 55, horizon: int = 5, episodes: int = 5, max_stocks: int = 10):
     key = _cache_key("batch_consensus", min=min_swing_score, h=horizon, ep=episodes, max=max_stocks)
     return _serve_or_compute(key, run_batch_consensus, args=(min_swing_score, horizon, episodes, max_stocks), msg="Computing batch consensus...")
 
-@app.get("/pipeline")
 async def pipeline(min_confidence: int = 40, max_final: int = 15, horizon: int = 5, episodes: int = 5):
     key = _cache_key("pipeline", conf=min_confidence, max=max_final, h=horizon, ep=episodes)
     return _serve_or_compute(key, run_pipeline, args=(min_confidence, max_final, horizon, episodes), msg="Computing full pipeline...")
 
 
 # ============================================================================
-# READY TO TRADE â€” Single clean screen showing only actionable stocks
+# READY TO TRADE — Single clean screen showing only actionable stocks
 # ============================================================================
 
 def run_ready_to_trade(min_swing=55, max_stocks=25):
-    """Full pipeline â†’ only BUY/STRONG BUY stocks with all details.
+    """Full pipeline → only BUY/STRONG BUY stocks with all details.
 
-    Flow: Screener (355 stocks) â†’ Top by score â†’ AI Consensus (14 tools)
-          â†’ Filter: only BUY or STRONG BUY â†’ Clean output with trade plan
+    Flow: Screener (355 stocks) → Top by score → AI Consensus (14 tools)
+          → Filter: only BUY or STRONG BUY → Clean output with trade plan
 
     Runs automatically at 9:00 AM ET (pre-market) so results are cached
     and ready when the market opens at 9:30 AM.
@@ -3255,10 +3236,10 @@ def run_ready_to_trade(min_swing=55, max_stocks=25):
         ), reverse=True)
 
         header = [{
-            "Pipeline": f"Scanned {len(screener_results)} â†’ Top {len(candidates)} â†’ AI Consensus â†’ {len(ready)} READY",
+            "Pipeline": f"Scanned {len(screener_results)} → Top {len(candidates)} → AI Consensus → {len(ready)} READY",
             "Ready to Trade": len(ready),
             "Rejected by AI": ", ".join(rejected) if rejected else "None",
-            "Status": "READY" if ready else "NO TRADES â€” AI consensus blocked all candidates",
+            "Status": "READY" if ready else "NO TRADES — AI consensus blocked all candidates",
         }]
 
         if not ready:
@@ -3270,7 +3251,6 @@ def run_ready_to_trade(min_swing=55, max_stocks=25):
         return [{"Error": str(e)}]
 
 
-@app.get("/ready")
 async def ready_to_trade(min_swing: int = 55, max_stocks: int = 25):
     """Single clean screen: only stocks that passed BOTH screener AND AI consensus."""
     key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
@@ -3278,7 +3258,6 @@ async def ready_to_trade(min_swing: int = 55, max_stocks: int = 25):
                             msg="Analyzing top stocks through full AI pipeline... Pre-market scan runs at 9:00 AM ET.")
 
 
-@app.get("/refresh_ready")
 async def refresh_ready(min_swing: int = 55, max_stocks: int = 25, x_api_key: OperatorAPIKey = None):
     _require_api_key(x_api_key)
     key = _cache_key("ready_to_trade", min=min_swing, max=max_stocks)
@@ -3289,7 +3268,6 @@ async def refresh_ready(min_swing: int = 55, max_stocks: int = 25, x_api_key: Op
     return [{"Status": "Ready-to-Trade refresh started."}]
 
 # --- Refresh endpoints (clear cache + recompute) ---
-@app.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     _require_api_key(x_api_key)
     s = validate_symbol(symbol)
@@ -3300,7 +3278,6 @@ async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = No
     threading.Thread(target=_bg_compute, args=(key, run_consensus, (s, 5, 10)), daemon=True).start()
     return {"Status": f"Consensus refresh started for {s}."}
 
-@app.get("/refresh_batch")
 async def refresh_batch(x_api_key: OperatorAPIKey = None):
     _require_api_key(x_api_key)
     key = _cache_key("batch_consensus", min=55, h=5, ep=5, max=10)
@@ -3310,7 +3287,6 @@ async def refresh_batch(x_api_key: OperatorAPIKey = None):
     threading.Thread(target=_bg_compute, args=(key, run_batch_consensus, (55, 5, 5, 10)), daemon=True).start()
     return [{"Status": "Batch consensus refresh started"}]
 
-@app.get("/refresh_pipeline")
 async def refresh_pipeline(x_api_key: OperatorAPIKey = None):
     _require_api_key(x_api_key)
     key = _cache_key("pipeline", conf=40, max=15, h=5, ep=5)
@@ -3434,21 +3410,20 @@ def _require_api_key(api_key: str | None):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-@app.get("/halal_status")
 async def halal_status(symbol: str = "AAPL"):
     """Get AAOIFI Halal compliance status for a single symbol."""
     s = validate_symbol(symbol)
     if not settings.FMP_API_KEY:
         return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
     try:
-        # Run in thread pool â€” get_halal_status does blocking HTTP (FMP + yfinance fallback)
+        # Run in thread pool — get_halal_status does blocking HTTP (FMP + yfinance fallback)
         result = await asyncio.to_thread(get_halal_status, s)
     except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"Halal screening crashed for {s}: {e}")
         result = None
     if result is None:
         return [{"Error": f"Could not retrieve fundamental data for {s}"}]
-    # Format for OpenBB widget display â€” _json_safe guards against NaN from yfinance
+    # Format for OpenBB widget display — _json_safe guards against NaN from yfinance
     status = "HALAL" if result.get("is_halal") else "HARAM"
     return [{
         "Symbol": s,
@@ -3467,12 +3442,11 @@ async def halal_status(symbol: str = "AAPL"):
         "Threshold": "Debt<33%, Interest<5%, No Haram Sector, Liquidity<33%",
     }]
 
-@app.get("/halal_verify/{symbol}")
 async def halal_verify(symbol: str):
     """Quick halal verification gate check for any symbol.
 
     Returns whether the stock is allowed for trading.
-    Uses the 3-layer defense: sector exclusion â†’ FMP AAOIFI â†’ fail-closed.
+    Uses the 3-layer defense: sector exclusion → FMP AAOIFI → fail-closed.
     """
     s = validate_symbol(symbol)
     is_halal, reason = verify_halal(s)
@@ -3485,7 +3459,6 @@ async def halal_verify(symbol: str):
     }]
 
 
-@app.get("/halal_blocked")
 async def halal_blocked():
     """List all stocks currently blocked by the halal verification gate."""
     blocked = []
@@ -3496,7 +3469,6 @@ async def halal_blocked():
     return blocked if blocked else [{"Message": "No stocks blocked yet (gate runs on first access)"}]
 
 
-@app.get("/screening_report")
 async def screening_report():
     """Get all AAOIFI screening results from the database."""
     results = get_screening_report()
@@ -3504,7 +3476,6 @@ async def screening_report():
         return [{"Message": "No screening results yet. Use /screen_stocks to start screening, or /halal_status/{symbol} for a single stock."}]
     return results
 
-@app.get("/screen_stocks")
 async def screen_stocks_endpoint(max_stocks: int = 80):
     """Trigger batch AAOIFI screening for all stocks in HALAL_STOCKS + RUSSELL_1000_HALAL."""
     if not settings.FMP_API_KEY:
@@ -3523,7 +3494,6 @@ async def screen_stocks_endpoint(max_stocks: int = 80):
 # MULTI-STRATEGY ENDPOINTS
 # ============================================================
 
-@app.get("/strategies")
 async def list_strategies(x_api_key: OperatorAPIKey = None):
     """List all configured strategies and their settings."""
     _require_api_key(x_api_key)
@@ -3544,7 +3514,6 @@ async def list_strategies(x_api_key: OperatorAPIKey = None):
     return result if result else [{"message": "No strategies configured. Set ALPACA_API_KEY_A/B/C env vars."}]
 
 
-@app.get("/strategy/{strategy_id}/account")
 async def strategy_account(strategy_id: str, x_api_key: OperatorAPIKey = None):
     """Get account info for a specific strategy."""
     _require_api_key(x_api_key)
@@ -3559,9 +3528,8 @@ async def strategy_account(strategy_id: str, x_api_key: OperatorAPIKey = None):
     return [account]
 
 
-@app.get("/debug/alpaca")
 async def debug_alpaca(x_api_key: OperatorAPIKey = None):
-    """Debug Alpaca connection â€” shows key prefix, base URL, and test result."""
+    """Debug Alpaca connection — shows key prefix, base URL, and test result."""
     _require_api_key(x_api_key)
     import httpx
     from app.config import STRATEGY_CONFIGS
@@ -3594,7 +3562,6 @@ async def debug_alpaca(x_api_key: OperatorAPIKey = None):
     return results
 
 
-@app.get("/strategy/{strategy_id}/positions")
 async def strategy_positions(strategy_id: str, x_api_key: OperatorAPIKey = None):
     """Get positions for a specific strategy."""
     _require_api_key(x_api_key)
@@ -3610,7 +3577,6 @@ async def strategy_positions(strategy_id: str, x_api_key: OperatorAPIKey = None)
     return positions
 
 
-@app.get("/strategy/{strategy_id}/scan")
 async def strategy_scan(strategy_id: str, symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     """Manually run a strategy consensus for a symbol."""
     _require_api_key(x_api_key)
@@ -3625,7 +3591,6 @@ async def strategy_scan(strategy_id: str, symbol: str = "AAPL", x_api_key: Opera
         return [{"Error": f"Unknown strategy {sid}. Use A, B, or C."}]
 
 
-@app.get("/strategies/comparison")
 async def strategy_comparison(x_api_key: OperatorAPIKey = None):
     """Get side-by-side comparison of all strategy accounts."""
     _require_api_key(x_api_key)
@@ -3667,7 +3632,6 @@ async def strategy_comparison(x_api_key: OperatorAPIKey = None):
 # PHASE 3: Alpaca Portfolio Integration (Read-Only)
 # ============================================================
 
-@app.get("/portfolio/summary")
 async def portfolio_summary(x_api_key: OperatorAPIKey = None):
     """Get Alpaca account summary: equity, cash, buying power, P&L."""
     _require_api_key(x_api_key)
@@ -3693,7 +3657,6 @@ async def portfolio_summary(x_api_key: OperatorAPIKey = None):
         "Currency": account["currency"],
     }]
 
-@app.get("/portfolio/positions")
 async def portfolio_positions(x_api_key: OperatorAPIKey = None):
     """Get all open positions with unrealized P&L."""
     _require_api_key(x_api_key)
@@ -3719,7 +3682,6 @@ async def portfolio_positions(x_api_key: OperatorAPIKey = None):
         })
     return result
 
-@app.get("/portfolio/orders")
 async def portfolio_orders(status: str = "all", limit: int = 20, x_api_key: OperatorAPIKey = None):
     """Get recent Alpaca orders."""
     _require_api_key(x_api_key)
@@ -3731,7 +3693,6 @@ async def portfolio_orders(status: str = "all", limit: int = 20, x_api_key: Oper
         return [{"Message": "No orders found"}]
     return orders
 
-@app.get("/portfolio/history")
 async def portfolio_history(period: str = "1M", x_api_key: OperatorAPIKey = None):
     """Get portfolio equity curve history."""
     _require_api_key(x_api_key)
@@ -3756,7 +3717,6 @@ async def portfolio_history(period: str = "1M", x_api_key: OperatorAPIKey = None
 # PHASE 4: Signal Tracking, Alerts & Monitoring
 # ============================================================
 
-@app.get("/signals/accuracy")
 async def signals_accuracy(period: int = 30):
     """Signal accuracy report: hit rates, avg returns by source."""
     validate_range(period, "period", 1, 365)
@@ -3767,14 +3727,12 @@ async def signals_accuracy(period: int = 30):
         logger.error(f"check_signal_outcomes thread failed: {e}")
     return get_accuracy_report(period_days=period)
 
-@app.get("/signals/history")
 async def signals_history(symbol: str = "", limit: int = 50):
     """Recent signal history with outcomes."""
     s = validate_symbol(symbol) if symbol else None
     validate_range(limit, "limit", 1, 500)
     return get_signal_history(symbol=s, limit=limit)
 
-@app.get("/signals/check_outcomes")
 async def signals_check_outcomes(days: int = 5, x_api_key: OperatorAPIKey = None):
     """Manually trigger outcome checking for mature signals."""
     _require_api_key(x_api_key)
@@ -3782,7 +3740,6 @@ async def signals_check_outcomes(days: int = 5, x_api_key: OperatorAPIKey = None
     result = check_signal_outcomes(lookback_days=days)
     return [{"Action": "Outcome check complete", **result}]
 
-@app.get("/telegram/test")
 async def telegram_test(x_api_key: OperatorAPIKey = None):
     """Send a test message to Telegram."""
     _require_api_key(x_api_key)
@@ -3792,7 +3749,6 @@ async def telegram_test(x_api_key: OperatorAPIKey = None):
     return [{"Status": "sent" if ok else "failed"}]
 
 
-@app.get("/telegram/test_chart")
 async def telegram_test_chart(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     """Test chart generation + Telegram photo sending. Returns diagnostic info."""
     _require_api_key(x_api_key)
@@ -3840,7 +3796,6 @@ async def telegram_test_chart(symbol: str = "AAPL", x_api_key: OperatorAPIKey = 
 
     return result
 
-@app.get("/telegram/daily_summary")
 async def telegram_daily_summary(x_api_key: OperatorAPIKey = None):
     """Manually trigger daily summary to Telegram."""
     _require_api_key(x_api_key)
@@ -3891,7 +3846,7 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
             f"\nAnalyzing with AI consensus..."
         )
 
-        # Step 3: Run consensus on each â€” this triggers chart alerts automatically
+        # Step 3: Run consensus on each — this triggers chart alerts automatically
         results = []
         for i, stock in enumerate(top_stocks):
             symbol = stock["symbol"]
@@ -3936,11 +3891,10 @@ def _run_post_market_scan_bg(top_n: int, min_score: int):
         tg_send(f"POST-MARKET SCAN ERROR\n\n{str(e)[:200]}")
 
 
-@app.get("/api/v1/post_market_scan")
 async def post_market_scan(top_n: int = 5, min_score: int = 55, x_api_key: OperatorAPIKey = None):
     """Post-market analysis: scan top stocks, send chart alerts via Telegram.
 
-    Runs in the BACKGROUND â€” returns immediately. Results sent to Telegram.
+    Runs in the BACKGROUND — returns immediately. Results sent to Telegram.
 
     Runs the screener, picks the top N stocks by swing score,
     runs consensus on each, and sends STRONG signals with professional
@@ -3952,7 +3906,7 @@ async def post_market_scan(top_n: int = 5, min_score: int = 55, x_api_key: Opera
     if not settings.TELEGRAM_BOT_TOKEN:
         return [{"Error": "Telegram not configured"}]
 
-    # Launch in background thread â€” don't block the HTTP response
+    # Launch in background thread — don't block the HTTP response
     thread = threading.Thread(
         target=_run_post_market_scan_bg,
         args=(top_n, min_score),
@@ -3968,11 +3922,10 @@ async def post_market_scan(top_n: int = 5, min_score: int = 55, x_api_key: Opera
     }]
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 # AUTO-TRADING ENDPOINTS (Stage 1: Paper Trading)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 
-@app.get("/api/v1/trading/status")
 async def trading_status(x_api_key: OperatorAPIKey = None):
     """Get auto-trading status: enabled/disabled, risk dashboard, PDT tracker."""
     _require_api_key(x_api_key)
@@ -4017,21 +3970,18 @@ async def trading_status(x_api_key: OperatorAPIKey = None):
     return risk
 
 
-@app.get("/api/v1/trading/history")
 async def trading_history(limit: int = 50, x_api_key: OperatorAPIKey = None):
     """Get auto-trade execution history."""
     _require_api_key(x_api_key)
     return get_trade_history(limit=limit)
 
 
-@app.get("/api/v1/trading/performance")
 async def trading_performance(x_api_key: OperatorAPIKey = None):
     """Get trading performance report: win rate, Sharpe, drawdown, profit factor."""
     _require_api_key(x_api_key)
     return get_performance_report()
 
 
-@app.post("/api/v1/trading/enable")
 async def trading_enable(x_api_key: OperatorAPIKey = None):
     """Enable auto-trading (paper account only)."""
     _require_api_key(x_api_key)
@@ -4040,7 +3990,6 @@ async def trading_enable(x_api_key: OperatorAPIKey = None):
     return {"auto_trade_enabled": True, "message": "Paper trading auto-execution enabled"}
 
 
-@app.post("/api/v1/trading/disable")
 async def trading_disable(x_api_key: OperatorAPIKey = None):
     """Disable auto-trading (emergency stop)."""
     _require_api_key(x_api_key)
@@ -4049,17 +3998,16 @@ async def trading_disable(x_api_key: OperatorAPIKey = None):
     return {"auto_trade_enabled": False, "message": "Auto-trading disabled"}
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 # PARAMETER OPTIMIZATION ENDPOINT
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 
-@app.get("/api/v1/optimize")
 async def optimize_parameters(n_stocks: int = 10, x_api_key: OperatorAPIKey = None):
     """Run parameter sweep optimization on historical data.
 
     Tests different consensus thresholds, SL/TP multipliers, and tool
     parameters to find optimal values. Results show improvement vs current defaults.
-    Runs in background â€” returns immediately, results sent to Telegram.
+    Runs in background — returns immediately, results sent to Telegram.
     """
     _require_api_key(x_api_key)
 
@@ -4091,11 +4039,10 @@ async def optimize_parameters(n_stocks: int = 10, x_api_key: OperatorAPIKey = No
     return [{"Status": "Optimizer started", "Message": "Results will be sent to Telegram"}]
 
 
-# â•â•â•â•â•â•â•â•ï¿½ï¿½ï¿½â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•ï¿½ï¿½â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════���═════════════════��═══════════════════════════════════════════
 # INTRADAY DATA ENDPOINT
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•ï¿½ï¿½ï¿½â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════���═══════════════════════════
 
-@app.get("/api/v1/intraday/{symbol}")
 async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
     """Get intraday bars for a symbol (15Min default).
 
@@ -4138,7 +4085,6 @@ async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
     return bars
 
 
-@app.get("/health")
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
@@ -4206,457 +4152,14 @@ async def health():
         "dependencies": checks,
     }
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 # CLAUDE AI AGENT ENDPOINTS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-
-@app.post("/agent/chat")
-async def agent_chat(payload: dict):
-    """Conversational AI trading assistant powered by Claude.
-
-    Send a natural language message (Arabic or English) and get
-    data-driven analysis using all available trading tools.
-
-    Request: {"message": "Ø­Ù„Ù„ Ù„ÙŠ Ø³Ù‡Ù… AAPL", "conversation_id": "optional"}
-    """
-    if not settings.ANTHROPIC_API_KEY:
-        return {"error": "ANTHROPIC_API_KEY not configured. Add it to Railway environment variables."}
-
-    message = payload.get("message", "").strip()
-    if not message:
-        return {"error": "Message is required"}
-
-    conversation_id = payload.get("conversation_id")
-
-    try:
-        from app.services.claude_agent import get_agent
-        agent = get_agent()
-        result = await agent.chat(message, conversation_id=conversation_id)
-        return result
-    except NON_FATAL_ANALYSIS_ERROR as e:
-        logger.error(f"Agent chat error: {e}")
-        return {"error": f"Agent error: {str(e)}"}
+# ══════════════════════════════════════════════════════════════════════
 
 
-@app.get("/agent/analyze")
-async def agent_analyze(symbol: str = "AAPL"):
-    """AI Agent single-stock analysis â€” convenience endpoint for OpenBB widget.
-
-    Runs a comprehensive analysis: halal check + technical + consensus + trade plan.
-    Returns the analysis as a table row for widget display.
-    """
-    if not settings.ANTHROPIC_API_KEY:
-        return [{"Error": "ANTHROPIC_API_KEY not configured"}]
-
-    s = validate_symbol(symbol)
-
-    try:
-        from app.services.claude_agent import get_agent
-        agent = get_agent()
-        prompt = (
-            f"Analyze {s} comprehensively: check halal status, run technical analysis "
-            f"and consensus. Give me a clear verdict with entry/SL/TP levels. Be concise."
-        )
-        result = await agent.chat(prompt)
-        return [{
-            "Symbol": s,
-            "AI Analysis": result.get("response", "No response"),
-            "Tools Used": ", ".join(result.get("tools_used", [])),
-            "Model": result.get("model", ""),
-        }]
-    except NON_FATAL_ANALYSIS_ERROR as e:
-        logger.error(f"Agent analyze error: {e}")
-        return [{"Error": f"Agent error: {str(e)}"}]
 
 
-@app.get("/agent/health")
-async def agent_health():
-    """Check Claude AI agent status."""
-    from app.services.claude_tools import TOOL_SCHEMAS
-    configured = bool(settings.ANTHROPIC_API_KEY)
-    return {
-        "status": "ready" if configured else "not_configured",
-        "model": settings.CLAUDE_MODEL,
-        "api_key_configured": configured,
-        "tools_count": len(TOOL_SCHEMAS),
-        "tools": [t["name"] for t in TOOL_SCHEMAS],
-    }
 
-
-@app.get("/admin/config")
-async def admin_config(x_api_key: OperatorAPIKey = None):
-    """Operator sanity endpoint for current redacted config."""
-    _require_api_key(x_api_key)
-    return {
-        "settings": settings.redacted(),
-        "app_cfg": app_cfg.to_redacted_dict(),
-    }
-
-
-@app.get("/admin/guards")
-async def admin_guards(limit: int = 50, x_api_key: OperatorAPIKey = None):
-    """Return the latest guard audit rows."""
-    _require_api_key(x_api_key)
-    try:
-        from app.db.database import SessionLocal
-        from app.db.models import GuardLog
-
-        db = SessionLocal()
-        try:
-            rows = db.query(GuardLog).order_by(GuardLog.ts.desc()).limit(min(max(limit, 1), 200)).all()
-            return [
-                {
-                    "ts": row.ts.isoformat() if row.ts else "",
-                    "strategy_id": row.strategy_id,
-                    "symbol": row.symbol,
-                    "guard_name": row.guard_name,
-                    "passed": row.passed,
-                    "code": row.code,
-                    "reason": row.reason,
-                    "regime": row.regime,
-                }
-                for row in rows
-            ]
-        finally:
-            db.close()
-    except NON_FATAL_ANALYSIS_ERROR as e:
-        logger.error(f"/admin/guards failed: {e}", exc_info=True)
-        return [{"error": str(e)}]
-
-
-@app.post("/admin/killswitch")
-async def admin_killswitch(killed: bool = True, x_api_key: OperatorAPIKey = None):
-    """Toggle the global kill-switch."""
-    _require_api_key(x_api_key)
-    app_cfg.killed = killed
-    tg_send(
-        f"KILL SWITCH {'ENABLED' if killed else 'DISABLED'}\n\n"
-        f"All new trades will {'fail closed' if killed else 'resume normal guard evaluation'}."
-    )
-    return {"killed": app_cfg.killed}
-
-
-@app.post("/admin/scan_signals")
-async def admin_scan_signals(
-    strategy: str = "ABC",
-    min_confidence: float = 70.0,
-    account_usd: float = 5000.0,
-    dry_run: bool = False,
-    symbols: str = "",
-    x_api_key: OperatorAPIKey = None,
-):
-    """Scan for STRONG BUY signals and push one Telegram alert per
-    signal. Independent of auto-trading — does NOT place broker
-    orders, only notifies for manual execution on IBKR.
-
-    Query params:
-      strategy        any subset of "ABC" (default "ABC")
-      min_confidence  minimum % to include (default 70)
-      account_usd     account size for share-count suggestion
-      dry_run         true skips Telegram (returns preview JSON only)
-      symbols         comma-separated tickers to scan; if empty, scans
-                      the full halal universe (~357 stocks). The full
-                      scan takes 10-15 minutes — too long for a
-                      synchronous HTTP request, so it runs as a
-                      background task. Use `symbols=AAPL,MSFT,NVDA`
-                      for a fast synchronous test.
-
-    Returns:
-      - dry_run=true OR symbols specified: synchronous JSON with full
-        results.
-      - default (full universe scan): 202 Accepted with a "queued"
-        message; signals stream to Telegram as they are found.
-    """
-    _require_api_key(x_api_key)
-    from app.services.signals_advisor import scan_and_notify_strong_buys
-
-    sids = tuple(c for c in strategy.upper() if c in "ABC")
-    if not sids:
-        sids = ("A", "B", "C")
-
-    # Parse symbol list (if provided).
-    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] or None
-
-    # Synchronous path: dry-run OR small explicit symbol list (<= 20
-    # tickers). These complete in seconds and the operator wants the
-    # JSON back immediately.
-    if dry_run or (syms is not None and len(syms) <= 20):
-        return scan_and_notify_strong_buys(
-            strategy_ids=sids,
-            symbols=syms,
-            min_confidence=min_confidence,
-            account_usd=account_usd,
-            dry_run=dry_run,
-        )
-
-    # Background path: full universe (or > 20 symbols). Spin off a
-    # daemon thread so the HTTP request returns now; results land on
-    # Telegram as the scan progresses. We can't use FastAPI's
-    # BackgroundTasks here because the operator may have a long-lived
-    # request timeout we don't control (Railway proxy ~5 min).
-    import threading
-    def _run_in_bg():
-        try:
-            scan_and_notify_strong_buys(
-                strategy_ids=sids,
-                symbols=syms,
-                min_confidence=min_confidence,
-                account_usd=account_usd,
-                dry_run=False,
-            )
-        except Exception as e:
-            logger.exception(f"background scan_signals failed: {e}")
-    threading.Thread(target=_run_in_bg, daemon=True, name="scan_signals").start()
-    return {
-        "queued": True,
-        "scope": "full universe (~357 halal stocks)" if not syms else f"{len(syms)} symbols",
-        "strategies": list(sids),
-        "min_confidence": min_confidence,
-        "note": "Signals will arrive on Telegram as they are found (~10-15 min).",
-    }
-
-
-@app.get("/admin/alpaca_check")
-async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
-    """Probe each Alpaca credential set (default + A/B/C) and report
-    which one is failing with 401. Use this to identify exactly which
-    ALPACA_API_KEY_* / ALPACA_SECRET_KEY_* pair is invalid on Railway."""
-    _require_api_key(x_api_key)
-
-    from app.config import STRATEGY_CONFIGS, settings as _settings
-    from app.services.alpaca_client import get_account, get_last_error
-
-    results: dict = {}
-
-    # Default / legacy account (no strategy suffix)
-    if _settings.ALPACA_API_KEY:
-        acct = get_account(strategy_id=None)
-        err = get_last_error(strategy_id=None)
-        results["DEFAULT"] = {
-            "configured": True,
-            "account_status": acct.get("status") if acct else None,
-            "equity": acct.get("equity") if acct else None,
-            "last_error": err,
-        }
-    else:
-        results["DEFAULT"] = {"configured": False}
-
-    # Per-strategy accounts
-    for sid in ("A", "B", "C"):
-        cfg = STRATEGY_CONFIGS.get(sid)
-        if not cfg or not cfg.alpaca_api_key:
-            results[sid] = {"configured": False}
-            continue
-        acct = get_account(strategy_id=sid)
-        err = get_last_error(strategy_id=sid)
-        results[sid] = {
-            "configured": True,
-            "name": cfg.name,
-            "account_status": acct.get("status") if acct else None,
-            "equity": acct.get("equity") if acct else None,
-            "last_error": err,
-        }
-
-    return {"results": results, "base_url": _settings.ALPACA_BASE_URL}
-
-
-@app.get("/admin/ibkr_ping")
-async def admin_ibkr_ping(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
-    """Smoke-test the IB Gateway connection. Layered diagnostics:
-
-    1. DNS — does the hostname resolve?
-    2. TCP — does a plain socket connect to host:port succeed?
-    3. ib_insync — does the IB API handshake complete, and can we read
-       the account?
-
-    The first failing layer is the actual problem. Any "connected: false"
-    response now includes a `tcp_ok` and a `ib_error` field so the
-    operator does not need to read service logs for routine debugging.
-    """
-    _require_api_key(x_api_key)
-
-    import socket
-
-    host = os.environ.get("IBKR_HOST", "127.0.0.1")
-    try:
-        port = int(os.environ.get("IBKR_PORT", "4002"))
-    except ValueError:
-        port = 4002
-    client_id_env = (
-        f"IBKR_CLIENT_ID_{strategy_id.upper()}" if strategy_id else "IBKR_CLIENT_ID"
-    )
-    client_id = os.environ.get(client_id_env, os.environ.get("IBKR_CLIENT_ID", "1"))
-
-    out: dict = {
-        "host": host,
-        "port": port,
-        "client_id": client_id,
-        "dns_ok": False,
-        "resolved_addrs": [],
-        "tcp_ok": False,
-        "tcp_error": "",
-        "connected": False,
-        "ib_error": "",
-        "account": None,
-        "n_positions": 0,
-    }
-
-    # Layer 1: DNS
-    try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        out["resolved_addrs"] = sorted({info[4][0] for info in infos})
-        out["dns_ok"] = bool(out["resolved_addrs"])
-    except Exception as exc:
-        out["tcp_error"] = f"DNS failed: {exc}"
-        return out
-
-    # Layer 2: raw TCP connect
-    last_err = ""
-    for info in infos:
-        family, socktype, proto, _, sockaddr = info
-        s = socket.socket(family, socktype, proto)
-        s.settimeout(5.0)
-        try:
-            s.connect(sockaddr)
-            out["tcp_ok"] = True
-            try:
-                s.close()
-            except Exception:
-                pass
-            break
-        except Exception as exc:
-            last_err = f"{sockaddr}: {exc}"
-            try:
-                s.close()
-            except Exception:
-                pass
-    if not out["tcp_ok"]:
-        out["tcp_error"] = last_err
-        return out
-
-    # Layer 3: bypass the broker adapter and talk to ib_insync
-    # directly so any exception during connect/handshake is surfaced
-    # in the response. The adapter logs and swallows errors by design
-    # (so production callers degrade gracefully) — the probe needs to
-    # see them. Run in a worker thread so ib_insync gets its own
-    # asyncio loop and does not deadlock with FastAPI's.
-    def _probe():
-        try:
-            import asyncio as _asyncio
-            try:
-                _asyncio.set_event_loop(_asyncio.new_event_loop())
-            except Exception:
-                pass
-            try:
-                import ib_insync  # type: ignore
-            except Exception as exc:
-                return {"phase": "import", "account": None, "n_positions": 0,
-                        "error": f"{type(exc).__name__}: {exc}"}
-
-            ib = ib_insync.IB()
-            # Try the configured client_id first; if it times out, retry
-            # with a high random id in case of collision with a stale
-            # session or another concurrent connection.
-            import random as _random
-            attempts = [int(client_id), _random.randint(900, 999)]
-            errors: list[str] = []
-            connected = False
-            used_id = attempts[0]
-            for cid in attempts:
-                try:
-                    ib.connect(host, port, clientId=cid, timeout=30.0)
-                    connected = True
-                    used_id = cid
-                    break
-                except Exception as exc:
-                    errors.append(f"clientId={cid}: {type(exc).__name__}: {exc}")
-                    try:
-                        ib.disconnect()
-                    except Exception:
-                        pass
-            if not connected:
-                return {"phase": "connect", "account": None, "n_positions": 0,
-                        "error": " | ".join(errors)}
-
-            try:
-                vals = ib.accountValues()
-                positions = ib.positions()
-                acct = {}
-                for v in vals:
-                    if getattr(v, "tag", "") == "TotalCashValue":
-                        acct["cash"] = str(getattr(v, "value", ""))
-                    elif getattr(v, "tag", "") == "NetLiquidation":
-                        acct["equity"] = str(getattr(v, "value", ""))
-                    elif getattr(v, "tag", "") == "BuyingPower":
-                        acct["buying_power"] = str(getattr(v, "value", ""))
-                acct["status"] = "ACTIVE"
-                return {"phase": "ok", "account": acct,
-                        "n_positions": len(positions), "error": ""}
-            except Exception as exc:
-                return {"phase": "read", "account": None, "n_positions": 0,
-                        "error": f"{type(exc).__name__}: {exc}"}
-            finally:
-                try:
-                    ib.disconnect()
-                except Exception:
-                    pass
-        except Exception as exc:
-            return {"phase": "outer", "account": None, "n_positions": 0,
-                    "error": f"{type(exc).__name__}: {exc}"}
-
-    res = await asyncio.to_thread(_probe)
-    out["account"] = res["account"]
-    out["n_positions"] = res["n_positions"]
-    out["ib_error"] = res["error"]
-    out["ib_phase"] = res.get("phase", "")
-    out["connected"] = res["account"] is not None
-    return out
-
-
-@app.post("/admin/rearm_orphans")
-async def admin_rearm_orphans(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
-    """Re-attach GTC stop-loss + take-profit to every position whose
-    bracket legs expired. Use this once after deploying the
-    time_in_force=gtc fix to recover positions stuck without an
-    automatic exit ("buys but never sells")."""
-    _require_api_key(x_api_key)
-
-    from app.config import STRATEGY_CONFIGS
-    from app.services.trading_engine import rearm_all_orphans
-
-    if strategy_id:
-        results = rearm_all_orphans(strategy_id=strategy_id)
-        return {"strategy": strategy_id, "actions": results}
-
-    out = {}
-    for sid in list(STRATEGY_CONFIGS.keys()):
-        out[sid] = rearm_all_orphans(strategy_id=sid)
-    return {"actions_by_strategy": out}
-
-
-@app.post("/admin/regime")
-async def admin_regime(state: str | None = None, x_api_key: OperatorAPIKey = None):
-    """Force or clear the live regime."""
-    _require_api_key(x_api_key)
-
-    from app.services.regime import force_regime, refresh_regime
-
-    normalized = state.upper() if state else None
-    if normalized not in (None, "BULL", "NEUTRAL", "BEAR"):
-        raise HTTPException(status_code=400, detail="state must be one of BULL, NEUTRAL, BEAR, or omitted to clear")
-
-    snapshot = force_regime(normalized)
-    if normalized is None:
-        snapshot = refresh_regime()
-        tg_send("REGIME OVERRIDE CLEARED\n\nLive regime computation has resumed.")
-    else:
-        tg_send(f"REGIME OVERRIDE\n\nForced state: {normalized}")
-    return {
-        "state": snapshot.state,
-        "changed": snapshot.changed,
-        "computed_at": snapshot.computed_at.isoformat() if snapshot.computed_at else "",
-        "forced": normalized is not None,
-    }
 
 
 def _equity_curve_svg(history):
@@ -4786,46 +4289,18 @@ def _render_ops_fragment(api_key: str | None) -> str:
     """
 
 
-@app.get("/ops/body", response_class=HTMLResponse)
-async def ops_dashboard_body(x_api_key: OperatorAPIKey = None):
-    _require_api_key(x_api_key)
-    try:
-        return HTMLResponse(_render_ops_fragment(x_api_key))
-    except NON_FATAL_ANALYSIS_ERROR as e:
-        logger.error(f"/ops/body failed: {e}", exc_info=True)
-        return HTMLResponse(f"<div><h2>Ops fragment error</h2><pre>{escape(str(e))}</pre></div>", status_code=500)
+# --- Include routers ---
+from app.routers.screener import router as screener_router
+from app.routers.forecast import router as forecast_router
+from app.routers.consensus import router as consensus_router
+from app.routers.portfolio import router as portfolio_router
+from app.routers.admin import router as admin_router
 
-
-@app.get("/ops", response_class=HTMLResponse)
-async def ops_dashboard(x_api_key: OperatorAPIKey = None):
-    """Operator dashboard shell with HTMX auto-refresh."""
-    _require_api_key(x_api_key)
-    headers_json = escape(json.dumps({"X-API-Key": x_api_key}) if x_api_key else "{}", quote=True)
-    body = _render_ops_fragment(x_api_key)
-    return HTMLResponse(
-        f"""
-        <html>
-          <head>
-            <title>Ops Dashboard</title>
-            <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-            <style>
-              body {{ font-family: Georgia, serif; background: linear-gradient(180deg, #f7f2ea 0%, #fcfbf8 100%); margin: 0; padding: 24px; color: #1f2933; }}
-              table th, table td {{ padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }}
-            </style>
-          </head>
-          <body>
-            <div
-              id="ops-shell"
-              hx-get="/ops/body"
-              hx-trigger="load, every 10s"
-              hx-swap="innerHTML"
-              hx-headers='{headers_json}'
-            >{body}</div>
-          </body>
-        </html>
-        """
-    )
-
+app.include_router(screener_router)
+app.include_router(forecast_router)
+app.include_router(consensus_router)
+app.include_router(portfolio_router)
+app.include_router(admin_router)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
