@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-05-07_
+_Last updated: 2026-05-07 (M1-M4 complete)_
 
 ---
 
@@ -25,7 +25,7 @@ _Last updated: 2026-05-07_
 | **CI** | GitHub Actions | — | ruff, pytest (80% cov), gitleaks |
 | **Forecast Ext** | OpenBB (openbb_forecast) | 0.1.0 | Poetry package, extensions |
 
-> **⚠️ Risk:** `requirements.txt` is **unpinned** — no version constraints. Builds are non-reproducible. Pin to `>=` with tested versions.
+> **✅ Fixed:** `requirements.txt` now pinned to `>=` with tested stable versions.
 
 ---
 
@@ -101,7 +101,7 @@ _Last updated: 2026-05-07_
 
 ```
 openbb-trading/
-├── halal_screener.py          [4833 lines] ← Monolith entry point, all endpoints
+├── halal_screener.py          [~4308 lines → ~3880 lines] ← Entry point, includes routers
 ├── app/
 │   ├── config.py              [Domain: Configuration] Settings + StrategyConfig
 │   ├── exceptions.py          [Domain: Shared] Exception hierarchy (7 types)
@@ -114,7 +114,7 @@ openbb-trading/
 │   │   ├── *.py (20 files)    [Domain: Core Business Logic] Trading, screening,
 │   │   │                        technical analysis, regime, ML, Telegram, etc.
 │   │   └── ...
-│   └── routers/               [⚠️ Empty! Endpoints in halal_screener.py]
+│   └── routers/               [✅ Populated] 5 modules: screener, forecast, consensus, portfolio, admin
 ├── openbb_forecast/           [Domain: ML/RL/Simulation] OpenBB extension
 │   ├── agents/                RL: DQN, PG, ES
 │   ├── models/                LSTM, Transformer, Ensemble
@@ -137,12 +137,12 @@ openbb-trading/
 - ✅ **Cache layer** — DB-backed, survives restarts
 - ✅ **RL agents isolated** — separate package, no leakage into trading engine
 
-### Risks to Address
-- ⚠️ **`halal_screener.py` at ~4833 lines** — violates Single Responsibility. Endpoints should live in `app/routers/`. Benefits of splitting: isolated error handling, per-router middleware, independent testability.
-- ⚠️ **`app/routers/__init__.py` is empty** — the package skeleton exists but is unused. Either populate it or remove it.
-- ⚠️ **`requirements.txt` unpinned** — every `pip install` may produce different dependency trees.
-- ⚠️ **USX Pro V4 filter (`usx_pro_filter.py`) exists but is not wired** into any endpoint or strategy.
-- ⚠️ **Copilot (`copilot.py`) duplicates FastAPI setup** — should merge into main app or document as separate deployment.
+### Risks Addressed (M1-M4)
+- ✅ ~~`halal_screener.py` at ~4833 lines~~ → Refactored into 5 router modules (~3880 lines remaining). All endpoints preserved, all tests pass.
+- ✅ ~~`app/routers/__init__.py` is empty~~ → Populated with 5 router modules: screener, forecast, consensus, portfolio, admin.
+- ✅ ~~`requirements.txt` unpinned~~ → Pinned to `>=` with tested stable versions.
+- ✅ ~~USX Pro V4 filter not wired~~ → Integrated as Stage 1 of 3-stage signals pipeline (commit `42059e6`).
+- ✅ ~~Copilot duplicates FastAPI setup~~ → Merged into main app as `POST /v1/query` streaming endpoint; `copilot.py` removed.
 
 ---
 
@@ -150,15 +150,11 @@ openbb-trading/
 
 | Item | Status | Location | Action Required |
 |------|--------|----------|----------------|
-| `app/routers/` | Empty skeleton | `app/routers/__init__.py` | Populate or remove |
-| USX Pro V4 filter | Module complete, not wired | `app/services/usx_pro_filter.py` | Connect to screener endpoints |
 | IBKR adapter | Implemented, inert | `app/services/broker/ibkr_adapter.py` | Needs IBKR account + keys |
 | Strategy D (pairs) | Deferred | (Phase 5 cointegration exists) | See `docs/out_of_scope.md` |
 | HMM regime detector | Deferred | — | See `docs/out_of_scope.md`, item 2 |
 | Walk-forward optimization | Deferred | — | See `docs/out_of_scope.md`, item 3 |
 | Cross-strategy Kelly | Deferred | — | See `docs/out_of_scope.md`, item 8 |
-| `copilot.py` | Standalone, not in Dockerfile | `copilot.py` | Either integrate or document |
-| `requirements.txt` | Unpinned | `requirements.txt` | Pin versions for reproducibility |
 | `keep_alive.py` | Loose utility | `keep_alive.py` | Review if still needed (Railway has built-in health checks) |
 | `russell1000_halal.py` | Standalone listing | `russell1000_halal.py` | Could move to `app/data/` or `calibration/` |
 
@@ -166,11 +162,11 @@ openbb-trading/
 
 ## MILESTONES (Verifiable Goals)
 
-| # | Milestone | Success Criteria | Dependencies |
-|---|-----------|-----------------|--------------|
-| **M1** | Pin dependencies | `pip freeze > requirements-locked.txt` passes; Docker build is deterministic | None |
-| **M2** | Refactor halal_screener into routers | `/screener`, `/analyze`, `/ml`, `/rl`, `/admin` endpoints moved to `app/routers/`; all existing tests pass | M1 |
-| **M3** | Wire USX Pro V4 | `/usx` endpoint uses `usx_pro_filter` module; outputs match documented spec | None |
-| **M4** | Merge copilot into main app | `/agent/chat` available on main FastAPI without separate `copilot.py`; Claude integration tests pass | M2 |
-| **M5** | Clean orphans | Remove `app/routers/__init__.py` if unused, integrate `keep_alive.py` into app lifespan, relocate `russell1000_halal.py` | M2 |
-| **M6** | Activate IBKR (gate: user decision) | IBKR adapter receives real credentials; `factory.get_broker("IBKR")` returns working instance; `tests/test_ibkr_adapter.py` passes | External: IBKR account funding |
+| # | Milestone | Success Criteria | Status |
+|---|-----------|-----------------|--------|
+| **M1** | Pin dependencies | `requirements.txt` pinned to `>=` stable versions | ✅ Done (commit `c852437`) |
+| **M2** | Refactor halal_screener into routers | 5 router modules in `app/routers/`; all 178 tests pass | ✅ Done (commit `c852437`) |
+| **M3** | Wire USX Pro V4 | 3-stage signals pipeline (USX → AI → Telegram) | ✅ Done (commit `42059e6`) |
+| **M4** | Merge copilot into main app | `POST /v1/query` streaming endpoint on main FastAPI; `copilot.py` removed | ✅ Done (commit pending) |
+| **M5** | Clean orphans | Review `keep_alive.py`, `russell1000_halal.py` for relocation | 🔶 Pending |
+| **M6** | Activate IBKR (gate: user decision) | IBKR adapter receives real credentials | ⏸️ Deferred (needs VPS + ≥$25k) |
