@@ -305,6 +305,45 @@ async def agent_health():
             "tools": [t["name"] for t in TOOL_SCHEMAS]}
 
 
+from pydantic import BaseModel
+
+
+class CopilotMessage(BaseModel):
+    role: str
+    content: str
+
+
+class CopilotQueryRequest(BaseModel):
+    messages: list[CopilotMessage]
+    context: str | None = None
+
+
+@router.post("/v1/query")
+async def copilot_query(request: CopilotQueryRequest):
+    from halal_screener import settings, NON_FATAL_ANALYSIS_ERROR, logger
+    from fastapi.responses import StreamingResponse
+    import anthropic, json
+
+    if not settings.ANTHROPIC_API_KEY:
+        return {"error": "ANTHROPIC_API_KEY not configured"}
+
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    def generate():
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        with client.messages.stream(
+            model=settings.CLAUDE_MODEL or "claude-sonnet-4-20250514",
+            max_tokens=2048,
+            system="أنت مساعد تداول متخصص في الأسهم الحلال والسوق الأمريكي وفق AAOIFI Standard 21.",
+            messages=messages,
+        ) as stream:
+            for text in stream.text_stream:
+                yield f"data: {json.dumps({'delta': text})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 @router.get("/ops/body")
 async def ops_dashboard_body(x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key, _render_ops_fragment, NON_FATAL_ANALYSIS_ERROR, logger, escape
