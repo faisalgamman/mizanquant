@@ -389,6 +389,10 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 
 def fetch(symbol, period="2y", start=None, end=None):
     """Fetch market data. Tries Alpaca first, falls back to yfinance. Caches results."""
+    try:
+        from app.services.metrics import metrics as _m
+    except Exception:
+        _m = None
     symbol = _validate_symbol(symbol)
     if not symbol:
         return None
@@ -396,14 +400,25 @@ def fetch(symbol, period="2y", start=None, end=None):
     cache_key = f"{symbol}|{period}|{start}|{end}|{_session_bucket()}"
     cached = _data_cache_get(cache_key)
     if cached is not None:
+        if _m:
+            _m.cache_hit("market_data_cache")
         return cached
+    if _m:
+        _m.cache_miss("market_data_cache")
 
     # Try Alpaca first (rate-limited with retry)
+    if _m:
+        _m.incr("api_calls_total", provider="alpaca")
     df = fetch_alpaca(symbol, period=period, start=start, end=end)
 
     # Fallback to yfinance
     if df is None:
+        if _m:
+            _m.incr("api_calls_total", provider="yfinance")
+            _m.incr("api_errors_total", provider="alpaca")
         df = fetch_yf(symbol, period=period, start=start, end=end)
+    elif _m:
+        _m.incr("api_success_total", provider="alpaca")
 
     if df is not None:
         _data_cache_set(cache_key, df)

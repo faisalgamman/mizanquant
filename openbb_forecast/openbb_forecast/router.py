@@ -34,7 +34,10 @@ from openbb_core.app.model.obbject import OBBject
 from openbb_core.app.router import Router
 from openbb_core.provider.abstract.data import Data
 
-router = Router(prefix="/forecast", description="Stock forecasting, RL trading agents, and backtesting")
+# Ensure Data model is properly rebuilt for Pydantic v2 compatibility
+Data.model_rebuild()
+
+router = Router(prefix="", description="Stock forecasting, RL trading agents, and backtesting")
 
 
 def _data_to_df(data: list[Data]) -> pd.DataFrame:
@@ -220,11 +223,14 @@ async def ensemble(
     forecast_horizon: int = 5,
     sequence_length: int = 30,
     n_splits: int = 5,
+    base_learners: str = "xgb,rf,gbr",
+    meta_learner: str = "ridge",
 ) -> OBBject:
-    """Stacking ensemble forecast (XGBoost + RandomForest + GradientBoosting -> Ridge).
+    """Stacking ensemble forecast with configurable base learners.
 
-    Uses out-of-fold predictions for meta-learner training to prevent data leakage.
-    Base models are tree-based; meta-learner is regularized linear regression.
+    Base learners: xgb, rf, gbr, ada, et, arima (comma-separated).
+    Meta-learner: ridge or xgb.
+    Uses out-of-fold predictions to prevent data leakage.
     """
     from openbb_forecast.models.base import compute_forecast_metrics
     from openbb_forecast.models.ensemble import StackingForecaster
@@ -234,7 +240,10 @@ async def ensemble(
     prices = _extract_prices(df, target_column)
     dates = _get_dates(df)
 
-    model = StackingForecaster()
+    model = StackingForecaster(
+        base_learners=[b.strip() for b in base_learners.split(",")],
+        meta_learner=meta_learner,
+    )
 
     fold_results = model.walk_forward_predict(
         data=prices,
@@ -261,7 +270,7 @@ async def ensemble(
 
     metrics = compute_forecast_metrics(fold_results)
     summary = ForecastSummary(
-        model_name="StackingEnsemble",
+        model_name=f"StackingEnsemble({base_learners})",
         n_folds=len(fold_results),
         directional_accuracy=metrics["directional_accuracy"],
         mae=metrics["mae"],
@@ -272,6 +281,183 @@ async def ensemble(
     )
 
     return OBBject(results=results, extra={"summary": summary.model_dump()})
+
+
+def _run_forecast(model_cls, model_name, data, target_column,
+                   forecast_horizon, sequence_length, n_splits, **model_kwargs):
+    """Run a generic forecast model with walk-forward validation."""
+    from openbb_forecast.models.base import compute_forecast_metrics
+    from openbb_forecast.schemas.forecast import ForecastResult, ForecastSummary
+
+    df = _data_to_df(data)
+    prices = _extract_prices(df, target_column)
+    dates = _get_dates(df)
+
+    model = model_cls(**model_kwargs)
+
+    fold_results = model.walk_forward_predict(
+        data=prices,
+        sequence_length=sequence_length,
+        forecast_horizon=forecast_horizon,
+        n_splits=n_splits,
+    )
+
+    results = []
+    for fold in fold_results:
+        for j in range(fold.test_size):
+            idx = int(fold.test_indices[j]) if j < len(fold.test_indices) else 0
+            date_str = dates[idx] if idx < len(dates) else str(idx)
+            pred_val = float(fold.predictions[j, 0]) if fold.predictions.ndim > 1 else float(fold.predictions[j])
+            actual_val = float(fold.actuals[j, 0]) if fold.actuals.ndim > 1 else float(fold.actuals[j])
+            results.append(
+                ForecastResult(
+                    date=date_str,
+                    actual=actual_val,
+                    predicted=pred_val,
+                    fold=fold.fold,
+                )
+            )
+
+    metrics = compute_forecast_metrics(fold_results)
+    summary = ForecastSummary(
+        model_name=model_name,
+        n_folds=len(fold_results),
+        directional_accuracy=metrics["directional_accuracy"],
+        mae=metrics["mae"],
+        rmse=metrics["rmse"],
+        mape=metrics["mape"],
+        mean_forecast=[],
+        std_forecast=[],
+    )
+
+    return OBBject(results=results, extra={"summary": summary.model_dump()})
+
+
+@router.command(methods=["POST"])
+async def gru(
+    data: list[Data],
+    target_column: str = "close",
+    forecast_horizon: int = 5,
+    sequence_length: int = 30,
+    variant: str = "standard",
+    hidden_size: int = 64,
+    num_layers: int = 2,
+    epochs: int = 100,
+    learning_rate: float = 0.001,
+    n_splits: int = 5,
+) -> OBBject:
+    """GRU time-series forecast. Variants: standard, bidirectional, seq2seq, vae, 2path."""
+    from openbb_forecast.models.gru import GRUForecaster, GRUVariant
+
+    vmap = {
+        "standard": GRUVariant.STANDARD, "bidirectional": GRUVariant.BIDIRECTIONAL,
+        "seq2seq": GRUVariant.SEQ2SEQ, "vae": GRUVariant.VAE, "2path": GRUVariant.TWOPATH,
+        "bigru": GRUVariant.BIDIRECTIONAL, "gru_2path": GRUVariant.TWOPATH,
+        "gru_seq2seq": GRUVariant.SEQ2SEQ, "bigru_seq2seq": GRUVariant.BIDIR_SEQ2SEQ,
+        "gru_vae": GRUVariant.VAE,
+    }
+    variant_enum = vmap.get(variant.replace("-", "_").lower(), GRUVariant.STANDARD)
+
+    return _run_forecast(
+        lambda **kw: GRUForecaster(variant=variant_enum, **kw),
+        f"GRU({variant})", data, target_column,
+        forecast_horizon, sequence_length, n_splits,
+        hidden_size=hidden_size, num_layers=num_layers,
+        epochs=epochs, learning_rate=learning_rate,
+    )
+
+
+@router.command(methods=["POST"])
+async def cnn(
+    data: list[Data],
+    target_column: str = "close",
+    forecast_horizon: int = 5,
+    sequence_length: int = 30,
+    variant: str = "cnn_seq2seq",
+    filters: int = 64,
+    epochs: int = 150,
+    learning_rate: float = 0.001,
+    n_splits: int = 5,
+) -> OBBject:
+    """CNN time-series forecast. Variants: cnn_seq2seq, dilated_cnn."""
+    from openbb_forecast.models.cnn import CNNForecaster
+
+    return _run_forecast(
+        lambda **kw: CNNForecaster(variant=variant, **kw),
+        f"CNN({variant})", data, target_column,
+        forecast_horizon, sequence_length, n_splits,
+        filters=filters, epochs=epochs, learning_rate=learning_rate,
+    )
+
+
+@router.command(methods=["POST"])
+async def rnn_variant(
+    data: list[Data],
+    target_column: str = "close",
+    forecast_horizon: int = 5,
+    sequence_length: int = 30,
+    variant: str = "vanilla",
+    hidden_size: int = 64,
+    num_layers: int = 2,
+    epochs: int = 150,
+    learning_rate: float = 0.001,
+    n_splits: int = 5,
+) -> OBBject:
+    """RNN variant forecast. Variants: vanilla, vanilla_bi, vanilla_2path,
+    lstm_2path, bilstm_seq2seq, lstm_vae, attention_rnn."""
+    from openbb_forecast.models.rnn_variants import RNNVariantForecaster
+
+    return _run_forecast(
+        lambda **kw: RNNVariantForecaster(variant=variant, **kw),
+        f"RNN({variant})", data, target_column,
+        forecast_horizon, sequence_length, n_splits,
+        hidden_size=hidden_size, num_layers=num_layers,
+        epochs=epochs, learning_rate=learning_rate,
+    )
+
+
+@router.command(methods=["POST"])
+async def arima(
+    data: list[Data],
+    target_column: str = "close",
+    forecast_horizon: int = 5,
+    sequence_length: int = 30,
+    order_p: int = 5,
+    order_d: int = 1,
+    order_q: int = 0,
+    n_splits: int = 5,
+) -> OBBject:
+    """ARIMA time-series forecast (statsmodels)."""
+    from openbb_forecast.models.arima import ARIMAForecaster
+
+    return _run_forecast(
+        lambda **kw: ARIMAForecaster(order=(order_p, order_d, order_q), **kw),
+        "ARIMA", data, target_column,
+        forecast_horizon, sequence_length, n_splits,
+    )
+
+
+@router.command(methods=["POST"])
+async def forecast(
+    data: list[Data],
+    model_name: str = "lstm",
+    target_column: str = "close",
+    forecast_horizon: int = 5,
+    sequence_length: int = 30,
+    n_splits: int = 5,
+) -> OBBject:
+    """Generic forecast using any registered model from the factory.
+
+    model_name: One of the registered model names (lstm, transformer, ensemble,
+                gru, bigru, cnn_seq2seq, dilated_cnn, vanilla, arima, etc.)
+    """
+    from openbb_forecast.models.factory import create_model
+
+    return _run_forecast(
+        lambda **kw: create_model(model_name, **kw),
+        model_name, data, target_column,
+        forecast_horizon, sequence_length, n_splits,
+    )
 
 
 # ---------------------------------------------------------------------------

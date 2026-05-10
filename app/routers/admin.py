@@ -1,4 +1,5 @@
 """Admin, Agent, Ops, Optimize, Post-market scan endpoints"""
+import os
 from fastapi import APIRouter
 from halal_screener import OperatorAPIKey
 
@@ -369,3 +370,49 @@ async def ops_dashboard(x_api_key: OperatorAPIKey = None):
 table th,td{{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;}}</style></head>
 <body><div id="ops-shell" hx-get="/ops/body" hx-trigger="load, every 10s" hx-swap="innerHTML" hx-headers='{headers_json}'>{body}</div></body></html>"""
     )
+
+
+@router.get("/admin/scheduler/health")
+async def admin_scheduler_health(x_api_key: OperatorAPIKey = None):
+    from halal_screener import _require_api_key
+    _require_api_key(x_api_key)
+    from app.services.scheduler_metrics import scheduler_metrics
+    return scheduler_metrics.health()
+
+
+@router.get("/admin/scheduler/metrics")
+async def admin_scheduler_metrics(x_api_key: OperatorAPIKey = None):
+    from halal_screener import _require_api_key
+    _require_api_key(x_api_key)
+    from app.services.scheduler_metrics import scheduler_metrics
+    return scheduler_metrics.snapshot()
+
+
+@router.get("/admin/scheduler/status")
+async def admin_scheduler_status(x_api_key: OperatorAPIKey = None):
+    from halal_screener import _require_api_key, NON_FATAL_ANALYSIS_ERROR, logger
+    _require_api_key(x_api_key)
+    from app.services.scheduler import _scheduler_running
+    from app.services.scheduler_metrics import scheduler_metrics
+    health = scheduler_metrics.health()
+    health["running"] = _scheduler_running
+    health["worker_mode"] = os.environ.get("WORKER_SERVICE", "").lower() == "true"
+    return health
+
+
+@router.get("/admin/metrics")
+async def admin_metrics(x_api_key: OperatorAPIKey = None):
+    """Return runtime instrumentation snapshot (counters, timings, cache hit rates)."""
+    from halal_screener import _require_api_key
+    from app.services.metrics import metrics
+    _require_api_key(x_api_key)
+    return metrics.snapshot()
+
+
+@router.get("/admin/cache-stats")
+async def admin_cache_stats(x_api_key: OperatorAPIKey = None):
+    """Return cache hit/miss statistics per layer."""
+    from halal_screener import _require_api_key
+    from app.services.metrics import metrics
+    _require_api_key(x_api_key)
+    return metrics.cache_stats()

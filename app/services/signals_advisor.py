@@ -109,7 +109,7 @@ def scan_universe_for_strategy(
 
     if symbols is None:
         import halal_screener as hs
-        symbols = list(hs.HALAL_STOCKS)
+        symbols = list(hs._universe_symbols())
 
     out: list[dict] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -335,7 +335,7 @@ def scan_and_notify_strong_buys(
     if symbols is None:
         try:
             import halal_screener as hs
-            symbols = list(hs.HALAL_STOCKS)
+            symbols = list(hs._universe_symbols())
         except Exception:
             symbols = []
 

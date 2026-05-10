@@ -19,3 +19,13 @@ anthropic>=0.86.0,<1.0
 nltk>=3.9.4,<4.0
 statsmodels>=0.14.6,<1.0
 ib_insync>=0.9.86,<1.0
+
+# ── Phase 1: Observability & Operations ──
+sentry-sdk>=2.0,<3.0
+structlog>=24.0,<25.0
+prometheus-client>=0.20,<1.0
+slowapi>=0.1.9,<1.0
+redis>=5.0,<6.0
+
+# ── Phase 2: ML/RL Ops ──
+mlflow>=2.0.0,<3.0

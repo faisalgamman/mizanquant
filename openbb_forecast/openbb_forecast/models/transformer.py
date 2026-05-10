@@ -116,15 +116,15 @@ class TransformerForecaster(BaseForecaster):
 
     def __init__(
         self,
-        d_model: int = 128,
-        n_heads: int = 8,
+        d_model: int = 64,
+        n_heads: int = 4,
         num_layers: int = 2,
-        dim_feedforward: int = 256,
-        epochs: int = 100,
+        dim_feedforward: int = 128,
+        epochs: int = 150,
         learning_rate: float = 0.0005,
-        dropout: float = 0.1,
+        dropout: float = 0.2,
         batch_size: int = 32,
-        patience: int = 20,
+        patience: int = 15,
         device: str = "auto",
         version: str | None = None,
     ):

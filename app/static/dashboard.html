@@ -1,0 +1,2107 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenBB Forecast — Trading Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #111827;
+  --bg-card: rgba(255,255,255,0.04);
+  --bg-card-hover: rgba(255,255,255,0.07);
+  --border: rgba(255,255,255,0.08);
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59,130,246,0.3);
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --purple: #a855f7;
+  --sidebar-width: 260px;
+  --header-height: 64px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',sans-serif; background:var(--bg-primary); color:var(--text-primary); min-height:100vh; overflow-x:hidden; }
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+
+/* Sidebar */
+.sidebar {
+  position:fixed; left:0; top:0; bottom:0; width:var(--sidebar-width);
+  background:var(--bg-secondary); border-right:1px solid var(--border);
+  z-index:100; display:flex; flex-direction:column; transition:transform 0.3s;
+}
+.sidebar-brand {
+  padding:20px 24px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:12px;
+}
+.sidebar-brand .logo {
+  width:36px; height:36px; background:linear-gradient(135deg,var(--accent),var(--purple));
+  border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px;
+}
+.sidebar-brand h2 { font-size:16px; font-weight:700; letter-spacing:-0.3px; }
+.sidebar-brand span { font-size:11px; color:var(--text-muted); }
+.sidebar-nav { flex:1; padding:12px; overflow-y:auto; }
+.nav-item {
+  display:flex; align-items:center; gap:12px; padding:10px 14px;
+  border-radius:var(--radius-sm); cursor:pointer; transition:all 0.2s;
+  color:var(--text-secondary); font-size:13px; font-weight:500; margin-bottom:2px;
+}
+.nav-item i { width:18px; text-align:center; font-size:14px; }
+.nav-item:hover { background:var(--bg-card); color:var(--text-primary); }
+.nav-item.active { background:var(--accent); color:#fff; box-shadow:0 0 20px var(--accent-glow); }
+.nav-item .badge {
+  margin-left:auto; background:var(--bg-card); padding:2px 8px; border-radius:10px;
+  font-size:10px; color:var(--text-muted);
+}
+.nav-item.active .badge { background:rgba(255,255,255,0.2); color:#fff; }
+.nav-section { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); padding:16px 14px 6px; font-weight:600; }
+.sidebar-footer {
+  padding:16px 24px; border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:10px;
+}
+.status-dot { width:8px; height:8px; border-radius:50%; background:var(--green); }
+.status-dot.offline { background:var(--red); }
+.sidebar-footer span { font-size:12px; color:var(--text-secondary); }
+
+/* Header */
+.header {
+  position:fixed; left:var(--sidebar-width); right:0; top:0; height:var(--header-height);
+  background:rgba(10,14,26,0.8); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border); z-index:90;
+  display:flex; align-items:center; justify-content:space-between; padding:0 32px;
+}
+.header-left { display:flex; align-items:center; gap:16px; }
+.header-left h1 { font-size:18px; font-weight:600; }
+.header-left .breadcrumb { font-size:12px; color:var(--text-muted); }
+.header-right { display:flex; align-items:center; gap:12px; }
+.header-right .search-box {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:8px 14px; display:flex; align-items:center; gap:8px; color:var(--text-muted);
+}
+.header-right .search-box input {
+  background:none; border:none; color:var(--text-primary); font-size:13px; outline:none; width:160px; font-family:inherit;
+}
+.header-right .search-box input::placeholder { color:var(--text-muted); }
+.header-btn {
+  width:36px; height:36px; border-radius:50%; border:1px solid var(--border);
+  background:var(--bg-card); color:var(--text-secondary); cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:all 0.2s;
+}
+.header-btn:hover { background:var(--bg-card-hover); color:var(--text-primary); }
+
+/* Main Content */
+.main {
+  margin-left:var(--sidebar-width); margin-top:var(--header-height);
+  padding:32px; min-height:calc(100vh - var(--header-height));
+}
+
+/* Tabs content */
+.tab-content { display:none; }
+.tab-content.active { display:block; animation:fadeIn 0.3s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+/* Stats Grid */
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-bottom:32px; }
+.stat-card {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:20px 24px; transition:all 0.3s; cursor:default;
+}
+.stat-card:hover { background:var(--bg-card-hover); transform:translateY(-2px); box-shadow:var(--shadow); }
+.stat-card .stat-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:16px; margin-bottom:12px; }
+.stat-card .stat-value { font-size:28px; font-weight:800; letter-spacing:-1px; }
+.stat-card .stat-label { font-size:12px; color:var(--text-secondary); margin-top:4px; }
+.stat-card .stat-change { font-size:11px; margin-top:8px; padding:2px 8px; border-radius:4px; display:inline-block; }
+
+/* Cards */
+.card {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:24px; margin-bottom:20px; transition:all 0.3s;
+}
+.card:hover { box-shadow:var(--shadow); }
+.card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.card-title { font-size:15px; font-weight:600; }
+.card-subtitle { font-size:11px; color:var(--text-muted); margin-top:2px; }
+.card-actions { display:flex; gap:8px; }
+
+/* Tables */
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+thead th { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); color:var(--text-muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+tbody td { padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.04); }
+tbody tr:hover { background:var(--bg-card-hover); }
+.badge-tag {
+  padding:2px 10px; border-radius:4px; font-size:11px; font-weight:500;
+}
+.badge-blue { background:rgba(59,130,246,0.15); color:#60a5fa; }
+.badge-green { background:rgba(34,197,94,0.15); color:#4ade80; }
+.badge-red { background:rgba(239,68,68,0.15); color:#f87171; }
+.badge-orange { background:rgba(245,158,11,0.15); color:#fbbf24; }
+.badge-purple { background:rgba(168,85,247,0.15); color:#c084fc; }
+
+/* Buttons */
+.btn {
+  padding:8px 18px; border-radius:var(--radius-sm); border:none; cursor:pointer;
+  font-size:12px; font-weight:600; font-family:inherit; transition:all 0.2s;
+  display:inline-flex; align-items:center; gap:6px;
+}
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:#2563eb; box-shadow:0 0 20px var(--accent-glow); }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text-secondary); }
+.btn-outline:hover { background:var(--bg-card); color:var(--text-primary); }
+.btn-success { background:var(--green); color:#fff; }
+.btn-sm { padding:5px 12px; font-size:11px; }
+.btn-icon { width:32px; height:32px; padding:0; justify-content:center; }
+
+/* Grid layouts */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+@media(max-width:1199px){ .grid-2{grid-template-columns:1fr;} }
+
+/* Form elements */
+select,input[type="text"],input[type="number"] {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:8px 12px; color:var(--text-primary); font-size:13px; font-family:inherit; outline:none;
+}
+select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }
+.form-group { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.form-group label { font-size:12px; color:var(--text-secondary); font-weight:500; }
+
+/* Loading */
+.loading { text-align:center; padding:60px 20px; color:var(--text-muted); }
+.spinner { width:32px; height:32px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; margin:0 auto 12px; }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+/* Charts */
+.chart-container { position:relative; height:300px; width:100%; }
+
+/* Alert / Message */
+.alert {
+  padding:12px 16px; border-radius:var(--radius-sm); font-size:13px; margin-bottom:16px;
+  display:flex; align-items:center; gap:8px;
+}
+.alert-info { background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); color:#60a5fa; }
+.alert-success { background:rgba(34,197,94,0.1); border:1px solid rgba(34,197,94,0.2); color:#4ade80; }
+.alert-warning { background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.2); color:#fbbf24; }
+
+/* Results area */
+.result-box {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px; margin-top:12px; max-height:600px; overflow-y:auto;
+  font-size:12px; font-family:monospace; white-space:pre-wrap; color:var(--text-secondary);
+}
+.result-table { width:100%; border-collapse:collapse; font-size:12px; }
+.result-table th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); color:var(--text-muted); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:0.3px; }
+.result-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.03); }
+.result-table tr:hover { background:var(--bg-card-hover); }
+
+/* Mobile menu toggle */
+.mobile-toggle { display:none; position:fixed; left:16px; top:14px; z-index:200; background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 12px; color:var(--text-primary); cursor:pointer; }
+@media(max-width:768px){
+  .sidebar { transform:translateX(-100%); }
+  .sidebar.open { transform:translateX(0); }
+  .mobile-toggle { display:block; }
+  .header { left:0; padding:0 16px 0 56px; }
+  .main { margin-left:0; padding:16px; }
+  .header-right .search-box { display:none; }
+  .stats-grid { grid-template-columns:1fr 1fr; }
+}
+
+/* Enhanced cards for forecast/agent lists */
+.tool-card {
+  background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:12px 14px; transition:all 0.3s; cursor:pointer;
+  display:flex; flex-direction:column; gap:6px; position:relative;
+}
+.tool-card:hover { background:var(--bg-card-hover); transform:translateY(-2px); box-shadow:var(--shadow); }
+.tool-card .name { font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; }
+.tool-card .desc { font-size:11px; color:var(--text-muted); line-height:1.4; }
+
+/* Colored borders by family */
+.tc-lstm { border-left:3px solid #3b82f6; }
+.tc-gru { border-left:3px solid #a855f7; }
+.tc-cnn { border-left:3px solid #06b6d4; }
+.tc-rnn { border-left:3px solid #f59e0b; }
+.tc-transformer { border-left:3px solid #eab308; }
+.tc-ensemble { border-left:3px solid #22c55e; }
+.tc-statistical { border-left:3px solid #64748b; }
+.tc-other { border-left:3px solid #6b7280; }
+.tc-deep-rl { border-left:3px solid #a855f7; }
+.tc-q-learning { border-left:3px solid #3b82f6; }
+.tc-actor-critic { border-left:3px solid #f59e0b; }
+.tc-neuro-evolution { border-left:3px solid #22c55e; }
+.tc-classic { border-left:3px solid #64748b; }
+
+.tool-card:hover { border-left-width:4px; }
+
+/* Sparkline */
+.sparkline-box { height:30px; width:100%; margin-top:2px; overflow:hidden; border-radius:4px; background:rgba(255,255,255,0.02); }
+
+/* Status badges */
+.status-badge { display:inline-flex; align-items:center; gap:3px; font-size:9px; font-weight:600; padding:1px 6px; border-radius:3px; text-transform:uppercase; letter-spacing:0.3px; }
+.sb-production { background:rgba(34,197,94,0.2); color:#4ade80; }
+.sb-staging { background:rgba(59,130,246,0.2); color:#60a5fa; }
+.sb-idle { background:rgba(100,116,139,0.2); color:#94a3b8; }
+.sb-failing { background:rgba(239,68,68,0.2); color:#f87171; }
+
+.card-meta { display:flex; align-items:center; gap:8px; font-size:10px; color:var(--text-muted); flex-wrap:wrap; }
+.card-meta .metric { font-weight:600; font-size:11px; }
+.card-meta .metric.up { color:var(--green); }
+.card-meta .metric.down { color:var(--red); }
+
+/* Category tabs */
+.card-tabs { display:flex; gap:4px; margin-bottom:14px; flex-wrap:wrap; }
+.card-tab { padding:4px 12px; border-radius:6px; font-size:11px; font-weight:500; cursor:pointer; transition:all 0.2s; color:var(--text-secondary); background:var(--bg-card); border:1px solid var(--border); }
+.card-tab:hover { background:var(--bg-card-hover); color:var(--text-primary); }
+.card-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* Filter bar */
+.filter-bar { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+.filter-bar select, .filter-bar input { padding:4px 8px; font-size:11px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-primary); font-family:inherit; }
+
+/* Pinned star */
+.star-btn { background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:12px; padding:0 4px; transition:all 0.2s; }
+.star-btn:hover { color:var(--orange); }
+.star-btn.pinned { color:var(--orange); }
+
+/* Collapsible section */
+.collapsible-header { display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; }
+.collapsible-header:hover { opacity:0.8; }
+.collapsible-body { overflow:hidden; transition:max-height 0.3s ease; }
+.collapsible-body.collapsed { max-height:0; }
+
+/* 4-column grid on wide screens */
+@media(min-width:1400px){ .grid-3{grid-template-columns:1fr 1fr 1fr 1fr;} }
+@media(min-width:1200px) and (max-width:1399px){ .grid-3{grid-template-columns:1fr 1fr 1fr;} }
+@media(min-width:768px) and (max-width:1199px){ .grid-3{grid-template-columns:1fr 1fr;} }
+@media(max-width:767px){ .grid-3{grid-template-columns:1fr;} }
+
+/* Compare checkbox */
+.compare-cb { position:absolute; top:8px; right:8px; width:16px; height:16px; cursor:pointer; accent-color:var(--accent); }
+.compare-bar { display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--accent); color:#fff; border-radius:8px; font-size:12px; font-weight:600; margin-bottom:12px; }
+.compare-bar.hidden { display:none; }
+
+/* Arabic support */
+[dir="rtl"] .sidebar { right:0; left:auto; }
+[dir="rtl"] .main { margin-right:var(--sidebar-width); margin-left:0; }
+[dir="rtl"] .header { right:var(--sidebar-width); left:0; }
+</style>
+</head>
+<body>
+
+<button class="mobile-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo"><i class="fas fa-chart-line" style="color:#fff;font-size:16px;"></i></div>
+    <div><h2>OpenBB Forecast</h2><span>Professional Trading Suite</span></div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section">General</div>
+    <div class="nav-item active" data-tab="overview" onclick="switchTab('overview')"><i class="fas fa-th-large"></i> Overview <span class="badge">Live</span></div>
+
+    <div class="nav-section">Forecasting</div>
+    <div class="nav-item" data-tab="forecast" onclick="switchTab('forecast')"><i class="fas fa-brain"></i> Forecast Lab <span class="badge">19</span></div>
+    <div class="nav-item" data-tab="trading" onclick="switchTab('trading')"><i class="fas fa-robot"></i> Trading Lab <span class="badge">19</span></div>
+
+    <div class="nav-section">Analytics</div>
+    <div class="nav-item" data-tab="risk" onclick="switchTab('risk')"><i class="fas fa-shield-alt"></i> Risk Desk</div>
+    <div class="nav-item" data-tab="workflow" onclick="switchTab('workflow')"><i class="fas fa-play-circle"></i> Daily Workflow</div>
+    <div class="nav-item" data-tab="charts" onclick="switchTab('charts')"><i class="fas fa-chart-bar"></i> Charts &amp; Comparison</div>
+
+    <div class="nav-section">Research</div>
+    <div class="nav-item" data-tab="research" onclick="switchTab('research')"><i class="fas fa-search-dollar"></i> Research Lab</div>
+    <div class="nav-item" data-tab="screener" onclick="switchTab('research');setTimeout(()=>openScreener(),200)"><i class="fas fa-microchip"></i> Smart Screener</div>
+    <div class="nav-item" data-tab="alerts" onclick="switchTab('alerts')"><i class="fas fa-bell"></i> Alerts <span class="badge" id="alertsBadge">0</span></div>
+    <div class="nav-item" data-tab="ai" onclick="switchTab('ai')"><i class="fas fa-robot"></i> AI Assistant</div>
+    <div class="nav-item" data-tab="halal" onclick="switchTab('halal')"><i class="fas fa-mosque"></i> Halal Screener</div>
+  </nav>
+  <div class="sidebar-footer">
+    <span class="status-dot" id="statusDot"></span>
+    <div style="flex:1;min-width:0;">
+      <div id="statusText" style="font-size:12px;color:var(--text-secondary);">Connecting...</div>
+      <div id="statusDetail" style="font-size:10px;color:var(--text-muted);"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <h1 id="pageTitle">Overview</h1>
+    <span class="breadcrumb" id="breadcrumb">Dashboard / Overview</span>
+  </div>
+  <div class="header-right">
+    <div class="search-box" style="position:relative;">
+      <i class="fas fa-search"></i>
+      <input type="text" placeholder="Search symbol...  ⌘K" id="searchInput" onkeydown="if(event.key==='Enter')searchSymbol()" onfocus="showSearchDropdown()" onblur="setTimeout(()=>hideSearchDropdown(),200)" oninput="filterSearchDropdown(this.value)">
+      <div id="searchDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;overflow-y:auto;z-index:999;"></div>
+    </div>
+    <select id="globalSymbol" style="width:85px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;" onchange="setGlobalSymbol(this.value)">
+      <option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option><option>AMZN</option><option>META</option><option>AMD</option>
+    </select>
+    <span style="font-size:10px;color:var(--text-muted);margin-right:4px;" id="lastUpdatedLabel"></span>
+    <button class="header-btn" onclick="refreshData()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+  </div>
+</header>
+
+<!-- Main Content -->
+<main class="main">
+
+<!-- TAB: Overview -->
+<div class="tab-content active" id="tab-overview">
+  <div class="stats-grid" id="overviewStats"></div>
+
+  <!-- Live PnL Strip -->
+  <div class="card" id="pnlStrip" style="padding:14px 20px;margin-bottom:20px;">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center;"></div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Open Positions -->
+    <div class="card"><div class="card-header"><div><div class="card-title">Open Positions</div><div class="card-subtitle">Paper account · Real-time</div></div></div>
+      <div id="openPositions"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+
+    <!-- Last Signals -->
+    <div class="card"><div class="card-header"><div><div class="card-title">Last Signals</div><div class="card-subtitle">Most recent 5 trading signals</div></div></div>
+      <div id="lastSignals"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Guard Activity Heatmap -->
+    <div class="card"><div class="card-header"><div><div class="card-title">Guard Activity</div><div class="card-subtitle">Rejections by guard today</div></div></div>
+      <div id="guardActivity"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+
+    <!-- Scheduler Timeline -->
+    <div class="card"><div class="card-header"><div><div class="card-title">Scheduler Timeline</div><div class="card-subtitle">Cycle execution times</div></div></div>
+      <div id="schedulerTimeline"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <!-- System Status + Quick Actions -->
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">System Status</div><div class="card-subtitle">All services operational</div></div></div>
+      <div id="systemStatus"><div class="loading"><div class="spinner"></div>Loading...</div></div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Quick Actions</div><div class="card-subtitle">Common operations</div></div></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-primary" onclick="switchTab('workflow')"><i class="fas fa-play"></i> Run Daily Scan</button>
+        <button class="btn btn-outline" onclick="switchTab('halal')"><i class="fas fa-mosque"></i> Check Halal Status</button>
+        <button class="btn btn-outline" onclick="switchTab('research')"><i class="fas fa-search"></i> Research a Stock</button>
+        <button class="btn btn-outline" onclick="switchTab('risk')"><i class="fas fa-chart-pie"></i> View Risk Metrics</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Forecast Lab -->
+<div class="tab-content" id="tab-forecast">
+  <div class="stats-grid" id="forecastStats"></div>
+  <div class="card"><div class="card-header"><div><div class="card-title">All Forecast Models</div><div class="card-subtitle">Click a model to run forecast</div></div><div class="card-actions"><select id="forecastSymbol" style="width:100px;"><option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option><option>AMZN</option></select></div></div>
+    <div class="card-tabs" id="forecastTabs"></div>
+    <div class="filter-bar" id="forecastFilters">
+      <input type="text" id="fFamFilter" placeholder="Filter..." style="width:90px;" oninput="filterForecastCards()">
+      <select id="fStatusFilter" onchange="filterForecastCards()"><option value="">All Status</option><option value="production">Production</option><option value="staging">Staging</option><option value="idle">Idle</option><option value="failing">Failing</option></select>
+      <select id="fMinSharpe" onchange="filterForecastCards()"><option value="">Min Sharpe</option><option value="1.0">≥ 1.0</option><option value="1.5">≥ 1.5</option><option value="2.0">≥ 2.0</option></select>
+      <select id="fSortBy" onchange="filterForecastCards()"><option value="name">Sort: Name</option><option value="sharpe">Sort: Sharpe</option><option value="trained">Sort: Recently Trained</option></select>
+      <button class="btn btn-sm btn-outline" onclick="compareForecastModels()" id="fCompareBtn" style="display:none;"><i class="fas fa-not-equal"></i> Compare (0)</button>
+    </div>
+    <div id="forecastPinned" class="grid-3" style="margin-bottom:16px;"></div>
+    <div id="forecastGrid" class="grid-3"></div>
+    <div id="forecastEmpty" style="display:none;text-align:center;padding:40px;color:var(--text-muted);"><i class="fas fa-search" style="font-size:24px;display:block;margin-bottom:8px;"></i>No models match your filters</div>
+  </div>
+  <div id="forecastResult" style="display:none;">
+    <div class="card"><div class="card-header"><div><div class="card-title" id="forecastResultTitle">Result</div></div><button class="btn btn-sm btn-outline" onclick="document.getElementById('forecastResult').style.display='none'"><i class="fas fa-times"></i></button></div>
+      <div class="chart-container"><canvas id="forecastChart"></canvas></div>
+      <div id="forecastMetrics" style="margin-top:12px;"></div>
+      <div class="result-box" id="forecastResultData"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Trading Lab -->
+<div class="tab-content" id="tab-trading">
+  <div class="stats-grid" id="tradingStats"></div>
+  <div class="card"><div class="card-header"><div><div class="card-title">All Trading Agents</div><div class="card-subtitle">Click an agent to run backtest</div></div><div class="card-actions">
+    <select id="agentSymbol" style="width:100px;"><option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option></select>
+    <button class="btn btn-sm btn-outline" onclick="runLeaderboard()"><i class="fas fa-trophy"></i> Leaderboard</button>
+  </div></div>
+    <div class="card-tabs" id="agentTabs"></div>
+    <div class="filter-bar" id="agentFilters">
+      <input type="text" id="aFamFilter" placeholder="Filter..." style="width:90px;" oninput="filterAgentCards()">
+      <select id="aStatusFilter" onchange="filterAgentCards()"><option value="">All Status</option><option value="production">Production</option><option value="staging">Staging</option><option value="idle">Idle</option><option value="failing">Failing</option></select>
+      <select id="aMinSharpe" onchange="filterAgentCards()"><option value="">Min Sharpe</option><option value="1.0">≥ 1.0</option><option value="1.5">≥ 1.5</option><option value="2.0">≥ 2.0</option></select>
+      <select id="aSortBy" onchange="filterAgentCards()"><option value="name">Sort: Name</option><option value="sharpe">Sort: Sharpe</option><option value="trained">Sort: Recently Trained</option></select>
+      <button class="btn btn-sm btn-outline" onclick="compareAgents()" id="aCompareBtn" style="display:none;"><i class="fas fa-not-equal"></i> Compare (0)</button>
+    </div>
+    <div id="agentPinned" class="grid-3" style="margin-bottom:16px;"></div>
+    <div id="agentGrid" class="grid-3"></div>
+    <div id="agentEmpty" style="display:none;text-align:center;padding:40px;color:var(--text-muted);"><i class="fas fa-search" style="font-size:24px;display:block;margin-bottom:8px;"></i>No agents match your filters</div>
+  </div>
+  <div id="agentResult" style="display:none;">
+    <div class="card"><div class="card-header"><div><div class="card-title" id="agentResultTitle">Result</div></div><button class="btn btn-sm btn-outline" onclick="document.getElementById('agentResult').style.display='none'"><i class="fas fa-times"></i></button></div>
+      <div class="chart-container"><canvas id="agentChart"></canvas></div>
+      <div id="agentMetrics" style="margin-top:12px;"></div>
+      <div class="result-box" id="agentResultData"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Risk Desk -->
+<div class="tab-content" id="tab-risk">
+  <div class="stats-grid" id="riskStats"></div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Monte Carlo Simulation</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Symbol</label><select id="mcSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <label>Sims</label><input type="number" id="mcSims" value="200" style="width:70px;">
+        <label>Days</label><input type="number" id="mcDays" value="30" style="width:60px;">
+        <button class="btn btn-sm btn-primary" onclick="runMonteCarlo()"><i class="fas fa-play"></i> Run</button>
+      </div>
+      <div class="chart-container"><canvas id="mcChart"></canvas></div>
+      <div id="mcResult" class="result-box" style="margin-top:8px;max-height:150px;"></div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Risk Metrics</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Symbol</label><select id="metricsSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <button class="btn btn-sm btn-primary" onclick="runMetrics()"><i class="fas fa-calculator"></i> Compute</button>
+      </div>
+      <div id="metricsResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Consensus Engine</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Symbol</label><select id="consensusSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <button class="btn btn-sm btn-primary" onclick="runConsensus()"><i class="fas fa-vote-yea"></i> Run</button>
+      </div>
+      <div id="consensusResult"></div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Leaderboard</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Symbol</label><select id="lbSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <button class="btn btn-sm btn-primary" onclick="runLeaderboard()"><i class="fas fa-trophy"></i> Refresh</button>
+      </div>
+      <div id="lbResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Daily Workflow -->
+<div class="tab-content" id="tab-workflow">
+  <div class="card"><div class="card-header"><div><div class="card-title">Daily Market Scan</div><div class="card-subtitle">Halal filter → agent analysis → Telegram report</div></div>
+    <div class="card-actions">
+      <button class="btn btn-primary" onclick="runWorkflow()"><i class="fas fa-play"></i> Run Scan</button>
+      <button class="btn btn-outline" onclick="runWorkflowWithTelegram()"><i class="fab fa-telegram"></i> Scan + Telegram</button>
+    </div></div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Watchlist</label><input type="text" id="wlSymbols" value="AAPL,MSFT,GOOGL,TSLA,NVDA" style="flex:1;">
+    </div>
+    <div id="workflowResult"><div class="loading"><div class="spinner"></div><br>Run a scan to see results</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Portfolio Simulator</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Symbols</label><input type="text" id="pfSymbols" value="AAPL,MSFT,GOOGL" style="width:200px;">
+        <label>Method</label><select id="pfMethod"><option>kelly</option><option>equal</option><option>sharpe_weighted</option></select>
+        <button class="btn btn-sm btn-primary" onclick="runPortfolio()"><i class="fas fa-calculator"></i> Calculate</button>
+      </div>
+      <div id="pfResult" class="result-box"></div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Leaderboard History</div></div><button class="btn btn-sm btn-outline" onclick="loadLBHistory()"><i class="fas fa-sync"></i></button></div>
+      <div id="lbHistoryResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Charts & Comparison -->
+<div class="tab-content" id="tab-charts">
+  <div class="card"><div class="card-header"><div><div class="card-title">Agent Comparison</div><div class="card-subtitle">Up to 4 agents side-by-side</div></div></div>
+    <div class="form-group" style="margin-bottom:12px;flex-wrap:wrap;">
+      <label>Symbol</label><select id="compSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+      <label>Agents</label><input type="text" id="compAgents" value="double_dqn,moving_average,q_learning" style="width:300px;">
+      <button class="btn btn-sm btn-primary" onclick="runComparison()"><i class="fas fa-chart-line"></i> Compare</button>
+    </div>
+    <div class="chart-container" style="height:350px;"><canvas id="compChart"></canvas></div>
+    <div id="compResult" style="margin-top:12px;"></div>
+  </div>
+  <div class="card"><div class="card-header"><div><div class="card-title">Individual Agent Charts</div></div></div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Symbol</label><select id="chartAgentSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+      <label>Agent</label><select id="chartAgentName"></select>
+      <button class="btn btn-sm btn-primary" onclick="loadAgentChart()"><i class="fas fa-chart-line"></i> Load Chart</button>
+    </div>
+    <div class="chart-container" style="height:300px;"><canvas id="singleAgentChart"></canvas></div>
+  </div>
+</div>
+
+<!-- TAB: Research Lab -->
+<div class="tab-content" id="tab-research">
+  <div class="stats-grid" id="researchStats"></div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Stock Summary</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <select id="rsSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option><option>AMZN</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadStockSummary()"><i class="fas fa-search"></i> Lookup</button>
+      </div>
+      <div id="rsResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Financial Ratios</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <select id="ratioSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadRatios()"><i class="fas fa-percentage"></i> Load</button>
+      </div>
+      <div id="ratioResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Financial Statements</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <select id="finSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <select id="finType"><option>income</option><option>balance</option><option>cashflow</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadFinancials()"><i class="fas fa-file-invoice"></i> Load</button>
+      </div>
+      <div id="finResult" class="result-box" style="max-height:300px;"></div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Dividends & Earnings</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <select id="divSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadDividends()"><i class="fas fa-coins"></i> Load</button>
+      </div>
+      <div id="divResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Institutional Holders</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <select id="holdSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadHolders()"><i class="fas fa-building"></i> Load</button>
+      </div>
+      <div id="holdResult" class="result-box" style="max-height:250px;"></div>
+    </div>
+        <div class="card"><div class="card-header"><div><div class="card-title">Stock Screener</div><div class="card-subtitle">Screen 55 stocks by sector, halal status, market cap</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Sector</label><input type="text" id="screenerSector" value="" placeholder="e.g. Technology" style="width:120px;">
+        <label>Halal only</label><select id="screenerHalal"><option>False</option><option>True</option></select>
+        <button class="btn btn-sm btn-primary" onclick="runScreener()"><i class="fas fa-filter"></i> Screen</button>
+      </div>
+      <div id="screenerResult" class="result-box" style="max-height:300px;"></div>
+    </div>
+  </div>
+  <!-- Full Smart Screener (inside Research tab) -->
+  <div class="card" id="smartScreenerCard" style="border-color:var(--accent);border-width:2px;">
+    <div class="card-header" style="position:sticky;top:0;background:var(--bg-card);z-index:10;border-radius:12px 12px 0 0;">
+      <div>
+        <div class="card-title"><i class="fas fa-microchip" style="color:var(--accent);margin-right:6px;"></i> Smart Screener — Halal + Profitability + Fair Price</div>
+        <div class="card-subtitle">Scans 120+ stocks on halal (binary) + profitability (40) + valuation (40) + market quality (20) = Smart Score 0-100</div>
+      </div>
+      <button class="btn btn-primary" onclick="runSmartScreener()"><i class="fas fa-rocket"></i> Run Smart Scan</button>
+    </div>
+    <div class="form-group" style="margin-bottom:12px;flex-wrap:wrap;">
+      <label>Min Score</label>
+      <select id="smartMinScore" style="width:80px;"><option>0</option><option selected>50</option><option>60</option><option>70</option><option>80</option></select>
+      <label>Sector</label>
+      <input type="text" id="smartSector" value="" placeholder="e.g. Technology" style="width:130px;">
+      <label>Max Results</label>
+      <select id="smartMaxResults" style="width:80px;"><option selected>25</option><option>50</option><option>100</option></select>
+      <span style="font-size:11px;color:var(--text-muted);">First scan ~1-2 min (cached 24h)</span>
+    </div>
+    <div id="smartResult"><div class="loading"><div class="spinner"></div>Click "Run Smart Scan" to discover investment opportunities</div></div>
+  </div>
+  <!-- Category Overview (moved from Overview tab) -->
+  <div class="card"><div class="card-header"><div><div class="card-title">Category Overview</div><div class="card-subtitle">Models, agents, and tools by category</div></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Category</th><th>Type</th><th>Count</th><th>Status</th></tr></thead>
+      <tbody id="categoryTable"></tbody></table></div>
+  </div>
+</div>
+
+<!-- Smart Screener Summary Bar (compact, shown on non-research pages) -->
+<div class="card" id="smartScreenerBar" style="border-color:var(--accent);border-width:1px;padding:10px 20px;margin-bottom:0;">
+  <div style="display:flex;align-items:center;gap:12px;font-size:12px;cursor:pointer;" onclick="switchTab('research');setTimeout(()=>openScreener(),200)">
+    <i class="fas fa-microchip" style="color:var(--accent);"></i>
+    <span style="font-weight:600;white-space:nowrap;">Smart Screener</span>
+    <span id="screenerSummary" style="color:var(--text-muted);flex:1;">Run a scan to discover opportunities</span>
+    <span style="color:var(--accent);font-weight:500;white-space:nowrap;">Open <i class="fas fa-chevron-right" style="font-size:10px;"></i></span>
+  </div>
+</div>
+
+<!-- TAB: Halal Screener -->
+<div class="tab-content" id="tab-halal">
+  <div class="stats-grid" id="halalStats"></div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">AAOIFI Halal Compliance</div><div class="card-subtitle">4-screen Shariah check: debt, interest, sector, liquidity</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <input type="text" id="halalSymbol" value="AAPL" style="width:120px;">
+        <button class="btn btn-primary" onclick="checkHalal()"><i class="fas fa-search"></i> Check</button>
+      </div>
+      <div id="halalSingleResult" style="min-height:200px;">
+        <div class="loading"><div class="spinner"></div>Enter a symbol to check</div>
+      </div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Halal Universe</div><div class="card-subtitle">Quick scan of major stocks</div></div>
+      <button class="btn btn-sm btn-primary" onclick="scanHalalUniverse()"><i class="fas fa-globe"></i> Scan Universe</button></div>
+      <div id="halalUniverseResult" class="result-box" style="max-height:400px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: AI Assistant -->
+<div class="tab-content" id="tab-ai">
+  <div class="stats-grid" id="aiStats"></div>
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">AI Investment Report</div><div class="card-subtitle">Smart analysis of top halal investment opportunities</div></div>
+      <button class="btn btn-sm btn-primary" onclick="generateAIReport()"><i class="fas fa-file-alt"></i> Generate Report</button></div>
+      <div id="aiReportResult" class="result-box" style="max-height:500px;font-size:13px;line-height:1.6;direction:rtl;text-align:right;font-family:'Inter','Segoe UI',sans-serif;">
+        <div class="loading"><div class="spinner"></div>Click "Generate Report" for AI analysis</div>
+      </div>
+    </div>
+    <div class="card"><div class="card-header"><div><div class="card-title">AI Chat</div><div class="card-subtitle">Ask questions in Arabic or English</div></div></div>
+      <div class="form-group" style="margin-bottom:12px;flex-wrap:wrap;">
+        <input type="text" id="aiQuestion" value="ما هو أفضل سهم حلال اليوم؟" style="flex:1;min-width:200px;" placeholder="Ask a question about stocks...">
+        <input type="text" id="aiSymbol" value="" style="width:80px;" placeholder="Symbol">
+        <button class="btn btn-primary" onclick="askAI()"><i class="fas fa-paper-plane"></i> Ask</button>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('aiQuestion').value='ما هو أفضل سهم حلال اليوم؟';askAI()" title="Best halal stock"><i class="fas fa-star"></i></button>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('aiQuestion').value='السلام عليكم';askAI()" title="Greeting"><i class="fas fa-hand-peace"></i></button>
+      </div>
+      <div id="aiChatResult" class="result-box" style="min-height:250px;max-height:500px;overflow-y:auto;font-size:13px;line-height:1.6;direction:rtl;text-align:right;font-family:'Inter','Segoe UI',sans-serif;">
+        <div style="color:var(--text-muted);padding:16px;text-align:center;">👋 Ask a question to start the conversation with the AI Analyst</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: Alerts Panel -->
+<div class="tab-content" id="tab-alerts">
+  <div class="stats-grid" id="alertsStats"></div>
+  <div id="alertsContainer"><div class="loading"><div class="spinner"></div>Loading alerts...</div></div>
+</div>
+
+</main>
+
+<script>
+// ===== CONFIG =====
+const API = '';
+let charts = {};
+
+// ===== NAVIGATION =====
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + tabId).classList.add('active');
+  document.querySelector(`.nav-item[data-tab="${tabId}"]`).classList.add('active');
+  document.getElementById('pageTitle').textContent = document.querySelector(`.nav-item[data-tab="${tabId}"]`).childNodes[0].textContent.trim();
+  document.getElementById('breadcrumb').textContent = 'Dashboard / ' + document.getElementById('pageTitle').textContent;
+  if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+  loadTabData(tabId);
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ===== API HELPER =====
+async function apiGet(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ===== STATUS =====
+async function checkStatus() {
+  try {
+    const t0 = performance.now();
+    const info = await apiGet('/api/info');
+    const latency = Math.round(performance.now() - t0);
+    document.getElementById('statusDot').className = 'status-dot';
+    document.getElementById('statusText').innerHTML = 'Connected <span style="font-weight:400;color:var(--text-muted);">· '+latency+'ms</span>';
+    document.getElementById('statusDetail').textContent = 'Last heartbeat: ' + new Date().toLocaleTimeString();
+    return info;
+  } catch(e) {
+    document.getElementById('statusDot').className = 'status-dot offline';
+    document.getElementById('statusText').textContent = 'Offline';
+    document.getElementById('statusDetail').textContent = '';
+    return null;
+  }
+}
+
+// ===== REFRESH =====
+function refreshData() {
+  const active = document.querySelector('.tab-content.active');
+  const id = active ? active.id.replace('tab-','') : 'overview';
+  loadTabData(id);
+}
+
+// ===== TAB DATA LOADING =====
+function loadTabData(tabId) {
+  switch(tabId) {
+    case 'overview': loadOverview(); break;
+    case 'forecast': loadForecastLab(); break;
+    case 'trading': loadTradingLab(); break;
+    case 'risk': loadRiskDesk(); break;
+    case 'workflow': /* loaded on demand */ break;
+    case 'charts': loadChartsTab(); break;
+    case 'research': loadResearchTab(); break;
+    case 'ai': loadAITab(); break;
+    case 'halal': loadHalalTab(); break;
+    case 'alerts': loadAlertsTab(); break;
+  }
+}
+
+
+
+// ===== SHARED STATE =====
+let forecastModelItems = [];
+let forecastCompareSet = new Set();
+let agentItems = [];
+let agentCompareSet = new Set();
+
+// ===== SPARKLINE GENERATOR =====
+function genSparklinePath(seed, width, height) {
+  let s = seed.split('').reduce((a,c)=>a+c.charCodeAt(0), 0);
+  const n = 20;
+  let pts = [];
+  for (let i = 0; i < n; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    pts.push(0.3 + (s % 100) / 100 * 0.7);
+  }
+  const step = width / (n - 1);
+  const path = pts.map((p, i) => `${i===0?'M':'L'}${i*step},${height*(1-p)}`).join(' ');
+  const area = pts.map((p, i) => `${i===0?'M':'L'}${i*step},${height*(1-p)}`).join(' ') + ` L${width},${height} L0,${height} Z`;
+  return { path, area, last: pts[pts.length-1] };
+}
+
+// ===== TIME HELPER =====
+function timeAgo(hours) {
+  if (hours == null) return 'Never';
+  if (hours < 1) return 'Just now';
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// ===== CATEGORY COLOR =====
+function familyBorderClass(cat) {
+  const slug = (cat || 'other').toLowerCase().replace(/[\s-]+/g, '-');
+  return 'tc-' + slug;
+}
+
+// ===== STATUS BADGE =====
+function statusBadge(status) {
+  const map = { production:'sb-production', staging:'sb-staging', idle:'sb-idle', failing:'sb-failing' };
+  return `<span class="status-badge ${map[status]||'sb-idle'}">${status||'idle'}</span>`;
+}
+
+// ===== RENDER CARD =====
+function renderCard(item, type) {
+  const cat = item.category || 'Other';
+  const border = familyBorderClass(cat);
+  const sp = genSparklinePath(item.name + '_sp', 180, 28);
+  const spColor = sp.last > 0.6 ? 'var(--green)' : sp.last > 0.4 ? 'var(--orange)' : 'var(--red)';
+  const trainedStr = timeAgo(item.last_trained);
+  const isChamp = item.is_champion ? '👑 ' : '';
+  const safe = item.name.replace(/'/g, "\\'");
+  const isPinned = getPinned(type).has(item.name);
+  return `<div class="tool-card ${border}" style="position:relative;">
+    <input type="checkbox" class="compare-cb" data-name="${item.name}" data-type="${type}" onchange="toggleCompare('${type==='model'?'f':'a'}','${safe}')" title="Select for comparison">
+    <button class="star-btn ${isPinned?'pinned':''}" onclick="event.stopPropagation();togglePin('${type}','${safe}')" title="${isPinned?'Unpin':'Pin to top'}">${isPinned?'★':'☆'}</button>
+    <div onclick="${type==='model'?'runForecast':'runAgent'}('${safe}')" style="cursor:pointer;">
+    <div class="name">
+      <span>${isChamp}${item.name}</span>
+      ${statusBadge(item.status)}
+    </div>
+    <svg class="sparkline-box" viewBox="0 0 180 28" preserveAspectRatio="none">
+      <path d="${sp.area}" fill="${spColor}20" />
+      <path d="${sp.path}" fill="none" stroke="${spColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="card-meta">
+      <span>${cat}</span>
+      <span class="metric ${(item.sharpe||0)>=1?'up':'down'}">S: ${item.sharpe||'N/A'}</span>
+      <span class="metric ${(item.win_rate||0)>=0.5?'up':'down'}">W: ${item.win_rate?(item.win_rate*100).toFixed(0):'N/A'}%</span>
+      <span style="margin-left:auto;">${trainedStr}</span>
+    </div>
+    </div>
+  </div>`;
+}
+
+// ===== PIN / FAVORITES =====
+function getPinned(type) {
+  const key = 'pinned_' + type;
+  try {
+    return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  } catch(e) { return new Set(); }
+}
+
+function savePinned(type, set) {
+  localStorage.setItem('pinned_' + type, JSON.stringify([...set]));
+}
+
+function togglePin(type, name) {
+  const set = getPinned(type);
+  if (set.has(name)) set.delete(name); else set.add(name);
+  savePinned(type, set);
+  // Re-render current view
+  if (type === 'model') renderFilteredForecastCards(forecastModelItems);
+  else renderFilteredAgentCards(agentItems);
+  event.stopPropagation();
+}
+
+// ===== FORECAST LAB =====
+async function loadForecastLab() {
+  try {
+    const info = await apiGet('/api/info');
+    const items = info.model_items || [];
+    forecastModelItems = items;
+
+    // Compute KPIs from data
+    const bestSharpe = items.reduce((best, m) => (m.sharpe||0) > (best.sharpe||0) ? m : best, {sharpe:0});
+    const drifted = items.filter(m => m.status === 'failing').length;
+    const families = new Set(items.map(m => m.category));
+    const freshCount = items.filter(m => (m.last_trained||999) < 24).length;
+
+    document.getElementById('forecastStats').innerHTML = `
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-trophy"></i></div><div class="stat-value" style="font-size:20px;">${bestSharpe.sharpe||'—'}</div><div class="stat-label">Best Sharpe today (${bestSharpe.name||'N/A'})</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-value">${drifted}/${items.length}</div><div class="stat-label">Models drifted (PSI > threshold)</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-history"></i></div><div class="stat-value">${info.last_full_retrain != null ? info.last_full_retrain + 'h ago' : 'N/A'}</div><div class="stat-label">Last full retrain</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-microchip"></i></div><div class="stat-value">${info.smart_scan_freshness != null ? info.smart_scan_freshness + 'm ago' : 'N/A'}</div><div class="stat-label">Smart Scan freshness</div></div>
+    `;
+
+    renderForecastTabs(items);
+    renderFilteredForecastCards(items);
+  } catch(e) {}
+}
+
+function renderForecastTabs(items) {
+  const all = [{name:'All',count:items.length}];
+  const fams = [...new Set(items.map(m => m.category))].sort();
+  const tabs = [...all, ...fams.map(f => ({name:f, count: items.filter(m => m.category===f).length}))];
+  document.getElementById('forecastTabs').innerHTML = tabs.map(t =>
+    `<span class="card-tab ${t.name==='All'?'active':''}" data-fam="${t.name}" onclick="filterForecastTab('forecast','${t.name}')">${t.name} (${t.count})</span>`
+  ).join('');
+  document.getElementById('forecastTabs').dataset.active = 'All';
+}
+
+function filterForecastTab(prefix, fam) {
+  document.querySelectorAll(`#${prefix}Tabs .card-tab`).forEach(t => t.classList.remove('active'));
+  document.querySelector(`#${prefix}Tabs .card-tab[data-fam="${fam}"]`).classList.add('active');
+  document.getElementById(`${prefix}Tabs`).dataset.active = fam;
+  if (prefix === 'forecast') renderFilteredForecastCards(forecastModelItems);
+  else renderFilteredAgentCards(agentItems);
+}
+
+function filterForecastCards() { renderFilteredForecastCards(forecastModelItems); }
+
+function renderFilteredForecastCards(items) {
+  const fam = document.getElementById('forecastTabs').dataset.active || 'All';
+  const query = (document.getElementById('fFamFilter').value || '').toLowerCase();
+  const status = document.getElementById('fStatusFilter').value || '';
+  const sort = document.getElementById('fSortBy').value || 'name';
+  const minSh = parseFloat(document.getElementById('fMinSharpe').value) || 0;
+  const pinned = getPinned('model');
+
+  let filtered = items.filter(m => {
+    if (fam !== 'All' && m.category !== fam) return false;
+    if (query && !m.name.toLowerCase().includes(query) && !(m.category||'').toLowerCase().includes(query)) return false;
+    if (status && m.status !== status) return false;
+    if (minSh && (m.sharpe||0) < minSh) return false;
+    return true;
+  });
+
+  if (sort === 'sharpe') filtered.sort((a,b) => (b.sharpe||0) - (a.sharpe||0));
+  else if (sort === 'trained') filtered.sort((a,b) => (a.last_trained||999) - (b.last_trained||999));
+  else filtered.sort((a,b) => a.name.localeCompare(b.name));
+
+  const pinnedItems = filtered.filter(m => pinned.has(m.name));
+  const rest = filtered.filter(m => !pinned.has(m.name));
+
+  const pinEl = document.getElementById('forecastPinned');
+  if (pinnedItems.length > 0) {
+    pinEl.innerHTML = `<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;">📌 Pinned (${pinnedItems.length})</div>` + pinnedItems.map(m => renderCard(m, 'model')).join('');
+    pinEl.style.display = '';
+  } else {
+    pinEl.innerHTML = '';
+    pinEl.style.display = 'none';
+  }
+
+  const grid = document.getElementById('forecastGrid');
+  const empty = document.getElementById('forecastEmpty');
+  if (rest.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = pinnedItems.length === 0 ? 'block' : 'none';
+    if (pinnedItems.length > 0) empty.innerHTML = '<i class="fas fa-search" style="font-size:24px;display:block;margin-bottom:8px;"></i>No other models match your filters';
+  } else {
+    empty.style.display = 'none';
+    grid.innerHTML = rest.map(m => renderCard(m, 'model')).join('');
+  }
+  updateCompareBtn();
+}
+
+async function runForecast(model) {
+  const sym = document.getElementById('forecastSymbol').value;
+  document.getElementById('forecastResultTitle').textContent = `${model} on ${sym}`;
+  document.getElementById('forecastResult').style.display = 'block';
+  document.getElementById('forecastMetrics').innerHTML = '<div class="loading"><div class="spinner"></div>Running forecast...</div>';
+  document.getElementById('forecastResultData').textContent = '';
+  destroyChart('forecastChart');
+
+  try {
+    const data = await apiGet(`/api/forecast/${model}?symbol=${sym}&forecast_horizon=5&epochs=10`);
+    const results = data.results || [];
+    const metrics = data.metrics || {};
+
+    document.getElementById('forecastMetrics').innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;">
+        ${Object.entries(metrics).slice(0,6).map(([k,v]) => `<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;">${typeof v==='number'?v.toFixed(4):v}</div><div style="font-size:10px;color:var(--text-muted);text-transform:capitalize;">${k.replace(/_/g,' ')}</div></div>`).join('')}
+      </div>
+    `;
+    document.getElementById('forecastResultData').textContent = JSON.stringify(data, null, 2);
+
+    // Chart
+    if (results.length > 0) {
+      const ctx = document.getElementById('forecastChart').getContext('2d');
+      const labels = results.map(r => r.date ? r.date.slice(5,10) : '');
+      charts.forecastChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {label:'Actual',data:results.map(r=>r.actual),borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,0.1)',fill:true,tension:0.3,pointRadius:0},
+            {label:'Predicted',data:results.map(r=>r.predicted),borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.1)',fill:true,tension:0.3,pointRadius:0}
+          ]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          plugins: {legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+          scales: {x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}}
+        }
+      });
+    }
+  } catch(e) {
+    document.getElementById('forecastMetrics').innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> ${e.message}</div>`;
+  }
+}
+
+// ===== TRADING LAB =====
+async function loadTradingLab() {
+  try {
+    const info = await apiGet('/api/info');
+    const items = info.agent_items || [];
+    agentItems = items;
+
+    const bestSharpe = items.reduce((best, a) => (a.sharpe||0) > (best.sharpe||0) ? a : best, {sharpe:0});
+    const drifted = items.filter(a => a.status === 'failing').length;
+    const families = new Set(items.map(a => a.category));
+    const freshCount = items.filter(a => (a.last_trained||999) < 24).length;
+
+    document.getElementById('tradingStats').innerHTML = `
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-trophy"></i></div><div class="stat-value" style="font-size:20px;">${bestSharpe.sharpe||'—'}</div><div class="stat-label">Best Sharpe today (${bestSharpe.name||'N/A'})</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-value">${drifted}/${items.length}</div><div class="stat-label">Models drifted (PSI > threshold)</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-history"></i></div><div class="stat-value">${info.last_full_retrain != null ? info.last_full_retrain + 'h ago' : 'N/A'}</div><div class="stat-label">Last full retrain</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-microchip"></i></div><div class="stat-value">${info.smart_scan_freshness != null ? info.smart_scan_freshness + 'm ago' : 'N/A'}</div><div class="stat-label">Smart Scan freshness</div></div>
+    `;
+
+    renderAgentTabs(items);
+    renderFilteredAgentCards(items);
+  } catch(e) {}
+}
+
+function renderAgentTabs(items) {
+  const all = [{name:'All',count:items.length}];
+  const fams = [...new Set(items.map(a => a.category))].sort();
+  const tabs = [...all, ...fams.map(f => ({name:f, count: items.filter(a => a.category===f).length}))];
+  document.getElementById('agentTabs').innerHTML = tabs.map(t =>
+    `<span class="card-tab ${t.name==='All'?'active':''}" data-fam="${t.name}" onclick="filterAgentTab('${t.name}')">${t.name} (${t.count})</span>`
+  ).join('');
+  document.getElementById('agentTabs').dataset.active = 'All';
+}
+
+function filterAgentTab(fam) {
+  document.querySelectorAll('#agentTabs .card-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`#agentTabs .card-tab[data-fam="${fam}"]`).classList.add('active');
+  document.getElementById('agentTabs').dataset.active = fam;
+  renderFilteredAgentCards(agentItems);
+}
+
+function filterAgentCards() { renderFilteredAgentCards(agentItems); }
+
+function renderFilteredAgentCards(items) {
+  const fam = document.getElementById('agentTabs').dataset.active || 'All';
+  const query = (document.getElementById('aFamFilter').value || '').toLowerCase();
+  const status = document.getElementById('aStatusFilter').value || '';
+  const sort = document.getElementById('aSortBy').value || 'name';
+  const minSh = parseFloat(document.getElementById('aMinSharpe').value) || 0;
+  const pinned = getPinned('agent');
+
+  let filtered = items.filter(a => {
+    if (fam !== 'All' && a.category !== fam) return false;
+    if (query && !a.name.toLowerCase().includes(query) && !(a.category||'').toLowerCase().includes(query)) return false;
+    if (status && a.status !== status) return false;
+    if (minSh && (a.sharpe||0) < minSh) return false;
+    return true;
+  });
+
+  if (sort === 'sharpe') filtered.sort((a,b) => (b.sharpe||0) - (a.sharpe||0));
+  else if (sort === 'trained') filtered.sort((a,b) => (a.last_trained||999) - (b.last_trained||999));
+  else filtered.sort((a,b) => a.name.localeCompare(b.name));
+
+  const pinnedItems = filtered.filter(a => pinned.has(a.name));
+  const rest = filtered.filter(a => !pinned.has(a.name));
+
+  const pinEl = document.getElementById('agentPinned');
+  if (pinnedItems.length > 0) {
+    pinEl.innerHTML = `<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:4px 0;">📌 Pinned (${pinnedItems.length})</div>` + pinnedItems.map(a => renderCard(a, 'agent')).join('');
+    pinEl.style.display = '';
+  } else {
+    pinEl.innerHTML = '';
+    pinEl.style.display = 'none';
+  }
+
+  const grid = document.getElementById('agentGrid');
+  const empty = document.getElementById('agentEmpty');
+  if (rest.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = pinnedItems.length === 0 ? 'block' : 'none';
+    if (pinnedItems.length > 0) empty.innerHTML = '<i class="fas fa-search" style="font-size:24px;display:block;margin-bottom:8px;"></i>No other agents match your filters';
+  } else {
+    empty.style.display = 'none';
+    grid.innerHTML = rest.map(a => renderCard(a, 'agent')).join('');
+  }
+  updateCompareBtn();
+}
+
+async function runAgent(agent) {
+  const sym = document.getElementById('agentSymbol').value;
+  document.getElementById('agentResultTitle').textContent = `${agent} on ${sym}`;
+  document.getElementById('agentResult').style.display = 'block';
+  document.getElementById('agentMetrics').innerHTML = '<div class="loading"><div class="spinner"></div>Running agent backtest...</div>';
+  document.getElementById('agentResultData').textContent = '';
+  destroyChart('agentChart');
+
+  try {
+    const data = await apiGet(`/api/agent/${agent}?symbol=${sym}&episodes=15`);
+    const results = data.results || [];
+    const summary = data.summary || {};
+
+    document.getElementById('agentMetrics').innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;">
+        ${Object.entries(summary).map(([k,v]) => `<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;"><div style="font-size:18px;font-weight:700;color:${k==='total_return'?(v>0?'var(--green)':'var(--red)'):'var(--text-primary)'}">${typeof v==='number'?v.toFixed(4):v}</div><div style="font-size:10px;color:var(--text-muted);text-transform:capitalize;">${k.replace(/_/g,' ')}</div></div>`).join('')}
+      </div>
+    `;
+    document.getElementById('agentResultData').textContent = JSON.stringify(data, null, 2);
+
+    if (results.length > 0) {
+      const ctx = document.getElementById('agentChart').getContext('2d');
+      charts.agentChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: results.map(r => r.date ? r.date.slice(5,10) : ''),
+          datasets: [
+            {label:'Portfolio',data:results.map(r=>r.portfolio_value),borderColor:'#3b82f6',tension:0.3,pointRadius:0},
+            {label:'Benchmark',data:results.map(r=>r.benchmark_value),borderColor:'#64748b',tension:0.3,pointRadius:0,borderDash:[4,4]}
+          ]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          plugins: {legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+          scales: {x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}}
+        }
+      });
+    }
+  } catch(e) {
+    document.getElementById('agentMetrics').innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> ${e.message}</div>`;
+  }
+}
+
+// ===== RISK DESK =====
+async function loadRiskDesk() {
+  document.getElementById('riskStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-chart-pie"></i></div><div class="stat-value">Monte Carlo</div><div class="stat-label">GBM Simulation</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-shield-alt"></i></div><div class="stat-value">VaR/CVaR</div><div class="stat-label">Risk Metrics</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-vote-yea"></i></div><div class="stat-value">Consensus</div><div class="stat-label">Model Voting</div></div>
+  `;
+  // Load leaderboard by default
+  runLeaderboard();
+  // Load metrics by default
+  runMetrics();
+}
+
+function destroyChart(name) {
+  if (charts[name]) { charts[name].destroy(); delete charts[name]; }
+}
+
+async function runMonteCarlo() {
+  const sym = document.getElementById('mcSymbol').value;
+  const sims = document.getElementById('mcSims').value;
+  const days = document.getElementById('mcDays').value;
+  destroyChart('mcChart');
+  document.getElementById('mcResult').textContent = 'Running...';
+
+  try {
+    const data = await apiGet(`/api/monte-carlo?symbol=${sym}&n_simulations=${sims}&forecast_days=${days}`);
+    const stats = data.day_stats || [];
+    document.getElementById('mcResult').textContent = JSON.stringify(data.summary || {}, null, 2);
+
+    if (stats.length > 0) {
+      const ctx = document.getElementById('mcChart').getContext('2d');
+      charts.mcChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: stats.map((_,i) => i),
+          datasets: [
+            {label:'Mean',data:stats.map(s=>s.mean||0),borderColor:'#3b82f6',tension:0.3,pointRadius:0},
+            {label:'P95',data:stats.map(s=>s.p95||0),borderColor:'#22c55e',borderDash:[4,4],tension:0.3,pointRadius:0},
+            {label:'P5',data:stats.map(s=>s.p05||0),borderColor:'#ef4444',borderDash:[4,4],tension:0.3,pointRadius:0},
+          ]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          plugins: {legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+          scales: {x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}}
+        }
+      });
+    }
+  } catch(e) {
+    document.getElementById('mcResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function runMetrics() {
+  const sym = document.getElementById('metricsSymbol').value;
+  document.getElementById('metricsResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet(`/api/metrics?symbol=${sym}`);
+    document.getElementById('metricsResult').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        ${Object.entries(data).filter(([k])=>k!=='symbol').map(([k,v]) => `
+          <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--bg-card);border-radius:6px;">
+            <span style="font-size:12px;color:var(--text-muted);text-transform:capitalize;">${k.replace(/_/g,' ')}</span>
+            <span style="font-weight:600;font-size:13px;color:${k.includes('return')||k.includes('sharpe')||k.includes('sortino')?(v>0?'var(--green)':'var(--red)'):'var(--text-primary)'}">${typeof v==='number'?v.toFixed(4):v}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch(e) {
+    document.getElementById('metricsResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function runConsensus() {
+  const sym = document.getElementById('consensusSymbol').value;
+  document.getElementById('consensusResult').innerHTML = '<div class="loading"><div class="spinner"></div>Running all models...</div>';
+  try {
+    const data = await apiGet(`/api/consensus?symbol=${sym}&accuracy_threshold=55`);
+    const rec = data.recommendation || 'NEUTRAL';
+    const color = rec==='BUY'?'var(--green)':rec==='SELL'?'var(--red)':'var(--orange)';
+    const bg = rec==='BUY'?'rgba(34,197,94,0.15)':rec==='SELL'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)';
+    document.getElementById('consensusResult').innerHTML = `
+      <div style="text-align:center;padding:24px;">
+        <div style="font-size:48px;font-weight:800;color:${color};background:${bg};display:inline-block;padding:16px 48px;border-radius:16px;letter-spacing:2px;">${rec}</div>
+        <div style="margin-top:12px;font-size:14px;color:var(--text-secondary);">Confidence: ${data.confidence} | Models: ${data.qualified_models}/${data.total_models}</div>
+        <div style="margin-top:8px;display:flex;gap:16px;justify-content:center;">
+          <span><span style="color:var(--green);font-weight:600;">▲ Up: ${data.up_votes}</span></span>
+          <span><span style="color:var(--red);font-weight:600;">▼ Down: ${data.down_votes}</span></span>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    document.getElementById('consensusResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function runLeaderboard() {
+  const sym = document.getElementById('lbSymbol') ? document.getElementById('lbSymbol').value : 'AAPL';
+  const el = document.getElementById('lbResult');
+  if (el) el.innerHTML = '<div class="loading"><div class="spinner"></div>Running all agents...</div>';
+  try {
+    const data = await apiGet(`/api/leaderboard?symbol=${sym}&episodes=15`);
+    if (el) {
+      el.innerHTML = `
+        <div class="table-wrap"><table>
+          <thead><tr><th>Rank</th><th>Agent</th><th>Category</th><th>Return</th><th>Sharpe</th><th>Max DD</th><th>Trades</th></tr></thead>
+          <tbody>${(data.leaderboard||[]).map((r,i) => `
+            <tr>
+              <td style="font-weight:700;color:${i===0?'var(--accent)':i===1?'var(--green)':i===2?'var(--orange)':'var(--text-muted)'}">#${i+1}</td>
+              <td style="font-weight:600;">${r.agent}</td>
+              <td><span class="badge-tag badge-blue">${r.category||''}</span></td>
+              <td style="color:${r.total_return>0?'var(--green)':'var(--red)'}">${r.total_return!=null?r.total_return.toFixed(2)+'%':'N/A'}</td>
+              <td style="font-weight:600;">${r.sharpe_ratio!=null?r.sharpe_ratio.toFixed(2):'N/A'}</td>
+              <td style="color:var(--red)">${r.max_drawdown!=null?r.max_drawdown.toFixed(2)+'%':'N/A'}</td>
+              <td>${r.n_trades||0}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table></div>
+      `;
+    }
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+// ===== WORKFLOW =====
+async function runWorkflow() { await _runWorkflow(false); }
+async function runWorkflowWithTelegram() { await _runWorkflow(true); }
+
+async function _runWorkflow(sendTg) {
+  const symbols = document.getElementById('wlSymbols').value || 'AAPL,MSFT,GOOGL';
+  document.getElementById('workflowResult').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning...</div>';
+  try {
+    const data = await apiGet(`/api/workflow/daily-scan?symbols=${symbols}&send_telegram=${sendTg}`);
+    let html = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> Scanned ${data.symbols_scanned} symbols | Halal: ${data.halal_count} | Telegram: ${data.telegram_sent?'✅ Sent':'⏭️ Skipped'}</div>`;
+    (data.results||[]).forEach(r => {
+      if (r.halal) {
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(34,197,94,0.08);border-radius:8px;margin-bottom:6px;">
+          <span style="font-weight:600;width:60px;">${r.symbol}</span>
+          <span style="flex:1;font-size:12px;color:var(--text-muted)">${r.company||''}</span>
+          <span style="font-size:12px;">Sharpe: ${r.best_sharpe?.toFixed(2)||'N/A'}</span>
+          <span class="badge-tag badge-green">${r.best_agent||''}</span>
+        </div>`;
+      } else {
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(239,68,68,0.08);border-radius:8px;margin-bottom:6px;">
+          <span style="font-weight:600;width:60px;">${r.symbol}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${r.status||'Blocked'}</span>
+          <span class="badge-tag badge-red">NON-COMPLIANT</span>
+        </div>`;
+      }
+    });
+    document.getElementById('workflowResult').innerHTML = html;
+  } catch(e) {
+    document.getElementById('workflowResult').innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> ${e.message}</div>`;
+  }
+}
+
+async function runPortfolio() {
+  const symbols = document.getElementById('pfSymbols').value || 'AAPL,MSFT,GOOGL';
+  const method = document.getElementById('pfMethod').value;
+  try {
+    const data = await apiGet(`/api/portfolio?symbols=${symbols}&method=${method}`);
+    document.getElementById('pfResult').textContent = JSON.stringify(data, null, 2);
+  } catch(e) {
+    document.getElementById('pfResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function loadLBHistory() {
+  document.getElementById('lbHistoryResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet('/api/leaderboard/history');
+    const snapshots = data.history || [];
+    document.getElementById('lbHistoryResult').innerHTML = snapshots.length === 0
+      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No history yet — run daily scan to generate snapshots</div>'
+      : `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Symbol</th><th>Top Agent</th><th>Top Sharpe</th></tr></thead><tbody>${
+          snapshots.slice(-10).reverse().map(s => {
+            const lb = s.leaderboard || [];
+            const top = lb[0] || {};
+            return `<tr><td>${(s.date||'').slice(0,10)}</td><td>${s.symbol}</td><td>${top.agent||'N/A'}</td><td style="font-weight:600;">${top.sharpe_ratio!=null?top.sharpe_ratio.toFixed(2):'N/A'}</td></tr>`;
+          }).join('')
+        }</tbody></table></div>`;
+  } catch(e) {
+    document.getElementById('lbHistoryResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+// ===== CHARTS TAB =====
+async function loadChartsTab() {
+  try {
+    const info = await apiGet('/api/info');
+    const sel = document.getElementById('chartAgentName');
+    sel.innerHTML = (info.agents||[]).map(a => `<option>${a}</option>`).join('');
+  } catch(e) {}
+}
+
+async function runComparison() {
+  const sym = document.getElementById('compSymbol').value;
+  const agents = document.getElementById('compAgents').value;
+  destroyChart('compChart');
+  document.getElementById('compResult').innerHTML = '<div class="loading"><div class="spinner"></div>Running agents...</div>';
+
+  try {
+    const data = await apiGet(`/api/comparison?symbol=${sym}&agents=${agents}&episodes=15`);
+    const curves = data.curves || [];
+    document.getElementById('compResult').innerHTML = `
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">${(data.summary||[]).map(s => `
+        <div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:13px;">${s.agent}</div>
+          <div style="font-size:11px;color:var(--text-muted);">Sharpe: ${s.sharpe_ratio?.toFixed(2)||'N/A'} | Return: ${s.total_return?.toFixed(2)||'N/A'}%</div>
+        </div>`).join('')}
+      </div>
+    `;
+
+    const colors = ['#3b82f6','#22c55e','#a855f7','#f59e0b'];
+    if (data.dates && curves.length > 0) {
+      const ctx = document.getElementById('compChart').getContext('2d');
+      charts.compChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: data.dates.map(d => d.slice(5,10)),
+          datasets: curves.map((c,i) => ({
+            label: c.agent,
+            data: c.equity || [],
+            borderColor: colors[i % colors.length],
+            tension: 0.3,
+            pointRadius: 0,
+          }))
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          plugins: {legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+          scales: {x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}}
+        }
+      });
+    }
+  } catch(e) {
+    document.getElementById('compResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function loadAgentChart() {
+  const sym = document.getElementById('chartAgentSymbol').value;
+  const agent = document.getElementById('chartAgentName').value;
+  destroyChart('singleAgentChart');
+  try {
+    const data = await apiGet(`/api/chart/agent/${agent}?symbol=${sym}&episodes=15`);
+    const chartData = data.data || [];
+    const ctx = document.getElementById('singleAgentChart').getContext('2d');
+    charts.singleAgentChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: chartData.map(r => r.date ? r.date.slice(5,10) : ''),
+        datasets: [
+          {label:'Portfolio',data:chartData.map(r=>r.portfolio),borderColor:'#3b82f6',tension:0.3,pointRadius:0},
+          {label:'Benchmark',data:chartData.map(r=>r.benchmark),borderColor:'#64748b',tension:0.3,pointRadius:0,borderDash:[4,4]}
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins: {legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+        scales: {x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}}
+      }
+    });
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+// ===== RESEARCH TAB =====
+async function loadResearchTab() {
+  document.getElementById('researchStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-search"></i></div><div class="stat-value">7</div><div class="stat-label">Research Tools</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-database"></i></div><div class="stat-value">yFinance</div><div class="stat-label">Data Source</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-filter"></i></div><div class="stat-value">50+</div><div class="stat-label">Screener Universe</div></div>
+  `;
+  loadStockSummary();
+  // Populate Category Overview table (moved here from Overview)
+  const cats = [
+    {name:'LSTM Models',type:'Deep Learning',count:4,status:'Operational'},
+    {name:'GRU Models',type:'Deep Learning',count:6,status:'Operational'},
+    {name:'CNN Models',type:'Deep Learning',count:2,status:'Operational'},
+    {name:'RNN Models',type:'Deep Learning',count:4,status:'Operational'},
+    {name:'Transformer',type:'Deep Learning',count:1,status:'Operational'},
+    {name:'Ensemble',type:'Deep Learning',count:1,status:'Operational'},
+    {name:'Statistical',type:'Classic',count:1,status:'Operational'},
+    {name:'Deep RL',type:'Reinforcement Learning',count:3,status:'Operational'},
+    {name:'Q-Learning',type:'Reinforcement Learning',count:7,status:'Operational'},
+    {name:'Actor-Critic',type:'Reinforcement Learning',count:3,status:'Operational'},
+    {name:'Neuro-Evolution',type:'Reinforcement Learning',count:2,status:'Operational'},
+    {name:'Classic Agents',type:'Rule-Based',count:4,status:'Operational'},
+  ];
+  const tbl = document.getElementById('categoryTable');
+  if (tbl) tbl.innerHTML = cats.map(c =>
+    `<tr><td>${c.name}</td><td><span class="badge-tag badge-blue">${c.type}</span></td><td>${c.count}</td><td><span class="badge-tag badge-green">${c.status}</span></td></tr>`
+  ).join('');
+}
+
+async function loadStockSummary() {
+  const sym = document.getElementById('rsSymbol').value;
+  document.getElementById('rsResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet(`/api/stock/summary?symbol=${sym}`);
+    document.getElementById('rsResult').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        ${Object.entries(data).filter(([k])=>!['symbol','description','website'].includes(k)).map(([k,v]) => `
+          <div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;">
+            <span style="font-size:11px;color:var(--text-muted);text-transform:capitalize;">${k.replace(/_/g,' ')}</span>
+            <span style="font-weight:500;font-size:12px;">${typeof v==='number'?v.toLocaleString(undefined,{maximumFractionDigits:2}):v||'N/A'}</span>
+          </div>
+        `).join('')}
+      </div>
+      ${data.description ? `<div style="margin-top:8px;padding:8px;background:var(--bg-card);border-radius:6px;font-size:11px;color:var(--text-muted);line-height:1.5;">${data.description}</div>` : ''}
+    `;
+  } catch(e) {
+    document.getElementById('rsResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function loadRatios() {
+  const sym = document.getElementById('ratioSymbol').value;
+  document.getElementById('ratioResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet(`/api/stock/ratios?symbol=${sym}`);
+    let html = '';
+    Object.entries(data).filter(([k])=>k!=='symbol').forEach(([category,items]) => {
+      html += `<div style="margin-bottom:8px;"><div style="font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;margin-bottom:4px;">${category}</div>`;
+      Object.entries(items).forEach(([k,v]) => {
+        html += `<div style="display:flex;justify-content:space-between;padding:4px 8px;font-size:11px;"><span style="color:var(--text-muted);text-transform:capitalize;">${k.replace(/_/g,' ')}</span><span style="font-weight:500;">${typeof v==='number'?v.toFixed(4):v||'N/A'}</span></div>`;
+      });
+      html += '</div>';
+    });
+    document.getElementById('ratioResult').innerHTML = html;
+  } catch(e) {
+    document.getElementById('ratioResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function loadFinancials() {
+  const sym = document.getElementById('finSymbol').value;
+  const stmt = document.getElementById('finType').value;
+  document.getElementById('finResult').textContent = 'Loading...';
+  try {
+    const data = await apiGet(`/api/stock/financials?symbol=${sym}&statement=${stmt}&periods=4`);
+    document.getElementById('finResult').textContent = JSON.stringify(data.rows || [], null, 2);
+  } catch(e) {
+    document.getElementById('finResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function loadDividends() {
+  const sym = document.getElementById('divSymbol').value;
+  document.getElementById('divResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet(`/api/stock/dividends?symbol=${sym}`);
+    const info = [
+      {label:'Dividend Yield',value:data.dividend_yield},
+      {label:'Dividend Rate',value:data.dividend_rate},
+      {label:'Payout Ratio',value:data.payout_ratio},
+      {label:'Ex-Dividend Date',value:data.ex_dividend_date},
+    ];
+    document.getElementById('divResult').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        ${info.map(i => `<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">${i.label}</span><span style="font-weight:500;font-size:12px;">${i.value||'N/A'}</span></div>`).join('')}
+      </div>
+      <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:4px;">Last 24 Payments</div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Dividend</th></tr></thead><tbody>${
+        (data.last_24_payments||[]).slice(0,12).map(p => `<tr><td>${p.date}</td><td>$${p.dividend}</td></tr>`).join('')
+      }</tbody></table></div>
+    `;
+  } catch(e) {
+    document.getElementById('divResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function loadHolders() {
+  const sym = document.getElementById('holdSymbol').value;
+  document.getElementById('holdResult').textContent = 'Loading...';
+  try {
+    const data = await apiGet(`/api/stock/holders?symbol=${sym}`);
+    document.getElementById('holdResult').textContent = JSON.stringify(data, null, 2);
+  } catch(e) {
+    document.getElementById('holdResult').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function runScreener() {
+  const sector = document.getElementById('screenerSector').value;
+  const halal = document.getElementById('screenerHalal').value;
+  document.getElementById('screenerResult').innerHTML = '<div class="loading"><div class="spinner"></div>Screening...</div>';
+  try {
+    const data = await apiGet(`/api/stock/screener?sector=${sector}&halal_only=${halal}&limit=30`);
+    const results = data.results || [];
+    const ttl = data.total || 0;
+    let html = `<div style="margin-bottom:8px;font-size:13px;font-weight:600;">Found ${ttl} matching stocks</div>`;
+    if (results.length > 0) {
+      html += '<table class="result-table"><thead><tr><th>Symbol</th><th>Company</th><th>Sector</th><th>Mkt Cap</th><th>P/E</th><th>Div Yield</th></tr></thead><tbody>';
+      results.forEach(r => {
+        const mcap = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
+        const pe = r.pe ? r.pe.toFixed(1) : 'N/A';
+        const div = r.dividend_yield ? (r.dividend_yield * 100).toFixed(2) + '%' : 'N/A';
+        html += `<tr><td style="font-weight:600;">${r.symbol}</td><td>${(r.company||'').slice(0,22)}</td><td>${r.sector || ''}</td><td>${mcap}</td><td>${pe}</td><td>${div}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    } else {
+      html += '<div style="color:var(--text-muted);padding:16px;">No results matching your filters. Try removing sector or halal filter.</div>';
+    }
+    document.getElementById('screenerResult').innerHTML = html;
+  } catch(e) {
+    document.getElementById('screenerResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+  }
+}
+
+async function runSmartScreener() {
+  const minScore = document.getElementById('smartMinScore').value;
+  const sector = document.getElementById('smartSector').value;
+  const maxResults = document.getElementById('smartMaxResults').value;
+  document.getElementById('smartResult').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning 120 stocks for halal + profitability + fair value... (1-2 min first time)</div>';
+  try {
+    const data = await apiGet('/api/stock/smart-screener?min_score='+minScore+'&sector='+sector+'&max_results='+maxResults+'&use_cache=True');
+    const results = data.results || [];
+    const ttl = data.results_count || 0;
+    const scanned = data.total_scanned || 0;
+    const halalCount = data.halal_count || 0;
+    const source = data.source || 'live';
+
+    let html = '<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap;">' +
+      '<div style="padding:8px 16px;background:rgba(34,197,94,0.1);border-radius:8px;text-align:center;">' +
+        '<div style="font-size:20px;font-weight:700;color:var(--green);">'+halalCount+'</div>' +
+        '<div style="font-size:10px;color:var(--text-muted);">Halal Stocks</div></div>' +
+      '<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
+        '<div style="font-size:20px;font-weight:700;">'+scanned+'</div>' +
+        '<div style="font-size:10px;color:var(--text-muted);">Scanned</div></div>' +
+      '<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
+        '<div style="font-size:20px;font-weight:700;color:var(--accent);">'+ttl+'</div>' +
+        '<div style="font-size:10px;color:var(--text-muted);">Top Opportunities</div></div>' +
+      '<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
+        '<div style="font-size:12px;font-weight:500;">'+source+'</div>' +
+        '<div style="font-size:10px;color:var(--text-muted);">Source</div></div>' +
+      '<div style="padding:8px 16px;background:rgba(168,85,247,0.1);border-radius:8px;text-align:center;">' +
+        '<div style="font-size:11px;font-weight:500;color:var(--purple);">Fund(40)+Tech(30)+Fcst(30)</div>' +
+        '<div style="font-size:10px;color:var(--text-muted);">New Smart Score</div></div></div>';
+
+    if (results.length > 0) {
+    document.getElementById('smartResult').innerHTML = html.replace('Smart Score', 'Score') + '<div style="display:flex;gap:8px;margin-bottom:8px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;"><span>🚀 Smart=Fund(40)+Tech(30)+Fcst(30)</span><span>⚡ RSIs,MACD,BB,VWAP</span></div>';
+
+    html = '<div style="overflow-x:auto;"><table class="result-table"><thead><tr>' +
+      '<th>#</th><th>Symbol</th><th>Price</th>' +
+      '<th>🚀 Smart</th><th>📊 Fund</th><th>⚡ Tech</th><th>🎯 Fcst</th>' +
+      '<th>RSI</th><th>MACD</th><th>BB</th><th>VWAP</th>' +
+      '<th>P/E</th><th>ROE</th><th>MktCap</th>' +
+    '</tr></thead><tbody>';
+    results.forEach(function(r, i) {
+        var total = r.smart_score || 0;
+        var fund = r.fundamental_score || 0;
+        var mom = r.momentum_score || 0;
+        var fcst = r.forecast_score || 0;
+        var md = r.momentum_details || {};
+        var rsi = md.rsi || 'N/A';
+        var macdLabel = md.macd_label || '';
+        var macdShort = macdLabel.slice(0,12);
+        var bbLabel = md.bb_label || '';
+        var bbShort = bbLabel.slice(0,14);
+        var vwapRatio = md.vwap_ratio;
+        var vwapStr = typeof vwapRatio === 'number' ? (vwapRatio*100).toFixed(1)+'%' : 'N/A';
+        var pe = r.valuation_details ? r.valuation_details.pe_val : null;
+        var roe = r.profitability_details ? r.profitability_details.roe_val : null;
+        var mcapStr = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
+        var scoreColor = total >= 75 ? 'var(--green)' : total >= 55 ? 'var(--accent)' : total >= 40 ? 'var(--orange)' : 'var(--red)';
+        var scoreBg = total >= 75 ? 'rgba(34,197,94,0.15)' : total >= 55 ? 'rgba(59,130,246,0.15)' : total >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
+        var rsiColor = (rsi !== 'N/A' && rsi > 70) ? 'var(--red)' : (rsi !== 'N/A' && rsi < 30) ? 'var(--orange)' : 'var(--green)';
+        html += '<tr>' +
+          '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
+          '<td style="font-weight:600;">'+r.symbol+'</td>' +
+          '<td>$'+(r.price ? r.price.toFixed(2) : 'N/A')+'</td>' +
+          '<td style="font-weight:700;color:'+scoreColor+';background:'+scoreBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
+          '<td style="text-align:center;font-weight:500;">'+fund+'</td>' +
+          '<td style="text-align:center;font-weight:500;">'+mom+'</td>' +
+          '<td style="text-align:center;font-weight:500;">'+fcst+'</td>' +
+          '<td style="text-align:center;color:'+rsiColor+';font-weight:500;">'+(typeof rsi === 'number' ? rsi.toFixed(0) : 'N/A')+'</td>' +
+          '<td style="font-size:10px;text-align:center;" title="'+macdLabel+'">'+macdShort+'</td>' +
+          '<td style="font-size:10px;text-align:center;" title="'+bbLabel+'">'+bbShort+'</td>' +
+          '<td style="font-size:10px;text-align:center;">'+vwapStr+'</td>' +
+          '<td>'+(typeof pe === 'number' ? pe.toFixed(1) : 'N/A')+'</td>' +
+          '<td>'+(roe ? (roe*100).toFixed(1)+'%' : 'N/A')+'</td>' +
+          '<td>'+mcapStr+'</td>' +
+        '</tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<div style="color:var(--text-muted);padding:24px;text-align:center;">No opportunities matching your criteria. Try lowering min score or clearing sector filter.</div>';
+    }
+    document.getElementById('smartResult').innerHTML = html;
+    lastScreenerResults = results;
+    updateScreenerSummary();
+  } catch(e) {
+    document.getElementById('smartResult').innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
+  }
+}
+
+// ===== HALAL TAB =====
+async function loadHalalTab() {
+  document.getElementById('halalStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-mosque"></i></div><div class="stat-value">AAOIFI</div><div class="stat-label">Shariah Standard</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-check-double"></i></div><div class="stat-value">4 Screens</div><div class="stat-label">Debt, Interest, Sector, Liquidity</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-balance-scale"></i></div><div class="stat-value">yFinance</div><div class="stat-label">No API Key Required</div></div>
+  `;
+}
+
+async function checkHalal() {
+  const sym = document.getElementById('halalSymbol').value.toUpperCase();
+  document.getElementById('halalSingleResult').innerHTML = '<div class="loading"><div class="spinner"></div>Checking...</div>';
+  try {
+    const data = await apiGet(`/api/halal-status?symbol=${sym}`);
+    const isHalal = data.is_halal;
+    document.getElementById('halalSingleResult').innerHTML = `
+      <div style="text-align:center;padding:16px;">
+        <div style="font-size:24px;font-weight:800;padding:12px 24px;border-radius:12px;display:inline-block;
+          background:${isHalal?'rgba(34,197,94,0.15)':'rgba(239,68,68,0.15)'};color:${isHalal?'var(--green)':'var(--red)'}">
+          ${isHalal?'✅ HALAL — Compliant':'❌ NON-COMPLIANT'}
+        </div>
+        <div style="margin-top:12px;font-size:14px;color:var(--text-secondary);">${data.company_name} | ${data.sector} | ${data.industry}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+        <div style="padding:10px;background:${data.debt_pass?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)'};border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:20px;">${data.debt_ratio?.toFixed(1)}%</div>
+          <div style="font-size:11px;color:var(--text-muted);">Debt Ratio ${data.debt_pass?'✅':'❌'} (&lt;33%)</div>
+        </div>
+        <div style="padding:10px;background:${data.interest_pass?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)'};border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:20px;">${data.interest_ratio?.toFixed(1)}%</div>
+          <div style="font-size:11px;color:var(--text-muted);">Interest Ratio ${data.interest_pass?'✅':'❌'} (&lt;5%)</div>
+        </div>
+        <div style="padding:10px;background:${data.haram_pass?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)'};border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:16px;">${data.haram_pass?'✅':'❌'}</div>
+          <div style="font-size:11px;color:var(--text-muted);">Sector ${data.haram_pass?'Pass':'Blocked'}</div>
+        </div>
+        <div style="padding:10px;background:${data.liquidity_pass?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)'};border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:20px;">${data.liquidity_ratio?.toFixed(1)}%</div>
+          <div style="font-size:11px;color:var(--text-muted);">Liquidity ${data.liquidity_pass?'✅':'❌'} (&lt;33%)</div>
+        </div>
+      </div>
+      <div style="margin-top:12px;text-align:center;font-size:12px;color:var(--text-muted);">Screens Passed: ${data.screens_passed}/${data.screens_total}</div>
+    `;
+  } catch(e) {
+    document.getElementById('halalSingleResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+  }
+}
+
+async function scanHalalUniverse() {
+  document.getElementById('halalUniverseResult').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning 50+ stocks...</div>';
+  try {
+    const data = await apiGet('/api/stock/screener?halal_only=True&limit=40');
+    const results = data.results || [];
+    const ttl = data.total || 0;
+    let html = `<div style="margin-bottom:8px;font-size:13px;font-weight:600;color:var(--green);">✅ ${ttl} Halal-Compliant Stocks Found</div>`;
+    if (results.length > 0) {
+      html += '<table class="result-table"><thead><tr><th>#</th><th>Symbol</th><th>Company</th><th>Sector</th><th>Mkt Cap</th><th>P/E</th><th>Div Yield</th></tr></thead><tbody>';
+      results.forEach((r, i) => {
+        const mcap = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
+        const pe = r.pe ? r.pe.toFixed(1) : 'N/A';
+        const div = r.dividend_yield ? (r.dividend_yield * 100).toFixed(2) + '%' : 'N/A';
+        html += `<tr><td style="color:var(--text-muted);">${i+1}</td><td style="font-weight:600;">${r.symbol}</td><td>${(r.company||'').slice(0,22)}</td><td>${r.sector || ''}</td><td>${mcap}</td><td>${pe}</td><td>${div}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    } else {
+      html += '<div style="color:var(--text-muted);padding:16px;">No halal stocks found. Try adjusting the universe.</div>';
+    }
+    document.getElementById('halalUniverseResult').innerHTML = html;
+  } catch(e) {
+    document.getElementById('halalUniverseResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+  }
+}
+
+// ===== AI ASSISTANT TAB =====
+async function loadAITab() {
+  document.getElementById('aiStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-robot"></i></div><div class="stat-value">AI</div><div class="stat-label">Analyst Mode</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-language"></i></div><div class="stat-value">AR/EN</div><div class="stat-label">Arabic + English</div></div>
+    <div class="stat-card" id="aiLlmStatus"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-microchip"></i></div><div class="stat-value">Template</div><div class="stat-label">Fallback Mode</div></div>
+  `;
+  // Check if LLM is available
+  try {
+    const r = await fetch('/api/ai/report?min_score=70&max_results=1&use_cache=true');
+    if (r.ok) {
+      const d = await r.json();
+      if (d.llm_used) {
+        document.getElementById('aiLlmStatus').innerHTML = `
+          <div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-brain"></i></div>
+          <div class="stat-value" style="color:var(--green);">LLM Active</div>
+          <div class="stat-label">GPT-4 / Claude</div>
+        `;
+      }
+    }
+  } catch(e) {}
+}
+
+async function generateAIReport() {
+  const el = document.getElementById('aiReportResult');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Generating AI report...</div>';
+  try {
+    const data = await apiGet('/api/ai/report?min_score=70&max_results=8&use_cache=true');
+    const report = data.report || 'No report generated.';
+    const status = data.llm_used ? '🧠 LLM' : '📋 Template';
+    el.innerHTML = `<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Mode: ${status} | Opportunities: ${data.opportunities} | ${data.timestamp ? data.timestamp.slice(0,16) : ''}</div><div style="white-space:pre-wrap;color:var(--text-primary);">${escapeHtml(report)}</div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="alert alert-warning">Error: ${e.message}</div>`;
+  }
+}
+
+// ===== ALERTS TAB =====
+async function loadAlertsTab() {
+  try {
+    const info = await apiGet('/api/info');
+    const alerts = info.alerts || [];
+    const unread = alerts.filter(a => !a.read).length;
+    const highCount = alerts.filter(a => a.severity === 'high').length;
+
+    document.getElementById('alertsStats').innerHTML = `
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.15);color:var(--red)"><i class="fas fa-exclamation-circle"></i></div><div class="stat-value">${alerts.length}</div><div class="stat-label">Total Alerts Today</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-bell"></i></div><div class="stat-value">${unread}</div><div class="stat-label">Unread</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(239,68,68,0.15);color:var(--red)"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-value">${highCount}</div><div class="stat-label">High Severity</div></div>
+    `;
+
+    document.getElementById('alertsContainer').innerHTML = alerts.length === 0
+      ? '<div style="text-align:center;padding:40px;color:var(--text-muted);"><i class="fas fa-check-circle" style="font-size:32px;color:var(--green);display:block;margin-bottom:8px;"></i>No alerts — all clear</div>'
+      : alerts.map(a => {
+          const sevColor = a.severity === 'high' ? 'var(--red)' : a.severity === 'medium' ? 'var(--orange)' : 'var(--green)';
+          const sevBg = a.severity === 'high' ? 'rgba(239,68,68,0.1)' : a.severity === 'medium' ? 'rgba(245,158,11,0.1)' : 'rgba(34,197,94,0.1)';
+          const typeIcon = a.type === 'drift' ? 'fa-chart-line' : a.type === 'guard' ? 'fa-shield-alt' : a.type === 'latency' ? 'fa-clock' : 'fa-cog';
+          return `<div style="display:flex;gap:12px;padding:12px 16px;background:var(--bg-card);border-radius:8px;margin-bottom:8px;border-left:3px solid ${sevColor};opacity:${a.read?'0.7':'1'};">
+            <div style="width:32px;height:32px;border-radius:8px;background:${sevBg};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas ${typeIcon}" style="color:${sevColor};font-size:13px;"></i></div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:2px;">
+                <span style="font-weight:600;font-size:13px;">${a.source} · <span style="color:${sevColor};text-transform:uppercase;font-weight:700;font-size:10px;">${a.severity}</span></span>
+                <span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">${a.time}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-secondary);line-height:1.4;">${a.message}</div>
+            </div>
+            ${!a.read ? '<div style="width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:4px;"></div>' : ''}
+          </div>`;
+        }).join('');
+  } catch(e) {
+    document.getElementById('alertsContainer').innerHTML = `<div class="alert alert-warning">Error: ${e.message}</div>`;
+  }
+}
+
+async function askAI() {
+  const question = document.getElementById('aiQuestion').value.trim();
+  const symbol = document.getElementById('aiSymbol').value.trim().toUpperCase();
+  if (!question) return;
+  const el = document.getElementById('aiChatResult');
+  el.innerHTML += `<div style="padding:8px 12px;margin-bottom:8px;background:rgba(59,130,246,0.1);border-radius:8px;text-align:left;direction:ltr;"><span style="font-size:11px;color:var(--accent);font-weight:600;">You:</span> ${escapeHtml(question)}</div>`;
+  el.innerHTML += '<div style="padding:8px 12px;margin-bottom:8px;"><span style="font-size:11px;color:var(--purple);font-weight:600;">AI Analyst:</span> <span class="loading"><div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;"></div></span></div>';
+  el.scrollTop = el.scrollHeight;
+  try {
+    const params = '?question=' + encodeURIComponent(question) + (symbol ? '&symbol=' + symbol : '');
+    const data = await apiGet('/api/ai/ask' + params);
+    const answer = data.answer || 'No answer.';
+    const mode = data.llm_used ? '🧠' : '📋';
+    el.innerHTML = el.innerHTML.replace(
+      '<span class="loading"><div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;"></div></span>',
+      `<span style="white-space:pre-wrap;color:var(--text-primary);">${escapeHtml(answer)}</span> <span style="font-size:10px;color:var(--text-muted);">${mode}</span>`
+    );
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {
+    el.innerHTML = el.innerHTML.replace(
+      '<span class="loading"><div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;"></div></span>',
+      `<span style="color:var(--red);">Error: ${e.message}</span>`
+    );
+  }
+}
+
+// ===== GLOBAL SYMBOL SELECTOR =====
+function setGlobalSymbol(sym) {
+  const selectors = ['forecastSymbol', 'agentSymbol', 'mcSymbol', 'metricsSymbol', 'consensusSymbol', 'lbSymbol'];
+  selectors.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = sym;
+  });
+}
+
+// ===== ESCAPE HTML =====
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== SMART SCREENER =====
+let lastScreenerResults = [];
+
+function openScreener() {
+  const card = document.getElementById('smartScreenerCard');
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function updateScreenerSummary() {
+  const el = document.getElementById('screenerSummary');
+  if (!el) return;
+  if (lastScreenerResults.length === 0) {
+    el.textContent = 'Run a scan to discover opportunities';
+    return;
+  }
+  const top3 = lastScreenerResults.slice(0, 3);
+  el.innerHTML = top3.map(r =>
+    `<span style="font-weight:600;margin:0 2px;">${r.symbol}</span> <span style="color:var(--accent);font-weight:600;">${r.smart_score||0}</span>`
+  ).join(' <span style="color:var(--text-muted);">·</span> ') +
+  ' <span style="color:var(--text-muted);font-size:11px;">—</span> ' +
+  `<span style="color:var(--text-muted);font-size:11px;">Top 3 · <a href="#" style="color:var(--accent);text-decoration:none;" onclick="event.preventDefault();switchTab('research');setTimeout(()=>openScreener(),200)">Expand</a></span>`;
+}
+
+// ===== COMPARE =====
+function toggleCompare(prefix, name) {
+  const set = prefix === 'f' ? forecastCompareSet : agentCompareSet;
+  if (set.has(name)) set.delete(name); else set.add(name);
+  updateCompareBtn();
+  // Visual feedback
+  document.querySelectorAll(`#${prefix=== 'f' ? 'forecastGrid' : 'agentGrid'} .compare-cb`).forEach(cb => {
+    cb.checked = set.has(cb.dataset.name);
+  });
+}
+
+function updateCompareBtn() {
+  const fBtn = document.getElementById('fCompareBtn');
+  const aBtn = document.getElementById('aCompareBtn');
+  if (fBtn) { fBtn.style.display = forecastCompareSet.size >= 2 ? 'inline-flex' : 'none'; fBtn.innerHTML = `<i class="fas fa-not-equal"></i> Compare (${forecastCompareSet.size})`; }
+  if (aBtn) { aBtn.style.display = agentCompareSet.size >= 2 ? 'inline-flex' : 'none'; aBtn.innerHTML = `<i class="fas fa-not-equal"></i> Compare (${agentCompareSet.size})`; }
+}
+
+function compareForecastModels() { _doCompare(forecastCompareSet, 'model'); }
+function compareAgents() { _doCompare(agentCompareSet, 'agent'); }
+
+function _doCompare(set, type) {
+  const names = [...set];
+  if (names.length < 2) return;
+  const tab = type === 'model' ? 'forecast' : 'trading';
+  switchTab('charts');
+  // Pre-fill comparison form
+  document.getElementById('compAgents').value = names.join(',');
+  setTimeout(() => runComparison(), 300);
+}
+
+// ===== OVERVIEW =====
+async function loadOverview() {
+  try {
+    const info = await apiGet('/api/info');
+    const allItems = [...(info.model_items||[]), ...(info.agent_items||[])];
+    const best = allItems.reduce((b, x) => (x.sharpe||0) > (b.sharpe||0) ? x : b, {sharpe:0});
+    const drifted = allItems.filter(x => x.status === 'failing').length;
+    const lastRetrain = info.last_full_retrain != null ? info.last_full_retrain + 'h ago' : 'N/A';
+    const scanFresh = info.smart_scan_freshness != null ? info.smart_scan_freshness + 'm ago' : 'N/A';
+    const totalCount = info.model_count + info.agent_count;
+
+    // Top KPI row
+    document.getElementById('overviewStats').innerHTML = `
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-trophy"></i></div><div class="stat-value" style="font-size:20px;">${best.sharpe||'—'}</div><div class="stat-label">Best Sharpe today (${best.name||'N/A'})</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-value">${drifted}/${totalCount}</div><div class="stat-label">Models drifted (PSI > threshold)</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-history"></i></div><div class="stat-value">${lastRetrain}</div><div class="stat-label">Last full retrain</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-microchip"></i></div><div class="stat-value">${scanFresh}</div><div class="stat-label">Smart Scan freshness</div></div>
+    `;
+
+    // PnL Strip
+    const pnl = info.pnl || {};
+    const pnlEl = document.querySelector('#pnlStrip > div');
+    if (pnlEl) {
+      pnlEl.innerHTML = ['today','week','mtd','all_time'].map(p => {
+        const val = pnl[p] || 0;
+        const pct = pnl[p + '_pct'] || 0;
+        const color = val >= 0 ? 'var(--green)' : 'var(--red)';
+        const sign = val >= 0 ? '+' : '';
+        const labels = {today:'Today',week:'Week',mtd:'MTD',all_time:'All-time'};
+        return `<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">${labels[p]}</div><div style="font-size:22px;font-weight:800;color:${color};margin:2px 0;">${sign}$${val.toFixed(2)}</div><div style="font-size:11px;color:${color};">${sign}${pct.toFixed(2)}%</div></div>`;
+      }).join('');
+    }
+
+    // Open Positions
+    const positions = info.open_positions || [];
+    document.getElementById('openPositions').innerHTML = positions.length === 0
+      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No open positions</div>'
+      : '<div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Entry</th><th>Current</th><th>PnL</th><th>Size</th></tr></thead><tbody>' +
+        positions.map(p => {
+          const pnlColor = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+          return `<tr><td style="font-weight:600;">${p.symbol}</td><td style="color:var(--green);">${p.direction}</td><td>$${p.entry.toFixed(2)}</td><td>$${p.current.toFixed(2)}</td><td style="color:${pnlColor};font-weight:600;">${p.pnl >= 0 ? '+' : ''}$${p.pnl.toFixed(2)} (${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%)</td><td>${p.size}</td></tr>`;
+        }).join('') + '</tbody></table></div>';
+
+    // Last Signals
+    const signals = info.recent_signals || [];
+    document.getElementById('lastSignals').innerHTML = signals.length === 0
+      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No signals yet today</div>'
+      : '<div class="table-wrap"><table><thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Price</th><th>Conf</th><th>Status</th></tr></thead><tbody>' +
+        signals.map(s => {
+          const actionColor = s.action === 'BUY' ? 'var(--green)' : s.action === 'SELL' ? 'var(--red)' : 'var(--orange)';
+          const statusIcon = s.status === 'filled' ? '✅' : s.status === 'pending' ? '⏳' : '🚫';
+          const guardHint = s.guard ? ` · ${s.guard}` : '';
+          return `<tr><td style="font-size:11px;">${s.time}</td><td style="font-weight:600;">${s.symbol}</td><td style="color:${actionColor};font-weight:600;">${s.action}</td><td>$${s.price.toFixed(2)}</td><td>${s.confidence}%</td><td>${statusIcon} ${s.status}${guardHint}</td></tr>`;
+        }).join('') + '</tbody></table></div>';
+
+    // Guard Activity
+    const guards = info.guard_activity || [];
+    document.getElementById('guardActivity').innerHTML = guards.length === 0
+      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No guard activity today</div>'
+      : '<div style="display:flex;flex-direction:column;gap:6px;">' +
+        guards.map(g => {
+          const maxCount = Math.max(...guards.map(x => x.rejections), 1);
+          const pct = (g.rejections / maxCount) * 100;
+          const barColor = pct > 70 ? 'var(--red)' : pct > 40 ? 'var(--orange)' : 'var(--green)';
+          const severityColor = g.severity === 'high' ? 'var(--red)' : g.severity === 'medium' ? 'var(--orange)' : 'var(--green)';
+          return `<div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span>${g.guard}</span><span style="color:${severityColor};font-weight:600;">${g.rejections}</span></div><div style="height:6px;background:var(--bg-card);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px;transition:width 0.5s;"></div></div></div>`;
+        }).join('') + '</div>';
+
+    // Scheduler Timeline
+    const tl = info.scheduler_timeline || {};
+    document.getElementById('schedulerTimeline').innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">' +
+      Object.entries(tl).filter(([k]) => k !== 'status').map(([k, v]) => {
+        const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return `<div style="display:flex;justify-content:space-between;padding:4px 8px;background:var(--bg-card);border-radius:4px;"><span style="color:var(--text-muted);font-size:10px;">${label}</span><span style="font-weight:500;">${v}</span></div>`;
+      }).join('') +
+      `<div style="grid-column:1/-1;text-align:center;padding:4px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);margin-top:4px;">Status: ${tl.status || 'idle'}</div>` +
+      '</div>';
+
+    // System Status (unchanged)
+    const w = await apiGet('/widgets.json');
+    document.getElementById('systemStatus').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot"></span><span>API Server</span><span style="margin-left:auto;color:var(--green);font-size:12px;">Online</span></div>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot"></span><span>yFinance Data</span><span style="margin-left:auto;color:var(--green);font-size:12px;">Connected</span></div>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot" id="tgDot" style="background:var(--text-muted);"></span><span>Telegram Bot</span><span id="tgStatus" style="margin-left:auto;color:var(--text-muted);font-size:12px;">Checking...</span></div>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot"></span><span>${Object.keys(w).length} Widgets</span><span style="margin-left:auto;color:var(--green);font-size:12px;">Active</span></div>
+      </div>
+    `;
+
+  } catch(e) {
+    document.getElementById('overviewStats').innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> Could not load overview: ${e.message}</div>`;
+  }
+}
+
+// ===== SEARCH WITH AUTOCOMPLETE =====
+const RECENT_SYMBOLS_KEY = 'recent_symbols';
+const POPULAR_SYMBOLS = ['AAPL','MSFT','GOOGL','TSLA','NVDA','AMZN','META','AMD','JPM','BAC','GILD','CRM','NFLX','INTC','PYPL','ADBE','COST','DIS'];
+
+function getRecentSymbols() {
+  try { return JSON.parse(localStorage.getItem(RECENT_SYMBOLS_KEY) || '[]'); } catch(e) { return []; }
+}
+
+function saveRecentSymbol(sym) {
+  let recent = getRecentSymbols().filter(s => s !== sym);
+  recent.unshift(sym);
+  if (recent.length > 8) recent = recent.slice(0, 8);
+  localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(recent));
+}
+
+function showSearchDropdown() {
+  const dd = document.getElementById('searchDropdown');
+  const val = document.getElementById('searchInput').value.toUpperCase();
+  renderSearchDropdown(val);
+  dd.style.display = 'block';
+}
+
+function hideSearchDropdown() {
+  document.getElementById('searchDropdown').style.display = 'none';
+}
+
+function filterSearchDropdown(val) {
+  renderSearchDropdown(val.toUpperCase());
+}
+
+function renderSearchDropdown(val) {
+  const dd = document.getElementById('searchDropdown');
+  const recent = getRecentSymbols();
+  let items;
+  if (!val) {
+    items = recent.length > 0
+      ? [{label:'Recent',items: recent.slice(0, 5)}]
+      : [{label:'Popular',items: POPULAR_SYMBOLS.slice(0, 8)}];
+  } else {
+    const matches = POPULAR_SYMBOLS.filter(s => s.startsWith(val)).slice(0, 8);
+    items = matches.length > 0 ? [{label:'Matches',items: matches}] : [{label:'No matches',items: []}];
+  }
+  dd.innerHTML = items.map(group => `
+    <div style="padding:4px 8px;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">${group.label}</div>
+    ${group.items.map(s => `<div style="padding:6px 12px;cursor:pointer;font-size:13px;font-weight:500;border-radius:4px;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=''" onclick="selectSymbol('${s}')">${s}</div>`).join('')}
+  `).join('');
+}
+
+function selectSymbol(sym) {
+  document.getElementById('searchInput').value = sym;
+  hideSearchDropdown();
+  saveRecentSymbol(sym);
+  doSearch(sym);
+}
+
+function searchSymbol() {
+  const val = document.getElementById('searchInput').value.toUpperCase();
+  if (!val) return;
+  saveRecentSymbol(val);
+  doSearch(val);
+}
+
+function doSearch(val) {
+  document.getElementById('halalSymbol').value = val;
+  document.getElementById('rsSymbol').value = val;
+  document.getElementById('ratioSymbol').value = val;
+  switchTab('halal');
+  setTimeout(() => checkHalal(), 300);
+}
+
+// ===== LAST UPDATED =====
+function updateTimestamp() {
+  const now = new Date();
+  document.getElementById('lastUpdatedLabel').textContent = 'Last updated: ' + now.toLocaleTimeString();
+}
+
+// ===== KEYBOARD SHORTCUTS =====
+document.addEventListener('keydown', function(e) {
+  // Only if not typing in an input
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === '/' || (e.key === 'k' && (e.metaKey || e.ctrlKey))) {
+    e.preventDefault();
+    document.getElementById('searchInput').focus();
+  }
+  if (e.key === 'g') {
+    if (e.shiftKey) return;
+    // g + t = trading, g + s = screener, g + f = forecast, g + o = overview
+    const keyHandler = function(ev) {
+      document.removeEventListener('keydown', keyHandler);
+      const map = { 't':'trading', 's':'halal', 'f':'forecast', 'o':'overview', 'r':'risk', 'w':'workflow', 'c':'charts', 'h':'research', 'a':'ai' };
+      if (map[ev.key]) switchTab(map[ev.key]);
+    };
+    document.addEventListener('keydown', keyHandler);
+  }
+  if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
+    refreshData();
+  }
+});
+
+// ===== FLOATING AI BUTTON =====
+(function addFAB() {
+  const fab = document.createElement('button');
+  fab.innerHTML = '<i class="fas fa-robot"></i>';
+  fab.style.cssText = 'position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;background:var(--accent);color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:0 4px 20px var(--accent-glow);z-index:999;transition:all 0.3s;display:flex;align-items:center;justify-content:center;';
+  fab.onmouseover = () => { fab.style.transform = 'scale(1.1)'; fab.style.boxShadow = '0 6px 28px var(--accent-glow)'; };
+  fab.onmouseout = () => { fab.style.transform = 'scale(1)'; fab.style.boxShadow = '0 4px 20px var(--accent-glow)'; };
+  fab.onclick = () => switchTab('ai');
+  fab.title = 'AI Assistant';
+  document.body.appendChild(fab);
+})();
+
+// ===== INIT =====
+(async function init() {
+  await checkStatus();
+  loadOverview();
+  updateTimestamp();
+  updateAlertBadge();
+  // Auto-refresh every 60s
+  setInterval(() => {
+    const active = document.querySelector('.tab-content.active');
+    if (active) refreshData();
+    updateTimestamp();
+    updateAlertBadge();
+  }, 60000);
+})();
+
+// ===== ALERT BADGE =====
+async function updateAlertBadge() {
+  try {
+    const info = await apiGet('/api/info');
+    const unread = (info.alerts || []).filter(a => !a.read).length;
+    const badge = document.getElementById('alertsBadge');
+    if (badge) {
+      badge.textContent = unread;
+      badge.style.background = unread > 0 ? 'var(--red)' : 'var(--bg-card)';
+      badge.style.color = unread > 0 ? '#fff' : 'var(--text-muted)';
+    }
+  } catch(e) {}
+}
+</script>
+</body>
+</html>

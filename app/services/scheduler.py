@@ -25,6 +25,8 @@ from pathlib import Path
 
 logger = logging.getLogger("screener")
 
+from app.services.scheduler_metrics import scheduler_metrics
+
 _scheduler_thread = None
 _scheduler_running = False
 
@@ -115,6 +117,7 @@ def _scheduler_loop():
     last_pre_market = ""
     last_optimizer = ""
     last_train_models = ""
+    last_pretrain_ml = ""
     last_signal_audit = ""
     last_reference_refresh = ""
     SCAN_INTERVAL = 1800  # 30 minutes between scans
@@ -146,24 +149,44 @@ def _scheduler_loop():
                 last_reference_refresh = today_str
                 logger.info("Reference-data refresh: updating tradable assets and earnings caches...")
                 try:
+                    scheduler_metrics.record_cycle_start("reference_data")
                     _run_reference_data_refresh()
+                    scheduler_metrics.record_cycle_end("reference_data", success=True)
                 except Exception as e:
+                    scheduler_metrics.record_cycle_end("reference_data", success=False, error=str(e))
                     logger.error(f"Reference-data refresh failed: {e}")
 
             if _is_weekday(now) and now.hour == 2 and last_train_models != today_str:
                 last_train_models = today_str
                 logger.info("Nightly retrain: running persisted-model refresh...")
                 try:
+                    scheduler_metrics.record_cycle_start("train_models")
                     _run_train_models()
+                    scheduler_metrics.record_cycle_end("train_models", success=True)
                 except Exception as e:
+                    scheduler_metrics.record_cycle_end("train_models", success=False, error=str(e))
                     logger.error(f"Nightly retrain failed: {e}")
+
+            if _is_weekday(now) and now.hour == 3 and last_pretrain_ml != today_str:
+                last_pretrain_ml = today_str
+                logger.info("ML pretrain: pre-computing DQN/PG for universe...")
+                try:
+                    scheduler_metrics.record_cycle_start("pretrain_ml")
+                    _run_pretrain_ml()
+                    scheduler_metrics.record_cycle_end("pretrain_ml", success=True)
+                except Exception as e:
+                    scheduler_metrics.record_cycle_end("pretrain_ml", success=False, error=str(e))
+                    logger.error(f"ML pretrain failed: {e}")
 
             if _is_weekday(now) and now.hour == 16 and now.minute >= 30 and last_signal_audit != today_str:
                 last_signal_audit = today_str
                 logger.info("Signal audit: checking live verdict drift...")
                 try:
+                    scheduler_metrics.record_cycle_start("signal_audit")
                     _run_signal_audit()
+                    scheduler_metrics.record_cycle_end("signal_audit", success=True)
                 except Exception as e:
+                    scheduler_metrics.record_cycle_end("signal_audit", success=False, error=str(e))
                     logger.error(f"Signal audit failed: {e}")
 
             # --- WEEKLY OPTIMIZER: Sunday 10:00 AM ET (once per week) ---
@@ -171,8 +194,11 @@ def _scheduler_loop():
                 last_optimizer = today_str
                 logger.info("Weekly optimizer: tuning parameters...")
                 try:
+                    scheduler_metrics.record_cycle_start("optimizer")
                     _run_optimizer()
+                    scheduler_metrics.record_cycle_end("optimizer", success=True)
                 except Exception as e:
+                    scheduler_metrics.record_cycle_end("optimizer", success=False, error=str(e))
                     logger.error(f"Weekly optimizer failed: {e}")
 
             # --- PRE-MARKET: 9:00-9:30 AM ET (once per day) ---
@@ -180,8 +206,11 @@ def _scheduler_loop():
                 last_pre_market = today_str
                 logger.info("Pre-market: refreshing screener data...")
                 try:
+                    scheduler_metrics.record_cycle_start("pre_market")
                     _run_pre_market()
+                    scheduler_metrics.record_cycle_end("pre_market", success=True)
                 except Exception as e:
+                    scheduler_metrics.record_cycle_end("pre_market", success=False, error=str(e))
                     logger.error(f"Pre-market scan failed: {e}")
 
             # --- MARKET HOURS: scan every 30 min ---
@@ -191,8 +220,11 @@ def _scheduler_loop():
                     last_scan_time = time.time()
                     logger.info(f"Market hours scan ({now.strftime('%H:%M')} ET)...")
                     try:
+                        scheduler_metrics.record_cycle_start("market_scan")
                         _run_market_scan()
+                        scheduler_metrics.record_cycle_end("market_scan", success=True)
                     except Exception as e:
+                        scheduler_metrics.record_cycle_end("market_scan", success=False, error=str(e))
                         logger.error(f"Market scan failed: {e}")
 
             # --- POST-MARKET: 4:00-4:30 PM ET (once per day) ---
@@ -200,8 +232,11 @@ def _scheduler_loop():
                 last_post_market = today_str
                 logger.info("Post-market: running full analysis...")
                 try:
+                    scheduler_metrics.record_cycle_start("post_market")
                     _run_post_market()
+                    scheduler_metrics.record_cycle_end("post_market", success=True)
                 except Exception as e:
+                    scheduler_metrics.record_cycle_end("post_market", success=False, error=str(e))
                     logger.error(f"Post-market scan failed: {e}")
 
             # --- INTRADAY SIGNALS SCANS: 10:30 / 12:00 / 14:30 / 16:30 ET ---
@@ -216,8 +251,11 @@ def _scheduler_loop():
                         last_signals_slot[slot_key] = today_str
                         logger.info(f"Intraday signals scan: {label}")
                         try:
+                            scheduler_metrics.record_cycle_start("signals_scan")
                             _run_signals_scan(label)
+                            scheduler_metrics.record_cycle_end("signals_scan", success=True)
                         except Exception as e:
+                            scheduler_metrics.record_cycle_end("signals_scan", success=False, error=str(e))
                             logger.error(f"Intraday signals scan failed ({label}): {e}", exc_info=True)
                         break  # only fire one slot per loop iteration
 
@@ -556,6 +594,23 @@ def _run_train_models():
     logger.info("train_models.py completed: %s", completed.stdout.strip())
 
 
+def _run_pretrain_ml():
+    """Pre-train DQN/PG models for the universe and cache in DB.
+
+    Runs at 3 AM ET (after model retrain at 2 AM). Fills
+    ``ModelResultsCache`` so API/consensus calls read pre-computed
+    results instead of blocking on on-the-fly training.
+    """
+    try:
+        from app.services.ml_pretrain import pretrain_universe
+        trained = pretrain_universe(max_symbols=200, episodes=10)
+        logger.info("ML pretrain complete: %d models cached", trained)
+    except ImportError:
+        logger.warning("app.worker.ml_pretrain not available — skipping")
+    except Exception as e:
+        logger.error("ML pretrain failed: %s", e, exc_info=True)
+
+
 def _run_signal_audit():
     """Daily signal drift audit hook."""
     completed = _run_repo_script("scripts/audit_signals.py")
@@ -581,6 +636,7 @@ def start_scheduler():
         return
 
     _scheduler_running = True
+    scheduler_metrics.mark_started()
     _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler")
     _scheduler_thread.start()
     logger.info("Background scheduler thread started")
@@ -590,4 +646,5 @@ def stop_scheduler():
     """Stop the scheduler gracefully."""
     global _scheduler_running
     _scheduler_running = False
+    scheduler_metrics.mark_stopped()
     logger.info("Scheduler stopping...")

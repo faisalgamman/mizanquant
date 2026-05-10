@@ -175,3 +175,69 @@ class TradeHistory(Base):
     armed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow, index=True)
     closed_at = Column(DateTime, nullable=True)
+
+
+class Universe(Base):
+    """Master symbol universe — single source of truth for all tradable stocks.
+
+    Replaces the old ``HALAL_STOCKS`` / ``RUSSELL_1000_HALAL`` dual lists.
+    Populated via ``scripts/seed_universe.py`` and refreshed periodically.
+    """
+
+    __tablename__ = "universe"
+
+    symbol = Column(String(10), primary_key=True)
+    company_name = Column(String(255), default="")
+    exchange = Column(String(20), default="")  # NYSE / NASDAQ / AMEX
+    cik = Column(String(20), nullable=True)  # SEC EDGAR CIK
+    sic_code = Column(String(10), nullable=True)
+    sector = Column(String(100), nullable=True)
+    industry = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True)
+    added_at = Column(DateTime, default=_utcnow)
+    last_updated = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class BacktestRun(Base):
+    """Reproducibility-gated backtest result (Phase 2).
+
+    Every backtest emits a reproducibility seal so results can be
+    traced to an exact code + data + config snapshot.
+    """
+
+    __tablename__ = "backtest_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+
+    # ── What was tested ──
+    strategy_name = Column(String(50), nullable=False, index=True)
+    symbols = Column(JSON, nullable=False)  # list[str]
+    profile = Column(String(20), nullable=True)  # "momentum", "reversion", "ml", etc.
+
+    # ── Performance summary ──
+    sharpe = Column(Float, nullable=True)
+    sortino = Column(Float, nullable=True)
+    max_drawdown_pct = Column(Float, nullable=True)
+    calmar = Column(Float, nullable=True)
+    annualized_return_pct = Column(Float, nullable=True)
+    win_rate = Column(Float, nullable=True)
+    profit_factor = Column(Float, nullable=True)
+    total_trades = Column(Integer, nullable=True)
+    total_commissions = Column(Float, nullable=True)
+    total_slippage = Column(Float, nullable=True)
+    test_start = Column(DateTime, nullable=True)
+    test_end = Column(DateTime, nullable=True)
+
+    # ── QC checks (Chan Ch.2) ──
+    deflated_sharpe = Column(Float, nullable=True)
+    permutation_pvalue = Column(Float, nullable=True)
+    bootstrap_lower_5pct = Column(Float, nullable=True)
+
+    # ── Reproducibility seal ──
+    git_sha = Column(String(40), nullable=False)
+    is_dirty = Column(Boolean, default=False)
+    data_hash = Column(String(16), nullable=False)
+    code_hash = Column(String(16), nullable=False)
+    config_hash = Column(String(16), nullable=False)
+    extra = Column(JSON, nullable=True)  # catch-all: agent params, model version, etc.
