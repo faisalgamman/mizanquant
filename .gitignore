@@ -1,4 +1,5 @@
 .env
+.env.live
 __pycache__/
 *.pyc
 *.db

@@ -25,6 +25,7 @@ def _make(**overrides) -> Settings:
         DAILY_LOSS_LIMIT_PCT=3.0,
         MAX_POSITION_PCT=15.0,
         MAX_OPEN_POSITIONS=6,
+        LIVE_WHITELIST="AAPL,MSFT",
     )
     base.update(overrides)
     return Settings(**base)
@@ -67,6 +68,25 @@ def test_risk_bounds():
     s = _make(ALPACA_API_KEY_A="k", ALPACA_SECRET_KEY_A="s", TRADE_RISK_PCT=50)
     errors = s.validate_for_live()
     assert any("TRADE_RISK_PCT" in e for e in errors)
+
+
+def test_empty_whitelist_flagged():
+    s = _make(
+        ALPACA_API_KEY_A="k", ALPACA_SECRET_KEY_A="s",
+        LIVE_WHITELIST="",
+    )
+    errors = s.validate_for_live()
+    assert any("LIVE_WHITELIST" in e for e in errors)
+
+
+def test_live_whitelist_property():
+    s = _make(LIVE_WHITELIST=" aapl , MSFT , googl ")
+    assert s.live_whitelist == ["AAPL", "MSFT", "GOOGL"]
+
+
+def test_live_whitelist_empty_when_not_set():
+    s = _make(LIVE_WHITELIST="")
+    assert s.live_whitelist == []
 
 
 def test_happy_path_empty_errors():
