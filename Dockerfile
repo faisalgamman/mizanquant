@@ -12,16 +12,14 @@ COPY . .
 
 # Install Python deps
 RUN pip install --no-cache-dir -e openbb_forecast
-RUN pip install --no-cache-dir \
-    fastapi uvicorn[standard] yfinance pandas numpy \
-    httpx pydantic-settings apscheduler
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose port
-EXPOSE 6910
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
-    CMD python -c "import httpx; httpx.get('http://127.0.0.1:6910/api/info').raise_for_status()"
+    CMD python -c "import httpx; httpx.get('http://127.0.0.1:${PORT:-8000}/api/info').raise_for_status()"
 
 # Run
-CMD ["uvicorn", "app.workspace_server:app", "--host", "0.0.0.0", "--port", "6910"]
+CMD uvicorn halal_screener:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
