@@ -114,6 +114,17 @@ app = FastAPI(lifespan=_app_lifespan)
 operator_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 OperatorAPIKey = Annotated[str | None, Security(operator_api_key_header)]
 
+
+@app.get("/")
+async def root():
+    return {
+        "service": "MizanQuant Halal Screener",
+        "version": "17.0.0",
+        "docs": "/docs",
+        "health": "/health",
+        "status": "live",
+    }
+
 import keep_alive
 app.add_middleware(
     CORSMiddleware,
