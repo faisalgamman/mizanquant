@@ -7,7 +7,7 @@ router = APIRouter(tags=["Portfolio"])
 
 @router.get("/strategies")
 async def list_strategies(x_api_key: OperatorAPIKey = None):
-    from halal_screener import _require_api_key, STRATEGY_CONFIGS
+    from halal_screener import _require_api_key
     _require_api_key(x_api_key)
     from app.config import STRATEGY_CONFIGS as CFG
     result = []
