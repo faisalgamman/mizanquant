@@ -14,14 +14,14 @@ from openbb_forecast.data.validation import WalkForwardSplit
 
 
 PROFILES = ("base", "momentum", "reversion", "ml")
-THRESHOLDS = list(range(30, 81, 5))
+THRESHOLDS = list(range(20, 76, 5))
 CALIBRATION_DIR = Path("calibration")
 SYMBOLS = ("AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL")
 LEGACY_MIN_CONFIDENCE = {
-    "base": 45.0,
-    "momentum": 45.0,
-    "reversion": 40.0,
-    "ml": 50.0,
+    "base": 35.0,
+    "momentum": 35.0,
+    "reversion": 30.0,
+    "ml": 35.0,
 }
 
 
@@ -46,7 +46,8 @@ def _profile_confidence(prices: np.ndarray, profile: str) -> np.ndarray:
         signal = np.convolve(returns, np.ones(10) / 10, mode="same") + returns
     else:
         signal = np.convolve(returns, np.ones(7) / 7, mode="same")
-    scaled = np.clip(np.abs(signal) * 2500.0, 0.0, 100.0)
+    # Reduced scaling multiplier (was 2500.0) to lower the neutral barrier
+    scaled = np.clip(np.abs(signal) * 1500.0, 0.0, 100.0)
     return scaled
 
 
@@ -114,7 +115,7 @@ def _aggregate_profile(profile: str) -> dict:
 
     eligible = [
         row for row in sweeps
-        if row["trades_per_year"] >= 50 and row["max_dd"] <= 15.0
+        if row["trades_per_year"] >= 80 and row["max_dd"] <= 18.0
     ]
     best = max(eligible or sweeps, key=lambda row: row["sharpe"])
     legacy_threshold = LEGACY_MIN_CONFIDENCE.get(profile, 45.0)

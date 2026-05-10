@@ -1,10 +1,6 @@
-"""PyTorch LSTM forecaster — replaces the TF1 LSTM from deep-learning/1.lstm.ipynb.
+"""PyTorch CNN forecasters — ported from Stock-Prediction-Models.
 
-Key differences from original:
-  - PyTorch instead of TF1 (no tf.Session, tf.placeholder, tf.contrib)
-  - Proper dropout (applied between LSTM layers, not to output)
-  - reset() reinitializes weights between walk-forward folds
-  - Early stopping on validation loss to prevent overfitting within each fold
+Provides CNN-Seq2Seq and Dilated CNN variants for time-series forecasting.
 """
 
 from __future__ import annotations
@@ -20,75 +16,72 @@ from openbb_forecast.models.base import BaseForecaster
 from openbb_forecast.models.persistence import default_version, write_metadata
 
 
-class LSTMNetwork(nn.Module):
-    """Multi-layer LSTM with dropout for time-series forecasting.
-
-    Architecture:
-        Input(n_features) -> LSTM(hidden_size, num_layers, dropout) -> Linear -> Output(forecast_horizon)
-    """
-
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size: int,
-        num_layers: int,
-        output_size: int,
-        dropout: float = 0.2,
-    ):
+class CNNSeq2SeqNetwork(nn.Module):
+    def __init__(self, input_size: int, window_size: int, filters: int = 64, dropout: float = 0.2):
         super().__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0.0,
-            batch_first=True,
-        )
+        self.conv1 = nn.Conv1d(input_size, filters, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(filters, filters, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool1d(2)
         self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(hidden_size, output_size)
+        self.relu = nn.ReLU()
+        pooled_len = window_size // 2
+        self.fc1 = nn.Linear(filters * pooled_len, 50)
+        self.fc2 = nn.Linear(50, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x shape: (batch, sequence_length, input_size)
-        lstm_out, _ = self.lstm(x)
-        # Use last time step output
-        last_output = lstm_out[:, -1, :]
-        out = self.dropout(last_output)
-        return self.fc(out)
+        x = x.transpose(1, 2)
+        x = self.relu(self.conv1(x))
+        x = self.pool(x)
+        x = self.relu(self.conv2(x))
+        x = x.view(x.size(0), -1)
+        x = self.dropout(x)
+        x = self.relu(self.fc1(x))
+        return self.fc2(x)
 
 
-class LSTMForecaster(BaseForecaster):
-    """LSTM forecaster with walk-forward validation support.
+class DilatedCNNNetwork(nn.Module):
+    def __init__(self, input_size: int, filters: int = 64, dropout: float = 0.2):
+        super().__init__()
+        self.conv1 = nn.Conv1d(input_size, filters, kernel_size=3, dilation=2, padding=2)
+        self.conv2 = nn.Conv1d(filters, filters, kernel_size=3, dilation=4, padding=4)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+        self.fc = nn.Linear(filters, 1)
 
-    Args:
-        hidden_size: Number of LSTM hidden units.
-        num_layers: Number of stacked LSTM layers.
-        epochs: Maximum training epochs per fold.
-        learning_rate: Adam optimizer learning rate.
-        dropout: Dropout rate between layers.
-        batch_size: Training batch size.
-        patience: Early stopping patience (epochs without improvement).
-        device: 'cuda', 'cpu', or 'auto'.
-    """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.transpose(1, 2)
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.dropout(x)
+        x = self.pool(x).squeeze(-1)
+        return self.fc(x)
 
-    name = "lstm"
+
+CNN_VARIANTS = {
+    "cnn_seq2seq": CNNSeq2SeqNetwork,
+    "dilated_cnn": DilatedCNNNetwork,
+}
+
+
+class CNNForecaster(BaseForecaster):
+    name = "cnn"
 
     def __init__(
         self,
-        hidden_size: int = 64,
-        num_layers: int = 2,
+        variant: str = "cnn_seq2seq",
+        filters: int = 64,
         epochs: int = 150,
         learning_rate: float = 0.001,
-        dropout: float = 0.3,
+        dropout: float = 0.2,
         batch_size: int = 32,
         patience: int = 15,
         device: str = "auto",
         version: str | None = None,
     ):
         self.version = version or default_version()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
+        self.variant = variant
+        self.filters = filters
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.dropout = dropout
@@ -100,32 +93,26 @@ class LSTMForecaster(BaseForecaster):
         else:
             self.device = torch.device(device)
 
-        self._model: LSTMNetwork | None = None
+        self._model: nn.Module | None = None
         self._input_size: int | None = None
         self._output_size: int | None = None
+        self._window_size: int | None = None
 
-    def _build_model(self, input_size: int, output_size: int) -> LSTMNetwork:
-        return LSTMNetwork(
-            input_size=input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            output_size=output_size,
-            dropout=self.dropout,
-        ).to(self.device)
+    def _build_model(self, input_size: int, output_size: int) -> nn.Module:
+        v = self.variant
+        if v not in CNN_VARIANTS:
+            raise ValueError(f"Unknown CNN variant: {v}. Choose from: {list(CNN_VARIANTS)}")
+        if v == "cnn_seq2seq":
+            return CNNSeq2SeqNetwork(input_size, self._window_size or 30, self.filters, self.dropout).to(self.device)
+        return DilatedCNNNetwork(input_size, self.filters, self.dropout).to(self.device)
 
     def reset(self) -> None:
-        """Reinitialize model weights for a fresh fold."""
         if self._input_size is not None and self._output_size is not None:
             self._model = self._build_model(self._input_size, self._output_size)
 
     def fit(self, X_train: np.ndarray, y_train: np.ndarray, **kwargs) -> None:
-        """Train LSTM on one fold's training data with early stopping.
-
-        Args:
-            X_train: shape (n_samples, sequence_length, n_features)
-            y_train: shape (n_samples, forecast_horizon)
-        """
         self._input_size = X_train.shape[-1]
+        self._window_size = X_train.shape[1]
         self._output_size = y_train.shape[-1] if y_train.ndim > 1 else 1
         self._model = self._build_model(self._input_size, self._output_size)
 
@@ -134,7 +121,6 @@ class LSTMForecaster(BaseForecaster):
         if y_t.ndim == 1:
             y_t = y_t.unsqueeze(-1)
 
-        # Split last 15% of training data for early stopping validation
         val_split = max(1, int(len(X_t) * 0.85))
         X_tr, X_val = X_t[:val_split], X_t[val_split:]
         y_tr, y_val = y_t[:val_split], y_t[val_split:]
@@ -142,12 +128,8 @@ class LSTMForecaster(BaseForecaster):
         dataset = TensorDataset(X_tr, y_tr)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        optimizer = torch.optim.AdamW(
-            self._model.parameters(), lr=self.learning_rate, weight_decay=1e-4
-        )
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
-        )
+        optimizer = torch.optim.AdamW(self._model.parameters(), lr=self.learning_rate, weight_decay=1e-4)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6)
         criterion = nn.MSELoss()
 
         best_val_loss = float("inf")
@@ -156,7 +138,6 @@ class LSTMForecaster(BaseForecaster):
 
         self._model.train()
         for epoch in range(self.epochs):
-            epoch_loss = 0.0
             for X_batch, y_batch in loader:
                 optimizer.zero_grad()
                 pred = self._model(X_batch)
@@ -164,14 +145,11 @@ class LSTMForecaster(BaseForecaster):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=0.5)
                 optimizer.step()
-                epoch_loss += loss.item()
 
-            # Validation for early stopping
             if len(X_val) > 0:
                 self._model.eval()
                 with torch.no_grad():
-                    val_pred = self._model(X_val)
-                    val_loss = criterion(val_pred, y_val).item()
+                    val_loss = criterion(self._model(X_val), y_val).item()
                 self._model.train()
 
                 if val_loss < best_val_loss:
@@ -185,35 +163,24 @@ class LSTMForecaster(BaseForecaster):
                         break
                 scheduler.step(val_loss)
 
-        # Restore best model
         if best_state is not None:
             self._model.load_state_dict(best_state)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Generate predictions from trained LSTM.
-
-        Args:
-            X: shape (n_samples, sequence_length, n_features)
-
-        Returns:
-            Predictions, shape (n_samples, forecast_horizon)
-        """
         if self._model is None:
             raise RuntimeError("Model not trained. Call fit() first.")
-
         self._model.eval()
         X_t = torch.FloatTensor(X).to(self.device)
         with torch.no_grad():
-            preds = self._model(X_t).cpu().numpy()
-        return preds
+            return self._model(X_t).cpu().numpy()
 
     def save(self, path: Path) -> None:
         if self._model is None:
             raise RuntimeError("Model not trained. Call fit() before save().")
         payload = {
             "config": {
-                "hidden_size": self.hidden_size,
-                "num_layers": self.num_layers,
+                "variant": self.variant,
+                "filters": self.filters,
                 "epochs": self.epochs,
                 "learning_rate": self.learning_rate,
                 "dropout": self.dropout,
@@ -224,21 +191,20 @@ class LSTMForecaster(BaseForecaster):
             },
             "input_size": self._input_size,
             "output_size": self._output_size,
+            "window_size": self._window_size,
             "state_dict": self._model.state_dict(),
         }
         torch.save(payload, path)
-        write_metadata(
-            path.with_suffix(".meta.json"),
-            {"name": self.name, "version": self.version, "trained_on": default_version()},
-        )
+        write_metadata(path.with_suffix(".meta.json"), {"name": self.name, "version": self.version, "variant": self.variant})
 
     @classmethod
-    def load(cls, path: Path) -> "LSTMForecaster":
+    def load(cls, path: Path) -> "CNNForecaster":
         payload = torch.load(path, map_location="cpu")
         config = payload.get("config", {})
         model = cls(**config)
         model._input_size = payload["input_size"]
         model._output_size = payload["output_size"]
+        model._window_size = payload.get("window_size", 30)
         model._model = model._build_model(model._input_size, model._output_size)
         model._model.load_state_dict(payload["state_dict"])
         model._model.eval()

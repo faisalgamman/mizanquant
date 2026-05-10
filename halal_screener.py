@@ -2395,33 +2395,34 @@ def _run_consensus_forecast_model(model_name, symbol, horizon, df, price):
 def _run_consensus_agent(agent_name, symbol, episodes, df):
     """Run a single RL agent via factory, return (vote, signal_str)."""
     # Check DB cache for pre-trained RL results
-    if df is not None:
-        pass  # data override supplied — cannot use cached result
-    else:
-        _agent_to_pretrained = {
-            "double_dqn": ("pretrained_dqn", "dqn"),
-            "policy_gradient": ("pretrained_policy_gradient", "policy_gradient"),
+    # CR-6: on cache miss → skip (don't train on the fly)
+    _pretrained_agents = ("double_dqn", "policy_gradient")
+    if df is None and agent_name in _pretrained_agents:
+        prefix_map = {
+            "double_dqn": "pretrained_dqn",
+            "policy_gradient": "pretrained_policy_gradient",
         }
-        if agent_name in _agent_to_pretrained:
-            prefix, _ = _agent_to_pretrained[agent_name]
-            cached_key = f"{prefix}|symbol={symbol.upper()}"
-            cached = db_cache_get(cached_key)
-            if cached is not None and len(cached) > 0:
-                summary = cached[0]
-                signal_str = str(summary.get("Signal", summary.get("Recommendation", "HOLD")))
-                reward = summary.get("Avg Reward", summary.get("Final Reward", 0))
-                try:
-                    reward_f = float(reward) if reward else 0.0
-                except (TypeError, ValueError):
-                    reward_f = 0.0
-                if signal_str.upper() == "BUY":
-                    vote = "BUY"
-                elif signal_str.upper() == "SELL":
-                    vote = "SELL"
-                else:
-                    vote = "HOLD"
-                sig = f"{signal_str} (R={reward_f:.1f})"
-                return vote, sig
+        cached_key = f"{prefix_map[agent_name]}|symbol={symbol.upper()}"
+        cached = db_cache_get(cached_key)
+        if cached is not None and len(cached) > 0:
+            summary = cached[0]
+            signal_str = str(summary.get("Signal", summary.get("Recommendation", "HOLD")))
+            reward = summary.get("Avg Reward", summary.get("Final Reward", 0))
+            try:
+                reward_f = float(reward) if reward else 0.0
+            except (TypeError, ValueError):
+                reward_f = 0.0
+            if signal_str.upper() == "BUY":
+                vote = "BUY"
+            elif signal_str.upper() == "SELL":
+                vote = "SELL"
+            else:
+                vote = "HOLD"
+            sig = f"{signal_str} (R={reward_f:.1f})"
+            return vote, sig
+        # Cache miss for pre-trained agent → skip (no inline training)
+        logger.warning("CR-6: %s cache miss for %s — skipping", agent_name, symbol)
+        return "-", f"{agent_name}: no cache (skipped)"
 
     try:
         from openbb_forecast.agents.environment import TradingEnvironment

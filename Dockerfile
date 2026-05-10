@@ -2,25 +2,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 8GB RAM tier — allow more threads for ML models
-ENV OMP_NUM_THREADS=4
-ENV MKL_NUM_THREADS=4
-ENV OPENBLAS_NUM_THREADS=4
-ENV MALLOC_TRIM_THRESHOLD_=131072
-ENV PYTHONUNBUFFERED=1
-# Matplotlib non-interactive backend
-ENV MPLBACKEND=Agg
-ENV MPLCONFIGDIR=/tmp/matplotlib
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch CPU-only (no CUDA = ~200MB instead of 2GB)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-# Install all other dependencies from requirements.txt (single source of truth)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt poetry-core
-
+# Copy project
 COPY . .
 
-RUN pip install --no-cache-dir --no-deps -e /app/openbb_forecast/
+# Install Python deps
+RUN pip install --no-cache-dir -e openbb_forecast
+RUN pip install --no-cache-dir \
+    fastapi uvicorn[standard] yfinance pandas numpy \
+    httpx pydantic-settings apscheduler
 
-CMD uvicorn halal_screener:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1
+# Expose port
+EXPOSE 6910
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
+    CMD python -c "import httpx; httpx.get('http://127.0.0.1:6910/api/info').raise_for_status()"
+
+# Run
+CMD ["uvicorn", "app.workspace_server:app", "--host", "0.0.0.0", "--port", "6910"]

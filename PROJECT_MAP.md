@@ -170,3 +170,4 @@ openbb-trading/
 | **M4** | Merge copilot into main app | `POST /v1/query` streaming endpoint on main FastAPI; `copilot.py` removed | ✅ Done (commit pending) |
 | **M5** | Clean orphans | Review `keep_alive.py`, `russell1000_halal.py` for relocation | 🔶 Pending |
 | **M6** | Activate IBKR (gate: user decision) | IBKR adapter receives real credentials | ⏸️ Deferred (needs VPS + ≥$25k) |
+| **M7** | OpenBB Workspace Integration | Custom backend at `app/workspace_server.py` serving 40 widgets (19 models + 19 agents + MC + metrics) with OpenBB Platform extension registration | ✅ Done |

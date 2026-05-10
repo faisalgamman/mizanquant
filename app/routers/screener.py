@@ -182,11 +182,11 @@ async def screening_report():
 
 @router.get("/screen_stocks")
 async def screen_stocks_endpoint(max_stocks: int = 80):
-    from halal_screener import _serve_or_compute, _cache_key, settings, validate_range, HALAL_STOCKS, RUSSELL_1000_HALAL, batch_screen
+    from halal_screener import _serve_or_compute, _cache_key, settings, validate_range, _universe_symbols, batch_screen
     if not settings.FMP_API_KEY:
         return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
     validate_range(max_stocks, "max_stocks", 1, 200)
-    all_symbols = list(set(HALAL_STOCKS + RUSSELL_1000_HALAL))
+    all_symbols = list(set(_universe_symbols()))
     key = _cache_key("screening_batch", max=max_stocks)
     def _run_batch():
         return [batch_screen(all_symbols, max_per_run=max_stocks)]
@@ -201,11 +201,22 @@ async def usx(min_score: int = 7):
     return _serve_or_compute(key, run_usx_screener, args=(min_score,), msg="Computing USX screener...")
 
 
+@router.get("/ping")
+async def ping():
+    """Unauthenticated lightweight health check for load balancers."""
+    from halal_screener import _uptime_seconds
+    return {
+        "status": "ok",
+        "uptime_seconds": round(_uptime_seconds(), 1),
+    }
+
+
 @router.get("/health")
 async def health():
     import logging
-    from halal_screener import (settings, HALAL_STOCKS, _has_alpaca_broker_config,
+    from halal_screener import (settings, _universe_symbols, _has_alpaca_broker_config,
         _primary_broker_strategy_id, fetch_yf, alpaca_get_account, alpaca_get_last_error,
+        _uptime_seconds, _check_model_degradation,
         NON_FATAL_ANALYSIS_ERROR, logger)
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
@@ -248,11 +259,17 @@ async def health():
     all_ok = core_ok and broker_ok
     if settings.AUTO_TRADE_ENABLED and not broker_connected:
         all_ok = False
+
+    model_degradation = _check_model_degradation()
+    degraded_models = [k for k, v in model_degradation.items() if v.get("status") in ("degraded", "below_chance")]
+    if degraded_models:
+        all_ok = False
+
     return {
         "status": "ok" if all_ok else "degraded",
         "version": "17.0.0",
         "widgets": 10,
-        "stocks": len(HALAL_STOCKS),
+        "stocks": len(_universe_symbols()),
         "data_source": "alpaca+yfinance" if broker_connected else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "telegram": "active" if telegram_configured else "not_configured",
@@ -263,6 +280,9 @@ async def health():
         "database": "connected" if checks["database"] else "unavailable",
         "auto_trading": "enabled" if settings.AUTO_TRADE_ENABLED and broker_connected else "blocked_broker_unavailable" if settings.AUTO_TRADE_ENABLED else "disabled",
         "config": "loaded",
+        "uptime_seconds": round(_uptime_seconds(), 1),
+        "uptime_human": f"{_uptime_seconds() / 3600:.1f}h",
+        "model_degradation": model_degradation,
         "dependencies": checks,
     }
 

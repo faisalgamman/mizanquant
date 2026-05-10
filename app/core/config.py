@@ -68,11 +68,11 @@ class ExecutionCfg(BaseModel):
 
 class ThresholdCfg(BaseModel):
     min_confidence: dict[str, float] = Field(
-        default_factory=lambda: {"momentum": 45.0, "reversion": 40.0, "ml": 50.0}
+        default_factory=lambda: {"momentum": 35.0, "reversion": 30.0, "ml": 35.0}
     )
-    strong_buy_votes: int = 7
+    strong_buy_votes: int = 5
     buy_votes_margin: int = 1
-    min_buy_confidence: float = 45.0
+    min_buy_confidence: float = 35.0
     atr_targets: dict[str, dict[str, float]] = Field(
         default_factory=lambda: {
             "base": {"sl": 1.5, "tp1": 1.5, "tp2": 2.5, "tp3": 4.0},
