@@ -70,6 +70,8 @@ NON_FATAL_ANALYSIS_ERROR = (
     RuntimeError,
     ZeroDivisionError,
     IndexError,
+    FileNotFoundError,
+    OSError,
     DataFetchError,
     ModelTrainingError,
     HTTPException,
@@ -82,17 +84,27 @@ ATR_TARGETS = app_cfg.thresholds.atr_targets
 async def _app_lifespan(_app: FastAPI):
     await _startup_bootstrap()
     try:
+        # Send startup notification
+        try:
+            model_status = _check_model_degradation()
+            degraded = [k for k, v in model_status.items() if v.get("status") in ("degraded", "below_chance")]
+            scheduler_mode = "worker" if os.environ.get("WORKER_SERVICE", "").lower() == "true" else "in-process"
+            msg = f"System booted. Models tracked: {len(model_status)}"
+            if degraded:
+                msg += f", {len(degraded)} degraded ({', '.join(degraded)})"
+            tg_send(f"Startup OK — {msg}\nScheduler: {scheduler_mode}")
+            logger.info(f"{msg} | scheduler={scheduler_mode}")
+        except NON_FATAL_ANALYSIS_ERROR:
+            logger.exception("Startup notification failed")
         yield
     finally:
         try:
             from app.services.scheduler import stop_scheduler
-
             stop_scheduler()
         except NON_FATAL_ANALYSIS_ERROR:
             logger.exception("Scheduler shutdown failed")
         try:
             from app.services.fill_watcher import stop_fill_watcher
-
             stop_fill_watcher()
         except NON_FATAL_ANALYSIS_ERROR:
             logger.exception("Fill watcher shutdown failed")
@@ -103,7 +115,14 @@ operator_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 OperatorAPIKey = Annotated[str | None, Security(operator_api_key_header)]
 
 import keep_alive
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)
 
 # --- 4.1: Timeout wrapper ---
 async def with_timeout(coro, seconds=120):
@@ -192,49 +211,31 @@ _HARAM_EXCLUDE = {
     "AXP","SYF","CPAY",
 }
 
-# Full S&P 500 minus haram exclusions
-_SP500_ALL = [
-    "A","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK",
-    "AEE","AEP","AES","AKAM","ALB","ALGN","ALLE","AMAT","AMCR","AMD",
-    "AME","AMGN","AMP","AMT","AMZN","ANET","AON","AOS","APA","APD","APH",
-    "APO","APP","APTV","ARE","ARES","ATO","AVB","AVGO","AVY","AWK","AXON",
-    "AXP","AZO","BALL","BAX","BBY","BDX","BG","BIIB","BKNG","BKR","BLDR",
-    "BMY","BR","BRK.B","BSX","BXP","CAG","CAH","CARR","CAT","CBRE","CCI",
-    "CDNS","CDW","CEG","CF","CHD","CHRW","CHTR","CIEN","CL","CLX","CMCSA",
-    "CMG","CMI","CMS","CNP","COHR","COIN","COO","COP","COST","CPAY","CPB",
-    "CPRT","CPT","CRH","CRL","CRM","CRWD","CSCO","CSGP","CSX","CTAS",
-    "CTRA","CTSH","CTVA","CVNA","CVS","CVX","D","DAL","DASH","DD","DDOG",
-    "DE","DECK","DELL","DG","DGX","DHI","DHR","DLR","DLTR","DOC","DOV",
-    "DOW","DPZ","DRI","DTE","DUK","DVA","DVN","DXCM","EA","EBAY","ECL",
-    "ED","EFX","EIX","EL","EME","EMR","EOG","EPAM","EQIX","EQR","EQT",
-    "ES","ESS","ETN","ETR","EVRG","EW","EXC","EXE","EXPD","EXPE","EXR",
-    "F","FANG","FAST","FCX","FDS","FDX","FE","FFIV","FICO","FIS","FISV",
-    "FIX","FRT","FSLR","FTNT","FTV","GDDY","GE","GEHC","GEN","GEV","GILD",
-    "GIS","GLW","GM","GNRC","GOOG","GOOGL","GPC","GPN","GRMN","GWW","HAL",
-    "HAS","HCA","HD","HLT","HOLX","HON","HOOD","HPE","HPQ","HRL","HSIC",
-    "HST","HSY","HUBB","HWM","IBKR","IBM","IDXX","IEX","IFF","INCY","INTC",
-    "INTU","INVH","IP","IQV","IR","IRM","ISRG","IT","ITW","J","JBHT","JBL",
-    "JCI","JKHY","JNJ","KDP","KEYS","KHC","KIM","KLAC","KMB","KMI","KO",
-    "KR","KVUE","LDOS","LEN","LH","LII","LIN","LITE","LLY","LNT","LOW",
-    "LRCX","LULU","LUV","LYB","MA","MAA","MAR","MAS","MCD","MCHP","MCK",
-    "MCO","MDLZ","MDT","META","MKC","MLM","MMM","MNST","MOS","MPC","MPWR",
-    "MRK","MRNA","MRSH","MSFT","MSI","MTD","MU","NEM","NEE","NI","NKE","NOW",
-    "NRG","NSC","NTAP","NTRS","NUE","NVDA","NVR","NWS","NWSA","NXPI","O",
-    "ODFL","OKE","OMC","ON","ORCL","ORLY","OTIS","OXY","PANW","PAYX","PCAR",
-    "PCG","PEG","PEP","PFE","PG","PH","PHM","PKG","PLD","PLTR","POOL",
-    "PODD","PPG","PPL","PSA","PSKY","PSX","PTC","PWR","PYPL","Q","QCOM",
-    "REG","REGN","RL","RMD","ROK","ROL","ROP","ROST","RSG","RVTY","SAIC",
-    "SATS","SBAC","SBUX","SHW","SJM","SLB","SMCI","SNA","SNDK","SNPS","SO",
-    "SOLV","SPG","SRE","STE","STLD","STX","SW","SWK","SWKS","SYF","SYK",
-    "SYY","T","TDG","TDY","TECH","TEL","TER","TGT","TJX","TKO","TMO",
-    "TMUS","TPL","TPR","TRGP","TRMB","TSCO","TSLA","TSN","TT","TTD","TTWO",
-    "TXN","TXT","TYL","UAL","UBER","UDR","UHS","ULTA","UNP","UPS","URI",
-    "V","VICI","VLO","VLTO","VMC","VRSK","VRSN","VRT","VRTX","VST","VTR",
-    "VTRS","VZ","WAB","WAT","WDAY","WDC","WEC","WELL","WM","WMB","WMT",
-    "WSM","WST","XEL","XOM","XYL","XYZ","YUM","ZBH","ZBRA","ZTS",
-]
+# ── HALAL_STOCKS: now imported from universe module (single source of truth) ──
+from app.services.universe import (
+    HALAL_STOCKS_FALLBACK as HALAL_STOCKS,
+    HALAL_STOCKS_BACKTEST_FALLBACK as HALAL_STOCKS_BACKTEST,
+)
 
-HALAL_STOCKS = [s for s in _SP500_ALL if s not in _HARAM_EXCLUDE]
+try:
+    from app.services.universe import get_universe_symbols as _get_universe
+    _db_symbols = None
+    def _universe_symbols():
+        global _db_symbols
+        if _db_symbols is None:
+            try:
+                from app.db.database import SessionLocal
+                db = SessionLocal()
+                try:
+                    _db_symbols = _get_universe(db)
+                finally:
+                    db.close()
+            except Exception:
+                _db_symbols = []
+        return _db_symbols or HALAL_STOCKS
+except ImportError:
+    def _universe_symbols():
+        return HALAL_STOCKS
 
 # Survivorship bias mitigation: stocks removed from S&P 500 in 2023-2025
 # that were halal-compliant when removed. Including these in backtests
@@ -271,11 +272,6 @@ _SP500_DELISTED_HALAL = [
     "VIAC",  # ViacomCBS (now PARA)
 ]
 
-# For backtesting only — includes delisted stocks to avoid survivorship bias
-HALAL_STOCKS_BACKTEST = HALAL_STOCKS + [
-    s for s in _SP500_DELISTED_HALAL if s not in _HARAM_EXCLUDE
-]
-
 VALID_SYMBOLS.update(HALAL_STOCKS)
 VALID_SYMBOLS.update(_SP500_DELISTED_HALAL)
 
@@ -284,8 +280,16 @@ _cache = {}
 _cache_ts = {}
 
 def cache_get(k):
+    try:
+        from app.services.metrics import metrics
+    except Exception:
+        metrics = None
     if time.time() - _cache_ts.get(k, 0) < _SIMPLE_CACHE_TTL:
+        if metrics:
+            metrics.cache_hit("simple_cache")
         return _cache.get(k)
+    if metrics:
+        metrics.cache_miss("simple_cache")
     return None
 
 def cache_set(k, v):
@@ -299,8 +303,16 @@ _model_cache = {}
 _model_cache_ts = {}
 
 def model_cache_get(key):
+    try:
+        from app.services.metrics import metrics
+    except Exception:
+        metrics = None
     if time.time() - _model_cache_ts.get(key, 0) < MODEL_CACHE_TTL:
+        if metrics:
+            metrics.cache_hit("model_cache")
         return _model_cache.get(key)
+    if metrics:
+        metrics.cache_miss("model_cache")
     # Expired — remove it
     _model_cache.pop(key, None)
     _model_cache_ts.pop(key, None)
@@ -463,11 +475,14 @@ def _analyze_one(symbol):
     return analyze(symbol, df)
 
 def run_screener():
+    from app.services.metrics import metrics as _m
     cached = cache_get("all")
     if cached: return cached
+    _m.incr("run_screener_calls")
     results = []
+    symbols = _universe_symbols()
     with ThreadPoolExecutor(max_workers=settings.SCREENER_WORKERS) as pool:
-        futures = {pool.submit(_analyze_one, s): s for s in HALAL_STOCKS}
+        futures = {pool.submit(_analyze_one, s): s for s in symbols}
         for f in as_completed(futures):
             r = f.result()
             if r: results.append(r)
@@ -623,7 +638,10 @@ def _run_with_memory_guard(func, *args, **kwargs):
         _model_semaphore.release()
 
 
-_PERSISTED_MODELS = {"lstm": None, "transformer": None, "ensemble": None}
+from openbb_forecast.models.factory import create_model as _create_forecast_model, get_model_class, get_model_suffix, MODEL_NAMES as ALL_MODEL_NAMES
+from openbb_forecast.agents.factory import create_agent as _create_rl_agent, AGENT_NAMES as ALL_AGENT_NAMES
+
+_PERSISTED_MODELS = {}
 _PERSISTED_MODEL_ATTEMPTS = set()
 
 
@@ -637,16 +655,8 @@ def _load_persisted_model(model_name):
     try:
         from openbb_forecast.models.persistence import resolve_latest
 
-        if model_name == "lstm":
-            from openbb_forecast.models.lstm import LSTMForecaster as model_cls
-            suffix = ".pt"
-        elif model_name == "transformer":
-            from openbb_forecast.models.transformer import TransformerForecaster as model_cls
-            suffix = ".pt"
-        else:
-            from openbb_forecast.models.ensemble import StackingForecaster as model_cls
-            suffix = ".pkl"
-
+        suffix = get_model_suffix(model_name)
+        model_cls = get_model_class(model_name)
         latest = resolve_latest(model_name, suffix)
         _PERSISTED_MODELS[model_name] = model_cls.load(latest)
         logger.info(f"Loaded persisted {model_name} model from {latest}")
@@ -668,7 +678,7 @@ def _predict_persisted_model(model_name, X_test):
 
 
 def _preload_persisted_models():
-    for model_name in tuple(_PERSISTED_MODELS):
+    for model_name in ALL_MODEL_NAMES:
         _load_persisted_model(model_name)
 
 
@@ -786,6 +796,11 @@ def _run_ensemble_inner(symbol, horizon, df=None):
         return [{"Error": str(e)}]
 
 def run_dqn(symbol, episodes, df=None):
+    if df is None:
+        pretrained_key = f"pretrained_dqn|symbol={symbol.upper()}"
+        cached = db_cache_get(pretrained_key)
+        if cached is not None:
+            return cached
     return _run_with_memory_guard(_run_dqn_inner, symbol, episodes, df=df)
 
 def _run_dqn_inner(symbol, episodes, df=None):
@@ -831,6 +846,11 @@ def _run_dqn_inner(symbol, episodes, df=None):
         return [{"Error": str(e)}]
 
 def run_policy_gradient(symbol, episodes, df=None):
+    if df is None:
+        pretrained_key = f"pretrained_policy_gradient|symbol={symbol.upper()}"
+        cached = db_cache_get(pretrained_key)
+        if cached is not None:
+            return cached
     return _run_with_memory_guard(_run_policy_gradient_inner, symbol, episodes, df=df)
 
 def _run_policy_gradient_inner(symbol, episodes, df=None):
@@ -993,7 +1013,7 @@ def run_usx_screener(min_score=7, direction="Long Only"):
     try:
         results = []
         with ThreadPoolExecutor(max_workers=settings.SCREENER_WORKERS) as pool:
-            futures = {pool.submit(_usx_one, s): s for s in HALAL_STOCKS}
+            futures = {pool.submit(_usx_one, s): s for s in _universe_symbols()}
             for f in as_completed(futures):
                 r = f.result()
                 if r and r["_score_int"] >= min_score:
@@ -1150,7 +1170,7 @@ def run_bcf_screener(portfolio_value=100000, rf_rate=0.043):
         max_positions = 5
         max_per_sector = 2
 
-        for symbol in HALAL_STOCKS:
+        for symbol in _universe_symbols():
             if len(results) >= max_positions:
                 break
 
@@ -1695,18 +1715,18 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # Verdict thresholds — scaled to actual voting tools
+        # Verdict thresholds — rebalanced to reduce neutral bias
         # With 14 tools, ~10-12 actually vote (DQN/PolicyGrad often SKIP)
-        # STRONG needs >60% of votes, BUY needs plurality with >=45% confidence
-        if votes_buy >= 7:
+        # STRONG needs >40% of votes, BUY needs plurality with >=35% confidence
+        if votes_buy >= 5:
             verdict, action_str = "STRONG BUY", "STRONG ENTER"
-        elif votes_buy > votes_sell and confidence >= 45:
+        elif votes_buy > votes_sell and confidence >= 35:
             verdict, action_str = "BUY", "ENTER"
         elif votes_buy > votes_sell:
             verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 7:
+        elif votes_sell >= 5:
             verdict, action_str = "STRONG SELL", "STRONG AVOID"
-        elif votes_sell > votes_buy and confidence >= 45:
+        elif votes_sell > votes_buy and confidence >= 35:
             verdict, action_str = "SELL", "AVOID"
         elif votes_sell > votes_buy:
             verdict, action_str = "WEAK SELL", "WEAK SELL"
@@ -1991,14 +2011,14 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # STRONG requires 4+ BUY votes AND price above SMA50
-        if votes_buy >= 4 and above_sma50:
+        # STRONG requires 3+ BUY votes AND price above SMA50
+        if votes_buy >= 3 and above_sma50:
             verdict = "STRONG BUY"
-        elif votes_buy > votes_sell and above_sma50 and confidence >= 55:
+        elif votes_buy > votes_sell and above_sma50 and confidence >= 50:
             verdict = "BUY"
-        elif votes_sell >= 4:
+        elif votes_sell >= 3:
             verdict = "STRONG SELL"
-        elif votes_sell > votes_buy and confidence >= 55:
+        elif votes_sell > votes_buy and confidence >= 50:
             verdict = "SELL"
         elif votes_buy > votes_sell:
             verdict = "WEAK BUY"
@@ -2251,14 +2271,13 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        # Mean reversion requires oversold conditions
-        if votes_buy >= 4:
+        if votes_buy >= 3:
             verdict = "STRONG BUY"
-        elif votes_buy >= 3 and confidence >= 55:
+        elif votes_buy >= 2 and confidence >= 50:
             verdict = "BUY"
-        elif votes_sell >= 4:
+        elif votes_sell >= 3:
             verdict = "STRONG SELL"
-        elif votes_sell >= 3 and confidence >= 55:
+        elif votes_sell >= 2 and confidence >= 50:
             verdict = "SELL"
         elif votes_buy > votes_sell:
             verdict = "WEAK BUY"
@@ -2325,12 +2344,137 @@ def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
         return [{"Error": str(e), "Strategy": "B-Reversion"}]
 
 
+# Default subset of ML models and agents for consensus_ml
+# Uses configurable lists — set via app_cfg or env to include/exclude specific tools
+_CONSENSUS_ML_MODELS = getattr(app_cfg, "consensus_ml_models", [
+    "lstm", "transformer", "ensemble", "gru", "cnn_seq2seq", "arima",
+])
+_CONSENSUS_ML_AGENTS = getattr(app_cfg, "consensus_ml_agents", [
+    "double_dqn", "policy_gradient", "qlearning", "actor_critic",
+])
+
+
+def _run_consensus_forecast_model(model_name, symbol, horizon, df, price):
+    """Run a single forecast model via the factory, return (vote, signal_str, forecast_price)."""
+    try:
+        prices = np.array(df["close"].values, dtype=np.float64).flatten()
+        prices = prices[~np.isnan(prices)]
+        SEQ_LEN = 20
+
+        from openbb_forecast.data.preprocessing import prepare_sequences
+        _, _, X_test, _, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
+
+        preds = _predict_persisted_model(model_name, X_test)
+        if preds is None:
+            # Try on-the-fly training for lightweight models
+            try:
+                model = _create_forecast_model(model_name)
+                X_train, y_train, X_test_v, y_test_v, m, s = prepare_sequences(prices, SEQ_LEN, horizon)
+                model.fit(X_train, y_train)
+                preds = model.predict(X_test_v[-1:])
+            except Exception:
+                return "HOLD", f"{model_name}: unavailable", None
+
+        pred_prices = preds[0] * std_p + mean_p
+        last_forecast = pred_prices[-1] if hasattr(pred_prices, "__len__") else float(pred_prices)
+        pct_chg = float((last_forecast - price) / price * 100)
+
+        if pct_chg > 2:
+            vote = "BUY"
+        elif pct_chg < -2:
+            vote = "SELL"
+        else:
+            vote = "HOLD"
+        sig = f"${last_forecast:.2f} ({pct_chg:+.1f}%)"
+        return vote, sig, float(last_forecast)
+    except Exception as e:
+        logger.debug(f"{model_name} forecast error: {e}")
+        return "-", f"{model_name}: ERROR", None
+
+
+def _run_consensus_agent(agent_name, symbol, episodes, df):
+    """Run a single RL agent via factory, return (vote, signal_str)."""
+    # Check DB cache for pre-trained RL results
+    if df is not None:
+        pass  # data override supplied — cannot use cached result
+    else:
+        _agent_to_pretrained = {
+            "double_dqn": ("pretrained_dqn", "dqn"),
+            "policy_gradient": ("pretrained_policy_gradient", "policy_gradient"),
+        }
+        if agent_name in _agent_to_pretrained:
+            prefix, _ = _agent_to_pretrained[agent_name]
+            cached_key = f"{prefix}|symbol={symbol.upper()}"
+            cached = db_cache_get(cached_key)
+            if cached is not None and len(cached) > 0:
+                summary = cached[0]
+                signal_str = str(summary.get("Signal", summary.get("Recommendation", "HOLD")))
+                reward = summary.get("Avg Reward", summary.get("Final Reward", 0))
+                try:
+                    reward_f = float(reward) if reward else 0.0
+                except (TypeError, ValueError):
+                    reward_f = 0.0
+                if signal_str.upper() == "BUY":
+                    vote = "BUY"
+                elif signal_str.upper() == "SELL":
+                    vote = "SELL"
+                else:
+                    vote = "HOLD"
+                sig = f"{signal_str} (R={reward_f:.1f})"
+                return vote, sig
+
+    try:
+        from openbb_forecast.agents.environment import TradingEnvironment
+        from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
+        from openbb_forecast.risk.manager import RiskManager
+
+        prices = np.array(df["close"].values, dtype=np.float64).flatten()
+        prices = prices[~np.isnan(prices)]
+        split = int(len(prices) * 0.8)
+        train_prices = prices[:split]
+
+        cost_model = TransactionCostModel(commission_bps=10)
+        try:
+            risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
+        except Exception:
+            risk_mgr = None
+
+        env = TradingEnvironment(
+            prices=train_prices, window_size=30,
+            initial_capital=10000, cost_model=cost_model,
+            risk_manager=risk_mgr,
+        )
+
+        agent = _create_rl_agent(agent_name, state_size=env.state_size, action_size=env.action_size)
+        rewards = agent.train(env, episodes=episodes)
+        state = env.reset()
+        action = agent.select_action(state)
+        action_map = {0: "HOLD", 1: "BUY", 2: "SELL"}
+        action_str = action_map.get(int(action), "HOLD")
+
+        reward = float(np.mean(rewards[-10:])) if len(rewards) >= 10 else float(np.mean(rewards)) if rewards else 0
+        if action_str == "BUY":
+            vote = "BUY"
+        elif action_str == "SELL":
+            vote = "SELL"
+        else:
+            vote = "HOLD"
+
+        sig = f"{action_str} (R={reward:.1f})"
+        return vote, sig
+    except Exception as e:
+        logger.debug(f"{agent_name} agent error: {e}")
+        return "-", f"{agent_name}: ERROR"
+
+
 def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None):
     """Strategy C: AI Ensemble — pure ML decision-making.
 
-    Tools: LSTM, Transformer, Stacking Ensemble, Double DQN, Policy Gradient
-    Entry: 4+ of 5 ML models vote BUY
-    Exit: default trailing stop, TP at models' average predicted price
+    Dynamically discovers all registered forecast models and RL agents
+    via the factory, runs each as a voting tool.
+
+    Entry: 60% of tools vote BUY
+    Exit: default trailing stop, TP at average predicted price
     """
     try:
         is_halal, halal_reason = verify_halal(symbol)
@@ -2348,131 +2492,46 @@ def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None
         price = float(df["close"].iloc[-1])
         atr_val = float(atr(df).iloc[-1])
 
-        # --- Tool 1: LSTM ---
-        try:
-            lstm_r = run_lstm(symbol, horizon, df=df)
-            if lstm_r and len(lstm_r) > 1:
-                last_forecast = lstm_r[-1]
-                pct_chg = float(last_forecast.get("Change %", 0))
-                forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 2:
-                    votes_buy += 1; vote = "BUY"
-                    predicted_prices.append(forecast_price)
-                elif pct_chg < -2:
-                    votes_sell += 1; vote = "SELL"
-                else:
-                    votes_hold += 1; vote = "HOLD"
-                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
-                details.append({"Tool": "LSTM", "Signal": sig, "Vote": vote})
+        # --- Forecast models (price prediction) ---
+        for model_name in _CONSENSUS_ML_MODELS:
+            vote, sig, fcast_price = _run_consensus_forecast_model(model_name, symbol, horizon, df, price)
+            if vote == "BUY":
+                votes_buy += 1
+                if fcast_price is not None:
+                    predicted_prices.append(fcast_price)
+            elif vote == "SELL":
+                votes_sell += 1
+            elif vote == "-":
+                pass  # skip non-functional, don't count as HOLD
             else:
                 votes_hold += 1
-                details.append({"Tool": "LSTM", "Signal": "No forecast", "Vote": "HOLD"})
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"LSTM tool error: {e}")
-            details.append({"Tool": "LSTM", "Signal": "ERROR", "Vote": "-"})
+            details.append({"Tool": model_name.upper(), "Signal": sig, "Vote": vote})
 
-        # --- Tool 2: Transformer ---
-        try:
-            tf_r = run_transformer(symbol, horizon, df=df)
-            if tf_r and len(tf_r) > 1:
-                last_forecast = tf_r[-1]
-                pct_chg = float(last_forecast.get("Change %", 0))
-                forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 2:
-                    votes_buy += 1; vote = "BUY"
-                    predicted_prices.append(forecast_price)
-                elif pct_chg < -2:
-                    votes_sell += 1; vote = "SELL"
-                else:
-                    votes_hold += 1; vote = "HOLD"
-                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
-                details.append({"Tool": "Transformer", "Signal": sig, "Vote": vote})
+        # --- RL agents (action-based) ---
+        for agent_name in _CONSENSUS_ML_AGENTS:
+            vote, sig = _run_consensus_agent(agent_name, symbol, episodes, df)
+            if vote == "BUY":
+                votes_buy += 1
+            elif vote == "SELL":
+                votes_sell += 1
+            elif vote == "-":
+                pass
             else:
                 votes_hold += 1
-                details.append({"Tool": "Transformer", "Signal": "No forecast", "Vote": "HOLD"})
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"Transformer tool error: {e}")
-            details.append({"Tool": "Transformer", "Signal": "ERROR", "Vote": "-"})
-
-        # --- Tool 3: Stacking Ensemble ---
-        try:
-            ens_r = run_ensemble(symbol, horizon, df=df)
-            if ens_r and len(ens_r) > 1:
-                last_forecast = ens_r[-1]
-                pct_chg = float(last_forecast.get("Change %", 0))
-                forecast_price = float(last_forecast.get("Predicted Price", price))
-                if pct_chg > 2:
-                    votes_buy += 1; vote = "BUY"
-                    predicted_prices.append(forecast_price)
-                elif pct_chg < -2:
-                    votes_sell += 1; vote = "SELL"
-                else:
-                    votes_hold += 1; vote = "HOLD"
-                sig = f"${forecast_price:.2f} ({pct_chg:+.1f}%)"
-                details.append({"Tool": "Ensemble", "Signal": sig, "Vote": vote})
-            else:
-                votes_hold += 1
-                details.append({"Tool": "Ensemble", "Signal": "No forecast", "Vote": "HOLD"})
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"Ensemble tool error: {e}")
-            details.append({"Tool": "Ensemble", "Signal": "ERROR", "Vote": "-"})
-
-        # --- Tool 4: Double DQN ---
-        try:
-            dqn_r = run_dqn(symbol, episodes, df=df)
-            if dqn_r and len(dqn_r) > 0:
-                summary_item = dqn_r[0]
-                action = summary_item.get("Action", summary_item.get("Recommendation", ""))
-                reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
-                if "BUY" in str(action).upper():
-                    votes_buy += 1; vote = "BUY"
-                elif "SELL" in str(action).upper():
-                    votes_sell += 1; vote = "SELL"
-                else:
-                    votes_hold += 1; vote = "HOLD"
-                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
-                details.append({"Tool": "DQN", "Signal": sig, "Vote": vote})
-            else:
-                votes_hold += 1
-                details.append({"Tool": "DQN", "Signal": "No action", "Vote": "HOLD"})
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"DQN tool error: {e}")
-            details.append({"Tool": "DQN", "Signal": "ERROR", "Vote": "-"})
-
-        # --- Tool 5: Policy Gradient ---
-        try:
-            pg_r = run_policy_gradient(symbol, episodes, df=df)
-            if pg_r and len(pg_r) > 0:
-                summary_item = pg_r[0]
-                action = summary_item.get("Action", summary_item.get("Recommendation", ""))
-                reward = summary_item.get("Total Reward", summary_item.get("Final Portfolio", 0))
-                if "BUY" in str(action).upper():
-                    votes_buy += 1; vote = "BUY"
-                elif "SELL" in str(action).upper():
-                    votes_sell += 1; vote = "SELL"
-                else:
-                    votes_hold += 1; vote = "HOLD"
-                sig = f"{action} (R={reward:.1f})" if isinstance(reward, (int, float)) else str(action)
-                details.append({"Tool": "PolicyGrad", "Signal": sig, "Vote": vote})
-            else:
-                votes_hold += 1
-                details.append({"Tool": "PolicyGrad", "Signal": "No action", "Vote": "HOLD"})
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"PolicyGrad tool error: {e}")
-            details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-"})
+            details.append({"Tool": agent_name.upper(), "Signal": sig, "Vote": vote})
 
         # --- Verdict ---
         total = votes_buy + votes_sell + votes_hold
         if total == 0: total = 1
         confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
 
-        if votes_buy >= 4:
+        if votes_buy >= 3:
             verdict = "STRONG BUY"
-        elif votes_buy >= 3 and confidence >= 55:
+        elif votes_buy >= 2 and confidence >= 50:
             verdict = "BUY"
-        elif votes_sell >= 4:
+        elif votes_sell >= 3:
             verdict = "STRONG SELL"
-        elif votes_sell >= 3 and confidence >= 55:
+        elif votes_sell >= 2 and confidence >= 50:
             verdict = "SELL"
         elif votes_buy > votes_sell:
             verdict = "WEAK BUY"
@@ -2813,8 +2872,8 @@ def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None
     )
 
 
-# Pipeline uses same S&P 500 halal universe
-RUSSELL_1000_HALAL = HALAL_STOCKS
+# Backward compat shim
+from app.services.universe import HALAL_STOCKS_FALLBACK as RUSSELL_1000_HALAL  # noqa: F811
 
 def _quick_filter_one(symbol):
     """Quick filter for pipeline stage 1."""
@@ -2840,7 +2899,7 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         # Stage 1: Quick filter (concurrent)
         quick_results = []
         with ThreadPoolExecutor(max_workers=settings.SCREENER_WORKERS) as pool:
-            futures = {pool.submit(_quick_filter_one, s): s for s in RUSSELL_1000_HALAL}
+            futures = {pool.submit(_quick_filter_one, s): s for s in _universe_symbols()}
             for f in as_completed(futures):
                 r = f.result()
                 if r: quick_results.append(r)
@@ -2901,8 +2960,8 @@ def run_pipeline(min_confidence=40, max_final=15, horizon=5, episodes=5):
         weak_buy   = [r for r in final_results if r.get("Verdict","") == "WEAK BUY"]
 
         header = [{
-            "Pipeline":         "Russell 1000 Halal → Full AI Pipeline",
-            "Total Scanned":    len(RUSSELL_1000_HALAL),
+            "Pipeline":         "Universe → Full AI Pipeline",
+            "Total Scanned":    len(_universe_symbols()),
             "After Quick Filter": len(top100),
             "After Screener":   len(top30),
             "After USX Pro":    len(top15),
@@ -2994,21 +3053,38 @@ def _cache_key(endpoint, **params):
     return "|".join(parts)
 
 def _get_cached(key):
+    try:
+        from app.services.metrics import metrics
+    except Exception:
+        metrics = None
     with _cache_lock:
         cached = _bg_cache.get(key)
         status = _cache_status.get(key, "idle")
         ts = _cache_time.get(key, 0)
-    if cached and (time.time() - ts) > _BG_CACHE_TTL:
-        return cached, "stale"
+    if cached:
+        if (time.time() - ts) > _BG_CACHE_TTL:
+            if metrics:
+                metrics.cache_miss("bg_cache")
+            return cached, "stale"
+        if metrics:
+            metrics.cache_hit("bg_cache")
+        return cached, status
+    if metrics:
+        metrics.cache_miss("bg_cache")
     return cached, status
 
 def _bg_compute(key, func, args=(), kwargs=None):
+    from app.services.metrics import metrics as _m
     with _cache_lock:
         if _cache_status.get(key) == "running":
             return
         _cache_status[key] = "running"
+    _m.incr("bg_compute_starts", key=key.split("|")[0])
     try:
+        start = time.perf_counter()
         result = func(*args, **(kwargs or {}))
+        elapsed = time.perf_counter() - start
+        _m.record_timing("bg_compute_duration", elapsed, key=key.split("|")[0])
         with _cache_lock:
             _bg_cache[key] = result
             _cache_status[key] = "done"
@@ -3373,13 +3449,16 @@ async def _startup_bootstrap():
         _bg_compute(_cache_key("usx", min_score=7), run_usx_screener, (7,))
     threading.Thread(target=_delayed_usx, daemon=True).start()
 
-    # Start the automated scheduler (scans every 30 min during market hours)
-    try:
-        from app.services.scheduler import start_scheduler
-        start_scheduler()
-        logger.info("Automated scheduler started successfully")
-    except NON_FATAL_ANALYSIS_ERROR as e:
-        logger.warning(f"Scheduler failed to start (non-fatal): {e}")
+    # Start the automated scheduler (only if not running as standalone worker)
+    if os.environ.get("WORKER_SERVICE", "").lower() != "true":
+        try:
+            from app.services.scheduler import start_scheduler
+            start_scheduler()
+            logger.info("Automated scheduler started successfully (in-process)")
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.warning(f"Scheduler failed to start (non-fatal): {e}")
+    else:
+        logger.info("WORKER_SERVICE=true — scheduler delegated to standalone worker process")
     try:
         from app.services.fill_watcher import start_fill_watcher
 
@@ -3408,6 +3487,49 @@ def _require_api_key(api_key: str | None):
         raise HTTPException(status_code=503, detail="Operator API key not configured")
     if api_key != settings.API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+# --- Uptime tracking ---
+_BOOT_TIMESTAMP = time.time()
+
+
+def _uptime_seconds() -> float:
+    return time.time() - _BOOT_TIMESTAMP
+
+
+def _check_model_degradation() -> dict:
+    """Check persisted model performance against degradation thresholds.
+
+    Returns dict with model status entries. Flags any model whose test
+    Sharpe has dropped below 0.0 or test accuracy below 0.5.
+    """
+    from openbb_forecast.models.persistence import resolve_latest
+    import json
+
+    results = {}
+    for model_name in ("lstm", "transformer", "ensemble"):
+        suffix = ".pt" if model_name != "ensemble" else ".pkl"
+        try:
+            latest = resolve_latest(model_name, suffix)
+            if latest is None:
+                results[model_name] = {"status": "no_artifact", "sharpe": None}
+                continue
+            meta_path = latest.with_suffix(".meta.json")
+            if not meta_path.exists():
+                results[model_name] = {"status": "no_metadata", "sharpe": None}
+                continue
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            test_sharpe = meta.get("test_sharpe", 0.0)
+            test_acc = meta.get("test_acc", 0.0)
+            if test_sharpe < 0.0:
+                results[model_name] = {"status": "degraded", "sharpe": test_sharpe, "acc": test_acc}
+            elif test_acc < 0.5:
+                results[model_name] = {"status": "below_chance", "sharpe": test_sharpe, "acc": test_acc}
+            else:
+                results[model_name] = {"status": "healthy", "sharpe": test_sharpe, "acc": test_acc}
+        except Exception as exc:
+            results[model_name] = {"status": "check_error", "error": str(exc)}
+    return results
 
 
 async def halal_status(symbol: str = "AAPL"):
@@ -3477,12 +3599,11 @@ async def screening_report():
     return results
 
 async def screen_stocks_endpoint(max_stocks: int = 80):
-    """Trigger batch AAOIFI screening for all stocks in HALAL_STOCKS + RUSSELL_1000_HALAL."""
+    """Trigger batch AAOIFI screening for all stocks in the universe."""
     if not settings.FMP_API_KEY:
         return [{"Error": "FMP_API_KEY not configured. Get a free key at https://site.financialmodelingprep.com/developer/docs"}]
     validate_range(max_stocks, "max_stocks", 1, 200)
-    # Combine all known symbols, deduplicate
-    all_symbols = list(set(HALAL_STOCKS + RUSSELL_1000_HALAL))
+    all_symbols = list(set(_universe_symbols()))
     # Run in background to avoid timeout
     key = _cache_key("screening_batch", max=max_stocks)
     def _run_batch():
@@ -4085,6 +4206,14 @@ async def intraday_bars(symbol: str, timeframe: str = "15Min", days: int = 5):
     return bars
 
 
+async def ping():
+    """Unauthenticated lightweight health check for load balancers."""
+    return {
+        "status": "ok",
+        "uptime_seconds": round(_uptime_seconds(), 1),
+    }
+
+
 async def health():
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
@@ -4126,17 +4255,24 @@ async def health():
     all_ok = core_ok and broker_ok
     if settings.AUTO_TRADE_ENABLED and not broker_connected:
         all_ok = False
+
+    model_degradation = _check_model_degradation()
+    degraded_models = [k for k, v in model_degradation.items() if v.get("status") in ("degraded", "below_chance")]
+    if degraded_models:
+        all_ok = False
+
     return {
         "status": "ok" if all_ok else "degraded",
         "version": "17.0.0",
         "widgets": 10,
-        "stocks": len(HALAL_STOCKS),
+        "stocks": len(_universe_symbols()),
         "data_source": "alpaca+yfinance" if broker_connected else "yfinance",
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "telegram": "active" if telegram_configured else "not_configured",
         "operator_api": "configured" if settings.API_KEY else "not_configured",
         "broker": (
             "connected"
+
             if broker_connected
             else "configured_unavailable" if alpaca_configured else "not_configured"
         ),
@@ -4149,6 +4285,9 @@ async def health():
             else "blocked_broker_unavailable" if settings.AUTO_TRADE_ENABLED else "disabled"
         ),
         "config": "loaded",
+        "uptime_seconds": round(_uptime_seconds(), 1),
+        "uptime_human": f"{_uptime_seconds() / 3600:.1f}h",
+        "model_degradation": model_degradation,
         "dependencies": checks,
     }
 
