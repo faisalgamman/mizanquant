@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     TRAILING_STOP_ENABLED: bool = True   # use trailing stops instead of static SL
     TRAILING_STOP_PCT: float = 2.5       # trailing stop distance (% from peak)
 
+    # --- Live whitelist (SF-3) ---
+    # Comma-separated list of ticker symbols allowed for live trading.
+    # When empty, validate_for_live() will refuse to arm auto-trade.
+    # Example: "AAPL,MSFT,GOOGL"
+    LIVE_WHITELIST: str = ""
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -159,7 +165,22 @@ class Settings(BaseSettings):
         if self.MAX_OPEN_POSITIONS < 1:
             errors.append("MAX_OPEN_POSITIONS must be >= 1.")
 
+        # SF-3: live whitelist must contain at least one symbol
+        if not self.live_whitelist:
+            errors.append(
+                "LIVE_WHITELIST is empty — at least one ticker symbol required "
+                "for live trading (comma-separated, e.g. AAPL,MSFT)."
+            )
+
         return errors
+
+    @property
+    def live_whitelist(self) -> list[str]:
+        """Parse LIVE_WHITELIST into a list of uppercase symbols."""
+        raw = (self.LIVE_WHITELIST or "").strip()
+        if not raw:
+            return []
+        return [s.strip().upper() for s in raw.split(",") if s.strip()]
 
     def redacted(self) -> dict:
         """Return settings with secret fields masked — safe for logging."""
