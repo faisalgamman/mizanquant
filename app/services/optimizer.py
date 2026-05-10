@@ -289,7 +289,7 @@ def optimize_params(symbols: list = None, n_samples: int = 10) -> dict:
         # that today's run includes a mix of survivors and casualties; pinning
         # the seed makes the optimizer reproducible across weekly runs.
         try:
-            from halal_screener import HALAL_STOCKS_BACKTEST
+            from app.services.universe import HALAL_STOCKS_BACKTEST_FALLBACK as HALAL_STOCKS_BACKTEST
             full = list(HALAL_STOCKS_BACKTEST)
             current = [s for s in full if not s.startswith("_")]
             # Always include the known delisted set; sample remainder.
