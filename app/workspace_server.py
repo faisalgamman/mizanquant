@@ -1474,6 +1474,7 @@ async def smart_screener(
     max_results: int = Query(25, description="Maximum results"),
     use_cache: str = Query("true", description="Use cached results ('false' to force refresh)"),
     add_forecast: str = Query("true", description="Add forecast consensus score (0-30) to top results"),
+    watchlist: str = Query("", description="Comma-separated symbols to scan (overrides default universe)"),
 ):
     """Smart investment screener: halal + fundamentals (40) + momentum (30) + forecast consensus (30).
 
@@ -1503,9 +1504,12 @@ async def smart_screener(
         effective_min_score = market_status.get("min_gate", 60)
     strong_gate = market_status.get("strong_gate", 75)
 
+    # Use watchlist symbols if provided, otherwise default universe
+    scan_symbols = [s.strip().upper() for s in watchlist.split(",") if s.strip()] if watchlist else _SMART_UNIVERSE
+
     all_results = []
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(_analyze_smart, sym): sym for sym in _SMART_UNIVERSE}
+        futures = {pool.submit(_analyze_smart, sym): sym for sym in scan_symbols}
         for f in as_completed(futures):
             r = f.result()
             if r:
@@ -1551,7 +1555,7 @@ async def smart_screener(
     credited = sum(1 for r in top if r.get("signal") == "CREDIT")
 
     result = {
-        "total_scanned": len(_SMART_UNIVERSE),
+        "total_scanned": len(scan_symbols),
         "halal_count": sum(1 for r in all_results if r.get("is_halal")),
         "results_count": len(top),
         "qualified_count": qualified_count,
