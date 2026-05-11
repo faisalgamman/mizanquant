@@ -11,11 +11,17 @@ COPY openbb_forecast/openbb_forecast/ /app/_vendor/openbb_forecast/
 # Copy project root files
 COPY requirements.txt railway.json /app/
 
+# Debug: verify data subpackage exists
+RUN python -c "import os, sys; d='/app/_vendor/openbb_forecast/data'; exists=os.path.isdir(d); print(f'DATA EXISTS: {exists}', file=sys.stderr); [print(f'  {f}', file=sys.stderr) for f in sorted(os.listdir(d))] if exists else print('  MISSING!', file=sys.stderr)"
+
 # PYTHONPATH: /app for 'app' package, /app/_vendor for 'openbb_forecast' package
 ENV PYTHONPATH="/app:/app/_vendor:$PYTHONPATH"
 
 # Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Debug: test import of openbb_forecast subpackages
+RUN PYTHONPATH="/app:/app/_vendor" python -c "import os, sys; pkg=__import__('openbb_forecast'); print('PKG:', pkg.__file__); print('PATH:', pkg.__path__); sub=__import__('openbb_forecast.data'); print('DATA:', sub.__file__)"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
