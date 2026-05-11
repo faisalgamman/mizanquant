@@ -378,50 +378,50 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 <!-- Main Content -->
 <main class="main">
 
-<!-- TAB: Overview -->
+<!-- TAB: Overview — Command Center -->
 <div class="tab-content active" id="tab-overview">
-  <div class="stats-grid" id="overviewStats"></div>
+
+  <!-- ═══ Market Status Bar (Overview) ═══ -->
+  <div id="overviewMarketBar" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-size:12px;font-weight:600;align-items:center;gap:20px;flex-wrap:wrap;"></div>
 
   <!-- BLOCK System Banner -->
   <div id="blockBanner" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-size:13px;font-weight:600;"></div>
+
+  <div class="stats-grid" id="overviewStats"></div>
 
   <!-- Live PnL Strip -->
   <div class="card" id="pnlStrip" style="padding:14px 20px;margin-bottom:20px;">
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center;"></div>
   </div>
 
+  <!-- Top 3 Signals + Open Positions -->
   <div class="grid-2">
-    <!-- Open Positions -->
+    <div class="card"><div class="card-header"><div><div class="card-title">Top Signals</div><div class="card-subtitle">Best opportunities from Smart Screener</div></div><button class="btn btn-sm btn-outline" onclick="loadTopSignals()"><i class="fas fa-sync"></i></button></div>
+      <div id="topSignals"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Open Positions</div><div class="card-subtitle">Paper account · Real-time</div></div></div>
       <div id="openPositions"><div class="loading"><div class="spinner"></div></div></div>
     </div>
-
-    <!-- Last Signals -->
-    <div class="card"><div class="card-header"><div><div class="card-title">Last Signals</div><div class="card-subtitle">Most recent 5 trading signals</div></div></div>
-      <div id="lastSignals"><div class="loading"><div class="spinner"></div></div></div>
-    </div>
   </div>
 
+  <!-- Pipeline + Guard Activity -->
   <div class="grid-2">
-    <!-- Guard Activity Heatmap -->
+    <div class="card"><div class="card-header"><div><div class="card-title">Pipeline Stages</div><div class="card-subtitle">8-stage daily trading pipeline</div></div><button class="btn btn-sm btn-outline" onclick="loadPipelineStatus()"><i class="fas fa-sync"></i></button></div>
+      <div id="pipelineStatus"><div class="loading"><div class="spinner"></div>Loading...</div></div>
+    </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Guard Activity</div><div class="card-subtitle">Rejections by guard today</div></div></div>
       <div id="guardActivity"><div class="loading"><div class="spinner"></div></div></div>
     </div>
+  </div>
 
-    <!-- Scheduler Timeline -->
+  <!-- Market Context + Scheduler -->
+  <div class="grid-2">
+    <div class="card"><div class="card-header"><div><div class="card-title">Market Context</div><div class="card-subtitle">VIX · SPY Regime · Breadth · Credit · Liquidity</div></div><button class="btn btn-sm btn-outline" onclick="loadMarketContext()"><i class="fas fa-sync"></i></button></div>
+      <div id="marketContext"><div class="loading"><div class="spinner"></div>Loading...</div></div>
+    </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Scheduler Timeline</div><div class="card-subtitle">Cycle execution times</div></div></div>
       <div id="schedulerTimeline"><div class="loading"><div class="spinner"></div></div></div>
     </div>
-  </div>
-
-  <!-- Market Context -->
-  <div class="card"><div class="card-header"><div><div class="card-title">Market Context</div><div class="card-subtitle">VIX · SPY Regime · Breadth · Credit · Liquidity</div></div><button class="btn btn-sm btn-outline" onclick="loadMarketContext()"><i class="fas fa-sync"></i> Refresh</button></div>
-    <div id="marketContext"><div class="loading"><div class="spinner"></div>Loading...</div></div>
-  </div>
-
-  <!-- Unified Pipeline Status -->
-  <div class="card"><div class="card-header"><div><div class="card-title">Unified Pipeline</div><div class="card-subtitle">8-stage daily trading pipeline</div></div><button class="btn btn-sm btn-outline" onclick="loadPipelineStatus()"><i class="fas fa-sync"></i> Refresh</button></div>
-    <div id="pipelineStatus"><div class="loading"><div class="spinner"></div>Loading...</div></div>
   </div>
 
   <!-- System Status + Quick Actions -->
@@ -885,6 +885,62 @@ async function checkStatus() {
   }
 }
 
+async function loadOverviewMarketBar() {
+  const bar = document.getElementById('overviewMarketBar');
+  if (!bar) return;
+  try {
+    const ctx = await apiGet('/api/market/context');
+    const vix = ctx.vix || {};
+    const spy = ctx.spy_regime || {};
+    const breadth = ctx.breadth || {};
+    const credit = ctx.credit || {};
+    const liq = ctx.liquidity || {};
+    const statusCls = vix.classification === 'low_fear' ? 'ms-risk-on' : vix.classification === 'normal' ? 'ms-risk-on' : vix.classification === 'elevated' ? 'ms-caution' : 'ms-extreme-fear';
+    const spyIcon = spy.regime === 'bull' ? '🟢' : spy.regime === 'bear' ? '🔴' : '🟡';
+    bar.style.display = 'flex';
+    bar.className = statusCls;
+    bar.style.cssText += 'display:flex;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-size:12px;font-weight:600;align-items:center;gap:20px;flex-wrap:wrap;';
+    bar.innerHTML = `
+      <span>SPY: ${(spy.regime||'?').toUpperCase()} ${spyIcon}</span>
+      <span>VIX: ${vix.vix??'N/A'} ${(vix.classification||'').replace(/_/g,' ')}</span>
+      <span>Breadth: ${breadth.breadth_pct??'N/A'}%</span>
+      <span>Credit: ${credit.ratio??'N/A'}</span>
+      <span>Liquidity: ${liq.liquidity_pct??'N/A'}%</span>
+      <span style="font-size:10px;font-weight:400;color:var(--text-muted);margin-left:auto;">${ctx.cached_at ? new Date(ctx.cached_at).toLocaleTimeString() : ''}</span>
+    `;
+  } catch(e) { bar.style.display = 'none'; }
+}
+
+async function loadTopSignals() {
+  const el = document.getElementById('topSignals');
+  if (!el) return;
+  try {
+    const data = await apiGet('/api/stock/smart-screener?min_score=0&max_results=3&use_cache=True');
+    const results = data.results || [];
+    if (results.length === 0) {
+      el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;"><i class="fas fa-inbox" style="font-size:20px;display:block;margin-bottom:6px;"></i>Run Smart Screener to see top signals</div>';
+      return;
+    }
+    const sg = data.strong_gate || 75;
+    el.innerHTML = results.map(function(r, i) {
+      var total = r.smart_score || 0;
+      var scoreColor = total >= sg ? '#4ade80' : 'var(--accent)';
+      var signal = r.signal || 'WAIT';
+      var signalColor = signal === 'BUY' ? '#4ade80' : signal === 'WAIT' ? '#fbbf24' : '#f87171';
+      var chg = r.change_pct;
+      var chgColor = chg != null ? (chg > 0 ? 'var(--green)' : 'var(--red)') : 'var(--text-muted)';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-card);border-radius:8px;margin-bottom:4px;cursor:pointer;" onclick="switchTab(\'research\');setTimeout(function(){document.getElementById(\'smartSector\').value=\'\';runSmartScreener()},300)">' +
+        '<span style="font-weight:700;color:var(--accent);">' + r.symbol + '</span>' +
+        '<span style="font-weight:700;color:'+scoreColor+';margin-left:auto;">' + total + '/100</span>' +
+        '<span style="font-size:10px;color:'+chgColor+';font-weight:600;">' + (chg != null ? (chg > 0 ? '▲' : '▼') + ' ' + chg.toFixed(2) + '%' : '') + '</span>' +
+        '<span style="padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;color:'+signalColor+';background:'+signalColor+'22;">' + signal + '</span>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px;">Top signals unavailable</div>';
+  }
+}
+
 async function loadOverview() {
   try {
     const [info, trading, guards, history, sched] = await Promise.all([
@@ -894,8 +950,10 @@ async function loadOverview() {
       apiGet('/api/trading/history/recent?limit=5').catch(() => []),
       apiGet('/api/scheduler/status').catch(() => ({})),
     ]);
-    loadPipelineStatus(); // fire-and-forget for pipeline card
-    loadMarketContext();  // fire-and-forget for market context card
+    loadPipelineStatus(); // fire-and-forget
+    loadMarketContext();  // fire-and-forget
+    loadOverviewMarketBar(); // Market Status bar
+    loadTopSignals();     // Top 3 signals
 
     // ── BLOCK System Banner ──
     try {
@@ -993,15 +1051,6 @@ async function loadOverview() {
         <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Regime</div><div style="font-weight:600;">${info.regime||'N/A'}</div></div>
       </div>
     `;
-
-    // Last Signals
-    const lsEl = document.getElementById('lastSignals');
-    if (history.length > 0) {
-      const keys = Object.keys(history[0]);
-      lsEl.innerHTML = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>${keys.map(k => `<th>${k}</th>`).join('')}</tr></thead><tbody>${history.slice(0,5).map(t => `<tr>${keys.map(k => `<td>${t[k]||'-'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-    } else {
-      lsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;"><i class="fas fa-inbox" style="font-size:20px;display:block;margin-bottom:6px;"></i>No recent signals</div>';
-    }
 
     // Scheduler Timeline
     const stEl = document.getElementById('schedulerTimeline');
@@ -1687,11 +1736,6 @@ async function runMonteCarlo() {
   } catch(e) {
     document.getElementById('mcResult').innerHTML = 'Error: ' + e.message;
   }
-      });
-    }
-  } catch(e) {
-    document.getElementById('mcResult').textContent = 'Error: ' + e.message;
-  }
 }
 
 async function runMetrics() {
@@ -2305,7 +2349,7 @@ async function runSmartScreener() {
 
     html += '<tr ' + rowStyle + '>' +
       '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
-      '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+
+      '<td style="font-weight:600;cursor:pointer;" onclick="showTradePlan(\''+r.symbol+'\')">'+r.symbol+
         '<span style="cursor:pointer;margin-left:4px;font-size:9px;color:var(--text-muted);" onclick="event.stopPropagation();addToWatchlist(\''+r.symbol+'\')" title="Add to watchlist">+</span></td>' +
       '<td style="text-align:center;">'+halalIcon+'</td>' +
       '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
@@ -2394,7 +2438,7 @@ function renderScreenerTable(results) {
 
         html += '<tr ' + rowStyle + '>' +
           '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
-          '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+
+          '<td style="font-weight:600;cursor:pointer;" onclick="showTradePlan(\''+r.symbol+'\')">'+r.symbol+
             '<span style="cursor:pointer;margin-left:4px;font-size:9px;color:var(--text-muted);" onclick="event.stopPropagation();addToWatchlist(\''+r.symbol+'\')" title="Add to watchlist">+</span></td>' +
           '<td style="text-align:center;">'+halalIcon+'</td>' +
           '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
@@ -3030,6 +3074,115 @@ async function updateAlertBadge() {
       badge.style.color = unread > 0 ? '#fff' : 'var(--text-muted)';
     }
   } catch(e) {}
+}
+
+// ── Trade Plan Modal ──
+async function showTradePlan(symbol) {
+  var overlay = document.getElementById('tradePlanOverlay');
+  var modal = document.getElementById('tradePlanModal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'tradePlanOverlay';
+    overlay.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;';
+    overlay.onclick = function(e) { if (e.target === overlay) hideTradePlan(); };
+    document.body.appendChild(overlay);
+  }
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'tradePlanModal';
+    modal.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:440px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 0 40px rgba(0,0,0,0.5);';
+    overlay.appendChild(modal);
+  }
+  modal.innerHTML = '<div style="text-align:center;padding:20px;"><div class="spinner"></div>Loading trade plan...</div>';
+  overlay.style.display = 'flex';
+
+  try {
+    var plan = await apiGet('/api/trade/plan?symbol=' + symbol);
+    var entry = plan.entry_price || 0;
+    var stop = plan.stop_loss || 0;
+    var tp1 = plan.take_profit_1 || 0;
+    var tp2 = plan.take_profit_2 || 0;
+    var tp3 = plan.take_profit_3 || 0;
+    var shares = plan.shares || 0;
+    var value = plan.position_value || 0;
+    var riskPct = plan.risk_pct || 0;
+    var rr = plan.risk_reward || 0;
+    var atr = plan.atr || 0;
+    var riskAmount = plan.risk_amount || 0;
+    var tp1Pct = entry > 0 && stop > 0 ? ((tp1/entry-1)*100).toFixed(2) : '0';
+    var tp2Pct = entry > 0 ? ((tp2/entry-1)*100).toFixed(2) : '0';
+    var tp3Pct = entry > 0 ? ((tp3/entry-1)*100).toFixed(2) : '0';
+    var stopPct = entry > 0 ? ((stop/entry-1)*100).toFixed(2) : '0';
+
+    // Also fetch scoring and smart data
+    var scoreHtml = '';
+    try {
+      var scoreData = await apiGet('/api/scoring/weighted?symbol=' + symbol);
+      scoreHtml = '<div style="padding:10px;background:' + (scoreData.total >= 65 ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)') + ';border-radius:8px;margin-bottom:12px;text-align:center;">' +
+        '<div style="font-size:24px;font-weight:800;color:' + (scoreData.total >= 65 ? '#4ade80' : '#fbbf24') + ';">' + (scoreData.total || 0) + '/100</div>' +
+        '<div style="font-size:10px;color:var(--text-muted);">Weighted Score</div></div>';
+    } catch(e) {}
+
+    var pctStr = '1.0';
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div><strong style="font-size:16px;">${symbol}</strong></div>
+        <span style="cursor:pointer;color:var(--text-muted);font-size:18px;" onclick="hideTradePlan()">&times;</span>
+      </div>
+      ${scoreHtml}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div style="padding:8px;background:var(--bg-card);border-radius:6px;text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);">Entry</div>
+          <div style="font-weight:700;">$${entry.toFixed(2)}</div>
+        </div>
+        <div style="padding:8px;background:rgba(239,68,68,0.1);border-radius:6px;text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);">Stop</div>
+          <div style="font-weight:700;color:var(--red);">$${stop.toFixed(2)}</div>
+          <div style="font-size:9px;color:var(--red);">${stopPct}%</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px;">
+        <div style="padding:6px;background:rgba(34,197,94,0.08);border-radius:6px;text-align:center;border:1px solid rgba(34,197,94,0.2);">
+          <div style="font-size:8px;color:var(--text-muted);">TP1 (50%)</div>
+          <div style="font-weight:600;font-size:12px;color:var(--green);">$${tp1.toFixed(2)}</div>
+          <div style="font-size:9px;color:var(--green);">+${tp1Pct}%</div>
+        </div>
+        <div style="padding:6px;background:rgba(59,130,246,0.08);border-radius:6px;text-align:center;border:1px solid rgba(59,130,246,0.2);">
+          <div style="font-size:8px;color:var(--text-muted);">TP2 (30%)</div>
+          <div style="font-weight:600;font-size:12px;color:var(--accent);">$${tp2.toFixed(2)}</div>
+          <div style="font-size:9px;color:var(--accent);">+${tp2Pct}%</div>
+        </div>
+        <div style="padding:6px;background:rgba(168,85,247,0.08);border-radius:6px;text-align:center;border:1px solid rgba(168,85,247,0.2);">
+          <div style="font-size:8px;color:var(--text-muted);">TP3 (20%)</div>
+          <div style="font-weight:600;font-size:12px;color:var(--purple);">$${tp3.toFixed(2)}</div>
+          <div style="font-size:9px;color:var(--purple);">+${tp3Pct}%</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div style="padding:8px;background:var(--bg-card);border-radius:6px;text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);">Shares</div>
+          <div style="font-weight:700;">${shares.toFixed(2)}</div>
+          <div style="font-size:9px;color:var(--text-muted);">Value: $${value.toFixed(2)}</div>
+        </div>
+        <div style="padding:8px;background:var(--bg-card);border-radius:6px;text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);">Risk / R:R</div>
+          <div style="font-weight:700;">$${riskAmount.toFixed(2)}</div>
+          <div style="font-size:11px;color:${rr >= 1.5 ? 'var(--green)' : 'var(--orange)'};">R:R 1:${rr.toFixed(1)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-success btn-sm" style="flex:1;" onclick="alert('Paper trade executed for ${symbol}: $${value.toFixed(2)}')"><i class="fas fa-play"></i> Execute Paper</button>
+        <button class="btn btn-outline btn-sm" onclick="hideTradePlan()">Dismiss</button>
+      </div>
+    `;
+  } catch(e) {
+    modal.innerHTML = '<div style="text-align:center;padding:20px;color:var(--orange);">Trade plan unavailable: ' + e.message + '<br><button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="hideTradePlan()">Close</button></div>';
+  }
+}
+
+function hideTradePlan() {
+  var overlay = document.getElementById('tradePlanOverlay');
+  if (overlay) overlay.style.display = 'none';
 }
 </script>
 </body>
