@@ -18,10 +18,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-# Ensure project root is on sys.path regardless of CWD
-_project_root = Path(__file__).resolve().parent.parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
+_app_dir = Path(__file__).resolve().parent.parent  # project root (/app)
+# Ensure app package is importable
+if str(_app_dir) not in sys.path:
+    sys.path.insert(0, str(_app_dir))
+# Ensure openbb_forecast package is importable (may be in a non-standard path)
+_forecast_src = _app_dir / "openbb_forecast" / "openbb_forecast"
+if _forecast_src.is_dir() and str(_forecast_src.parent) not in sys.path:
+    sys.path.insert(0, str(_forecast_src.parent))
 
 import pandas as pd
 import uvicorn
