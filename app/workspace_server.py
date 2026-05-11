@@ -14,18 +14,6 @@ import os
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional
-
-# Ensure app/ is on sys.path (PYTHONPATH may not be set in all environments)
-_app_root = Path(__file__).resolve().parent.parent
-if str(_app_root) not in sys.path:
-    sys.path.insert(0, str(_app_root))
-# Ensure openbb_forecast is importable from _vendor if PYTHONPATH not set
-_vendor = _app_root / "_vendor"
-if _vendor.is_dir() and str(_vendor) not in sys.path:
-    sys.path.insert(0, str(_vendor))
 
 import pandas as pd
 import uvicorn
