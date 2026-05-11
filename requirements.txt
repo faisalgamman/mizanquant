@@ -29,3 +29,4 @@ redis>=5.0,<6.0
 
 # ── Phase 2: ML/RL Ops ──
 mlflow>=2.0.0,<3.0
+openbb-core>=1.6.9,<2.0

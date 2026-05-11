@@ -30,9 +30,7 @@ from fastapi import FastAPI, Query
 from app.services.universe import HALAL_STOCKS_FALLBACK
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from openbb_core.provider.abstract.data import Data
 
-Data.model_rebuild()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("workspace_server")
