@@ -5,14 +5,13 @@ WORKDIR /app
 # Copy project
 COPY . .
 
-# Install the openbb_forecast package (uses setup.py find_packages → includes all subpackages)
-RUN pip install --no-cache-dir --no-deps ./openbb_forecast
+# The openbb_forecast source is at openbb_forecast/openbb_forecast/
+# Copy it to /app so it's importable as 'openbb_forecast' without conflicts
+RUN mkdir -p /app_pkg && cp -r openbb_forecast/openbb_forecast /app_pkg/openbb_forecast
+ENV PYTHONPATH="/app_pkg:$PYTHONPATH"
 
 # Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Remove source dir to avoid shadowing installed package
-RUN rm -rf openbb_forecast
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
