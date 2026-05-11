@@ -21,11 +21,17 @@ async def _dashboard_health():
     except Exception:
         pass
     try:
-        from app.services.yfinance_utils import fetch_yf
-        df = fetch_yf("AAPL", period="1y")
-        checks["market_data"] = df is not None and len(df) > 0
+        import yfinance as yf
+        ticker = yf.Ticker("AAPL")
+        info = ticker.info or {}
+        checks["market_data"] = bool(info.get("regularMarketPrice") or info.get("currentPrice"))
     except Exception:
-        pass
+        try:
+            from app.services.yfinance_utils import fetch_yf
+            df = fetch_yf("AAPL", period="1mo")
+            checks["market_data"] = df is not None and len(df) > 0
+        except Exception:
+            pass
     try:
         from app.db.database import engine
         engine.connect().close()
@@ -46,13 +52,23 @@ async def _dashboard_health():
     checks["telegram"] = "active" if telegram_ok else "not_configured"
     from app.services.scheduler_metrics import scheduler_metrics
     metrics = scheduler_metrics.health()
+    broker_ok = checks["broker"] == "connected"
+    db_ok = checks["database"]
+    md_ok = checks["market_data"]
+    if broker_ok and db_ok:
+        status = "operational"
+    elif broker_ok or db_ok:
+        status = "degraded"
+    else:
+        status = "down"
     return {
-        "status": "operational" if checks["market_data"] else "degraded",
+        "status": status,
         "broker": checks["broker"],
         "broker_type": "alpaca",
-        "database": "connected" if checks["database"] else "disconnected",
+        "database": "connected" if db_ok else "disconnected",
+        "market_data": "available" if md_ok else "unavailable",
         "telegram": checks["telegram"],
-        "data_source": "yfinance" if checks["market_data"] else "unknown",
+        "data_source": "yfinance" if md_ok else "unknown",
         "auto_trading": "enabled" if os.environ.get("AUTO_TRADE_ENABLED", "").lower() in ("true", "1") else "disabled",
         "uptime_seconds": metrics.get("uptime", 0),
     }
