@@ -14,6 +14,14 @@ import os
 import sys
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+# Ensure app/ is on sys.path
+_app_root = Path(__file__).resolve().parent.parent
+if str(_app_root) not in sys.path:
+    sys.path.insert(0, str(_app_root))
 
 import pandas as pd
 import uvicorn

@@ -6,10 +6,10 @@ WORKDIR /app
 COPY . .
 
 # Install openbb-forecast first (setuptools find_packages includes all subpackages like data/)
-RUN pip install --no-cache-dir --no-deps ./openbb_forecast
-
-# Install remaining Python deps
-RUN pip install --no-cache-dir -r requirements.txt
+# Then remove source dir to prevent namespace-package conflicts with site-packages install
+RUN pip install --no-cache-dir --no-deps ./openbb_forecast && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -rf openbb_forecast
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s \
