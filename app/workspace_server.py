@@ -18,14 +18,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-_app_dir = Path(__file__).resolve().parent.parent  # project root (/app)
-# Ensure app package is importable
-if str(_app_dir) not in sys.path:
-    sys.path.insert(0, str(_app_dir))
-# Ensure openbb_forecast package is importable (may be in a non-standard path)
-_forecast_src = _app_dir / "openbb_forecast" / "openbb_forecast"
-if _forecast_src.is_dir() and str(_forecast_src.parent) not in sys.path:
-    sys.path.insert(0, str(_forecast_src.parent))
+# Ensure app/ is on sys.path (PYTHONPATH may not be set in all environments)
+_app_root = Path(__file__).resolve().parent.parent
+if str(_app_root) not in sys.path:
+    sys.path.insert(0, str(_app_root))
+# Ensure openbb_forecast is importable from _vendor if PYTHONPATH not set
+_vendor = _app_root / "_vendor"
+if _vendor.is_dir() and str(_vendor) not in sys.path:
+    sys.path.insert(0, str(_vendor))
 
 import pandas as pd
 import uvicorn

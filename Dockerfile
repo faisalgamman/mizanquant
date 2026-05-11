@@ -2,18 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Step 1: Copy only openbb_forecast package (including all subdirs like data/)
-COPY openbb_forecast/openbb_forecast/ /app/openbb_forecast/openbb_forecast/
-
-# Step 2: Copy the rest of the project (excluding openbb_forecast to avoid shadowing)
+# Copy app package
 COPY app/ /app/app/
+
+# Copy openbb_forecast to a non-conflicting path (avoid namespace package clash)
+COPY openbb_forecast/openbb_forecast/ /app/_vendor/openbb_forecast/
+
+# Copy project root files
 COPY requirements.txt railway.json /app/
 
-# Debug: print openbb_forecast contents to stderr (visible in Railway build logs)
-RUN python -c "import os; import sys; p='/app/openbb_forecast/openbb_forecast'; print('OPENBB_FORECAST CONTENTS:', file=sys.stderr); [print(f'  {e}', file=sys.stderr) for e in sorted(os.listdir(p))]; d=os.path.join(p,'data'); print('DATA DIR:', os.path.isdir(d), file=sys.stderr)"
-
-# Add PYTHONPATH so openbb_forecast is importable
-ENV PYTHONPATH="/app/openbb_forecast:$PYTHONPATH"
+# PYTHONPATH: /app for 'app' package, /app/_vendor for 'openbb_forecast' package
+ENV PYTHONPATH="/app:/app/_vendor:$PYTHONPATH"
 
 # Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
