@@ -276,6 +276,68 @@ def get_liquidity_index() -> dict:
     }
 
 
+# ── Market Status Classification (USX PRO V4.1 style) ──
+
+
+_MARKET_STATUS_CACHE: dict = {}
+_MARKET_STATUS_TS: float = 0.0
+
+
+def get_market_status(force_refresh: bool = False) -> dict:
+    """USX PRO V4.1 Market Status: RISK ON / CAUTION / CREDIT STRESS / EXTREME FEAR.
+
+    Combines VIX percentile + HY/IG credit trend to classify overall market.
+    Returns status label, VIX%, HY/IG ratio, and score gate levels.
+    """
+    global _MARKET_STATUS_CACHE, _MARKET_STATUS_TS
+    now = time.time()
+    if not force_refresh and now - _MARKET_STATUS_TS < _CONTEXT_CACHE_TTL:
+        return dict(_MARKET_STATUS_CACHE)
+
+    vix_ctx = get_vix_context()
+    credit = get_credit_ratio()
+    vix_val = vix_ctx.get("vix") or 0
+    vix_pct = vix_ctx.get("vix_pctile") or 0
+    credit_cls = credit.get("classification", "ok")
+    credit_change = credit.get("daily_change_pct") or 0
+
+    # Classification rules
+    if vix_val > 70:
+        status = "EXTREME FEAR"
+    elif vix_val > 50 or (vix_pct > 70 and credit_cls == "stress"):
+        status = "CREDIT STRESS"
+    elif vix_val > 30 or vix_pct > 50:
+        status = "CAUTION"
+    else:
+        status = "RISK ON"
+
+    # Gate levels tied to market status
+    gate_map = {
+        "RISK ON":       {"min_gate": 60, "strong_gate": 75},
+        "CAUTION":       {"min_gate": 65, "strong_gate": 80},
+        "CREDIT STRESS":  {"min_gate": 70, "strong_gate": 85},
+        "EXTREME FEAR":   {"min_gate": 99, "strong_gate": 99, "halt": True},
+    }
+    gates = gate_map.get(status, {"min_gate": 60, "strong_gate": 75})
+
+    result = {
+        "status": status,
+        "vix": round(vix_val, 2),
+        "vix_pctile": round(vix_pct, 1),
+        "credit_ratio": credit.get("ratio"),
+        "credit_change_pct": credit_change,
+        "hyg_price": credit.get("hyg_price"),
+        "lqd_price": credit.get("lqd_price"),
+        "min_gate": gates["min_gate"],
+        "strong_gate": gates["strong_gate"],
+        "halt_pipeline": gates.get("halt", False),
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _MARKET_STATUS_CACHE = result
+    _MARKET_STATUS_TS = now
+    return result
+
+
 # ── Combined Context ──
 
 
