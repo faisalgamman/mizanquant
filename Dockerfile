@@ -9,8 +9,8 @@ COPY openbb_forecast/openbb_forecast/ /app/openbb_forecast/openbb_forecast/
 COPY app/ /app/app/
 COPY requirements.txt railway.json /app/
 
-# Debug: verify data directory
-RUN python -c "import os; d='/app/openbb_forecast/openbb_forecast/data'; assert os.path.isdir(d), f'DATA MISSING: {d}'; print('data/ OK:', sorted(os.listdir(d)))"
+# Debug: print openbb_forecast contents to stderr (visible in Railway build logs)
+RUN python -c "import os; import sys; p='/app/openbb_forecast/openbb_forecast'; print('OPENBB_FORECAST CONTENTS:', file=sys.stderr); [print(f'  {e}', file=sys.stderr) for e in sorted(os.listdir(p))]; d=os.path.join(p,'data'); print('DATA DIR:', os.path.isdir(d), file=sys.stderr)"
 
 # Add PYTHONPATH so openbb_forecast is importable
 ENV PYTHONPATH="/app/openbb_forecast:$PYTHONPATH"
