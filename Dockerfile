@@ -5,12 +5,13 @@ WORKDIR /app
 # Copy project
 COPY . .
 
-# Install Python deps (openbb-forecast first via local package, then requirements)
-RUN pip install --no-cache-dir --no-deps ./openbb_forecast && \
-    pip install --no-cache-dir -r requirements.txt
+# Rename project dir to avoid shadowing the openbb_forecast package name
+# (the project root "openbb_forecast" conflicts with the package "openbb_forecast")
+RUN mv openbb_forecast _openbb_forecast_src
+ENV PYTHONPATH="/app/_openbb_forecast_src:$PYTHONPATH"
 
-# Remove source dir to avoid shadowing installed openbb_forecast package
-RUN rm -rf openbb_forecast
+# Install Python deps
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \

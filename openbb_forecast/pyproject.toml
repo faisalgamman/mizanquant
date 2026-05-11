@@ -5,16 +5,7 @@ description = "OpenBB extension for stock forecasting, RL trading agents, and wa
 authors = ["OpenBB Forecast Contributors"]
 license = "Apache-2.0"
 readme = "README.md"
-packages = [
-    {include = "openbb_forecast"},
-    {include = "openbb_forecast/data"},
-    {include = "openbb_forecast/models"},
-    {include = "openbb_forecast/agents"},
-    {include = "openbb_forecast/simulation"},
-    {include = "openbb_forecast/risk"},
-    {include = "openbb_forecast/backtesting"},
-    {include = "openbb_forecast/schemas"},
-]
+packages = [{include = "openbb_forecast"}]
 
 [tool.poetry.dependencies]
 python = ">=3.10"
