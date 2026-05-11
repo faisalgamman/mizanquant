@@ -5,13 +5,14 @@ WORKDIR /app
 # Copy project
 COPY . .
 
-# Rename project dir to avoid shadowing the openbb_forecast package name
-# (the project root "openbb_forecast" conflicts with the package "openbb_forecast")
-RUN mv openbb_forecast _openbb_forecast_src
-ENV PYTHONPATH="/app/_openbb_forecast_src:$PYTHONPATH"
+# Install the openbb_forecast package (uses setup.py find_packages → includes all subpackages)
+RUN pip install --no-cache-dir --no-deps ./openbb_forecast
 
 # Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Remove source dir to avoid shadowing installed package
+RUN rm -rf openbb_forecast
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
