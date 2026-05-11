@@ -16,7 +16,7 @@ reports/
 
 # Runtime cache / session artifacts â€” not source
 app/.cache/
-data/
+# data/ — root level only; openbb_forecast/data/ is tracked
 docs/
 drift_references/
 models/gru/
