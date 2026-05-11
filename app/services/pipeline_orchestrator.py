@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import pandas as pd
+
 logger = logging.getLogger("pipeline")
 
 # ---------------------------------------------------------------------------
@@ -207,6 +209,9 @@ class UnifiedPipeline:
                     df = yf.download(sym, period="2d", progress=False, auto_adjust=True)
                     if df is None or df.empty:
                         return None
+                    # Flatten MultiIndex columns from auto_adjust=True
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.droplevel(1)
                     latest = df.iloc[-1]
                     return {
                         "symbol": sym.upper(),

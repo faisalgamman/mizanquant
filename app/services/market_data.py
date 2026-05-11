@@ -380,7 +380,7 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
         df.columns = [c.lower() for c in df.columns]
         for col in ["dividends", "stock splits", "capital gains"]:
             df.drop(columns=[col], errors="ignore", inplace=True)
-        min_rows = 40 if start and end else 200
+        min_rows = 40
         return df if len(df) >= min_rows else None
     except Exception as e:
         logger.error(f"yfinance {symbol}: {e}")

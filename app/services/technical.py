@@ -203,6 +203,62 @@ def obv(df):
     return (df["volume"] * direction).cumsum()
 
 
+def gap_detection(df: pd.DataFrame) -> dict:
+    """Detect gap between today's open and previous close.
+
+    Args:
+        df: DataFrame with 'open', 'close' columns.
+
+    Returns:
+        Dict with gap_pct, gap_type ('up'/'down'/'none'), alert_level.
+    """
+    if len(df) < 2:
+        return {"gap_pct": 0.0, "gap_type": "none", "alert_level": "none"}
+    prev_close = float(df["close"].iloc[-2])
+    curr_open = float(df["open"].iloc[-1])
+    if prev_close == 0:
+        return {"gap_pct": 0.0, "gap_type": "none", "alert_level": "none"}
+    gap_pct = (curr_open / prev_close - 1) * 100
+    if gap_pct > 3:
+        alert = "telegram"
+    elif gap_pct > 1:
+        alert = "positive"
+    elif gap_pct < -3:
+        alert = "telegram"
+    elif gap_pct < -1:
+        alert = "warning"
+    else:
+        alert = "none"
+    return {
+        "gap_pct": round(gap_pct, 2),
+        "gap_type": "up" if gap_pct > 0 else "down",
+        "alert_level": alert,
+    }
+
+
+def relative_strength(symbol_df: pd.DataFrame, spy_df: pd.DataFrame, period: int = 20) -> float:
+    """RS ratio vs SPY over *period* days.
+
+    RS = (symbol_return / spy_return). > 1.05 = leader, < 0.95 = laggard.
+    """
+    if len(symbol_df) < period or len(spy_df) < period:
+        return 1.0
+    sym_ret = float(symbol_df["close"].iloc[-1] / symbol_df["close"].iloc[-period])
+    spy_ret = float(spy_df["close"].iloc[-1] / spy_df["close"].iloc[-period])
+    if spy_ret == 0:
+        return 1.0
+    return round(sym_ret / spy_ret, 4)
+
+
+def adx_classification(adx_value: float) -> str:
+    """Classify ADX trend strength."""
+    if adx_value > 25:
+        return "trending"
+    if adx_value >= 20:
+        return "developing"
+    return "choppy"
+
+
 def vwap(df):
     """Volume Weighted Average Price (intraday approximation).
 
