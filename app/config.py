@@ -58,9 +58,9 @@ class Settings(BaseSettings):
     MODEL_CACHE_TTL: int = 3600
 
     # --- Concurrency / workers ---
-    MAX_CONCURRENT_MODELS: int = 3       # 8GB RAM can run 3 models concurrently
-    BG_WORKER_COUNT: int = 5
-    SCREENER_WORKERS: int = 10           # 8GB RAM allows more parallel screener threads
+    MAX_CONCURRENT_MODELS: int = 1       # Railway 512 MB — only 1 model at a time
+    BG_WORKER_COUNT: int = 2             # Railway 512 MB — reduced from 5
+    SCREENER_WORKERS: int = 4            # Railway 512 MB — reduced from 10
 
     # --- Phase 2: Halal screening ---
     FMP_API_KEY: str = ""

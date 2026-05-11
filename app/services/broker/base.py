@@ -4,7 +4,7 @@ The methods below are the *minimum* surface required to run the
 existing engine. Each method's contract is defined by what
 `trading_engine.py`, `fill_watcher.py`, and `reconcile_positions`
 already expect — the Alpaca adapter is the canonical reference
-implementation and the IB adapter must match its return shapes.
+implementation.
 
 Returns are dicts/lists of plain JSON-friendly types so the rest of
 the engine doesn't need to know which broker it is talking to.
@@ -24,7 +24,7 @@ class BrokerClient(Protocol):
     the default account.
     """
 
-    name: str  # "alpaca" | "ibkr" | ...
+    name: str  # e.g. "alpaca"
 
     def get_account(self, strategy_id: str | None = None) -> Optional[dict]:
         """Return account snapshot: cash, equity, buying_power, status."""

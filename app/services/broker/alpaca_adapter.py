@@ -3,9 +3,7 @@
 Delegates to the existing functions in `app/services/alpaca_client.py`
 and a small number of helpers in `app/services/trading_engine.py`. No
 new I/O — this class is a thin pass-through whose only job is to put
-an interface boundary in front of Alpaca-specific calls so a second
-broker (Interactive Brokers, Phase B) can be introduced without
-rewriting the engine.
+an interface boundary in front of Alpaca-specific calls.
 """
 
 from __future__ import annotations

@@ -269,12 +269,12 @@ def test_per_strategy_client_id(monkeypatch):
     assert ibkr_adapter._client_id_for("C") == 1
 
 
-def test_factory_resolves_ibkr_when_env_set(monkeypatch):
-    """Phase A factory must route to IBBroker when BROKER_TYPE=ibkr."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+def test_factory_falls_back_to_alpaca_for_unknown_broker(monkeypatch):
+    """Factory falls back to Alpaca for unknown broker types."""
+    monkeypatch.setenv("BROKER_TYPE", "unknown_broker")
     import importlib
     from app.services.broker import factory
 
     importlib.reload(factory)
     b = factory.get_broker()
-    assert b.name == "ibkr"
+    assert b.name == "alpaca"

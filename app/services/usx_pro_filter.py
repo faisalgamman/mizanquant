@@ -420,7 +420,7 @@ def score_symbol(
 def filter_universe(
     symbols: list[str],
     min_score: float = DEFAULT_MIN_SCORE,
-    max_workers: int = 8,
+    max_workers: int = 3,
     skip_regime_check: bool = False,
 ) -> tuple[list[SymbolScore], RegimeReport]:
     """Two-stage funnel.

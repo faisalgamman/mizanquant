@@ -659,22 +659,42 @@ async def stock_financials(
     statement: str = Query("income", description="income | balance | cashflow"),
     periods: int = Query(4, description="Number of periods"),
 ):
-    """Annual financial statements from yfinance."""
+    """Annual financial statements from yfinance with YoY comparison."""
     ticker = yf.Ticker(symbol)
     fetcher = {"income": ticker.financials, "balance": ticker.balance_sheet, "cashflow": ticker.cashflow}
     df = fetcher.get(statement)
     if df is None or df.empty:
-        return {"symbol": symbol, "statement": statement, "error": "No data", "rows": []}
+        return {"symbol": symbol, "statement": statement, "error": "No data", "rows": [], "years": []}
+
+    years = []
+    for col in df.columns[:periods]:
+        try:
+            years.append(str(col.year))
+        except AttributeError:
+            years.append(str(col))
 
     rows = []
-    for idx in df.index[:periods]:
-        row = {"item": str(idx)}
+    for idx in df.index:
+        item_name = str(idx)
+        item_short = item_name.replace(" ", "_").replace("/", "_").replace("-", "_").replace(".", "")[:40]
+        row = {"item": item_name, "item_short": item_short}
+        values = []
         for col in df.columns[:periods]:
             val = df.loc[idx, col]
-            row[str(col.year)] = round(float(val), 2) if isinstance(val, (int, float)) else str(val)
+            num_val = round(float(val), 2) if isinstance(val, (int, float)) else None
+            row[str(col.year)] = num_val
+            values.append(num_val)
+
+        # YoY change for last two periods
+        yoy_change = None
+        if len(values) >= 2 and all(v is not None for v in values[:2]):
+            prev, curr = values[1], values[0]
+            if prev != 0:
+                yoy_change = round((curr - prev) / abs(prev) * 100, 1)
+        row["yoy_change_pct"] = yoy_change
         rows.append(row)
 
-    return {"symbol": symbol, "statement": statement, "rows": rows}
+    return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
 
 
 @app.get("/api/stock/dividends")
@@ -792,10 +812,22 @@ async def stock_screener(
     industry: str = Query("", description="Filter by industry"),
     min_market_cap: float = Query(0, description="Min market cap"),
     max_market_cap: float = Query(1e15, description="Max market cap"),
-    halal_only: bool = Query(False, description="Only halal-compliant stocks"),
-    limit: int = Query(20, description="Max results"),
+    halal_only: bool = Query(True, description="Only halal-compliant stocks"),
+    limit: int = Query(30, description="Max results"),
+    use_cache: str = Query("true", description="Use cached results"),
 ):
-    """Screen stocks from a predefined universe by sector, market cap, and halal status."""
+    """Screen stocks from halal universe by sector, market cap, and halal status.
+
+    Uses ThreadPoolExecutor for parallel yfinance fetches with per-symbol timeout.
+    Results cached for 24h. Falls back to cached data on failure.
+    """
+    _use_cache = str(use_cache).lower() in ("true", "1", "yes")
+    cache_key = f"stock_screener_{sector}_{industry}_{min_market_cap}_{halal_only}"
+    if _use_cache:
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
     universe = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "BRK-B",
                 "JNJ", "V", "PG", "HD", "DIS", "MA", "NFLX", "CRM", "ADBE", "AMD",
                 "PYPL", "INTC", "KO", "PEP", "WMT", "XOM", "CVX", "JPM", "BAC",
@@ -803,46 +835,85 @@ async def stock_screener(
                 "NKE", "SBUX", "MCD", "BA", "GE", "CAT", "IBM", "ORCL", "SAP",
                 "LLY", "NVS", "RY", "TD", "BMO", "BNS", "ENB", "TRP", "SU", "CNQ"]
 
-    results = []
-    for sym in universe:
+    def _screen_one(sym: str) -> dict | None:
         try:
-            ticker = yf.Ticker(sym)
-            info = ticker.info or {}
-            mcap = _safe_float(info.get("marketCap"))
-            if mcap < min_market_cap or mcap > max_market_cap:
-                continue
-            sec = (info.get("sector") or "").lower()
-            ind = (info.get("industry") or "").lower()
-            if sector and sector.lower() not in sec:
-                continue
-            if industry and industry.lower() not in ind:
-                continue
-            if halal_only:
-                halal = _screen_halal(sym)
-                if not halal.get("is_halal"):
-                    continue
-
-            results.append({
-                "symbol": sym,
-                "company": info.get("shortName") or info.get("longName") or sym,
-                "sector": info.get("sector", ""),
-                "industry": info.get("industry", ""),
-                "price": _safe_float(info.get("currentPrice") or info.get("regularMarketPrice")),
-                "market_cap": mcap,
-                "pe": info.get("trailingPE"),
-                "forward_pe": info.get("forwardPE"),
-                "dividend_yield": info.get("dividendYield"),
-                "beta": info.get("beta"),
-            })
-            if len(results) >= limit:
-                break
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(_fetch_screener_data, sym, halal_only)
+                return fut.result(timeout=30)
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Screener timeout for {sym}")
+            return None
         except Exception:
+            return None
+
+    all_results = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_screen_one, sym): sym for sym in universe}
+        for f in as_completed(futures):
+            r = f.result()
+            if r:
+                all_results.append(r)
+
+    # Apply post-fetch filters
+    filtered = []
+    for r in all_results:
+        mcap = r.get("market_cap", 0)
+        if mcap < min_market_cap or mcap > max_market_cap:
             continue
+        sec = (r.get("sector") or "").lower()
+        ind = (r.get("industry") or "").lower()
+        if sector and sector.lower() not in sec:
+            continue
+        if industry and industry.lower() not in ind:
+            continue
+        if halal_only and not r.get("is_halal", True):
+            continue
+        filtered.append(r)
+
+    filtered = sorted(filtered, key=lambda r: r.get("market_cap", 0), reverse=True)[:limit]
+
+    result = {
+        "total": len(filtered),
+        "filters": {"sector": sector, "industry": industry, "halal_only": halal_only},
+        "results": filtered,
+        "source": "live",
+    }
+    _cache_set(cache_key, result)
+    return result
+
+
+def _fetch_screener_data(sym: str, halal_only: bool) -> dict | None:
+    """Fetch and format screener data for one symbol."""
+    try:
+        ticker = yf.Ticker(sym)
+        info = ticker.info or {}
+    except Exception:
+        return None
+
+    mcap = _safe_float(info.get("marketCap"))
+
+    try:
+        halal_result = _screen_halal(sym)
+        is_halal = halal_result.get("is_halal", False)
+    except Exception:
+        is_halal = False
+
+    if halal_only and not is_halal:
+        return None
 
     return {
-        "total": len(results),
-        "filters": {"sector": sector, "industry": industry, "halal_only": halal_only},
-        "results": sorted(results, key=lambda r: r.get("market_cap", 0), reverse=True),
+        "symbol": sym,
+        "company": info.get("shortName") or info.get("longName") or sym,
+        "sector": info.get("sector", ""),
+        "industry": info.get("industry", ""),
+        "price": _safe_float(info.get("currentPrice") or info.get("regularMarketPrice")),
+        "market_cap": mcap,
+        "pe": info.get("trailingPE"),
+        "forward_pe": info.get("forwardPE"),
+        "dividend_yield": info.get("dividendYield"),
+        "beta": info.get("beta"),
+        "is_halal": is_halal,
     }
 
 
@@ -1364,7 +1435,7 @@ async def smart_screener(
             return {"source": "cache", **cached}
 
     all_results = []
-    with ThreadPoolExecutor(max_workers=12) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(_analyze_smart, sym): sym for sym in _SMART_UNIVERSE}
         for f in as_completed(futures):
             r = f.result()
@@ -1387,7 +1458,7 @@ async def smart_screener(
     _do_forecast = str(add_forecast).lower() in ("true", "1", "yes")
     if _do_forecast and top:
         logger.info(f"Computing forecast consensus for {len(top)} top stocks...")
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top}
             for ff in as_completed(f_futures):
                 r = f_futures[ff]
@@ -3216,7 +3287,19 @@ async def get_apps():
 
 
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+import os
+
+
+# Include dashboard API routes
+from app.routers.dashboard import router as dashboard_router
+app.include_router(dashboard_router)
+
+# Mount static files for dashboard
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 
 @app.get("/", include_in_schema=False)

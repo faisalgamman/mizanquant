@@ -1,16 +1,16 @@
-"""Automated trading scheduler — multi-strategy.
+"""Automated trading scheduler — unified pipeline.
 
-Runs 3 strategies on separate Alpaca paper accounts:
-  A: Momentum Alpha    — trend-following, top 3 by score
-  B: Mean Reversion    — dip-buying, lowest-score oversold stocks
-  C: AI Ensemble       — pure ML, top 2 stocks (memory-heavy)
+Runs the 8-stage UnifiedPipeline on the daily schedule:
 
-Strategies run SEQUENTIALLY to stay within 8GB RAM.
+  02:00 AM  │ Model retraining (existing)
+  08:00 AM  │ Data collection (Stage 1)
+  08:30 AM  │ Halal + Smart filter (Stages 2-3)
+  09:00 AM  │ AI consensus + Kelly + Guardian + Alpaca (Stages 4-7)
+  12:00 PM  │ Mid-session signals scan
+  04:00 PM  │ Post-market report (Stage 8)
+  04:30 PM  │ Signal audit (existing)
 
-Schedule:
-  PRE-MARKET  (9:00 AM ET):  Refresh screener, send daily briefing
-  MARKET HOURS (every 30m):  Run all 3 strategies
-  POST-MARKET (4:15 PM ET):  Full analysis + strategy comparison
+Strategies run SEQUENTIALLY to stay within RAM.
 """
 
 import gc
@@ -120,19 +120,16 @@ def _scheduler_loop():
     last_pretrain_ml = ""
     last_signal_audit = ""
     last_reference_refresh = ""
+    last_pipeline_data = ""
+    last_pipeline_filter = ""
+    last_pipeline_full = ""
     SCAN_INTERVAL = 1800  # 30 minutes between scans
 
-    # Intraday signals-advisor scan slots (US/Eastern, weekdays only).
-    # Pre-market 9:00 is already handled by _run_pre_market; these
-    # additional slots push STRONG-BUY-only Telegram alerts throughout
-    # the session for manual execution on IBKR. Now hourly to maximise
-    # coverage now that Stage 1 (USX V4) is doing the heavy filtering
-    # before the expensive AI consensus runs.
+    # Unified pipeline schedule (US/Eastern, weekdays only).
     SIGNALS_SLOTS = [
-        (9, 45,  "9:45 AM ET (post-open)"),
         (10, 30, "10:30 AM ET"),
         (11, 30, "11:30 AM ET"),
-        (12, 30, "12:30 PM ET"),
+        (12, 30, "12:30 PM ET (midday)"),
         (13, 30, "1:30 PM ET"),
         (14, 30, "2:30 PM ET"),
         (15, 30, "3:30 PM ET (pre-close)"),
@@ -201,48 +198,68 @@ def _scheduler_loop():
                     scheduler_metrics.record_cycle_end("optimizer", success=False, error=str(e))
                     logger.error(f"Weekly optimizer failed: {e}")
 
-            # --- PRE-MARKET: 9:00-9:30 AM ET (once per day) ---
-            elif _is_pre_market(now) and last_pre_market != today_str:
-                last_pre_market = today_str
-                logger.info("Pre-market: refreshing screener data...")
+            # --- PIPELINE STAGE 1: Data collection at 8:00 AM ET (once per day) ---
+            if _is_weekday(now) and now.hour == 8 and now.minute < 5 and last_pipeline_data != today_str:
+                last_pipeline_data = today_str
+                logger.info("Pipeline stage 1: collecting market data...")
                 try:
-                    scheduler_metrics.record_cycle_start("pre_market")
-                    _run_pre_market()
-                    scheduler_metrics.record_cycle_end("pre_market", success=True)
+                    scheduler_metrics.record_cycle_start("pipeline_data")
+                    from app.services.pipeline_orchestrator import run_pipeline
+                    report = run_pipeline(dry_run=True, skip_stages={"halal", "smart", "consensus", "kelly", "guardian", "execute", "report"})
+                    logger.info("Pipeline stage 1: collected data in %.1fs", report.elapsed_s)
+                    scheduler_metrics.record_cycle_end("pipeline_data", success=True)
                 except Exception as e:
-                    scheduler_metrics.record_cycle_end("pre_market", success=False, error=str(e))
-                    logger.error(f"Pre-market scan failed: {e}")
+                    scheduler_metrics.record_cycle_end("pipeline_data", success=False, error=str(e))
+                    logger.error(f"Pipeline data collection failed: {e}")
 
-            # --- MARKET HOURS: scan every 30 min ---
-            elif _is_market_hours(now):
-                elapsed = time.time() - last_scan_time
-                if elapsed >= SCAN_INTERVAL:
-                    last_scan_time = time.time()
-                    logger.info(f"Market hours scan ({now.strftime('%H:%M')} ET)...")
-                    try:
-                        scheduler_metrics.record_cycle_start("market_scan")
-                        _run_market_scan()
-                        scheduler_metrics.record_cycle_end("market_scan", success=True)
-                    except Exception as e:
-                        scheduler_metrics.record_cycle_end("market_scan", success=False, error=str(e))
-                        logger.error(f"Market scan failed: {e}")
+            # --- PIPELINE STAGES 2-3: Halal + Smart filter at 8:30 AM ET (once per day) ---
+            if _is_weekday(now) and now.hour == 8 and now.minute >= 30 and now.minute < 35 and last_pipeline_filter != today_str:
+                last_pipeline_filter = today_str
+                logger.info("Pipeline stages 2-3: halal + smart screening...")
+                try:
+                    scheduler_metrics.record_cycle_start("pipeline_filter")
+                    from app.services.pipeline_orchestrator import run_pipeline
+                    report = run_pipeline(dry_run=True, skip_stages={"consensus", "kelly", "guardian", "execute", "report"})
+                    logger.info("Pipeline stages 2-3: %d halal, %d smart filter passed in %.1fs",
+                                report.stages[1].count_out if len(report.stages) > 1 else 0,
+                                report.stages[2].count_out if len(report.stages) > 2 else 0,
+                                report.elapsed_s)
+                    scheduler_metrics.record_cycle_end("pipeline_filter", success=True)
+                except Exception as e:
+                    scheduler_metrics.record_cycle_end("pipeline_filter", success=False, error=str(e))
+                    logger.error(f"Pipeline filter failed: {e}")
+
+            # --- PIPELINE STAGES 4-7: Full analysis + execution at 9:00-9:30 AM ET (once per day) ---
+            if _is_weekday(now) and now.hour == 9 and now.minute < 5 and last_pipeline_full != today_str:
+                last_pipeline_full = today_str
+                logger.info("Pipeline stages 4-7: AI consensus + Kelly + Guardian + Alpaca...")
+                try:
+                    scheduler_metrics.record_cycle_start("pipeline_full")
+                    from app.services.pipeline_orchestrator import run_pipeline
+                    report = run_pipeline(dry_run=True)
+                    logger.info("Pipeline stages 4-7: %d signals, %d executed, %d rejected in %.1fs",
+                                report.signals_passed, report.signals_executed, report.signals_rejected, report.elapsed_s)
+                    scheduler_metrics.record_cycle_end("pipeline_full", success=True)
+                except Exception as e:
+                    scheduler_metrics.record_cycle_end("pipeline_full", success=False, error=str(e))
+                    logger.error(f"Pipeline full run failed: {e}")
 
             # --- POST-MARKET: 4:00-4:30 PM ET (once per day) ---
             elif _is_post_market(now) and last_post_market != today_str:
                 last_post_market = today_str
-                logger.info("Post-market: running full analysis...")
+                logger.info("Post-market: pipeline report + final summary...")
                 try:
                     scheduler_metrics.record_cycle_start("post_market")
-                    _run_post_market()
+                    from app.services.pipeline_orchestrator import run_pipeline
+                    report = run_pipeline(dry_run=True, skip_stages={"collect", "halal", "smart", "consensus", "kelly", "guardian", "execute"})
                     scheduler_metrics.record_cycle_end("post_market", success=True)
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("post_market", success=False, error=str(e))
-                    logger.error(f"Post-market scan failed: {e}")
+                    logger.error(f"Post-market report failed: {e}")
 
-            # --- INTRADAY SIGNALS SCANS: 10:30 / 12:00 / 14:30 / 16:30 ET ---
+            # --- INTRADAY SIGNALS: 10:30 / 12:00 / 14:30 / 16:30 ET ---
             # Independent block — runs alongside any other branch above.
-            # Pushes STRONG-BUY Telegram alerts (signals advisor) for
-            # manual execution on IBKR. Each slot fires once per weekday.
+            # Pushes STRONG-BUY Telegram alerts (signals advisor).
             if _is_weekday(now):
                 for hour, minute, label in SIGNALS_SLOTS:
                     slot_key = f"{hour:02d}:{minute:02d}"
@@ -329,8 +346,8 @@ def _run_pre_market():
     alert_strategy_comparison()
 
     # --- Signals Advisor: STRONG BUY scan across the halal universe ---
-    # Sends one Telegram alert per qualifying signal (per strategy) so the
-    # operator can execute manually on IBKR. Independent of auto-trade.
+    # Sends one Telegram alert per qualifying signal (per strategy).
+    # Independent of auto-trade.
     try:
         logger.info("Pre-market: running signals advisor (full universe)...")
         from app.services.signals_advisor import scan_and_notify_strong_buys
@@ -354,7 +371,7 @@ def _run_pre_market():
                 f"PRE-MARKET SIGNALS — {total} STRONG BUY across A/B/C\n"
                 f"A={by_strat.get('A',0)} B={by_strat.get('B',0)} C={by_strat.get('C',0)}\n"
                 f"Sent {sent} individual Telegram alerts above. "
-                "Review and execute manually on IBKR."
+                "Review charts and execute via Alpaca."
             )
         else:
             tg_send("PRE-MARKET SIGNALS — no STRONG BUY met the 60% threshold today.")
@@ -442,9 +459,7 @@ def _run_signals_scan(label: str = "intraday"):
 
     # Confidence threshold lowered 70 -> 60 to roughly double the
     # daily signal count. This helps the operator accumulate enough
-    # trades for Phase 8 graduation (30 closed trades in 14 days)
-    # without having to expand the universe yet. Manual review on
-    # IBKR provides the second-pass quality filter.
+    # trades without having to expand the universe yet.
     summary = scan_and_notify_strong_buys(
         strategy_ids=("A", "B", "C"),
         min_confidence=60.0,
@@ -457,7 +472,7 @@ def _run_signals_scan(label: str = "intraday"):
         tg_send(
             f"PRE-MARKET SIGNALS — {label}: {total} STRONG BUY across A/B/C\n"
             f"A={by_strat.get('A',0)} B={by_strat.get('B',0)} C={by_strat.get('C',0)}\n"
-            f"Sent {sent} individual alerts above. Review and execute manually on IBKR."
+            f"Sent {sent} individual alerts above. Review and execute via Alpaca."
         )
     logger.info(
         f"signals advisor [{label}]: total={total} sent={sent} by_strategy={by_strat}"

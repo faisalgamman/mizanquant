@@ -6,7 +6,7 @@
 <title>OpenBB Forecast — Trading Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link rel="stylesheet" href="/static/fontawesome/all.min.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
@@ -315,6 +315,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     <div class="nav-section">Forecasting</div>
     <div class="nav-item" data-tab="forecast" onclick="switchTab('forecast')"><i class="fas fa-brain"></i> Forecast Lab <span class="badge">19</span></div>
     <div class="nav-item" data-tab="trading" onclick="switchTab('trading')"><i class="fas fa-robot"></i> Trading Lab <span class="badge">19</span></div>
+    <div class="nav-item" data-tab="backtest" onclick="switchTab('backtest')"><i class="fas fa-history"></i> Backtest</div>
 
     <div class="nav-section">Analytics</div>
     <div class="nav-item" data-tab="risk" onclick="switchTab('risk')"><i class="fas fa-shield-alt"></i> Risk Desk</div>
@@ -349,9 +350,10 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
       <input type="text" placeholder="Search symbol...  ⌘K" id="searchInput" onkeydown="if(event.key==='Enter')searchSymbol()" onfocus="showSearchDropdown()" onblur="setTimeout(()=>hideSearchDropdown(),200)" oninput="filterSearchDropdown(this.value)">
       <div id="searchDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;overflow-y:auto;z-index:999;"></div>
     </div>
-    <select id="globalSymbol" style="width:85px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;" onchange="setGlobalSymbol(this.value)">
-      <option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option><option>AMZN</option><option>META</option><option>AMD</option>
+    <select id="globalSymbol" style="width:100px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;" onchange="setGlobalSymbol(this.value)">
+      <option value="">Loading...</option>
     </select>
+    <span id="symbolCount" style="font-size:9px;color:var(--text-muted);white-space:nowrap;"></span>
     <span style="font-size:10px;color:var(--text-muted);margin-right:4px;" id="lastUpdatedLabel"></span>
     <button class="header-btn" onclick="refreshData()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
   </div>
@@ -393,6 +395,11 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     </div>
   </div>
 
+  <!-- Unified Pipeline Status -->
+  <div class="card"><div class="card-header"><div><div class="card-title">Unified Pipeline</div><div class="card-subtitle">8-stage daily trading pipeline</div></div><button class="btn btn-sm btn-outline" onclick="loadPipelineStatus()"><i class="fas fa-sync"></i> Refresh</button></div>
+    <div id="pipelineStatus"><div class="loading"><div class="spinner"></div>Loading...</div></div>
+  </div>
+
   <!-- System Status + Quick Actions -->
   <div class="grid-2">
     <div class="card"><div class="card-header"><div><div class="card-title">System Status</div><div class="card-subtitle">All services operational</div></div></div>
@@ -400,7 +407,8 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Quick Actions</div><div class="card-subtitle">Common operations</div></div></div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <button class="btn btn-primary" onclick="switchTab('workflow')"><i class="fas fa-play"></i> Run Daily Scan</button>
+        <button class="btn btn-primary" onclick="runPipeline()"><i class="fas fa-play"></i> Run Pipeline</button>
+        <button class="btn btn-outline" onclick="switchTab('workflow')"><i class="fas fa-tasks"></i> Daily Workflow</button>
         <button class="btn btn-outline" onclick="switchTab('halal')"><i class="fas fa-mosque"></i> Check Halal Status</button>
         <button class="btn btn-outline" onclick="switchTab('research')"><i class="fas fa-search"></i> Research a Stock</button>
         <button class="btn btn-outline" onclick="switchTab('risk')"><i class="fas fa-chart-pie"></i> View Risk Metrics</button>
@@ -412,7 +420,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 <!-- TAB: Forecast Lab -->
 <div class="tab-content" id="tab-forecast">
   <div class="stats-grid" id="forecastStats"></div>
-  <div class="card"><div class="card-header"><div><div class="card-title">All Forecast Models</div><div class="card-subtitle">Click a model to run forecast</div></div><div class="card-actions"><select id="forecastSymbol" style="width:100px;"><option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option><option>AMZN</option></select></div></div>
+  <div class="card"><div class="card-header"><div><div class="card-title">All Forecast Models</div><div class="card-subtitle">Click a model to run forecast</div></div><div class="card-actions"><input type="text" id="forecastSymbol" placeholder="AAPL" value="AAPL" style="width:100px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;"></div></div>
     <div class="card-tabs" id="forecastTabs"></div>
     <div class="filter-bar" id="forecastFilters">
       <input type="text" id="fFamFilter" placeholder="Filter..." style="width:90px;" oninput="filterForecastCards()">
@@ -438,7 +446,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 <div class="tab-content" id="tab-trading">
   <div class="stats-grid" id="tradingStats"></div>
   <div class="card"><div class="card-header"><div><div class="card-title">All Trading Agents</div><div class="card-subtitle">Click an agent to run backtest</div></div><div class="card-actions">
-    <select id="agentSymbol" style="width:100px;"><option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option></select>
+    <input type="text" id="agentSymbol" placeholder="AAPL" value="AAPL" style="width:100px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
     <button class="btn btn-sm btn-outline" onclick="runLeaderboard()"><i class="fas fa-trophy"></i> Leaderboard</button>
   </div></div>
     <div class="card-tabs" id="agentTabs"></div>
@@ -462,13 +470,35 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   </div>
 </div>
 
+<!-- TAB: Backtest -->
+<div class="tab-content" id="tab-backtest">
+  <div class="card">
+    <div class="card-header"><div><div class="card-title">Walk-Forward Backtest</div><div class="card-subtitle">EMA + RSI + MACD strategy with transaction costs</div></div></div>
+    <div class="form-group" style="display:flex;gap:12px;flex-wrap:wrap;padding:16px;align-items:end;">
+      <div><label>Symbol</label><input type="text" id="btSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;"></div>
+      <div><label>Start</label><input type="date" id="btStart" value="2022-01-01" style="font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
+      <div><label>End</label><input type="date" id="btEnd" value="2024-12-31" style="font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
+      <div><label>Portfolio ($)</label><input type="number" id="btPortfolio" value="100000" style="width:90px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
+      <div><label>Risk %</label><input type="number" id="btRisk" value="1.0" step="0.1" min="0.1" max="10" style="width:60px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
+      <div><label>Hold Days</label><input type="number" id="btHold" value="3" min="1" max="60" style="width:60px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
+      <div><button class="btn btn-primary" onclick="runBacktest()"><i class="fas fa-play"></i> Run</button></div>
+    </div>
+  </div>
+  <div id="btResult" style="display:none;">
+    <div class="stats-grid" id="btStats"></div>
+    <div class="card"><div class="card-header"><div><div class="card-title">Trade Log</div></div></div>
+      <div style="overflow-x:auto;" id="btTrades"></div>
+    </div>
+  </div>
+</div>
+
 <!-- TAB: Risk Desk -->
 <div class="tab-content" id="tab-risk">
   <div class="stats-grid" id="riskStats"></div>
   <div class="grid-2">
     <div class="card"><div class="card-header"><div><div class="card-title">Monte Carlo Simulation</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label>Symbol</label><select id="mcSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <label>Symbol</label><input type="text" id="mcSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <label>Sims</label><input type="number" id="mcSims" value="200" style="width:70px;">
         <label>Days</label><input type="number" id="mcDays" value="30" style="width:60px;">
         <button class="btn btn-sm btn-primary" onclick="runMonteCarlo()"><i class="fas fa-play"></i> Run</button>
@@ -478,7 +508,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Risk Metrics</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label>Symbol</label><select id="metricsSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <label>Symbol</label><input type="text" id="metricsSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="runMetrics()"><i class="fas fa-calculator"></i> Compute</button>
       </div>
       <div id="metricsResult"><div class="loading"><div class="spinner"></div></div></div>
@@ -487,14 +517,14 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   <div class="grid-2">
     <div class="card"><div class="card-header"><div><div class="card-title">Consensus Engine</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label>Symbol</label><select id="consensusSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <label>Symbol</label><input type="text" id="consensusSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="runConsensus()"><i class="fas fa-vote-yea"></i> Run</button>
       </div>
       <div id="consensusResult"></div>
     </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Leaderboard</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <label>Symbol</label><select id="lbSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <label>Symbol</label><input type="text" id="lbSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="runLeaderboard()"><i class="fas fa-trophy"></i> Refresh</button>
       </div>
       <div id="lbResult"><div class="loading"><div class="spinner"></div></div></div>
@@ -533,7 +563,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 <div class="tab-content" id="tab-charts">
   <div class="card"><div class="card-header"><div><div class="card-title">Agent Comparison</div><div class="card-subtitle">Up to 4 agents side-by-side</div></div></div>
     <div class="form-group" style="margin-bottom:12px;flex-wrap:wrap;">
-      <label>Symbol</label><select id="compSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+      <label>Symbol</label><input type="text" id="compSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
       <label>Agents</label><input type="text" id="compAgents" value="double_dqn,moving_average,q_learning" style="width:300px;">
       <button class="btn btn-sm btn-primary" onclick="runComparison()"><i class="fas fa-chart-line"></i> Compare</button>
     </div>
@@ -542,7 +572,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   </div>
   <div class="card"><div class="card-header"><div><div class="card-title">Individual Agent Charts</div></div></div>
     <div class="form-group" style="margin-bottom:12px;">
-      <label>Symbol</label><select id="chartAgentSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+      <label>Symbol</label><input type="text" id="chartAgentSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
       <label>Agent</label><select id="chartAgentName"></select>
       <button class="btn btn-sm btn-primary" onclick="loadAgentChart()"><i class="fas fa-chart-line"></i> Load Chart</button>
     </div>
@@ -556,14 +586,14 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   <div class="grid-2">
     <div class="card"><div class="card-header"><div><div class="card-title">Stock Summary</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <select id="rsSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option><option>TSLA</option><option>NVDA</option><option>AMZN</option></select>
+        <input type="text" id="rsSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="loadStockSummary()"><i class="fas fa-search"></i> Lookup</button>
       </div>
       <div id="rsResult"><div class="loading"><div class="spinner"></div></div></div>
     </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Financial Ratios</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <select id="ratioSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <input type="text" id="ratioSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="loadRatios()"><i class="fas fa-percentage"></i> Load</button>
       </div>
       <div id="ratioResult"><div class="loading"><div class="spinner"></div></div></div>
@@ -572,7 +602,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   <div class="grid-2">
     <div class="card"><div class="card-header"><div><div class="card-title">Financial Statements</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <select id="finSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <input type="text" id="finSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <select id="finType"><option>income</option><option>balance</option><option>cashflow</option></select>
         <button class="btn btn-sm btn-primary" onclick="loadFinancials()"><i class="fas fa-file-invoice"></i> Load</button>
       </div>
@@ -580,7 +610,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     </div>
     <div class="card"><div class="card-header"><div><div class="card-title">Dividends & Earnings</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <select id="divSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <input type="text" id="divSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="loadDividends()"><i class="fas fa-coins"></i> Load</button>
       </div>
       <div id="divResult"><div class="loading"><div class="spinner"></div></div></div>
@@ -589,7 +619,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   <div class="grid-2">
     <div class="card"><div class="card-header"><div><div class="card-title">Institutional Holders</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
-        <select id="holdSymbol"><option>AAPL</option><option>MSFT</option><option>GOOGL</option></select>
+        <input type="text" id="holdSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
         <button class="btn btn-sm btn-primary" onclick="loadHolders()"><i class="fas fa-building"></i> Load</button>
       </div>
       <div id="holdResult" class="result-box" style="max-height:250px;"></div>
@@ -597,7 +627,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
         <div class="card"><div class="card-header"><div><div class="card-title">Stock Screener</div><div class="card-subtitle">Screen 55 stocks by sector, halal status, market cap</div></div></div>
       <div class="form-group" style="margin-bottom:12px;">
         <label>Sector</label><input type="text" id="screenerSector" value="" placeholder="e.g. Technology" style="width:120px;">
-        <label>Halal only</label><select id="screenerHalal"><option>False</option><option>True</option></select>
+        <label>Halal only</label><select id="screenerHalal"><option selected>True</option><option>False</option></select>
         <button class="btn btn-sm btn-primary" onclick="runScreener()"><i class="fas fa-filter"></i> Screen</button>
       </div>
       <div id="screenerResult" class="result-box" style="max-height:300px;"></div>
@@ -614,7 +644,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     </div>
     <div class="form-group" style="margin-bottom:12px;flex-wrap:wrap;">
       <label>Min Score</label>
-      <select id="smartMinScore" style="width:80px;"><option>0</option><option selected>50</option><option>60</option><option>70</option><option>80</option></select>
+      <select id="smartMinScore" style="width:80px;"><option>0</option><option>50</option><option selected>65</option><option>70</option><option>80</option></select>
       <label>Sector</label>
       <input type="text" id="smartSector" value="" placeholder="e.g. Technology" style="width:130px;">
       <label>Max Results</label>
@@ -722,20 +752,309 @@ async function apiGet(path) {
 }
 
 // ===== STATUS =====
+async function loadUniverse() {
+  try {
+    const data = await apiGet('/api/symbols/universe');
+    const sel = document.getElementById('globalSymbol');
+    const count = document.getElementById('symbolCount');
+    sel.innerHTML = data.symbols.map(s => `<option value="${s}">${s}</option>`).join('');
+    count.textContent = data.count + ' halal';
+    return data.symbols;
+  } catch(e) {
+    return [];
+  }
+}
+
+function filterSearchDropdown(query) {
+  const dd = document.getElementById('searchDropdown');
+  if (!query || query.length < 1) { dd.style.display = 'none'; return; }
+  const q = query.toUpperCase();
+  const symbols = window._universeSymbols || [];
+  const matches = symbols.filter(s => s.includes(q)).slice(0, 20);
+  if (matches.length === 0) { dd.style.display = 'none'; return; }
+  dd.innerHTML = matches.map(s =>
+    `<div style="padding:8px 14px;cursor:pointer;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);" onmousedown="event.preventDefault();selectSymbol('${s}')">${s}</div>`
+  ).join('');
+  dd.style.display = 'block';
+}
+
+function selectSymbol(sym) {
+  document.getElementById('searchInput').value = sym;
+  document.getElementById('searchDropdown').style.display = 'none';
+  document.getElementById('globalSymbol').value = sym;
+  setGlobalSymbol(sym);
+}
+
+function showSearchDropdown() {
+  const val = document.getElementById('searchInput').value;
+  if (val) filterSearchDropdown(val);
+}
+
+function hideSearchDropdown() {
+  document.getElementById('searchDropdown').style.display = 'none';
+}
+
 async function checkStatus() {
   try {
     const t0 = performance.now();
-    const info = await apiGet('/api/info');
+    const info = await apiGet('/api/system/status');
     const latency = Math.round(performance.now() - t0);
     document.getElementById('statusDot').className = 'status-dot';
-    document.getElementById('statusText').innerHTML = 'Connected <span style="font-weight:400;color:var(--text-muted);">· '+latency+'ms</span>';
-    document.getElementById('statusDetail').textContent = 'Last heartbeat: ' + new Date().toLocaleTimeString();
+    let statusHtml = 'Connected <span style="font-weight:400;color:var(--text-muted);">· '+latency+'ms</span>';
+    if (info.broker === 'connected') statusHtml += ' <span style="color:var(--green);font-size:10px;">Broker ✓</span>';
+    if (info.database === 'connected') statusHtml += ' <span style="color:var(--green);font-size:10px;">DB ✓</span>';
+    document.getElementById('statusText').innerHTML = statusHtml;
+    document.getElementById('statusDetail').textContent = 'Regime: ' + (info.regime || 'N/A') + ' · Last heartbeat: ' + new Date().toLocaleTimeString();
     return info;
   } catch(e) {
     document.getElementById('statusDot').className = 'status-dot offline';
     document.getElementById('statusText').textContent = 'Offline';
     document.getElementById('statusDetail').textContent = '';
     return null;
+  }
+}
+
+async function loadOverview() {
+  try {
+    const [info, trading, guards, history, sched] = await Promise.all([
+      apiGet('/api/system/status'),
+      apiGet('/api/trading/summary'),
+      apiGet('/api/guards/summary').catch(() => ({})),
+      apiGet('/api/trading/history/recent?limit=5').catch(() => []),
+      apiGet('/api/scheduler/status').catch(() => ({})),
+    ]);
+    loadPipelineStatus(); // fire-and-forget for pipeline card
+
+    const guardCount = Object.values(guards).reduce((a, b) => a + b, 0);
+    const guardList = Object.entries(guards).slice(0, 5).map(([k, v]) =>
+      `<span class="badge-tag badge-orange">${k}: ${v}</span>`
+    ).join('');
+
+    document.getElementById('overviewStats').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-wallet"></i></div>
+        <div class="stat-value">$${(trading.equity || 0).toLocaleString()}</div>
+        <div class="stat-label">Portfolio Equity</div>
+        <span class="stat-change" style="background:${(trading.daily_pnl||0) >= 0 ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'};color:${(trading.daily_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)'}">${(trading.daily_pnl||0) >= 0 ? '+' : ''}$${(trading.daily_pnl||0).toFixed(2)} (${(trading.daily_pnl_pct||0).toFixed(2)}%) today</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-chart-line"></i></div>
+        <div class="stat-value">${trading.open_positions || 0}</div>
+        <div class="stat-label">Open Positions</div>
+        <span class="stat-change" style="background:rgba(59,130,246,0.15);color:var(--accent)">$${(trading.buying_power || 0).toLocaleString()} buying power</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-shield-alt"></i></div>
+        <div class="stat-value">${guardCount}</div>
+        <div class="stat-label">Guard Rejections Today</div>
+        <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${guardList || '<span style="font-size:11px;color:var(--text-muted);">No rejections</span>'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-microchip"></i></div>
+        <div class="stat-value" style="font-size:20px;">${info.status || 'N/A'}</div>
+        <div class="stat-label">System Status</div>
+        <span style="font-size:11px;color:var(--text-muted);">${info.regime || 'N/A'} · ${info.data_source || 'N/A'}</span>
+      </div>
+    `;
+
+    // PnL strip
+    document.getElementById('pnlStrip').querySelector('div').innerHTML = `
+      <div><div style="font-size:10px;color:var(--text-muted);">Today</div><div style="font-size:18px;font-weight:700;color:${(trading.daily_pnl||0)>=0?'var(--green)':'var(--red)'}">${(trading.daily_pnl||0)>=0?'+':''}$${(trading.daily_pnl||0).toFixed(2)}</div></div>
+      <div><div style="font-size:10px;color:var(--text-muted);">Day Trades</div><div style="font-size:18px;font-weight:700;">0</div></div>
+      <div><div style="font-size:10px;color:var(--text-muted);">Buying Power</div><div style="font-size:18px;font-weight:700;">$${(trading.buying_power||0).toLocaleString()}</div></div>
+      <div><div style="font-size:10px;color:var(--text-muted);">Auto Trading</div><div style="font-size:18px;font-weight:700;color:${trading.auto_trade_enabled?'var(--green)':'var(--text-muted)'}">${trading.auto_trade_enabled?'ON':'OFF'}</div></div>
+    `;
+
+    // Positions
+    const posEl = document.getElementById('openPositions');
+    if (trading.positions && trading.positions.length > 0) {
+      posEl.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg Entry</th><th>Current</th><th>P&L</th></tr></thead><tbody>${
+        trading.positions.map(p => `<tr><td><strong>${p.symbol}</strong></td><td>${p.qty}</td><td>$${p.avg_entry.toFixed(2)}</td><td>$${p.current_price.toFixed(2)}</td><td style="color:${p.unrealized_pl>=0?'var(--green)':'var(--red)'}">${p.unrealized_pl>=0?'+':''}$${p.unrealized_pl.toFixed(2)}</td></tr>`).join('')
+      }</tbody></table></div>`;
+    } else {
+      posEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);"><i class="fas fa-inbox" style="font-size:24px;display:block;margin-bottom:8px;"></i>No open positions</div>';
+    }
+
+    // Guard Activity
+    const guardEl = document.getElementById('guardActivity');
+    const gNames = Object.keys(guards);
+    if (gNames.length > 0) {
+      const maxG = Math.max(...Object.values(guards), 1);
+      guardEl.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px;">' +
+        gNames.map(g => `<div style="display:flex;align-items:center;gap:8px;"><span style="width:100px;font-size:11px;color:var(--text-secondary);text-transform:capitalize;">${g}</span><div style="flex:1;height:20px;background:var(--bg-card);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${(guards[g]/maxG*100)}%;background:var(--orange);border-radius:4px;transition:width 0.5s;"></div></div><span style="font-size:11px;font-weight:600;">${guards[g]}</span></div>`).join('') +
+        '</div>';
+    } else {
+      guardEl.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px;">No guard rejections today</div>';
+    }
+
+    // System Status
+    document.getElementById('systemStatus').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Broker</div><div style="font-weight:600;color:${info.broker==='connected'?'var(--green)':'var(--red)'}">${info.broker||'N/A'}</div></div>
+        <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Database</div><div style="font-weight:600;color:${info.database==='connected'?'var(--green)':'var(--red)'}">${info.database||'N/A'}</div></div>
+        <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Telegram</div><div style="font-weight:600;color:${info.telegram==='active'?'var(--green)':'var(--text-muted)'}">${info.telegram||'N/A'}</div></div>
+        <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Auto Trading</div><div style="font-weight:600;color:${info.auto_trading==='enabled'?'var(--green)':'var(--orange)'}">${info.auto_trading||'N/A'}</div></div>
+        <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Kill Switch</div><div style="font-weight:600;color:${info.kill_switch?'var(--red)':'var(--green)'}">${info.kill_switch?'ACTIVE':'OFF'}</div></div>
+        <div style="padding:8px;background:var(--bg-card);border-radius:8px;"><div style="font-size:10px;color:var(--text-muted);">Regime</div><div style="font-weight:600;">${info.regime||'N/A'}</div></div>
+      </div>
+    `;
+
+    // Last Signals
+    const lsEl = document.getElementById('lastSignals');
+    if (history.length > 0) {
+      const keys = Object.keys(history[0]);
+      lsEl.innerHTML = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr>${keys.map(k => `<th>${k}</th>`).join('')}</tr></thead><tbody>${history.slice(0,5).map(t => `<tr>${keys.map(k => `<td>${t[k]||'-'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    } else {
+      lsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;"><i class="fas fa-inbox" style="font-size:20px;display:block;margin-bottom:6px;"></i>No recent signals</div>';
+    }
+
+    // Scheduler Timeline
+    const stEl = document.getElementById('schedulerTimeline');
+    const runs = sched.run_counts || sched.runs || {};
+    const runKeys = Object.keys(runs);
+    if (runKeys.length > 0) {
+      const maxRun = Math.max(...Object.values(runs), 1);
+      stEl.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px;">' +
+        runKeys.map(k => `<div style="display:flex;align-items:center;gap:8px;"><span style="width:120px;font-size:11px;color:var(--text-secondary);text-transform:capitalize;">${k}</span><div style="flex:1;height:18px;background:var(--bg-card);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${(runs[k]/maxRun*100)}%;background:var(--accent);border-radius:4px;"></div></div><span style="font-size:11px;font-weight:600;">${runs[k]}</span></div>`).join('') +
+        '</div>';
+    } else {
+      stEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;"><i class="fas fa-clock" style="font-size:20px;display:block;margin-bottom:6px;"></i>No scheduler data</div>';
+    }
+
+  } catch(e) {
+    console.error('Overview load error:', e);
+  }
+}
+
+// ===== UNIFIED PIPELINE =====
+async function runPipeline() {
+  const btn = event?.target || document.querySelector('.btn-primary');
+  const original = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+  btn.disabled = true;
+  try {
+    const result = await apiGet('/api/pipeline/run?dry_run=true');
+    if (result.elapsed_s) {
+      alert(`Pipeline complete: ${result.signals_passed || 0} signals, ${result.signals_executed || 0} executed, ${result.signals_rejected || 0} rejected in ${result.elapsed_s.toFixed(1)}s`);
+    }
+    loadPipelineStatus();
+    loadOverview();
+  } catch(e) {
+    alert('Pipeline run failed: ' + e.message);
+  } finally {
+    btn.innerHTML = original;
+    btn.disabled = false;
+  }
+}
+
+async function loadPipelineStatus() {
+  try {
+    const data = await apiGet('/api/pipeline/status');
+    const el = document.getElementById('pipelineStatus');
+
+    // Stage progress bar
+    const stageLabels = {collect:'Data', halal:'Halal', smart:'Smart', consensus:'AI', kelly:'Kelly', guardian:'Guardian', execute:'Execute', report:'Report'};
+    const stageColors = {idle:'var(--bg-card)', running:'var(--accent)', ok:'var(--green)', failed:'var(--red)', skipped:'var(--orange)'};
+    const stagesHtml = (data.stages || []).map(s =>
+      `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;">
+        <div style="width:10px;height:10px;border-radius:50%;background:${stageColors[s.status] || stageColors.idle};"></div>
+        <span style="font-size:11px;font-weight:500;width:55px;">${stageLabels[s.name] || s.name}</span>
+        <span style="font-size:10px;color:var(--text-muted);text-transform:capitalize;">${s.status}</span>
+      </div>`
+    ).join('');
+
+    // Schedule timeline
+    const scheduleHtml = (data.schedule || []).map(s =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">
+        <span style="font-size:10px;font-weight:600;width:36px;color:var(--text-muted);">${s.time}</span>
+        <div style="width:6px;height:6px;border-radius:50%;background:${s.type==='pipeline'?'var(--accent)':s.type==='signal'?'var(--orange)':'var(--text-muted)'};"></div>
+        <span style="font-size:11px;">${s.task}</span>
+      </div>`
+    ).join('');
+
+    // Positions from pipeline
+    const positionsHtml = (data.positions || []).map(p =>
+      `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px;">
+        <strong>${p.symbol}</strong>
+        <span>${p.qty} @ $${p.entry}</span>
+        <span style="color:var(--text-muted);">${p.strategy || ''}</span>
+      </div>`
+    ).join('') || '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">No pipeline positions yet</div>';
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <div>
+          <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">Pipeline Stages</div>
+          ${stagesHtml}
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">Daily Schedule</div>
+          ${scheduleHtml}
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">Pipeline Positions</div>
+          ${positionsHtml}
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    document.getElementById('pipelineStatus').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:12px;">Pipeline not available</div>';
+  }
+}
+
+// ===== BACKTEST =====
+async function runBacktest() {
+  const sym = document.getElementById('btSymbol').value.trim().toUpperCase() || 'AAPL';
+  const start = document.getElementById('btStart').value || '2022-01-01';
+  const end = document.getElementById('btEnd').value || '2024-12-31';
+  const portfolio = document.getElementById('btPortfolio').value || 100000;
+  const risk = document.getElementById('btRisk').value || 1.0;
+  const hold = document.getElementById('btHold').value || 3;
+  const resultDiv = document.getElementById('btResult');
+  resultDiv.style.display = 'block';
+  document.getElementById('btStats').innerHTML = '<div class="loading"><div class="spinner"></div>Running backtest...</div>';
+  document.getElementById('btTrades').innerHTML = '';
+  try {
+    const data = await apiGet(`/api/backtest?symbol=${sym}&start_date=${start}&end_date=${end}&portfolio=${portfolio}&risk_pct=${risk}&hold_days=${hold}`);
+    if (!data || data.length === 0) {
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No results returned</div>';
+      return;
+    }
+    const summary = data[0];
+    if (summary.Message) {
+      document.getElementById('btStats').innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);">${summary.Message}</div>`;
+      return;
+    }
+    const trades = data.slice(1);
+    document.getElementById('btStats').innerHTML = `
+      <div style="padding:12px;background:var(--bg-card);border-radius:8px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;">
+          <div><div style="font-size:10px;color:var(--text-muted);">Symbol</div><div style="font-weight:700;font-size:16px;">${summary.Symbol}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Total Trades</div><div style="font-weight:600;">${summary['Total Trades']||0}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Winners</div><div style="font-weight:600;color:var(--green);">${summary.Winners||0}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Losers</div><div style="font-weight:600;color:var(--red);">${summary.Losers||0}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Win Rate</div><div style="font-weight:600;">${summary['Win Rate %']!=null ? summary['Win Rate %']+'%' : 'N/A'}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Total Return</div><div style="font-weight:600;color:${(summary['Return %']||0)>=0?'var(--green)':'var(--red)'}">${summary['Return %']!=null ? summary['Return %']+'%' : 'N/A'}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Sharpe</div><div style="font-weight:600;">${summary['Sharpe Ratio']!=null ? summary['Sharpe Ratio'].toFixed(2) : 'N/A'}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Max DD</div><div style="font-weight:600;color:var(--red);">${summary['Max Drawdown %']!=null ? summary['Max Drawdown %']+'%' : 'N/A'}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Final Portfolio</div><div style="font-weight:600;">$${summary['Final Portfolio']||'N/A'}</div></div>
+          <div><div style="font-size:10px;color:var(--text-muted);">Period</div><div style="font-size:11px;">${summary.Period||''}</div></div>
+        </div>
+      </div>`;
+    if (trades.length === 0) {
+      document.getElementById('btTrades').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No trades</div>';
+      return;
+    }
+    const keys = Object.keys(trades[0]);
+    let html = '<table class="data-table"><thead><tr>' + keys.map(k => `<th>${k}</th>`).join('') + '</tr></thead><tbody>';
+    trades.forEach(t => {
+      const cls = t.Result === 'Take Profit' ? 'green' : t.Result === 'Stop Loss' ? 'red' : '';
+      html += '<tr>' + keys.map(k => `<td class="${k==='Result'?cls:''}">${t[k]||'-'}</td>`).join('') + '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('btTrades').innerHTML = html;
+  } catch(e) {
+    document.getElementById('btStats').innerHTML = `<div style="padding:20px;text-align:center;color:var(--red);">Error: ${e.message}</div>`;
   }
 }
 
@@ -756,6 +1075,7 @@ function loadTabData(tabId) {
     case 'workflow': /* loaded on demand */ break;
     case 'charts': loadChartsTab(); break;
     case 'research': loadResearchTab(); break;
+    case 'backtest': /* loaded on demand via runBacktest */ break;
     case 'ai': loadAITab(); break;
     case 'halal': loadHalalTab(); break;
     case 'alerts': loadAlertsTab(); break;
@@ -1467,12 +1787,70 @@ async function loadRatios() {
 async function loadFinancials() {
   const sym = document.getElementById('finSymbol').value;
   const stmt = document.getElementById('finType').value;
-  document.getElementById('finResult').textContent = 'Loading...';
+  const el = document.getElementById('finResult');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading financials...</div>';
   try {
-    const data = await apiGet(`/api/stock/financials?symbol=${sym}&statement=${stmt}&periods=4`);
-    document.getElementById('finResult').textContent = JSON.stringify(data.rows || [], null, 2);
+    const data = await apiGet(`/api/stock/financials?symbol=${sym}&statement=${stmt}&periods=5`);
+    const years = data.years || [];
+    const rows = data.rows || [];
+
+    if (!rows.length) {
+      el.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;">No financial data available.</div>';
+      return;
+    }
+
+    // Highlight these key rows
+    const highlightItems = ['Total Revenue', 'Net Income', 'Gross Profit', 'Operating Income',
+      'EBITDA', 'Free Cash Flow', 'Operating Cash Flow',
+      'Total Assets', 'Total Debt', 'Total Liabilities', 'Stockholders Equity',
+      'Cash And Cash Equivalents', 'Current Assets', 'Current Liabilities'];
+
+    const isHighlighted = highlightItems.includes(rows[0].item);
+
+    let html = `<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--accent);">${stmt} statement · ${sym}</span>
+      <span style="font-size:10px;color:var(--text-muted);">values in USD</span>
+    </div>`;
+    html += '<div style="overflow-x:auto;max-height:400px;overflow-y:auto;"><table class="result-table"><thead><tr><th style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">Item</th>';
+    years.forEach(y => {
+      html += `<th style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;text-align:right;">${y}</th>`;
+    });
+    html += '<th style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;text-align:center;">YoY</th></tr></thead><tbody>';
+
+    rows.forEach(function(r) {
+      var isHighlighted = highlightItems.includes(r.item) || highlightItems.some(h => r.item.includes(h));
+      var style = isHighlighted ? 'font-weight:600;color:var(--text-primary);' : 'color:var(--text-secondary);';
+      var bgStyle = isHighlighted ? 'background:rgba(59,130,246,0.05);' : '';
+
+      html += `<tr style="${bgStyle}"><td style="${style}white-space:nowrap;">${r.item}</td>`;
+
+      years.forEach(function(y) {
+        var val = r[y];
+        var display = '—';
+        if (typeof val === 'number' && !isNaN(val)) {
+          if (Math.abs(val) >= 1e9) display = (val / 1e9).toFixed(2) + 'B';
+          else if (Math.abs(val) >= 1e6) display = (val / 1e6).toFixed(2) + 'M';
+          else if (Math.abs(val) >= 1e3) display = (val / 1e3).toFixed(2) + 'K';
+          else display = val.toFixed(2);
+        }
+        html += `<td style="text-align:right;${style}">${display}</td>`;
+      });
+
+      var yoy = r.yoy_change_pct;
+      var yoyDisplay = '—';
+      var yoyColor = '';
+      if (yoy !== null && yoy !== undefined) {
+        yoyDisplay = (yoy > 0 ? '↑' : yoy < 0 ? '↓' : '→') + ' ' + Math.abs(yoy).toFixed(1) + '%';
+        yoyColor = yoy > 0 ? 'var(--green)' : yoy < 0 ? 'var(--red)' : 'var(--text-muted)';
+      }
+      html += `<td style="text-align:center;color:${yoyColor};font-weight:600;font-size:12px;">${yoyDisplay}</td>`;
+
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
   } catch(e) {
-    document.getElementById('finResult').textContent = 'Error: ' + e.message;
+    el.innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
   }
 }
 
@@ -1515,27 +1893,35 @@ async function loadHolders() {
 async function runScreener() {
   const sector = document.getElementById('screenerSector').value;
   const halal = document.getElementById('screenerHalal').value;
-  document.getElementById('screenerResult').innerHTML = '<div class="loading"><div class="spinner"></div>Screening...</div>';
+  const el = document.getElementById('screenerResult');
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>Screening 55 stocks with parallel fetch...</div>';
   try {
-    const data = await apiGet(`/api/stock/screener?sector=${sector}&halal_only=${halal}&limit=30`);
+    const data = await apiGet(`/api/stock/screener?sector=${sector}&halal_only=${halal}&limit=30&use_cache=true`);
     const results = data.results || [];
     const ttl = data.total || 0;
-    let html = `<div style="margin-bottom:8px;font-size:13px;font-weight:600;">Found ${ttl} matching stocks</div>`;
+    const source = data.source || 'unknown';
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="font-size:13px;font-weight:600;">Found ${ttl} matching stocks</span>
+      <span style="font-size:10px;color:var(--text-muted);">${source === 'cache' ? '📦 cached' : '🔄 live'}</span>
+    </div>`;
     if (results.length > 0) {
-      html += '<table class="result-table"><thead><tr><th>Symbol</th><th>Company</th><th>Sector</th><th>Mkt Cap</th><th>P/E</th><th>Div Yield</th></tr></thead><tbody>';
+      html += '<div style="overflow-x:auto;"><table class="result-table"><thead><tr><th>Symbol</th><th>Company</th><th>Sector</th><th>Mkt Cap</th><th>P/E</th><th>Div Yield</th><th>Halal</th></tr></thead><tbody>';
       results.forEach(r => {
         const mcap = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
         const pe = r.pe ? r.pe.toFixed(1) : 'N/A';
         const div = r.dividend_yield ? (r.dividend_yield * 100).toFixed(2) + '%' : 'N/A';
-        html += `<tr><td style="font-weight:600;">${r.symbol}</td><td>${(r.company||'').slice(0,22)}</td><td>${r.sector || ''}</td><td>${mcap}</td><td>${pe}</td><td>${div}</td></tr>`;
+        const halalBadge = r.is_halal === true ? '<span style="color:var(--green);">✅</span>' :
+                          r.is_halal === false ? '<span style="color:var(--red);">❌</span>' :
+                          '<span style="color:var(--text-muted);">—</span>';
+        html += `<tr><td style="font-weight:600;">${r.symbol}</td><td>${(r.company||'').slice(0,22)}</td><td>${r.sector || ''}</td><td>${mcap}</td><td>${pe}</td><td>${div}</td><td style="text-align:center;">${halalBadge}</td></tr>`;
       });
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
     } else {
       html += '<div style="color:var(--text-muted);padding:16px;">No results matching your filters. Try removing sector or halal filter.</div>';
     }
-    document.getElementById('screenerResult').innerHTML = html;
+    el.innerHTML = html;
   } catch(e) {
-    document.getElementById('screenerResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+    el.innerHTML = '<div class="alert alert-warning">⚠️ ' + e.message + '</div>';
   }
 }
 
@@ -1570,10 +1956,10 @@ async function runSmartScreener() {
         '<div style="font-size:10px;color:var(--text-muted);">New Smart Score</div></div></div>';
 
     if (results.length > 0) {
-    document.getElementById('smartResult').innerHTML = html.replace('Smart Score', 'Score') + '<div style="display:flex;gap:8px;margin-bottom:8px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;"><span>🚀 Smart=Fund(40)+Tech(30)+Fcst(30)</span><span>⚡ RSIs,MACD,BB,VWAP</span></div>';
+    document.getElementById('smartResult').innerHTML = html.replace('Smart Score', 'Score') + '<div style="display:flex;gap:8px;margin-bottom:8px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;align-items:center;"><span>🚀 Smart=Fund(40)+Tech(30)+Fcst(30)</span><span>⚡ RSIs,MACD,BB,VWAP</span><button class="btn btn-sm" onclick="exportSmartCSV()" style="margin-left:auto;"><i class="fas fa-download"></i> CSV</button></div>';
 
     html = '<div style="overflow-x:auto;"><table class="result-table"><thead><tr>' +
-      '<th>#</th><th>Symbol</th><th>Price</th>' +
+      '<th>#</th><th>Symbol</th><th>Halal</th><th>Price</th>' +
       '<th>🚀 Smart</th><th>📊 Fund</th><th>⚡ Tech</th><th>🎯 Fcst</th>' +
       '<th>RSI</th><th>MACD</th><th>BB</th><th>VWAP</th>' +
       '<th>P/E</th><th>ROE</th><th>MktCap</th>' +
@@ -1594,12 +1980,14 @@ async function runSmartScreener() {
         var pe = r.valuation_details ? r.valuation_details.pe_val : null;
         var roe = r.profitability_details ? r.profitability_details.roe_val : null;
         var mcapStr = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
+        var halalBadge = r.is_halal ? '<span style="color:var(--green);">✅</span>' : '<span style="color:var(--red);">❌</span>';
         var scoreColor = total >= 75 ? 'var(--green)' : total >= 55 ? 'var(--accent)' : total >= 40 ? 'var(--orange)' : 'var(--red)';
         var scoreBg = total >= 75 ? 'rgba(34,197,94,0.15)' : total >= 55 ? 'rgba(59,130,246,0.15)' : total >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
         var rsiColor = (rsi !== 'N/A' && rsi > 70) ? 'var(--red)' : (rsi !== 'N/A' && rsi < 30) ? 'var(--orange)' : 'var(--green)';
         html += '<tr>' +
           '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
-          '<td style="font-weight:600;">'+r.symbol+'</td>' +
+          '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')" title="Click for score breakdown">'+r.symbol+'</td>' +
+          '<td style="text-align:center;font-size:13px;">'+halalBadge+'</td>' +
           '<td>$'+(r.price ? r.price.toFixed(2) : 'N/A')+'</td>' +
           '<td style="font-weight:700;color:'+scoreColor+';background:'+scoreBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
           '<td style="text-align:center;font-weight:500;">'+fund+'</td>' +
@@ -1615,6 +2003,9 @@ async function runSmartScreener() {
         '</tr>';
       });
       html += '</tbody></table></div>';
+
+      // Score detail popup area
+      html += '<div id="scoreDetailPanel"></div>';
     } else {
       html += '<div style="color:var(--text-muted);padding:24px;text-align:center;">No opportunities matching your criteria. Try lowering min score or clearing sector filter.</div>';
     }
@@ -1837,6 +2228,77 @@ function updateScreenerSummary() {
   `<span style="color:var(--text-muted);font-size:11px;">Top 3 · <a href="#" style="color:var(--accent);text-decoration:none;" onclick="event.preventDefault();switchTab('research');setTimeout(()=>openScreener(),200)">Expand</a></span>`;
 }
 
+function showScoreDetail(idx) {
+  const r = lastScreenerResults[idx];
+  if (!r) return;
+  const panel = document.getElementById('scoreDetailPanel');
+  if (!panel) return;
+
+  // Build detail sections
+  let sections = '';
+
+  // Fundamental breakdown
+  const fd = r.fundamental_details || {};
+  const pd = r.profitability_details || {};
+  const vd = r.valuation_details || {};
+  const mkd = r.market_details || {};
+  const mod = r.momentum_details || {};
+
+  sections += '<div style="margin-bottom:8px;"><div style="font-weight:600;color:var(--accent);margin-bottom:4px;">📊 Fundamental ('+r.fundamental_score+')</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:11px;">' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">Profit: '+(pd.roe || pd.roe_val || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">Margin: '+(pd.margin || pd.margin_val || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">Rev Growth: '+(pd.rev_growth || pd.rev_growth_val || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">P/E: '+(vd.pe_val || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">PEG: '+(vd.peg_val || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">P/B: '+(vd.pb_val || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">P/S: '+(vd.ps_val || 'N/A')+'</div>' +
+    '</div></div>';
+
+  sections += '<div style="margin-bottom:8px;"><div style="font-weight:600;color:var(--purple);margin-bottom:4px;">⚡ Momentum ('+r.momentum_score+')</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;">' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">RSI: '+(mod.rsi || 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;">VWAP: '+(mod.vwap_ratio ? (mod.vwap_ratio*100).toFixed(1)+'%' : 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;" title="'+(mod.macd_label || '')+'">MACD: '+(mod.macd_label ? mod.macd_label.slice(0,15) : 'N/A')+'</div>' +
+    '<div style="padding:4px 8px;background:var(--bg-card);border-radius:4px;" title="'+(mod.bb_label || '')+'">BB: '+(mod.bb_label ? mod.bb_label.slice(0,15) : 'N/A')+'</div>' +
+    '</div></div>';
+
+  if (r.forecast_details && r.forecast_details.score !== undefined) {
+    sections += '<div style="margin-bottom:8px;"><div style="font-weight:600;color:var(--orange);margin-bottom:4px;">🎯 Forecast ('+r.forecast_score+')</div>' +
+      '<div style="font-size:11px;padding:4px 8px;background:var(--bg-card);border-radius:4px;">' +
+      'Direction: '+(r.forecast_details.direction || 'N/A')+' | Confidence: '+(r.forecast_details.confidence || 'N/A') +
+      '</div></div>';
+  }
+
+  panel.innerHTML = '<div style="margin-top:8px;padding:12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+      '<div style="font-weight:700;font-size:14px;">' + r.symbol + ' <span style="font-weight:400;font-size:11px;color:var(--text-muted);">' + (r.company || '') + '</span></div>' +
+      '<button class="btn btn-sm" onclick="document.getElementById(\'scoreDetailPanel\').innerHTML=\'\'" style="padding:2px 8px;">✕</button>' +
+    '</div>' +
+    sections +
+    '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Sector: ' + (r.sector || 'N/A') + ' | MktCap: ' + (r.market_cap ? (r.market_cap/1e9).toFixed(1)+'B' : 'N/A') + ' | Price: $' + (r.price ? r.price.toFixed(2) : 'N/A') + '</div>' +
+  '</div>';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function exportSmartCSV() {
+  if (!lastScreenerResults.length) return;
+  const headers = ['Symbol', 'Price', 'SmartScore', 'Fundamental', 'Momentum', 'Forecast', 'RSI', 'P/E', 'ROE', 'MktCap', 'Sector', 'Halal'];
+  const rows = lastScreenerResults.map(r => [
+    r.symbol, r.price || '', r.smart_score || 0, r.fundamental_score || 0, r.momentum_score || 0, r.forecast_score || 0,
+    (r.momentum_details && r.momentum_details.rsi) || '', (r.valuation_details && r.valuation_details.pe_val) || '',
+    (r.profitability_details && r.profitability_details.roe_val) || '', r.market_cap || '', r.sector || '', r.is_halal ? 'Halal' : 'Non-Halal'
+  ]);
+  const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'smart_screener_results.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ===== COMPARE =====
 function toggleCompare(prefix, name) {
   const set = prefix === 'f' ? forecastCompareSet : agentCompareSet;
@@ -1868,104 +2330,8 @@ function _doCompare(set, type) {
   setTimeout(() => runComparison(), 300);
 }
 
-// ===== OVERVIEW =====
-async function loadOverview() {
-  try {
-    const info = await apiGet('/api/info');
-    const allItems = [...(info.model_items||[]), ...(info.agent_items||[])];
-    const best = allItems.reduce((b, x) => (x.sharpe||0) > (b.sharpe||0) ? x : b, {sharpe:0});
-    const drifted = allItems.filter(x => x.status === 'failing').length;
-    const lastRetrain = info.last_full_retrain != null ? info.last_full_retrain + 'h ago' : 'N/A';
-    const scanFresh = info.smart_scan_freshness != null ? info.smart_scan_freshness + 'm ago' : 'N/A';
-    const totalCount = info.model_count + info.agent_count;
-
-    // Top KPI row
-    document.getElementById('overviewStats').innerHTML = `
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-trophy"></i></div><div class="stat-value" style="font-size:20px;">${best.sharpe||'—'}</div><div class="stat-label">Best Sharpe today (${best.name||'N/A'})</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(245,158,11,0.15);color:var(--orange)"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-value">${drifted}/${totalCount}</div><div class="stat-label">Models drifted (PSI > threshold)</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-history"></i></div><div class="stat-value">${lastRetrain}</div><div class="stat-label">Last full retrain</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-microchip"></i></div><div class="stat-value">${scanFresh}</div><div class="stat-label">Smart Scan freshness</div></div>
-    `;
-
-    // PnL Strip
-    const pnl = info.pnl || {};
-    const pnlEl = document.querySelector('#pnlStrip > div');
-    if (pnlEl) {
-      pnlEl.innerHTML = ['today','week','mtd','all_time'].map(p => {
-        const val = pnl[p] || 0;
-        const pct = pnl[p + '_pct'] || 0;
-        const color = val >= 0 ? 'var(--green)' : 'var(--red)';
-        const sign = val >= 0 ? '+' : '';
-        const labels = {today:'Today',week:'Week',mtd:'MTD',all_time:'All-time'};
-        return `<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">${labels[p]}</div><div style="font-size:22px;font-weight:800;color:${color};margin:2px 0;">${sign}$${val.toFixed(2)}</div><div style="font-size:11px;color:${color};">${sign}${pct.toFixed(2)}%</div></div>`;
-      }).join('');
-    }
-
-    // Open Positions
-    const positions = info.open_positions || [];
-    document.getElementById('openPositions').innerHTML = positions.length === 0
-      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No open positions</div>'
-      : '<div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Entry</th><th>Current</th><th>PnL</th><th>Size</th></tr></thead><tbody>' +
-        positions.map(p => {
-          const pnlColor = p.pnl >= 0 ? 'var(--green)' : 'var(--red)';
-          return `<tr><td style="font-weight:600;">${p.symbol}</td><td style="color:var(--green);">${p.direction}</td><td>$${p.entry.toFixed(2)}</td><td>$${p.current.toFixed(2)}</td><td style="color:${pnlColor};font-weight:600;">${p.pnl >= 0 ? '+' : ''}$${p.pnl.toFixed(2)} (${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%)</td><td>${p.size}</td></tr>`;
-        }).join('') + '</tbody></table></div>';
-
-    // Last Signals
-    const signals = info.recent_signals || [];
-    document.getElementById('lastSignals').innerHTML = signals.length === 0
-      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No signals yet today</div>'
-      : '<div class="table-wrap"><table><thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Price</th><th>Conf</th><th>Status</th></tr></thead><tbody>' +
-        signals.map(s => {
-          const actionColor = s.action === 'BUY' ? 'var(--green)' : s.action === 'SELL' ? 'var(--red)' : 'var(--orange)';
-          const statusIcon = s.status === 'filled' ? '✅' : s.status === 'pending' ? '⏳' : '🚫';
-          const guardHint = s.guard ? ` · ${s.guard}` : '';
-          return `<tr><td style="font-size:11px;">${s.time}</td><td style="font-weight:600;">${s.symbol}</td><td style="color:${actionColor};font-weight:600;">${s.action}</td><td>$${s.price.toFixed(2)}</td><td>${s.confidence}%</td><td>${statusIcon} ${s.status}${guardHint}</td></tr>`;
-        }).join('') + '</tbody></table></div>';
-
-    // Guard Activity
-    const guards = info.guard_activity || [];
-    document.getElementById('guardActivity').innerHTML = guards.length === 0
-      ? '<div style="text-align:center;padding:20px;color:var(--text-muted);">No guard activity today</div>'
-      : '<div style="display:flex;flex-direction:column;gap:6px;">' +
-        guards.map(g => {
-          const maxCount = Math.max(...guards.map(x => x.rejections), 1);
-          const pct = (g.rejections / maxCount) * 100;
-          const barColor = pct > 70 ? 'var(--red)' : pct > 40 ? 'var(--orange)' : 'var(--green)';
-          const severityColor = g.severity === 'high' ? 'var(--red)' : g.severity === 'medium' ? 'var(--orange)' : 'var(--green)';
-          return `<div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;"><span>${g.guard}</span><span style="color:${severityColor};font-weight:600;">${g.rejections}</span></div><div style="height:6px;background:var(--bg-card);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px;transition:width 0.5s;"></div></div></div>`;
-        }).join('') + '</div>';
-
-    // Scheduler Timeline
-    const tl = info.scheduler_timeline || {};
-    document.getElementById('schedulerTimeline').innerHTML =
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">' +
-      Object.entries(tl).filter(([k]) => k !== 'status').map(([k, v]) => {
-        const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        return `<div style="display:flex;justify-content:space-between;padding:4px 8px;background:var(--bg-card);border-radius:4px;"><span style="color:var(--text-muted);font-size:10px;">${label}</span><span style="font-weight:500;">${v}</span></div>`;
-      }).join('') +
-      `<div style="grid-column:1/-1;text-align:center;padding:4px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);margin-top:4px;">Status: ${tl.status || 'idle'}</div>` +
-      '</div>';
-
-    // System Status (unchanged)
-    const w = await apiGet('/widgets.json');
-    document.getElementById('systemStatus').innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot"></span><span>API Server</span><span style="margin-left:auto;color:var(--green);font-size:12px;">Online</span></div>
-        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot"></span><span>yFinance Data</span><span style="margin-left:auto;color:var(--green);font-size:12px;">Connected</span></div>
-        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot" id="tgDot" style="background:var(--text-muted);"></span><span>Telegram Bot</span><span id="tgStatus" style="margin-left:auto;color:var(--text-muted);font-size:12px;">Checking...</span></div>
-        <div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-card);border-radius:8px;"><span class="status-dot"></span><span>${Object.keys(w).length} Widgets</span><span style="margin-left:auto;color:var(--green);font-size:12px;">Active</span></div>
-      </div>
-    `;
-
-  } catch(e) {
-    document.getElementById('overviewStats').innerHTML = `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> Could not load overview: ${e.message}</div>`;
-  }
-}
-
 // ===== SEARCH WITH AUTOCOMPLETE =====
 const RECENT_SYMBOLS_KEY = 'recent_symbols';
-const POPULAR_SYMBOLS = ['AAPL','MSFT','GOOGL','TSLA','NVDA','AMZN','META','AMD','JPM','BAC','GILD','CRM','NFLX','INTC','PYPL','ADBE','COST','DIS'];
 
 function getRecentSymbols() {
   try { return JSON.parse(localStorage.getItem(RECENT_SYMBOLS_KEY) || '[]'); } catch(e) { return []; }
@@ -1978,34 +2344,20 @@ function saveRecentSymbol(sym) {
   localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(recent));
 }
 
-function showSearchDropdown() {
-  const dd = document.getElementById('searchDropdown');
-  const val = document.getElementById('searchInput').value.toUpperCase();
-  renderSearchDropdown(val);
-  dd.style.display = 'block';
-}
-
-function hideSearchDropdown() {
-  document.getElementById('searchDropdown').style.display = 'none';
-}
-
-function filterSearchDropdown(val) {
-  renderSearchDropdown(val.toUpperCase());
-}
-
 function renderSearchDropdown(val) {
   const dd = document.getElementById('searchDropdown');
+  const symbols = window._universeSymbols || [];
   const recent = getRecentSymbols();
-  let items;
+  let groups;
   if (!val) {
-    items = recent.length > 0
+    groups = recent.length > 0
       ? [{label:'Recent',items: recent.slice(0, 5)}]
-      : [{label:'Popular',items: POPULAR_SYMBOLS.slice(0, 8)}];
+      : [{label:'All Symbols',items: symbols.slice(0, 10)}];
   } else {
-    const matches = POPULAR_SYMBOLS.filter(s => s.startsWith(val)).slice(0, 8);
-    items = matches.length > 0 ? [{label:'Matches',items: matches}] : [{label:'No matches',items: []}];
+    const matches = symbols.filter(s => s.includes(val)).slice(0, 10);
+    groups = matches.length > 0 ? [{label:'Matches',items: matches}] : [{label:'No matches',items: []}];
   }
-  dd.innerHTML = items.map(group => `
+  dd.innerHTML = groups.map(group => `
     <div style="padding:4px 8px;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">${group.label}</div>
     ${group.items.map(s => `<div style="padding:6px 12px;cursor:pointer;font-size:13px;font-weight:500;border-radius:4px;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=''" onclick="selectSymbol('${s}')">${s}</div>`).join('')}
   `).join('');
@@ -2075,18 +2427,21 @@ document.addEventListener('keydown', function(e) {
 })();
 
 // ===== INIT =====
-(async function init() {
+(async function() {
+  window._universeSymbols = await loadUniverse();
   await checkStatus();
-  loadOverview();
+  await loadOverview();
   updateTimestamp();
+  await loadAlertsTab();
   updateAlertBadge();
-  // Auto-refresh every 60s
+  // Refresh every 15s for the overview
   setInterval(() => {
-    const active = document.querySelector('.tab-content.active');
-    if (active) refreshData();
+    checkStatus();
     updateTimestamp();
+    const active = document.querySelector('.tab-content.active');
+    if (active && active.id === 'tab-overview') loadOverview();
     updateAlertBadge();
-  }, 60000);
+  }, 15000);
 })();
 
 // ===== ALERT BADGE =====
