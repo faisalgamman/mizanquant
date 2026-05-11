@@ -694,6 +694,31 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
       <span class="filter-chip" data-filter="buy" onclick="applyFilter('buy')">BUY Signal</span>
     </div>
 
+    <!-- ═══ Sector Mini-View ═══ -->
+    <div style="margin:0 12px 8px;padding:0;">
+      <div class="collapsible-header" onclick="toggleSectorView()" style="font-size:11px;color:var(--text-muted);padding:4px 0;border-top:1px solid var(--border);">
+        <span><i class="fas fa-th-large"></i> Sector Performance</span>
+        <span id="sectorToggleIcon"><i class="fas fa-chevron-down" style="font-size:10px;"></i></span>
+      </div>
+      <div id="sectorMiniView" class="collapsible-body collapsed" style="display:flex;gap:4px;flex-wrap:wrap;padding:4px 0;"></div>
+    </div>
+
+    <!-- ═══ Watchlist ═══ -->
+    <div style="margin:0 12px 8px;padding:0;">
+      <div class="collapsible-header" onclick="toggleWatchlist()" style="font-size:11px;color:var(--text-muted);padding:4px 0;border-top:1px solid var(--border);">
+        <span><i class="fas fa-bookmark"></i> Watchlist</span>
+        <span id="watchlistToggleIcon"><i class="fas fa-chevron-down" style="font-size:10px;"></i></span>
+      </div>
+      <div id="watchlistView" class="collapsible-body collapsed" style="padding:4px 0;">
+        <div class="form-group" style="gap:4px;">
+          <input type="text" id="watchlistInput" placeholder="AAPL, MSFT, NVDA" style="flex:1;font-size:11px;padding:4px 8px;">
+          <button class="btn btn-sm btn-primary" onclick="saveWatchlist()"><i class="fas fa-save"></i></button>
+          <button class="btn btn-sm btn-outline" onclick="scanWatchlist()"><i class="fas fa-rocket"></i> Scan</button>
+        </div>
+        <div id="watchlistTags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;"></div>
+      </div>
+    </div>
+
     <div id="smartResult"><div class="loading"><div class="spinner"></div>Click "Scan" to discover investment opportunities</div></div>
 
     <!-- NO QUALIFIED CANDIDATE Banner -->
@@ -2278,19 +2303,20 @@ async function runSmartScreener() {
         var halalIcon = r.is_halal ? '<span style="color:var(--green);font-size:13px;">✅</span>' : '<span style="color:var(--red);font-size:13px;">❌</span>';
         var rowStyle = r.is_halal ? '' : 'style="text-decoration:line-through;opacity:0.6;"';
 
-        html += '<tr ' + rowStyle + '>' +
-          '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
-          '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+'</td>' +
-          '<td style="text-align:center;">'+halalIcon+'</td>' +
-          '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
-          '<td style="text-align:center;color:var(--text-muted);font-size:11px;">'+(shortScore)+'</td>' +
-          '<td style="text-align:center;color:'+extColor+';">'+(ext != null ? ext.toFixed(1)+'%' : 'N/A')+'</td>' +
-          '<td style="text-align:center;">'+(atr != null ? atr.toFixed(2)+'%' : 'N/A')+'</td>' +
-          '<td style="text-align:center;color:'+advColor+';">'+(adv != null ? adv.toFixed(0)+advNote : 'N/A')+'</td>' +
-          '<td>$'+(price ? price.toFixed(2) : 'N/A')+'</td>' +
-          '<td style="color:'+chgColor+';font-weight:600;">'+(chg != null ? chgIcon + ' ' + chg.toFixed(2)+'%' : 'N/A')+'</td>' +
-          '<td style="text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:'+signalColor+';background:'+signalBg+';">'+signal+'</span></td>' +
-        '</tr>';
+    html += '<tr ' + rowStyle + '>' +
+      '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
+      '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+
+        '<span style="cursor:pointer;margin-left:4px;font-size:9px;color:var(--text-muted);" onclick="event.stopPropagation();addToWatchlist(\''+r.symbol+'\')" title="Add to watchlist">+</span></td>' +
+      '<td style="text-align:center;">'+halalIcon+'</td>' +
+      '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
+      '<td style="text-align:center;color:var(--text-muted);font-size:11px;">'+shortScore+'</td>' +
+      '<td style="text-align:center;color:'+extColor+';">'+(ext != null ? ext.toFixed(1)+'%' : 'N/A')+'</td>' +
+      '<td style="text-align:center;">'+(atr != null ? atr.toFixed(2)+'%' : 'N/A')+'</td>' +
+      '<td style="text-align:center;color:'+advColor+';">'+(adv != null ? adv.toFixed(0)+advNote : 'N/A')+'</td>' +
+      '<td>$'+(price ? price.toFixed(2) : 'N/A')+'</td>' +
+      '<td style="color:'+chgColor+';font-weight:600;">'+(chg != null ? chgIcon + ' ' + chg.toFixed(2)+'%' : 'N/A')+'</td>' +
+      '<td style="text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:'+signalColor+';background:'+signalBg+';">'+signal+'</span></td>' +
+    '</tr>';
       });
       html += '</tbody></table></div>';
 
@@ -2366,19 +2392,20 @@ function renderScreenerTable(results) {
     var halalIcon = r.is_halal ? '<span style="color:var(--green);font-size:13px;">✅</span>' : '<span style="color:var(--red);font-size:13px;">❌</span>';
     var rowStyle = r.is_halal ? '' : 'style="text-decoration:line-through;opacity:0.6;"';
 
-    html += '<tr ' + rowStyle + '>' +
-      '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
-      '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+'</td>' +
-      '<td style="text-align:center;">'+halalIcon+'</td>' +
-      '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
-      '<td style="text-align:center;color:var(--text-muted);font-size:11px;">'+shortScore+'</td>' +
-      '<td style="text-align:center;color:'+extColor+';">'+(ext != null ? ext.toFixed(1)+'%' : 'N/A')+'</td>' +
-      '<td style="text-align:center;">'+(atr != null ? atr.toFixed(2)+'%' : 'N/A')+'</td>' +
-      '<td style="text-align:center;color:'+advColor+';">'+(adv != null ? adv.toFixed(0)+advNote : 'N/A')+'</td>' +
-      '<td>$'+(price ? price.toFixed(2) : 'N/A')+'</td>' +
-      '<td style="color:'+chgColor+';font-weight:600;">'+(chg != null ? chgIcon + ' ' + chg.toFixed(2)+'%' : 'N/A')+'</td>' +
-      '<td style="text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:'+signalColor+';background:'+signalBg+';">'+signal+'</span></td>' +
-    '</tr>';
+        html += '<tr ' + rowStyle + '>' +
+          '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
+          '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+
+            '<span style="cursor:pointer;margin-left:4px;font-size:9px;color:var(--text-muted);" onclick="event.stopPropagation();addToWatchlist(\''+r.symbol+'\')" title="Add to watchlist">+</span></td>' +
+          '<td style="text-align:center;">'+halalIcon+'</td>' +
+          '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
+          '<td style="text-align:center;color:var(--text-muted);font-size:11px;">'+shortScore+'</td>' +
+          '<td style="text-align:center;color:'+extColor+';">'+(ext != null ? ext.toFixed(1)+'%' : 'N/A')+'</td>' +
+          '<td style="text-align:center;">'+(atr != null ? atr.toFixed(2)+'%' : 'N/A')+'</td>' +
+          '<td style="text-align:center;color:'+advColor+';">'+(adv != null ? adv.toFixed(0)+advNote : 'N/A')+'</td>' +
+          '<td>$'+(price ? price.toFixed(2) : 'N/A')+'</td>' +
+          '<td style="color:'+chgColor+';font-weight:600;">'+(chg != null ? chgIcon + ' ' + chg.toFixed(2)+'%' : 'N/A')+'</td>' +
+          '<td style="text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:'+signalColor+';background:'+signalBg+';">'+signal+'</span></td>' +
+        '</tr>';
   });
   html += '</tbody></table></div>';
   // Keep stats bar and banner by replacing only table portion
@@ -2410,6 +2437,156 @@ function toggleAutoRefresh() {
   }, 5 * 60 * 1000); // 5 min
   document.getElementById('autoRefreshBtn').innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> ON';
   document.getElementById('autoRefreshBtn').classList.add('btn-success');
+}
+
+// ── Sector Mini-View ──
+let _sectorViewOpen = false;
+async function toggleSectorView() {
+  _sectorViewOpen = !_sectorViewOpen;
+  var el = document.getElementById('sectorMiniView');
+  var icon = document.getElementById('sectorToggleIcon');
+  el.classList.toggle('collapsed', !_sectorViewOpen);
+  el.style.display = _sectorViewOpen ? 'flex' : 'none';
+  icon.innerHTML = _sectorViewOpen ? '<i class="fas fa-chevron-up" style="font-size:10px;"></i>' : '<i class="fas fa-chevron-down" style="font-size:10px;"></i>';
+  if (_sectorViewOpen) await loadSectorMiniView();
+}
+
+async function loadSectorMiniView() {
+  var el = document.getElementById('sectorMiniView');
+  if (!el) return;
+  el.innerHTML = '<span style="font-size:10px;color:var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Loading...</span>';
+  try {
+    var data = await apiGet('/api/sectors/performance');
+    var sectors = data.performance || [];
+    el.innerHTML = sectors.map(function(s) {
+      var chg = s.change_1d;
+      var color = chg > 0 ? 'var(--green)' : chg < 0 ? 'var(--red)' : 'var(--text-muted)';
+      var arrow = chg > 1 ? '▲▲' : chg > 0 ? '▲' : chg < -1 ? '▼▼' : chg < 0 ? '▼' : '';
+      var label = s.symbol.replace('XL','');
+      return '<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;background:var(--bg-card);border:1px solid var(--border);color:'+color+';" onclick="filterBySector(\''+s.sector_name+'\')" title="'+s.sector_name+': '+chg+'%">'+
+        label+' '+chg.toFixed(2)+'% '+arrow+'</span>';
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<span style="font-size:10px;color:var(--text-muted);">Failed to load sectors</span>';
+  }
+}
+
+function filterBySector(sector) {
+  document.getElementById('smartSector').value = sector;
+  runSmartScreener();
+  // Also collapse sector view
+  if (_sectorViewOpen) toggleSectorView();
+}
+
+// ── Watchlist ──
+let _wlOpen = false;
+function toggleWatchlist() {
+  _wlOpen = !_wlOpen;
+  var el = document.getElementById('watchlistView');
+  var icon = document.getElementById('watchlistToggleIcon');
+  el.classList.toggle('collapsed', !_wlOpen);
+  el.style.display = _wlOpen ? 'block' : 'none';
+  icon.innerHTML = _wlOpen ? '<i class="fas fa-chevron-up" style="font-size:10px;"></i>' : '<i class="fas fa-chevron-down" style="font-size:10px;"></i>';
+  if (_wlOpen) renderWatchlist();
+}
+
+async function loadWatchlist() {
+  try {
+    var data = await apiGet('/api/watchlist');
+    return data.symbols || [];
+  } catch(e) {
+    return [];
+  }
+}
+
+async function renderWatchlist() {
+  var symbols = await loadWatchlist();
+  var el = document.getElementById('watchlistTags');
+  if (!el) return;
+  if (symbols.length === 0) {
+    el.innerHTML = '<span style="font-size:10px;color:var(--text-muted);">No symbols yet. Add comma-separated symbols above.</span>';
+    return;
+  }
+  el.innerHTML = symbols.map(function(s) {
+    return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--bg-card);border:1px solid var(--accent);color:var(--accent);">'+
+      s+' <span style="cursor:pointer;color:var(--red);font-size:12px;" onclick="removeFromWatchlist(\''+s+'\')">&times;</span></span>';
+  }).join('');
+}
+
+async function saveWatchlist() {
+  var input = document.getElementById('watchlistInput').value;
+  var symbols = input.split(',').map(function(s) { return s.trim().toUpperCase(); }).filter(Boolean);
+  if (symbols.length === 0) return;
+  try {
+    await fetch('/api/watchlist', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({symbols: symbols}) });
+  } catch(e) { /* ignore, try localStorage fallback */ }
+  document.getElementById('watchlistInput').value = '';
+  await renderWatchlist();
+}
+
+async function addToWatchlist(symbol) {
+  try {
+    await fetch('/api/watchlist/add/' + symbol, { method: 'POST' });
+  } catch(e) { /* ignore */ }
+  if (_wlOpen) await renderWatchlist();
+}
+
+async function removeFromWatchlist(symbol) {
+  try {
+    await fetch('/api/watchlist/remove/' + symbol, { method: 'DELETE' });
+  } catch(e) { /* ignore */ }
+  await renderWatchlist();
+}
+
+async function scanWatchlist() {
+  var symbols = await loadWatchlist();
+  if (symbols.length === 0) {
+    document.getElementById('smartResult').innerHTML = '<div class="alert alert-warning">Watchlist is empty. Add symbols first.</div>';
+    return;
+  }
+  var wlStr = symbols.join(',');
+  var sector = document.getElementById('smartSector').value;
+  var maxResults = document.getElementById('smartMaxResults').value;
+  document.getElementById('smartResult').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning watchlist ('+symbols.length+' symbols)...</div>';
+  document.getElementById('screenerTimestamp').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+  try {
+    var data = await apiGet('/api/stock/smart-screener?min_score=0&sector='+sector+'&max_results='+maxResults+'&use_cache=False&watchlist='+encodeURIComponent(wlStr));
+    _screenerData = data;
+    var results = data.results || [];
+    var minGate = data.min_score || 60;
+    var strongGate = data.strong_gate || 75;
+    lastScreenerResults = results;
+    document.getElementById('screenerMinGate').textContent = minGate;
+    document.getElementById('screenerStrongGate').textContent = strongGate;
+    document.getElementById('screenerTimestamp').innerHTML = '🕐 ' + new Date().toLocaleTimeString() + ' ET';
+
+    // Build simple result display
+    var html = '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">'+
+      '<div style="padding:6px 14px;background:rgba(34,197,94,0.1);border-radius:8px;text-align:center;"><span style="font-size:16px;font-weight:700;color:var(--green);">'+symbols.length+'</span><span style="font-size:9px;color:var(--text-muted);display:block;">Watchlist</span></div>'+
+      '<div style="padding:6px 14px;background:var(--bg-card);border-radius:8px;text-align:center;"><span style="font-size:16px;font-weight:700;">'+results.length+'</span><span style="font-size:9px;color:var(--text-muted);display:block;">Results</span></div>'+
+      '<button class="btn btn-sm" onclick="exportSmartCSV()" style="margin-left:auto;"><i class="fas fa-download"></i> CSV</button></div>';
+
+    // Banner
+    var qb = document.getElementById('qualifiedBanner');
+    var qc = results.filter(function(r) { return (r.smart_score||0) >= strongGate; }).length;
+    var wc = results.filter(function(r) { var s=r.smart_score||0; return s>=minGate && s<strongGate; }).length;
+    if (results.length === 0) {
+      qb.style.display = 'block'; qb.className = 'ms-caution'; qb.style.cssText += 'display:block;padding:12px 16px;margin:0 12px 8px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;';
+      qb.innerHTML = '⏸ NO QUALIFIED CANDIDATE — WAIT';
+    } else {
+      qb.style.display = 'block'; qb.className = 'ms-risk-on'; qb.style.cssText += 'display:block;padding:12px 16px;margin:0 12px 8px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;';
+      qb.innerHTML = '✅ ' + qc + ' QUALIFIED  |  ' + wc + ' WATCH';
+    }
+
+    if (results.length > 0) {
+      renderScreenerTable(results);
+    } else {
+      document.getElementById('smartResult').innerHTML = html + '<div style="color:var(--text-muted);padding:24px;text-align:center;">No watchlist symbols passed the gate. Try lowering criteria.</div>';
+    }
+    updateScreenerSummary();
+  } catch(e) {
+    document.getElementById('smartResult').innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
+  }
 }
 
 // ===== HALAL TAB =====

@@ -451,3 +451,38 @@ async def api_pipeline_run(
         ],
         "error": report.error,
     }
+
+
+# ── Watchlist ──
+
+
+@router.get("/api/watchlist")
+async def api_get_watchlist():
+    """Return current watchlist symbols."""
+    from app.services.watchlist_service import get_watchlist
+    return {"symbols": get_watchlist()}
+
+
+@router.put("/api/watchlist")
+async def api_set_watchlist(body: dict):
+    """Replace entire watchlist. Body: {symbols: [...]}."""
+    from app.services.watchlist_service import set_watchlist
+    symbols = body.get("symbols", [])
+    saved = set_watchlist(symbols)
+    return {"symbols": saved, "count": len(saved)}
+
+
+@router.post("/api/watchlist/add/{symbol}")
+async def api_add_to_watchlist(symbol: str):
+    """Add a symbol to watchlist."""
+    from app.services.watchlist_service import add_symbol
+    updated = add_symbol(symbol)
+    return {"symbols": updated, "count": len(updated)}
+
+
+@router.delete("/api/watchlist/remove/{symbol}")
+async def api_remove_from_watchlist(symbol: str):
+    """Remove a symbol from watchlist."""
+    from app.services.watchlist_service import remove_symbol
+    updated = remove_symbol(symbol)
+    return {"symbols": updated, "count": len(updated)}
