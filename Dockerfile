@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy project
 COPY . .
 
-# Debug: check data directory exists
-RUN python -c "import os; d='/app/openbb_forecast/openbb_forecast/data'; print('data dir:', os.path.isdir(d), os.listdir(d) if os.path.isdir(d) else 'MISSING')"
+# Debug: verify openbb_forecast data subpackage exists
+RUN python -c "import os; d='/app/openbb_forecast/openbb_forecast/data'; assert os.path.isdir(d), f'DATA DIR MISSING: {d}'; files=sorted(os.listdir(d)); assert '__init__.py' in files, f'NO __init__.py in {d}'; print('data/ OK:', files)"
 
 # The openbb_forecast source is at openbb_forecast/openbb_forecast/
 # Copy it to /app so it's importable as 'openbb_forecast' without conflicts
