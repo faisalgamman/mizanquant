@@ -366,6 +366,9 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 <div class="tab-content active" id="tab-overview">
   <div class="stats-grid" id="overviewStats"></div>
 
+  <!-- BLOCK System Banner -->
+  <div id="blockBanner" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-size:13px;font-weight:600;"></div>
+
   <!-- Live PnL Strip -->
   <div class="card" id="pnlStrip" style="padding:14px 20px;margin-bottom:20px;">
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center;"></div>
@@ -393,6 +396,11 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     <div class="card"><div class="card-header"><div><div class="card-title">Scheduler Timeline</div><div class="card-subtitle">Cycle execution times</div></div></div>
       <div id="schedulerTimeline"><div class="loading"><div class="spinner"></div></div></div>
     </div>
+  </div>
+
+  <!-- Market Context -->
+  <div class="card"><div class="card-header"><div><div class="card-title">Market Context</div><div class="card-subtitle">VIX · SPY Regime · Breadth · Credit · Liquidity</div></div><button class="btn btn-sm btn-outline" onclick="loadMarketContext()"><i class="fas fa-sync"></i> Refresh</button></div>
+    <div id="marketContext"><div class="loading"><div class="spinner"></div>Loading...</div></div>
   </div>
 
   <!-- Unified Pipeline Status -->
@@ -824,6 +832,30 @@ async function loadOverview() {
       apiGet('/api/scheduler/status').catch(() => ({})),
     ]);
     loadPipelineStatus(); // fire-and-forget for pipeline card
+    loadMarketContext();  // fire-and-forget for market context card
+
+    // ── BLOCK System Banner ──
+    try {
+      const blockData = await apiGet('/api/block/status');
+      const level = blockData.block_level || 'NORMAL';
+      const banner = document.getElementById('blockBanner');
+      if (level === 'NORMAL') {
+        banner.style.display = 'none';
+      } else {
+        const colors = {CREDIT: '#f59e0b', VIX: '#f97316', BEAR: '#ef4444'};
+        const icons = {CREDIT: 'fa-exclamation-triangle', VIX: 'fa-cloud-sun', BEAR: 'fa-skull'};
+        const reasons = {
+          CREDIT: 'HY/IG ائتماني متوتر — لا إشارات جديدة اليوم',
+          VIX: 'VIX فوق 25 — تقلبات عالية — لا إشارات جديدة',
+          BEAR: 'SPY تحت EMA 200 — إيقاف تام للتداول',
+        };
+        banner.style.display = 'block';
+        banner.style.background = `${colors[level]}22`;
+        banner.style.border = `1px solid ${colors[level]}`;
+        banner.style.color = colors[level];
+        banner.innerHTML = `<i class="fas ${icons[level]||'fa-shield'}"></i> BLOCK = ${level} — ${reasons[level]||'تداول مقيد'}`;
+      }
+    } catch(e) { /* block status unavailable */ }
 
     const guardCount = Object.values(guards).reduce((a, b) => a + b, 0);
     const guardList = Object.entries(guards).slice(0, 5).map(([k, v]) =>
@@ -999,6 +1031,67 @@ async function loadPipelineStatus() {
     `;
   } catch(e) {
     document.getElementById('pipelineStatus').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:12px;">Pipeline not available</div>';
+  }
+}
+
+// ===== MARKET CONTEXT =====
+async function loadMarketContext() {
+  try {
+    const mc = await apiGet('/api/market/context');
+    const vix = mc.vix || {};
+    const spy = mc.spy_regime || {};
+    const breadth = mc.breadth || {};
+    const credit = mc.credit || {};
+    const liquidity = mc.liquidity || {};
+
+    const vixColor = vix.classification === 'low_fear' ? 'var(--green)' :
+                     vix.classification === 'normal' ? 'var(--accent)' :
+                     vix.classification === 'elevated' ? 'var(--orange)' : 'var(--red)';
+    const spyColor = spy.regime === 'bull' ? 'var(--green)' :
+                     spy.regime === 'bear' ? 'var(--red)' : 'var(--orange)';
+    const breadthColor = breadth.classification === 'broad_rally' ? 'var(--green)' :
+                         breadth.classification === 'mixed' ? 'var(--orange)' : 'var(--red)';
+    const creditColor = credit.classification === 'ok' ? 'var(--green)' :
+                        credit.classification === 'stress' ? 'var(--red)' : 'var(--orange)';
+    const liqColor = liquidity.classification === 'normal' ? 'var(--green)' :
+                     liquidity.classification === 'reduced' ? 'var(--orange)' : 'var(--red)';
+
+    document.getElementById('marketContext').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;">
+        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">VIX</div>
+          <div style="font-size:24px;font-weight:700;color:${vixColor};">${vix.vix ?? 'N/A'}</div>
+          <div style="font-size:10px;color:${vixColor};text-transform:capitalize;margin-top:2px;">${(vix.classification || 'N/A').replace(/_/g,' ')}</div>
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">Pctl ${vix.vix_pctile ?? 'N/A'}%</div>
+        </div>
+        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">SPY Regime</div>
+          <div style="font-size:20px;font-weight:700;color:${spyColor};">${(spy.regime || 'N/A').toUpperCase()}</div>
+          <div style="font-size:10px;color:var(--text-secondary);margin-top:2px;">$${spy.price ?? 'N/A'}</div>
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">EMA200 ${spy.price_vs_ema200_pct ?? 'N/A'}%</div>
+        </div>
+        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Breadth</div>
+          <div style="font-size:24px;font-weight:700;color:${breadthColor};">${breadth.breadth_pct != null ? breadth.breadth_pct + '%' : 'N/A'}</div>
+          <div style="font-size:10px;color:${breadthColor};text-transform:capitalize;margin-top:2px;">${(breadth.classification || 'N/A').replace(/_/g,' ')}</div>
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${breadth.above ?? 0}/${breadth.total ?? 0}</div>
+        </div>
+        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Credit</div>
+          <div style="font-size:20px;font-weight:700;color:${creditColor};">${credit.ratio != null ? credit.ratio : 'N/A'}</div>
+          <div style="font-size:10px;color:${creditColor};text-transform:capitalize;margin-top:2px;">${(credit.classification || 'N/A').replace(/_/g,' ')}</div>
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${credit.daily_change_pct != null ? credit.daily_change_pct + '%' : ''}</div>
+        </div>
+        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
+          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Liquidity</div>
+          <div style="font-size:20px;font-weight:700;color:${liqColor};">${liquidity.liquidity_pct != null ? liquidity.liquidity_pct + '%' : 'N/A'}</div>
+          <div style="font-size:10px;color:${liqColor};text-transform:capitalize;margin-top:2px;">${(liquidity.classification || 'N/A').replace(/_/g,' ')}</div>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    const el = document.getElementById('marketContext');
+    if (el) el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px;">Market context unavailable</div>';
   }
 }
 
@@ -1473,7 +1566,38 @@ async function runMonteCarlo() {
   try {
     const data = await apiGet(`/api/monte-carlo?symbol=${sym}&n_simulations=${sims}&forecast_days=${days}`);
     const stats = data.day_stats || [];
-    document.getElementById('mcResult').textContent = JSON.stringify(data.summary || {}, null, 2);
+    const summary = data.summary || {};
+    const lastClose = summary.last_close || 0;
+    const meanPrice = summary.expected_price || 0;
+    const upside = lastClose > 0 ? ((meanPrice / lastClose - 1) * 100).toFixed(1) : 'N/A';
+    const downsideP5 = summary.var_95 ? (summary.var_95 * 100).toFixed(1) : 'N/A';
+    const probProfit = summary.prob_profit ? (summary.prob_profit * 100).toFixed(0) : 'N/A';
+
+    // Summary table (replaces raw JSON)
+    document.getElementById('mcResult').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px;">
+        <div style="text-align:center;padding:8px;background:rgba(34,197,94,0.1);border-radius:8px;">
+          <div style="font-size:10px;color:var(--text-muted);">Prob Profit</div>
+          <div style="font-size:16px;font-weight:700;color:var(--green);">${probProfit}%</div>
+        </div>
+        <div style="text-align:center;padding:8px;background:rgba(59,130,246,0.1);border-radius:8px;">
+          <div style="font-size:10px;color:var(--text-muted);">Expected Price</div>
+          <div style="font-size:16px;font-weight:700;color:var(--accent);">$${meanPrice.toFixed(2)}</div>
+        </div>
+        <div style="text-align:center;padding:8px;background:rgba(34,197,94,0.1);border-radius:8px;">
+          <div style="font-size:10px;color:var(--text-muted);">Upside</div>
+          <div style="font-size:16px;font-weight:700;color:var(--green);">+${upside}%</div>
+        </div>
+        <div style="text-align:center;padding:8px;background:rgba(239,68,68,0.1);border-radius:8px;">
+          <div style="font-size:10px;color:var(--text-muted);">Downside (P5)</div>
+          <div style="font-size:16px;font-weight:700;color:var(--red);">${downsideP5}%</div>
+        </div>
+      </div>
+      <details style="font-size:11px;color:var(--text-muted);cursor:pointer;">
+        <summary>Show Details</summary>
+        <pre style="margin-top:4px;padding:8px;background:var(--bg-card);border-radius:6px;overflow-x:auto;font-size:10px;">${JSON.stringify(summary, null, 2)}</pre>
+      </details>
+    `;
 
     if (stats.length > 0) {
       const ctx = document.getElementById('mcChart').getContext('2d');
@@ -1482,16 +1606,24 @@ async function runMonteCarlo() {
         data: {
           labels: stats.map((_,i) => i),
           datasets: [
-            {label:'Mean',data:stats.map(s=>s.mean||0),borderColor:'#3b82f6',tension:0.3,pointRadius:0},
-            {label:'P95',data:stats.map(s=>s.p95||0),borderColor:'#22c55e',borderDash:[4,4],tension:0.3,pointRadius:0},
-            {label:'P5',data:stats.map(s=>s.p05||0),borderColor:'#ef4444',borderDash:[4,4],tension:0.3,pointRadius:0},
+            {label:'Mean', data:stats.map(s=>s.mean||0), borderColor:'#22c55e', backgroundColor:'rgba(34,197,94,0.05)', fill:false, tension:0.3, pointRadius:0},
+            {label:'P95 (Bull)', data:stats.map(s=>s.p95||0), borderColor:'#3b82f6', borderDash:[4,4], tension:0.3, pointRadius:0, fill:'+2', backgroundColor:'rgba(59,130,246,0.05)'},
+            {label:'P5 (Bear)', data:stats.map(s=>s.p05||0), borderColor:'#ef4444', borderDash:[4,4], tension:0.3, pointRadius:0, fill:false},
           ]
         },
         options: {
           responsive:true, maintainAspectRatio:false,
           plugins: {legend:{labels:{color:'#94a3b8',font:{size:11}}}},
-          scales: {x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}}
+          scales: {
+            x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},
+            y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}
+          }
         }
+      });
+    }
+  } catch(e) {
+    document.getElementById('mcResult').innerHTML = 'Error: ' + e.message;
+  }
       });
     }
   } catch(e) {
@@ -1504,14 +1636,37 @@ async function runMetrics() {
   document.getElementById('metricsResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
     const data = await apiGet(`/api/metrics?symbol=${sym}`);
+    const explain = {
+      'var_95': {label:'VaR 95%', desc:'تخسر أكثر من هذه النسبة في 5% من الأيام', good:v=>v<=0.02, ok:v=>v<=0.05},
+      'cvar_95': {label:'CVaR 95%', desc:'متوسط الخسارة في أسوأ 5% من الأيام', good:v=>v<=0.03, ok:v=>v<=0.06},
+      'max_drawdown': {label:'Max Drawdown', desc:'أكبر انخفاض من القمة', good:v=>v<=-0.15, ok:v=>v<=-0.25},
+      'sharpe_ratio': {label:'Sharpe Ratio', desc:'العائد المعدل بالمخاطرة (هدف > 1)', good:v=>v>=1, ok:v=>v>=0.5},
+      'sortino_ratio': {label:'Sortino Ratio', desc:'Sharpe للمخاطرة السلبية فقط', good:v=>v>=1.5, ok:v=>v>=0.8},
+      'total_return': {label:'Total Return', desc:'إجمالي العائد', good:v=>v>0, ok:v=>v>-0.05},
+      'annualized_return': {label:'Ann. Return', desc:'العائد السنوي', good:v=>v>0, ok:v=>v>-0.03},
+      'annualized_volatility': {label:'Ann. Volatility', desc:'التقلب السنوي', good:v=>v<=0.2, ok:v=>v<=0.3},
+      'calmar_ratio': {label:'Calmar Ratio', desc:'العائد ÷ أقصى انخفاض', good:v=>v>=1, ok:v=>v>=0.5},
+    };
     document.getElementById('metricsResult').innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        ${Object.entries(data).filter(([k])=>k!=='symbol').map(([k,v]) => `
-          <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--bg-card);border-radius:6px;">
-            <span style="font-size:12px;color:var(--text-muted);text-transform:capitalize;">${k.replace(/_/g,' ')}</span>
-            <span style="font-weight:600;font-size:13px;color:${k.includes('return')||k.includes('sharpe')||k.includes('sortino')?(v>0?'var(--green)':'var(--red)'):'var(--text-primary)'}">${typeof v==='number'?v.toFixed(4):v}</span>
-          </div>
-        `).join('')}
+        ${Object.entries(data).filter(([k])=>k!=='symbol').map(([k,v]) => {
+          const e = explain[k];
+          const label = e ? e.label : k.replace(/_/g,' ');
+          const desc = e ? e.desc : '';
+          let color = 'var(--text-primary)';
+          let icon = '';
+          if (e) {
+            if (e.good(v)) { color = 'var(--green)'; icon = '&#9989;'; }
+            else if (e.ok(v)) { color = 'var(--orange)'; icon = '&#9888;'; }
+            else { color = 'var(--red)'; icon = '&#128308;'; }
+          }
+          return '<div style="display:flex;flex-direction:column;padding:8px 12px;background:var(--bg-card);border-radius:6px;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;">'
+            + '<span style="font-size:12px;color:var(--text-muted);text-transform:capitalize;">' + label + '</span>'
+            + '<span style="font-weight:700;font-size:14px;color:' + color + '">' + icon + ' ' + (typeof v==='number'?v.toFixed(4):v) + '</span></div>'
+            + (desc ? '<span style="font-size:10px;color:var(--text-muted);margin-top:2px;">' + desc + '</span>' : '')
+            + '</div>';
+        }).join('')}
       </div>
     `;
   } catch(e) {
@@ -1551,14 +1706,15 @@ async function runLeaderboard() {
     if (el) {
       el.innerHTML = `
         <div class="table-wrap"><table>
-          <thead><tr><th>Rank</th><th>Agent</th><th>Category</th><th>Return</th><th>Sharpe</th><th>Max DD</th><th>Trades</th></tr></thead>
+          <thead><tr><th>Rank</th><th>Agent</th><th>Category</th><th>Return</th><th>Sharpe</th><th>Win Rate</th><th>Max DD</th><th>Trades</th></tr></thead>
           <tbody>${(data.leaderboard||[]).map((r,i) => `
             <tr>
               <td style="font-weight:700;color:${i===0?'var(--accent)':i===1?'var(--green)':i===2?'var(--orange)':'var(--text-muted)'}">#${i+1}</td>
-              <td style="font-weight:600;">${r.agent}</td>
+              <td style="font-weight:600;">${r.agent}${!r.n_trades?' <span class="badge-tag badge-green" style="font-size:10px;">جديد</span>':''}</td>
               <td><span class="badge-tag badge-blue">${r.category||''}</span></td>
               <td style="color:${r.total_return>0?'var(--green)':'var(--red)'}">${r.total_return!=null?r.total_return.toFixed(2)+'%':'N/A'}</td>
               <td style="font-weight:600;">${r.sharpe_ratio!=null?r.sharpe_ratio.toFixed(2):'N/A'}</td>
+              <td>${r.win_rate!=null?(r.win_rate*100).toFixed(1)+'%':'N/A'}</td>
               <td style="color:var(--red)">${r.max_drawdown!=null?r.max_drawdown.toFixed(2)+'%':'N/A'}</td>
               <td>${r.n_trades||0}</td>
             </tr>
@@ -1655,7 +1811,7 @@ async function runComparison() {
       <div style="display:flex;gap:12px;flex-wrap:wrap;">${(data.summary||[]).map(s => `
         <div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">
           <div style="font-weight:600;font-size:13px;">${s.agent}</div>
-          <div style="font-size:11px;color:var(--text-muted);">Sharpe: ${s.sharpe_ratio?.toFixed(2)||'N/A'} | Return: ${s.total_return?.toFixed(2)||'N/A'}%</div>
+          <div style="font-size:11px;color:var(--text-muted);">Sharpe: ${s.sharpe_ratio?.toFixed(2)||'N/A'} | WR: ${s.win_rate!=null?(s.win_rate*100).toFixed(1):'N/A'}%</div>
         </div>`).join('')}
       </div>
     `;

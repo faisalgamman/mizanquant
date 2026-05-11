@@ -2040,7 +2040,7 @@ async def agent_comparison(
         "symbol": symbol,
         "dates": dates[len(dates) - len(curves[0]["equity"]):] if curves else [],
         "curves": curves,
-        "summary": sorted(summary, key=lambda r: r.get("sharpe_ratio", 0), reverse=True),
+        "summary": sorted(summary, key=lambda r: (r.get("sharpe_ratio") or 0) * (r.get("win_rate") or 0), reverse=True),
     }
 
 
@@ -2535,7 +2535,7 @@ async def agent_leaderboard(
                 "win_rate": None, "risk_events": 0, "error": str(e),
             })
 
-    rows.sort(key=lambda r: r.get("sharpe_ratio") or -999, reverse=True)
+    rows.sort(key=lambda r: (r.get("sharpe_ratio") or 0) * (r.get("win_rate") or 0), reverse=True)
     return {"symbol": symbol, "leaderboard": rows, "total_agents": len(rows)}
 
 

@@ -6,11 +6,13 @@ from dataclasses import asdict
 
 from app.services.guards import (
     account_status,
+    block_system,
     correlation,
     cross_strategy_veto,
     daily_loss,
     duplicate_symbol,
     earnings_blackout,
+    market_conditions,
     max_notional,
     max_positions,
     min_notional,
@@ -18,6 +20,7 @@ from app.services.guards import (
     portfolio_drawdown,
     regime_bear_freeze,
     sector_exposure,
+    spy_bear_halt,
     vix_halt,
 )
 from app.services.guards.base import Guard, GuardContext, GuardResult
@@ -25,6 +28,9 @@ from app.services.guards.base import Guard, GuardContext, GuardResult
 
 _GUARDS: list[Guard] = [
     account_status.guard,
+    block_system.guard,
+    market_conditions.guard,
+    spy_bear_halt.guard,
     vix_halt.guard,
     daily_loss.guard,
     portfolio_drawdown.guard,

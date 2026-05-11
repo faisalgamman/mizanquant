@@ -231,3 +231,81 @@ def test_dashboard_page_served(monkeypatch):
 
     resp = client.get("/dashboard")
     assert resp.status_code == 200
+
+
+# ── New API endpoint tests: market context, sectors, scoring, trade plan, block status ──
+
+
+def test_market_context_endpoint(monkeypatch):
+    client = TestClient(hs.app)
+    resp = client.get("/api/market/context")
+    assert resp.status_code == 200
+    body = resp.json()
+    for key in ("vix", "spy_regime", "breadth", "credit", "liquidity"):
+        assert key in body, f"Missing key: {key}"
+
+
+def test_market_context_endpoint_force_refresh(monkeypatch):
+    client = TestClient(hs.app)
+    resp = client.get("/api/market/context?force_refresh=true")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "cached_at" in body
+
+
+def test_sectors_endpoint(monkeypatch):
+    client = TestClient(hs.app)
+    resp = client.get("/api/sectors/performance")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body, list)
+    assert len(body) == 11  # 11 sector ETFs
+    for sector in body:
+        assert "ticker" in sector
+        assert "name" in sector
+        assert "classification" in sector
+
+
+def test_scoring_endpoint(monkeypatch):
+    client = TestClient(hs.app)
+    monkeypatch.setattr("app.services.market_data.fetch", lambda symbol, **kw: None)
+    resp = client.get("/api/scoring/weighted?symbol=INVALID")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "error" in body
+
+
+def test_trade_plan_endpoint(monkeypatch):
+    client = TestClient(hs.app)
+    monkeypatch.setattr("app.services.market_data.fetch", lambda symbol, **kw: None)
+    resp = client.get("/api/trade/plan?symbol=INVALID")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "error" in body
+
+
+def test_block_status_endpoint(monkeypatch):
+    client = TestClient(hs.app)
+    resp = client.get("/api/block/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "block_level" in body
+    assert body["block_level"] in ("NORMAL", "CREDIT", "VIX", "BEAR")
+
+
+def test_pipeline_run_endpoint(monkeypatch):
+    def mock_run(**kw):
+        from app.services.pipeline_orchestrator import PipelineReport
+        r = PipelineReport()
+        r.date_utc = "2026-05-11"
+        r.signals_passed = 0
+        r.signals_executed = 0
+        r.elapsed_s = 0.5
+        return r
+    monkeypatch.setattr("app.services.pipeline_orchestrator.run_pipeline", mock_run)
+    client = TestClient(hs.app)
+    resp = client.get("/api/pipeline/run?dry_run=true")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "signals_passed" in body
+    assert "elapsed_s" in body

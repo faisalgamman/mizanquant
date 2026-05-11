@@ -603,8 +603,76 @@ def _run_optimizer():
     gc.collect()
 
 
+_DRIFT_RETRAIN = float(os.environ.get("DRIFT_RETRAIN_THRESHOLD", "0.25"))
+_DRIFT_HALT = float(os.environ.get("DRIFT_HALT_THRESHOLD", "0.35"))
+
+
+def _check_drift_before_retrain() -> dict:
+    """Check feature drift on representative market data (SPY).
+
+    Returns:
+        {"max_psi": float, "drifted_features": list[str], "status": str}
+        where status is one of: "ok", "drift_retrain", "drift_halt".
+    """
+    try:
+        from app.services.drift_monitor import DriftMonitor
+        from app.services.market_data import fetch
+        from openbb_forecast.data.preprocessing import create_features
+
+        df = fetch("SPY", period="1y")
+        if df is None or len(df) < 60:
+            return {"max_psi": 0.0, "drifted_features": [], "status": "ok", "error": "no_data"}
+
+        feat_df = create_features(df)
+        monitor = DriftMonitor()
+        refs = monitor.list_references()
+
+        market_features = [c for c in feat_df.columns if c in ("returns", "volatility_5",
+            "volatility_10", "momentum_5", "momentum_10", "rsi_14", "macd", "volume_ratio",
+            "high_low_range", "open_close_range")]
+
+        drifted = []
+        max_psi = 0.0
+        for col in market_features:
+            if col not in feat_df.columns:
+                continue
+            ref_name = f"SPY_{col}"
+            if ref_name not in refs:
+                continue
+            result = monitor.check_numeric(ref_name, feat_df[col].dropna().values.tolist())
+            psi = result.get("psi", 0.0)
+            max_psi = max(max_psi, psi)
+            if result.get("drifted"):
+                drifted.append(col)
+
+        if max_psi >= _DRIFT_HALT:
+            return {"max_psi": max_psi, "drifted_features": drifted, "status": "drift_halt"}
+        if max_psi >= _DRIFT_RETRAIN:
+            return {"max_psi": max_psi, "drifted_features": drifted, "status": "drift_retrain"}
+        return {"max_psi": max_psi, "drifted_features": drifted, "status": "ok"}
+    except Exception as e:
+        logger.warning("Drift check skipped: %s", e)
+        return {"max_psi": 0.0, "drifted_features": [], "status": "ok", "error": str(e)}
+
+
 def _run_train_models():
-    """Nightly persisted-model retraining hook."""
+    """Nightly persisted-model retraining hook with drift gating."""
+    drift = _check_drift_before_retrain()
+
+    if drift["status"] == "drift_halt":
+        from app.services.telegram_alert import send_message as tg_send
+        tg_send(
+            f"⚠️ *DRIFT HALT* — retrain skipped\n\n"
+            f"Max PSI={drift['max_psi']:.3f} (threshold={_DRIFT_HALT})\n"
+            f"Drifted features: {', '.join(drift['drifted_features'])}\n\n"
+            f"Model pipeline halted until drift resolves."
+        )
+        logger.warning("Drift halt (PSI=%.3f) — retrain skipped", drift["max_psi"])
+        return
+
+    if drift["status"] == "drift_retrain":
+        logger.warning("Drift retrain (PSI=%.3f) — forcing retrain", drift["max_psi"])
+
     completed = _run_repo_script("scripts/train_models.py")
     logger.info("train_models.py completed: %s", completed.stdout.strip())
 

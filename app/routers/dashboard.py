@@ -359,6 +359,54 @@ async def api_pipeline_status():
     }
 
 
+@router.get("/api/market/context")
+async def api_market_context(force_refresh: bool = False):
+    """Return market context indicators: VIX, SPY Regime, Breadth, Credit, Liquidity."""
+    from app.services.market_context import get_market_context
+    return get_market_context(force_refresh=force_refresh)
+
+
+@router.get("/api/sectors/performance")
+async def api_sector_performance(force_refresh: bool = False):
+    """Return performance for all 11 sector ETFs."""
+    from app.services.sector_analysis import get_sector_performance
+    return get_sector_performance(force_refresh=force_refresh)
+
+
+@router.get("/api/scoring/weighted")
+async def api_weighted_score(symbol: str = "AAPL"):
+    """Return 100-point weighted score for a symbol."""
+    from app.services.market_data import fetch
+    from app.services.scoring import weighted_score
+    df = fetch(symbol, period="6mo")
+    if df is None:
+        return {"error": f"No data for {symbol}"}
+    spy_df = fetch("SPY", period="6mo")
+    result = weighted_score(df, spy_df=spy_df)
+    result["symbol"] = symbol.upper()
+    return result
+
+
+@router.get("/api/trade/plan")
+async def api_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
+    """Return trade plan (TP/SL + position sizing) for a symbol."""
+    from app.services.market_data import fetch
+    from app.services.trade_plan import generate_trade_plan
+    df = fetch(symbol, period="6mo")
+    if df is None:
+        return {"error": f"No data for {symbol}"}
+    result = generate_trade_plan(df, portfolio_equity=portfolio)
+    result["symbol"] = symbol.upper()
+    return result
+
+
+@router.get("/api/block/status")
+async def api_block_status():
+    """Return current BLOCK system level."""
+    from app.services.guards.block_system import get_block_level
+    return {"block_level": get_block_level()}
+
+
 @router.get("/api/pipeline/run")
 async def api_pipeline_run(
     dry_run: bool = True,

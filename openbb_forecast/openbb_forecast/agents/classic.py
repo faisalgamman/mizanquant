@@ -66,6 +66,61 @@ class RLAgentBase:
     def act(self, price: float, step: int, prices: np.ndarray) -> int:
         raise NotImplementedError
 
+    def walk_forward_evaluate(
+        self,
+        prices: np.ndarray,
+        train_ratio: float = 0.7,
+        initial_capital: float = 10_000.0,
+        **kwargs,
+    ) -> dict:
+        """Walk-forward evaluation for classic (non-RL) agents.
+
+        Splits prices into train/test, backtests on the test portion,
+        and returns metrics matching the Leaderboard schema.
+        """
+        prices = np.asarray(prices, dtype=np.float64)
+        self.initial_balance = initial_capital
+        split_idx = int(len(prices) * train_ratio)
+
+        # Classic agents need only enough data for their lookback window
+        min_required = 50
+        if len(prices) < min_required:
+            raise ValueError(f"Not enough data: {len(prices)} < {min_required}")
+
+        test_prices = prices[split_idx:]
+
+        result = self.backtest(test_prices)
+        pv = result["portfolio_value"]
+
+        # Total return
+        total_return = result["profit_pct"]
+
+        # Max drawdown
+        peak = np.maximum.accumulate(pv)
+        dd = (pv - peak) / peak
+        max_dd = float(np.min(dd)) * 100 if len(dd) > 0 else 0.0
+
+        # Simple Sharpe (annualized, assuming daily data)
+        returns = np.diff(pv) / pv[:-1]
+        sharpe = float(np.mean(returns) / np.std(returns) * np.sqrt(252)) if len(returns) > 1 and np.std(returns) > 0 else 0.0
+
+        # Win rate from trades
+        buys = [t for t in self.trades if t[0] == "BUY"]
+        sells = [t for t in self.trades if t[0] == "SELL"]
+        wins = sum(1 for i in range(min(len(sells), len(buys))) if sells[i][1] > buys[i][1])
+        win_rate = wins / len(sells) if sells else 0.0
+
+        return {
+            "backtest_summary": {
+                "total_return": round(total_return, 4),
+                "sharpe_ratio": round(sharpe, 4),
+                "max_drawdown": round(max_dd, 4),
+                "n_trades": result["num_trades"],
+                "win_rate": round(win_rate, 4),
+            },
+            "risk_events": 0,
+        }
+
 
 class TurtleAgent(RLAgentBase):
     """Turtle Trading — buy on 20-day high breakout, sell on 20-day low stop."""

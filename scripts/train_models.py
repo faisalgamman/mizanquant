@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,8 @@ from openbb_forecast.risk.metrics import sharpe_ratio
 
 MODEL_FACTORIES = {name: name for name in MODEL_NAMES}
 
+PSI_RETRAIN_THRESHOLD = float(os.environ.get("DRIFT_RETRAIN_THRESHOLD", "0.25"))
+PSI_HALT_THRESHOLD = float(os.environ.get("DRIFT_HALT_THRESHOLD", "0.35"))
 
 FEATURE_COLS = [
     "returns", "volatility_5", "volatility_10", "volatility_20",
@@ -92,20 +95,21 @@ def _train_one(name: str, symbol: str, version: str) -> dict:
     val_scaled = feature_scaler.transform(val_features)
     test_scaled = feature_scaler.transform(test_features)
 
-    X_train, y_train = create_sequences(train_scaled, sequence_length=30, forecast_horizon=1)
-    X_val, y_val = create_sequences(val_scaled, sequence_length=30, forecast_horizon=1)
-    X_test, y_test = create_sequences(test_scaled, sequence_length=30, forecast_horizon=1)
+    X_train, y_train_full = create_sequences(train_scaled, sequence_length=30, forecast_horizon=1)
+    X_val, y_val_full = create_sequences(val_scaled, sequence_length=30, forecast_horizon=1)
+    X_test, y_test_full = create_sequences(test_scaled, sequence_length=30, forecast_horizon=1)
+    # Target is close price only (column 0), not all 14 features
+    y_train = y_train_full[:, :, 0]
+    y_val = y_val_full[:, :, 0]
+    y_test = y_test_full[:, :, 0]
 
     model = create_model(name, version=version)
     model.fit(X_train, y_train)
     val_sharpe, val_directional_acc = _score_predictions(model.predict(X_val), y_val, price_scaler)
     test_sharpe, test_directional_acc = _score_predictions(model.predict(X_test), y_test, price_scaler)
 
-    import re
-    _pt_models = {"lstm", "transformer", "gru", "cnn", "rnn_variant"}
-    _pkl_models = {"ensemble", "arima"}
-    _base = re.sub(r"_.*", "", name) if name in _pt_models or name in _pkl_models else name
-    suffix = ".pt" if _base in _pt_models or name in _pt_models else ".pkl"
+    from openbb_forecast.models.factory import get_model_suffix
+    suffix = get_model_suffix(name)
     artifact = artifact_path(name, version, suffix)
     model.save(artifact)
     meta_path = artifact.with_suffix(".meta.json")
@@ -123,6 +127,7 @@ def _train_one(name: str, symbol: str, version: str) -> dict:
         }
     )
     meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
+    _store_feature_references(df, symbol)
     return {
         "artifact": artifact,
         "val_sharpe": float(val_sharpe),
@@ -135,10 +140,8 @@ def _train_one(name: str, symbol: str, version: str) -> dict:
 
 def _previous_sharpe(name: str) -> float | None:
     try:
-        import re
-        _pt_models = {"lstm", "transformer", "gru", "cnn", "rnn_variant"}
-        _pkl_models = {"ensemble", "arima"}
-        suffix = ".pt" if name in _pt_models else ".pkl"
+        from openbb_forecast.models.factory import get_model_suffix
+        suffix = get_model_suffix(name)
         latest = resolve_latest(name, suffix)
         meta_path = latest.with_suffix(".meta.json")
         if meta_path.exists():
@@ -146,6 +149,17 @@ def _previous_sharpe(name: str) -> float | None:
     except Exception:
         return None
     return None
+
+
+def _store_feature_references(df: pd.DataFrame, symbol: str):
+    """Store training feature distributions as drift references."""
+    from app.services.drift_monitor import DriftMonitor
+    monitor = DriftMonitor()
+    for col in FEATURE_COLS:
+        if col in df.columns:
+            values = df[col].dropna().values.tolist()
+            if values:
+                monitor.set_reference(f"{symbol}_{col}", values)
 
 
 def main():

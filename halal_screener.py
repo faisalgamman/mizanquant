@@ -2818,11 +2818,55 @@ CONSENSUS_PROFILES = {
 }
 
 
+def _consensus_technical_fallback(symbol, df, profile_name="ml"):
+    """Fallback to technical scoring when no ML/RL models can analyze."""
+    from app.services.scoring import weighted_score
+    try:
+        spy_df = _load_consensus_df("SPY")
+        result = weighted_score(df, spy_df=spy_df)
+        total = result.get("total", 0)
+        verdict = "NEUTRAL"
+        if total >= 80:
+            verdict = "STRONG BUY"
+        elif total >= 65:
+            verdict = "BUY"
+        elif total <= 20:
+            verdict = "STRONG SELL"
+        elif total <= 35:
+            verdict = "SELL"
+        return [{
+            "Symbol": symbol.upper(), "Strategy": f"C-{profile_name}",
+            "Price": round(float(df["close"].iloc[-1]), 2),
+            "Verdict": verdict, "Confidence %": result.get("confidence", 0),
+            "Votes BUY": 1 if total >= 65 else 0,
+            "Votes SELL": 1 if total <= 35 else 0,
+            "Votes HOLD": 0,
+            "Detail": "التحليل تقني فقط — خارج universe التدريب",
+            "Technical Score": total,
+        }]
+    except Exception as e:
+        return [{"Error": f"Technical fallback failed: {e}"}]
+
+
 def run_consensus(symbol, horizon=5, episodes=10, profile="base", df_override=None, as_of=None):
     profile_name = (profile or "base").lower()
     meta = CONSENSUS_PROFILES.get(profile_name)
     if meta is None:
         return [{"Error": f"Unknown consensus profile: {profile_name}"}]
+
+    # ── Halal gate ──
+    is_halal, reason = verify_halal(symbol)
+    curated = symbol.upper() in _get_curated_set()
+    if not is_halal:
+        return [{
+            "Symbol": symbol.upper(), "Price": 0, "Verdict": "BLOCKED",
+            "Confidence %": 0, "Signal": "BLOCKED",
+            "Tool": "HalalGate", "Vote": "-",
+            "Error": f"❌ خارج قائمة الحلال — {reason}",
+        }]
+    if not curated:
+        logger.info("Consensus for %s: خارج universe التدريب — التحليل تقني فقط", symbol)
+
     prepared_df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
 
     if profile_name == "base":
@@ -2855,6 +2899,18 @@ def run_consensus(symbol, horizon=5, episodes=10, profile="base", df_override=No
             df_override=prepared_df,
             as_of=as_of,
         )
+
+    # ── Fallback: if ML profile returned too few votes, use technical score ──
+    if profile_name == "ml" and not curated and result and isinstance(result, list):
+        first = result[0]
+        votes_buy = int(first.get("Votes BUY", 0))
+        votes_sell = int(first.get("Votes SELL", 0))
+        votes_total = votes_buy + votes_sell + int(first.get("Votes HOLD", 0))
+        if votes_total < 3 and first.get("Error") is None:
+            logger.info("Consensus ML: %d votes only (untrained symbol) — using technical fallback", votes_total)
+            fallback = _consensus_technical_fallback(symbol, prepared_df, profile_name)
+            if fallback and "Error" not in fallback[0]:
+                result = fallback
 
     _persist_consensus_result(symbol, profile_name, result)
     return result
