@@ -292,6 +292,22 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 .compare-bar { display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--accent); color:#fff; border-radius:8px; font-size:12px; font-weight:600; margin-bottom:12px; }
 .compare-bar.hidden { display:none; }
 
+/* Filter chips for USX PRO */
+.filter-chip {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:3px 10px; border-radius:12px; font-size:10px; font-weight:600;
+  cursor:pointer; transition:all 0.2s; user-select:none;
+  background:var(--bg-card); border:1px solid var(--border); color:var(--text-muted);
+}
+.filter-chip:hover { background:var(--bg-card-hover); color:var(--text-primary); }
+.filter-chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* Market Status Bar colors */
+.ms-risk-on { background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.3); color:#4ade80; }
+.ms-caution { background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; }
+.ms-credit-stress { background:rgba(249,115,22,0.15); border:1px solid rgba(249,115,22,0.3); color:#fb923c; }
+.ms-extreme-fear { background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#f87171; }
+
 /* Arabic support */
 [dir="rtl"] .sidebar { right:0; left:auto; }
 [dir="rtl"] .main { margin-right:var(--sidebar-width); margin-left:0; }
@@ -641,25 +657,47 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
       <div id="screenerResult" class="result-box" style="max-height:300px;"></div>
     </div>
   </div>
-  <!-- Full Smart Screener (inside Research tab) -->
+  <!-- Full Smart Screener — USX PRO V4.1 Edition (inside Research tab) -->
   <div class="card" id="smartScreenerCard" style="border-color:var(--accent);border-width:2px;">
+
+    <!-- ═══ Market Status Bar (USX PRO V4.1) ═══ -->
+    <div id="marketStatusBar" style="display:none;padding:8px 16px;border-radius:8px;margin:8px 12px 0;font-size:12px;font-weight:600;align-items:center;gap:16px;flex-wrap:wrap;"></div>
+
     <div class="card-header" style="position:sticky;top:0;background:var(--bg-card);z-index:10;border-radius:12px 12px 0 0;">
       <div>
-        <div class="card-title"><i class="fas fa-microchip" style="color:var(--accent);margin-right:6px;"></i> Smart Screener — Halal + Profitability + Fair Price</div>
-        <div class="card-subtitle">Scans 120+ stocks on halal (binary) + profitability (40) + valuation (40) + market quality (20) = Smart Score 0-100</div>
+        <div class="card-title"><i class="fas fa-microchip" style="color:var(--accent);margin-right:6px;"></i> USX PRO Screener</div>
+        <div class="card-subtitle">Fundamentals (40) + Momentum (30) + Forecast (30) = Long Score 0-100 | Market-driven gates</div>
       </div>
-      <button class="btn btn-primary" onclick="runSmartScreener()"><i class="fas fa-rocket"></i> Run Smart Scan</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="screenerTimestamp" style="font-size:10px;color:var(--text-muted);"></span>
+        <button class="btn btn-primary btn-sm" onclick="runSmartScreener()"><i class="fas fa-rocket"></i> Scan</button>
+        <button class="btn btn-sm btn-outline" onclick="toggleAutoRefresh()" id="autoRefreshBtn" title="Auto-refresh every 5 min"><i class="fas fa-sync-alt"></i></button>
+      </div>
     </div>
-    <div class="form-group" style="margin-bottom:12px;flex-wrap:wrap;">
-      <label>Min Score</label>
-      <select id="smartMinScore" style="width:80px;"><option>0</option><option>50</option><option selected>65</option><option>70</option><option>80</option></select>
-      <label>Sector</label>
-      <input type="text" id="smartSector" value="" placeholder="e.g. Technology" style="width:130px;">
-      <label>Max Results</label>
-      <select id="smartMaxResults" style="width:80px;"><option selected>25</option><option>50</option><option>100</option></select>
-      <span style="font-size:11px;color:var(--text-muted);">First scan ~1-2 min (cached 24h)</span>
+
+    <!-- Score Gates + Quick Filters Bar -->
+    <div class="form-group" style="margin-bottom:8px;flex-wrap:wrap;padding:0 12px;">
+      <label>Min Gate</label>
+      <span id="screenerMinGate" style="font-weight:700;font-size:14px;">60</span>
+      <label>Strong Gate</label>
+      <span id="screenerStrongGate" style="font-weight:700;font-size:14px;color:var(--green);">75</span>
+      <label style="margin-left:8px;">Sector</label>
+      <input type="text" id="smartSector" value="" placeholder="e.g. Technology" style="width:110px;font-size:11px;">
+      <label>Max</label>
+      <select id="smartMaxResults" style="width:70px;font-size:11px;"><option selected>25</option><option>50</option><option>100</option></select>
+      <span style="font-size:10px;color:var(--text-muted);">Cached 24h</span>
+      <!-- Quick Filters -->
+      <span class="filter-chip active" data-filter="all" onclick="applyFilter('all')">All</span>
+      <span class="filter-chip" data-filter="halal" onclick="applyFilter('halal')">Halal Only</span>
+      <span class="filter-chip" data-filter="qualified" onclick="applyFilter('qualified')">QUALIFIED</span>
+      <span class="filter-chip" data-filter="watch" onclick="applyFilter('watch')">WATCH</span>
+      <span class="filter-chip" data-filter="buy" onclick="applyFilter('buy')">BUY Signal</span>
     </div>
-    <div id="smartResult"><div class="loading"><div class="spinner"></div>Click "Run Smart Scan" to discover investment opportunities</div></div>
+
+    <div id="smartResult"><div class="loading"><div class="spinner"></div>Click "Scan" to discover investment opportunities</div></div>
+
+    <!-- NO QUALIFIED CANDIDATE Banner -->
+    <div id="qualifiedBanner" style="display:none;padding:10px 16px;margin:0 12px 8px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;"></div>
   </div>
   <!-- Category Overview (moved from Overview tab) -->
   <div class="card"><div class="card-header"><div><div class="card-title">Category Overview</div><div class="card-subtitle">Models, agents, and tools by category</div></div></div>
@@ -1873,6 +1911,7 @@ async function loadAgentChart() {
 
 // ===== RESEARCH TAB =====
 async function loadResearchTab() {
+  loadMarketStatus();
   document.getElementById('researchStats').innerHTML = `
     <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-search"></i></div><div class="stat-value">7</div><div class="stat-label">Research Tools</div></div>
     <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-database"></i></div><div class="stat-value">yFinance</div><div class="stat-label">Data Source</div></div>
@@ -2081,81 +2120,176 @@ async function runScreener() {
   }
 }
 
+// ── USX PRO V4.1 Screener State ──
+let _screenerData = null;
+let _screenerFilter = 'all';
+let _autoRefreshTimer = null;
+
+async function loadMarketStatus() {
+  const bar = document.getElementById('marketStatusBar');
+  try {
+    const data = await apiGet('/api/market/status?force_refresh=false');
+    const status = data.status || 'RISK ON';
+    const vix = data.vix || 0;
+    const vixPct = data.vix_pctile || 0;
+    const creditRatio = data.credit_ratio || 'N/A';
+    const minGate = data.min_gate || 60;
+    const strongGate = data.strong_gate || 75;
+    const halted = data.halt_pipeline || false;
+
+    // Update gates display
+    document.getElementById('screenerMinGate').textContent = minGate;
+    document.getElementById('screenerStrongGate').textContent = strongGate;
+
+    // Status icon and color
+    const statusClass = 'ms-' + status.toLowerCase().replace(/\s+/g, '-');
+    const statusIcon = status === 'RISK ON' ? '🟢' : status === 'CAUTION' ? '🟡' : status === 'CREDIT STRESS' ? '🟠' : '🔴';
+    const statusText = status === 'EXTREME FEAR' ? 'EXTREME FEAR' : status;
+
+    bar.style.display = 'flex';
+    bar.className = statusClass;
+    bar.style.cssText += 'display:flex;padding:8px 16px;border-radius:8px;margin:8px 12px 0;font-size:12px;font-weight:600;align-items:center;gap:16px;flex-wrap:wrap;';
+    bar.innerHTML = `
+      <span>${statusIcon} <strong>${statusText}</strong></span>
+      <span>VIX: ${vix.toFixed(2)} (Pct ${vixPct.toFixed(1)}%)</span>
+      <span>HY/IG: ${creditRatio}</span>
+      <span>Min Gate: <strong>${minGate}</strong></span>
+      <span>Strong Gate: <strong>${strongGate}</strong></span>
+      ${halted ? '<span style="color:var(--red);">⏸ PIPELINE HALTED</span>' : ''}
+      <span style="font-size:10px;font-weight:400;color:var(--text-muted);margin-left:auto;">${data.cached_at ? new Date(data.cached_at).toLocaleTimeString() : ''}</span>
+    `;
+  } catch(e) {
+    bar.style.display = 'none';
+  }
+}
+
 async function runSmartScreener() {
-  const minScore = document.getElementById('smartMinScore').value;
+  loadMarketStatus();
   const sector = document.getElementById('smartSector').value;
   const maxResults = document.getElementById('smartMaxResults').value;
-  document.getElementById('smartResult').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning 120 stocks for halal + profitability + fair value... (1-2 min first time)</div>';
+  document.getElementById('smartResult').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning 120 stocks...</div>';
+  document.getElementById('screenerTimestamp').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
   try {
-    const data = await apiGet('/api/stock/smart-screener?min_score='+minScore+'&sector='+sector+'&max_results='+maxResults+'&use_cache=True');
+    const data = await apiGet('/api/stock/smart-screener?min_score=0&sector='+sector+'&max_results='+maxResults+'&use_cache=True');
+    _screenerData = data;
     const results = data.results || [];
     const ttl = data.results_count || 0;
     const scanned = data.total_scanned || 0;
     const halalCount = data.halal_count || 0;
+    const qualifiedCount = data.qualified_count || 0;
+    const watchCount = data.watch_count || 0;
     const source = data.source || 'live';
+    const minGate = data.min_score || 60;
+    const strongGate = data.strong_gate || 75;
 
-    let html = '<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap;">' +
-      '<div style="padding:8px 16px;background:rgba(34,197,94,0.1);border-radius:8px;text-align:center;">' +
-        '<div style="font-size:20px;font-weight:700;color:var(--green);">'+halalCount+'</div>' +
-        '<div style="font-size:10px;color:var(--text-muted);">Halal Stocks</div></div>' +
-      '<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
-        '<div style="font-size:20px;font-weight:700;">'+scanned+'</div>' +
-        '<div style="font-size:10px;color:var(--text-muted);">Scanned</div></div>' +
-      '<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
-        '<div style="font-size:20px;font-weight:700;color:var(--accent);">'+ttl+'</div>' +
-        '<div style="font-size:10px;color:var(--text-muted);">Top Opportunities</div></div>' +
-      '<div style="padding:8px 16px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
-        '<div style="font-size:12px;font-weight:500;">'+source+'</div>' +
-        '<div style="font-size:10px;color:var(--text-muted);">Source</div></div>' +
-      '<div style="padding:8px 16px;background:rgba(168,85,247,0.1);border-radius:8px;text-align:center;">' +
-        '<div style="font-size:11px;font-weight:500;color:var(--purple);">Fund(40)+Tech(30)+Fcst(30)</div>' +
-        '<div style="font-size:10px;color:var(--text-muted);">New Smart Score</div></div></div>';
+    // Update gates
+    document.getElementById('screenerMinGate').textContent = minGate;
+    document.getElementById('screenerStrongGate').textContent = strongGate;
+
+    // Update timestamp
+    const now = new Date();
+    document.getElementById('screenerTimestamp').innerHTML = '🕐 ' + now.toLocaleTimeString() + ' ET';
+
+    // Stats bar
+    let html = '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">' +
+      '<div style="padding:6px 14px;background:rgba(34,197,94,0.1);border-radius:8px;text-align:center;">' +
+        '<span style="font-size:16px;font-weight:700;color:var(--green);">'+halalCount+'</span>' +
+        '<span style="font-size:9px;color:var(--text-muted);display:block;">Halal</span></div>' +
+      '<div style="padding:6px 14px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
+        '<span style="font-size:16px;font-weight:700;">'+scanned+'</span>' +
+        '<span style="font-size:9px;color:var(--text-muted);display:block;">Scanned</span></div>' +
+      '<div style="padding:6px 14px;background:rgba(34,197,94,0.08);border-radius:8px;text-align:center;">' +
+        '<span style="font-size:16px;font-weight:700;color:var(--green);">'+qualifiedCount+'</span>' +
+        '<span style="font-size:9px;color:var(--text-muted);display:block;">QUALIFIED</span></div>' +
+      '<div style="padding:6px 14px;background:rgba(245,158,11,0.08);border-radius:8px;text-align:center;">' +
+        '<span style="font-size:16px;font-weight:700;color:var(--orange);">'+watchCount+'</span>' +
+        '<span style="font-size:9px;color:var(--text-muted);display:block;">WATCH</span></div>' +
+      '<div style="padding:6px 14px;background:var(--bg-card);border-radius:8px;text-align:center;">' +
+        '<span style="font-size:13px;font-weight:500;">'+source+'</span>' +
+        '<span style="font-size:9px;color:var(--text-muted);display:block;">Source</span></div>' +
+      '<button class="btn btn-sm" onclick="exportSmartCSV()" style="margin-left:auto;"><i class="fas fa-download"></i> CSV</button></div>';
+
+    // NO QUALIFIED CANDIDATE Banner
+    const qualifiedBanner = document.getElementById('qualifiedBanner');
+    if (results.length === 0) {
+      qualifiedBanner.style.display = 'block';
+      qualifiedBanner.className = 'ms-caution';
+      qualifiedBanner.style.cssText += 'display:block;padding:12px 16px;margin:0 12px 8px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;';
+      qualifiedBanner.innerHTML = '⏸ NO QUALIFIED CANDIDATE — WAIT';
+    } else if (qualifiedCount === 0 && watchCount > 0) {
+      qualifiedBanner.style.display = 'block';
+      qualifiedBanner.className = 'ms-caution';
+      qualifiedBanner.style.cssText += 'display:block;padding:12px 16px;margin:0 12px 8px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;';
+      qualifiedBanner.innerHTML = '⚠ WATCH ONLY — ' + watchCount + ' candidates near gate';
+    } else {
+      qualifiedBanner.style.display = 'block';
+      qualifiedBanner.className = 'ms-risk-on';
+      qualifiedBanner.style.cssText += 'display:block;padding:12px 16px;margin:0 12px 8px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;';
+      qualifiedBanner.innerHTML = '✅ ' + qualifiedCount + ' QUALIFIED CANDIDATES  |  ' + watchCount + ' WATCH';
+    }
 
     if (results.length > 0) {
-    document.getElementById('smartResult').innerHTML = html.replace('Smart Score', 'Score') + '<div style="display:flex;gap:8px;margin-bottom:8px;font-size:11px;color:var(--text-muted);flex-wrap:wrap;align-items:center;"><span>🚀 Smart=Fund(40)+Tech(30)+Fcst(30)</span><span>⚡ RSIs,MACD,BB,VWAP</span><button class="btn btn-sm" onclick="exportSmartCSV()" style="margin-left:auto;"><i class="fas fa-download"></i> CSV</button></div>';
+      // USX PRO V4.1 Table
+      html += '<div style="overflow-x:auto;"><table class="result-table"><thead><tr>' +
+        '<th>#</th><th>Symbol</th><th>Halal</th><th>Long</th><th>Short</th>' +
+        '<th>Ext%</th><th>ATR%</th><th>ADV$M</th>' +
+        '<th>Price</th><th>Chg%</th><th>Signal</th>' +
+      '</tr></thead><tbody>';
 
-    html = '<div style="overflow-x:auto;"><table class="result-table"><thead><tr>' +
-      '<th>#</th><th>Symbol</th><th>Halal</th><th>Price</th>' +
-      '<th>🚀 Smart</th><th>📊 Fund</th><th>⚡ Tech</th><th>🎯 Fcst</th>' +
-      '<th>RSI</th><th>MACD</th><th>BB</th><th>VWAP</th>' +
-      '<th>P/E</th><th>ROE</th><th>MktCap</th>' +
-    '</tr></thead><tbody>';
-    results.forEach(function(r, i) {
+      // Sort by smart_score descending
+      results.sort(function(a,b) { return (b.smart_score||0) - (a.smart_score||0); });
+
+      results.forEach(function(r, i) {
         var total = r.smart_score || 0;
-        var fund = r.fundamental_score || 0;
-        var mom = r.momentum_score || 0;
-        var fcst = r.forecast_score || 0;
-        var md = r.momentum_details || {};
-        var rsi = md.rsi || 'N/A';
-        var macdLabel = md.macd_label || '';
-        var macdShort = macdLabel.slice(0,12);
-        var bbLabel = md.bb_label || '';
-        var bbShort = bbLabel.slice(0,14);
-        var vwapRatio = md.vwap_ratio;
-        var vwapStr = typeof vwapRatio === 'number' ? (vwapRatio*100).toFixed(1)+'%' : 'N/A';
-        var pe = r.valuation_details ? r.valuation_details.pe_val : null;
-        var roe = r.profitability_details ? r.profitability_details.roe_val : null;
-        var mcapStr = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
-        var halalBadge = r.is_halal ? '<span style="color:var(--green);">✅</span>' : '<span style="color:var(--red);">❌</span>';
-        var scoreColor = total >= 75 ? 'var(--green)' : total >= 55 ? 'var(--accent)' : total >= 40 ? 'var(--orange)' : 'var(--red)';
-        var scoreBg = total >= 75 ? 'rgba(34,197,94,0.15)' : total >= 55 ? 'rgba(59,130,246,0.15)' : total >= 40 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
-        var rsiColor = (rsi !== 'N/A' && rsi > 70) ? 'var(--red)' : (rsi !== 'N/A' && rsi < 30) ? 'var(--orange)' : 'var(--green)';
-        html += '<tr>' +
+        var shortScore = Math.max(0, 100 - total);
+        var ext = r.ext_pct;
+        var atr = r.atr_pct;
+        var adv = r.adv_dollar_m;
+        var price = r.price || 0;
+        var chg = r.change_pct;
+        var signal = r.signal || 'WAIT';
+
+        // Long Score color
+        var longColor, longBg;
+        if (total >= strongGate) { longColor = '#4ade80'; longBg = 'rgba(34,197,94,0.2)'; }
+        else if (total >= minGate) { longColor = 'var(--accent)'; longBg = 'rgba(59,130,246,0.15)'; }
+        else { longColor = 'var(--text-muted)'; longBg = 'transparent'; }
+
+        // Ext% color
+        var extColor = ext != null ? (Math.abs(ext) > 15 ? 'var(--red)' : Math.abs(ext) > 10 ? 'var(--orange)' : 'var(--green)') : 'var(--text-muted)';
+
+        // ADV$M color
+        var advColor = adv != null ? (adv < 500 ? 'var(--orange)' : 'var(--green)') : 'var(--text-muted)';
+        var advNote = adv != null && adv < 500 ? ' ⚠️' : '';
+
+        // Chg% color
+        var chgColor = chg != null ? (chg > 0 ? 'var(--green)' : chg < 0 ? 'var(--red)' : 'var(--text-muted)') : 'var(--text-muted)';
+        var chgIcon = chg != null ? (chg > 0 ? '▲' : chg < 0 ? '▼' : '') : '';
+
+        // Signal color/badge
+        var signalColor, signalBg;
+        if (signal === 'BUY') { signalColor = '#4ade80'; signalBg = 'rgba(34,197,94,0.2)'; }
+        else if (signal === 'WAIT') { signalColor = '#fbbf24'; signalBg = 'rgba(245,158,11,0.15)'; }
+        else if (signal === 'REGIME') { signalColor = 'var(--text-muted)'; signalBg = 'rgba(148,163,184,0.15)'; }
+        else if (signal === 'CREDIT') { signalColor = '#fb923c'; signalBg = 'rgba(249,115,22,0.15)'; }
+        else { signalColor = '#f87171'; signalBg = 'rgba(239,68,68,0.15)'; } // AVOID
+
+        // Halal icon
+        var halalIcon = r.is_halal ? '<span style="color:var(--green);font-size:13px;">✅</span>' : '<span style="color:var(--red);font-size:13px;">❌</span>';
+        var rowStyle = r.is_halal ? '' : 'style="text-decoration:line-through;opacity:0.6;"';
+
+        html += '<tr ' + rowStyle + '>' +
           '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
-          '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')" title="Click for score breakdown">'+r.symbol+'</td>' +
-          '<td style="text-align:center;font-size:13px;">'+halalBadge+'</td>' +
-          '<td>$'+(r.price ? r.price.toFixed(2) : 'N/A')+'</td>' +
-          '<td style="font-weight:700;color:'+scoreColor+';background:'+scoreBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
-          '<td style="text-align:center;font-weight:500;">'+fund+'</td>' +
-          '<td style="text-align:center;font-weight:500;">'+mom+'</td>' +
-          '<td style="text-align:center;font-weight:500;">'+fcst+'</td>' +
-          '<td style="text-align:center;color:'+rsiColor+';font-weight:500;">'+(typeof rsi === 'number' ? rsi.toFixed(0) : 'N/A')+'</td>' +
-          '<td style="font-size:10px;text-align:center;" title="'+macdLabel+'">'+macdShort+'</td>' +
-          '<td style="font-size:10px;text-align:center;" title="'+bbLabel+'">'+bbShort+'</td>' +
-          '<td style="font-size:10px;text-align:center;">'+vwapStr+'</td>' +
-          '<td>'+(typeof pe === 'number' ? pe.toFixed(1) : 'N/A')+'</td>' +
-          '<td>'+(roe ? (roe*100).toFixed(1)+'%' : 'N/A')+'</td>' +
-          '<td>'+mcapStr+'</td>' +
+          '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+'</td>' +
+          '<td style="text-align:center;">'+halalIcon+'</td>' +
+          '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
+          '<td style="text-align:center;color:var(--text-muted);font-size:11px;">'+(shortScore)+'</td>' +
+          '<td style="text-align:center;color:'+extColor+';">'+(ext != null ? ext.toFixed(1)+'%' : 'N/A')+'</td>' +
+          '<td style="text-align:center;">'+(atr != null ? atr.toFixed(2)+'%' : 'N/A')+'</td>' +
+          '<td style="text-align:center;color:'+advColor+';">'+(adv != null ? adv.toFixed(0)+advNote : 'N/A')+'</td>' +
+          '<td>$'+(price ? price.toFixed(2) : 'N/A')+'</td>' +
+          '<td style="color:'+chgColor+';font-weight:600;">'+(chg != null ? chgIcon + ' ' + chg.toFixed(2)+'%' : 'N/A')+'</td>' +
+          '<td style="text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:'+signalColor+';background:'+signalBg+';">'+signal+'</span></td>' +
         '</tr>';
       });
       html += '</tbody></table></div>';
@@ -2168,9 +2302,114 @@ async function runSmartScreener() {
     document.getElementById('smartResult').innerHTML = html;
     lastScreenerResults = results;
     updateScreenerSummary();
+    _screenerFilter = 'all';
   } catch(e) {
     document.getElementById('smartResult').innerHTML = '<div class="alert alert-warning">Error: ' + e.message + '</div>';
+    document.getElementById('screenerTimestamp').innerHTML = '';
   }
+}
+
+function applyFilter(filter) {
+  _screenerFilter = filter;
+  // Update chip UI
+  document.querySelectorAll('.filter-chip').forEach(function(chip) {
+    chip.classList.toggle('active', chip.dataset.filter === filter);
+  });
+  // Filter and re-render
+  if (!_screenerData || !_screenerData.results) return;
+  var results = _screenerData.results;
+  var minGate = _screenerData.min_score || 60;
+  var strongGate = _screenerData.strong_gate || 75;
+
+  if (filter === 'halal') { results = results.filter(function(r) { return r.is_halal; }); }
+  else if (filter === 'qualified') { results = results.filter(function(r) { return (r.smart_score||0) >= strongGate; }); }
+  else if (filter === 'watch') { results = results.filter(function(r) { var s = r.smart_score||0; return s >= minGate && s < strongGate; }); }
+  else if (filter === 'buy') { results = results.filter(function(r) { return r.signal === 'BUY'; }); }
+
+  // Rebuild table
+  renderScreenerTable(results);
+}
+
+function renderScreenerTable(results) {
+  var minGate = (_screenerData && _screenerData.min_score) || 60;
+  var strongGate = (_screenerData && _screenerData.strong_gate) || 75;
+  var html = '<div style="overflow-x:auto;"><table class="result-table"><thead><tr>' +
+    '<th>#</th><th>Symbol</th><th>Halal</th><th>Long</th><th>Short</th>' +
+    '<th>Ext%</th><th>ATR%</th><th>ADV$M</th>' +
+    '<th>Price</th><th>Chg%</th><th>Signal</th>' +
+  '</tr></thead><tbody>';
+
+  results.sort(function(a,b) { return (b.smart_score||0) - (a.smart_score||0); });
+  results.forEach(function(r, i) {
+    var total = r.smart_score || 0;
+    var shortScore = Math.max(0, 100 - total);
+    var ext = r.ext_pct;
+    var atr = r.atr_pct;
+    var adv = r.adv_dollar_m;
+    var price = r.price || 0;
+    var chg = r.change_pct;
+    var signal = r.signal || 'WAIT';
+
+    var longColor = total >= strongGate ? '#4ade80' : total >= minGate ? 'var(--accent)' : 'var(--text-muted)';
+    var longBg = total >= strongGate ? 'rgba(34,197,94,0.2)' : total >= minGate ? 'rgba(59,130,246,0.15)' : 'transparent';
+    var extColor = ext != null ? (Math.abs(ext) > 15 ? 'var(--red)' : Math.abs(ext) > 10 ? 'var(--orange)' : 'var(--green)') : 'var(--text-muted)';
+    var advColor = adv != null ? (adv < 500 ? 'var(--orange)' : 'var(--green)') : 'var(--text-muted)';
+    var advNote = adv != null && adv < 500 ? ' ⚠️' : '';
+    var chgColor = chg != null ? (chg > 0 ? 'var(--green)' : chg < 0 ? 'var(--red)' : 'var(--text-muted)') : 'var(--text-muted)';
+    var chgIcon = chg != null ? (chg > 0 ? '▲' : chg < 0 ? '▼' : '') : '';
+    var signalColor, signalBg;
+    if (signal === 'BUY') { signalColor = '#4ade80'; signalBg = 'rgba(34,197,94,0.2)'; }
+    else if (signal === 'WAIT') { signalColor = '#fbbf24'; signalBg = 'rgba(245,158,11,0.15)'; }
+    else if (signal === 'REGIME') { signalColor = 'var(--text-muted)'; signalBg = 'rgba(148,163,184,0.15)'; }
+    else if (signal === 'CREDIT') { signalColor = '#fb923c'; signalBg = 'rgba(249,115,22,0.15)'; }
+    else { signalColor = '#f87171'; signalBg = 'rgba(239,68,68,0.15)'; }
+    var halalIcon = r.is_halal ? '<span style="color:var(--green);font-size:13px;">✅</span>' : '<span style="color:var(--red);font-size:13px;">❌</span>';
+    var rowStyle = r.is_halal ? '' : 'style="text-decoration:line-through;opacity:0.6;"';
+
+    html += '<tr ' + rowStyle + '>' +
+      '<td style="color:var(--text-muted);">'+(i+1)+'</td>' +
+      '<td style="font-weight:600;cursor:pointer;" onclick="showScoreDetail('+i+')">'+r.symbol+'</td>' +
+      '<td style="text-align:center;">'+halalIcon+'</td>' +
+      '<td style="font-weight:700;color:'+longColor+';background:'+longBg+';border-radius:4px;text-align:center;">'+total+'</td>' +
+      '<td style="text-align:center;color:var(--text-muted);font-size:11px;">'+shortScore+'</td>' +
+      '<td style="text-align:center;color:'+extColor+';">'+(ext != null ? ext.toFixed(1)+'%' : 'N/A')+'</td>' +
+      '<td style="text-align:center;">'+(atr != null ? atr.toFixed(2)+'%' : 'N/A')+'</td>' +
+      '<td style="text-align:center;color:'+advColor+';">'+(adv != null ? adv.toFixed(0)+advNote : 'N/A')+'</td>' +
+      '<td>$'+(price ? price.toFixed(2) : 'N/A')+'</td>' +
+      '<td style="color:'+chgColor+';font-weight:600;">'+(chg != null ? chgIcon + ' ' + chg.toFixed(2)+'%' : 'N/A')+'</td>' +
+      '<td style="text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:'+signalColor+';background:'+signalBg+';">'+signal+'</span></td>' +
+    '</tr>';
+  });
+  html += '</tbody></table></div>';
+  // Keep stats bar and banner by replacing only table portion
+  var smartEl = document.getElementById('smartResult');
+  var existingHtml = smartEl.innerHTML;
+  var tableStart = existingHtml.indexOf('<div style="overflow-x:auto;">');
+  var tableEnd = existingHtml.lastIndexOf('</table></div>') + '</table></div>'.length;
+  if (tableStart >= 0 && tableEnd > tableStart) {
+    smartEl.innerHTML = existingHtml.slice(0, tableStart) + html + existingHtml.slice(tableEnd) + '<div id="scoreDetailPanel"></div>';
+  } else {
+    // Fallback: full replace keeping stats intact
+    var statsEnd = existingHtml.indexOf('<div style="overflow-x:auto;">');
+    var prefix = statsEnd > 0 ? existingHtml.slice(0, statsEnd) : '';
+    smartEl.innerHTML = prefix + html + '<div id="scoreDetailPanel"></div>';
+  }
+  lastScreenerResults = results;
+}
+
+function toggleAutoRefresh() {
+  if (_autoRefreshTimer) {
+    clearInterval(_autoRefreshTimer);
+    _autoRefreshTimer = null;
+    document.getElementById('autoRefreshBtn').innerHTML = '<i class="fas fa-sync-alt"></i>';
+    document.getElementById('autoRefreshBtn').classList.remove('btn-success');
+    return;
+  }
+  _autoRefreshTimer = setInterval(function() {
+    runSmartScreener();
+  }, 5 * 60 * 1000); // 5 min
+  document.getElementById('autoRefreshBtn').innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> ON';
+  document.getElementById('autoRefreshBtn').classList.add('btn-success');
 }
 
 // ===== HALAL TAB =====
@@ -2439,11 +2678,13 @@ function showScoreDetail(idx) {
 
 function exportSmartCSV() {
   if (!lastScreenerResults.length) return;
-  const headers = ['Symbol', 'Price', 'SmartScore', 'Fundamental', 'Momentum', 'Forecast', 'RSI', 'P/E', 'ROE', 'MktCap', 'Sector', 'Halal'];
+  const headers = ['Symbol','LongScore','ShortScore','Ext%','ATR%','ADV$M','Price','Chg%','Signal','Fund','Tech','Fcst','RSI','P/E','ROE','MktCap','Sector','Halal'];
   const rows = lastScreenerResults.map(r => [
-    r.symbol, r.price || '', r.smart_score || 0, r.fundamental_score || 0, r.momentum_score || 0, r.forecast_score || 0,
-    (r.momentum_details && r.momentum_details.rsi) || '', (r.valuation_details && r.valuation_details.pe_val) || '',
-    (r.profitability_details && r.profitability_details.roe_val) || '', r.market_cap || '', r.sector || '', r.is_halal ? 'Halal' : 'Non-Halal'
+    r.symbol, r.smart_score||0, Math.max(0,100-(r.smart_score||0)), r.ext_pct||'', r.atr_pct||'', r.adv_dollar_m||'',
+    r.price||'', r.change_pct||'', r.signal||'WAIT',
+    r.fundamental_score||0, r.momentum_score||0, r.forecast_score||0,
+    (r.momentum_details && r.momentum_details.rsi)||'', (r.valuation_details && r.valuation_details.pe_val)||'',
+    (r.profitability_details && r.profitability_details.roe_val)||'', r.market_cap||'', r.sector||'', r.is_halal?'Halal':'Non-Halal'
   ]);
   const csv = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });

@@ -1362,6 +1362,7 @@ def _analyze_smart(symbol: str) -> dict | None:
         fundamental = min(40, prof["score"] // 2 + val["score"] // 4 + mkt["score"] // 2)
 
         # ── Technical Momentum Score (0-30) ──
+        hist_df = None
         try:
             _, hist_df = _fetch_data(symbol, period="1y")
             if hist_df is not None and len(hist_df) > 20:
@@ -1374,6 +1375,55 @@ def _analyze_smart(symbol: str) -> dict | None:
         # ── Forecast Consensus (0-30) — placeholder until post-processing ──
         forecast = {"score": 0, "details": {"note": "computed in post-process"}}
 
+        # ── USX PRO Extra Columns: Ext%, ATR%, ADV$M, Chg%, Signal ──
+        ext_pct = None
+        atr_pct = None
+        adv_dollar_m = None
+        chg_pct = None
+        signal = "WAIT"
+        if hist_df is not None and len(hist_df) > 14:
+            closes = hist_df["close"].values.astype(float)
+            highs = hist_df["high"].values.astype(float) if "high" in hist_df.columns else closes
+            lows = hist_df["low"].values.astype(float) if "low" in hist_df.columns else closes
+            volumes = hist_df["volume"].values.astype(float) if "volume" in hist_df.columns else None
+
+            # Ext%: distance from 20-day high
+            high_20 = float(np.max(highs[-20:]))
+            ext_pct = round((price - high_20) / high_20 * 100, 2) if high_20 > 0 else 0
+
+            # ATR%: ATR(14) / price
+            tr = np.maximum(highs[1:] - lows[1:], np.abs(highs[1:] - closes[:-1]), np.abs(lows[1:] - closes[:-1]))
+            atr = float(np.mean(tr[-14:])) if len(tr) >= 14 else 0
+            atr_pct = round(atr / price * 100, 2) if price > 0 else 0
+
+            # ADV$M: avg volume × price / 1,000,000
+            if volumes is not None:
+                avg_vol = float(np.mean(volumes[-20:])) if len(volumes) >= 20 else float(np.mean(volumes))
+                adv_dollar_m = round(avg_vol * price / 1_000_000, 1)
+
+            # Chg%: daily change
+            if len(closes) >= 2:
+                chg_pct = round((closes[-1] - closes[-2]) / closes[-2] * 100, 2)
+
+            # Signal classification
+            mom = momentum.get("details", {})
+            rsi = mom.get("rsi", 50)
+            macd_label = mom.get("macd_label", "")
+            bb_label = mom.get("bb_label", "")
+            vwap_ratio = mom.get("vwap_ratio", 0)
+            if rsi and isinstance(rsi, (int, float)) and rsi > 70 and "Overbought" in str(bb_label):
+                signal = "AVOID"
+            elif rsi and isinstance(rsi, (int, float)) and rsi < 35 and "Oversold" in str(bb_label):
+                signal = "BUY"
+            elif "Bullish" in str(macd_label) and "Above VWAP" in str(mom.get("vwap_label", "")):
+                signal = "BUY"
+            elif "Squeeze" in str(bb_label) and "Mid" in str(bb_label):
+                signal = "BUY"
+            elif "Bearish" in str(macd_label) or "Below VWAP" in str(mom.get("vwap_label", "")):
+                signal = "AVOID"
+            else:
+                signal = "WAIT"
+
         smart_score = fundamental + momentum["score"]  # + forecast added later
 
         return {
@@ -1382,6 +1432,7 @@ def _analyze_smart(symbol: str) -> dict | None:
             "sector": sector_val.title() if sector_val else "",
             "industry": industry_val.title() if industry_val else "",
             "price": price,
+            "change_pct": chg_pct,
             "market_cap": mcap,
             "is_halal": is_halal,
             "halal_screens": halal_screens,
@@ -1405,6 +1456,11 @@ def _analyze_smart(symbol: str) -> dict | None:
             "forecast_score": forecast["score"],
             "forecast_details": forecast["details"],
             "smart_score": smart_score,
+            # USX PRO extra columns
+            "ext_pct": ext_pct,
+            "atr_pct": atr_pct,
+            "adv_dollar_m": adv_dollar_m,
+            "signal": signal,
         }
     except Exception:
         return None
@@ -1425,7 +1481,7 @@ async def smart_screener(
       1. Fundamentals (0-40): profitability, valuation, market quality
       2. Technical Momentum (0-30): RSI, MACD, Bollinger Bands, VWAP
       3. Forecast Consensus (0-30): model direction agreement + agent Sharpe (top stocks only)
-    Returns ranked opportunities with detailed score breakdown.
+    Returns ranked opportunities with detailed score breakdown + market status gates.
     """
     _use_cache = str(use_cache).lower() in ("true", "1", "yes")
     cache_key = "smart_screener"
@@ -1433,6 +1489,19 @@ async def smart_screener(
         cached = _cache_get(cache_key)
         if cached:
             return {"source": "cache", **cached}
+
+    # Fetch market status for dynamic gates
+    try:
+        from app.services.market_context import get_market_status
+        market_status = get_market_status()
+    except Exception:
+        market_status = {"status": "RISK ON", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
+
+    # Apply market-driven gates when min_score is default (0)
+    effective_min_score = min_score
+    if effective_min_score == 0:
+        effective_min_score = market_status.get("min_gate", 60)
+    strong_gate = market_status.get("strong_gate", 75)
 
     all_results = []
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -1450,8 +1519,8 @@ async def smart_screener(
         filtered = [r for r in filtered if r.get("market_cap", 0) >= min_market_cap]
 
     filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
-    if min_score > 0:
-        filtered = [r for r in filtered if r["smart_score"] >= min_score]
+    if effective_min_score > 0:
+        filtered = [r for r in filtered if r["smart_score"] >= effective_min_score]
     top = filtered[:max_results]
 
     # ── Forecast Consensus post-processing (0-30) on top results ──
@@ -1473,11 +1542,24 @@ async def smart_screener(
         # Re-sort after forecast scores added
         top.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
 
+    # Count qualified vs watch candidates
+    qualified_count = sum(1 for r in top if r["smart_score"] >= strong_gate)
+    watch_count = sum(1 for r in top if effective_min_score <= r["smart_score"] < strong_gate)
+
+    # Build signal reasons for market context
+    regimed = sum(1 for r in top if r.get("signal") == "REGIME")
+    credited = sum(1 for r in top if r.get("signal") == "CREDIT")
+
     result = {
         "total_scanned": len(_SMART_UNIVERSE),
         "halal_count": sum(1 for r in all_results if r.get("is_halal")),
         "results_count": len(top),
-        "min_score": min_score,
+        "qualified_count": qualified_count,
+        "watch_count": watch_count,
+        "min_score": effective_min_score,
+        "strong_gate": strong_gate,
+        "market_status": market_status.get("status", "RISK ON"),
+        "halt_pipeline": market_status.get("halt_pipeline", False),
         "filters": {"sector": sector, "min_market_cap": min_market_cap},
         "results": top,
     }

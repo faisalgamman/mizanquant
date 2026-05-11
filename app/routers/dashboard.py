@@ -366,6 +366,13 @@ async def api_market_context(force_refresh: bool = False):
     return get_market_context(force_refresh=force_refresh)
 
 
+@router.get("/api/market/status")
+async def api_market_status(force_refresh: bool = False):
+    """USX PRO V4.1 Market Status: RISK ON / CAUTION / CREDIT STRESS / EXTREME FEAR with gates."""
+    from app.services.market_context import get_market_status
+    return get_market_status(force_refresh=force_refresh)
+
+
 @router.get("/api/sectors/performance")
 async def api_sector_performance(force_refresh: bool = False):
     """Return performance for all 11 sector ETFs."""
