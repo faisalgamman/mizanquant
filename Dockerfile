@@ -22,4 +22,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
     CMD python -c "import httpx; httpx.get('http://127.0.0.1:${PORT:-8000}/api/info').raise_for_status()"
 
 # Run
-CMD uvicorn halal_screener:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
+CMD python app/workspace_server.py

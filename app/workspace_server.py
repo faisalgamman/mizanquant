@@ -27,6 +27,7 @@ import pandas as pd
 import uvicorn
 import yfinance as yf
 from fastapi import FastAPI, Query
+from app.services.universe import HALAL_STOCKS_FALLBACK
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from openbb_core.provider.abstract.data import Data
@@ -111,14 +112,14 @@ def _cache_key(name: str) -> str:
     return name.lower().replace("/", "_").replace(" ", "_")
 
 
-def _cache_get(key: str):
+def _cache_get(key: str, max_age: int = 86400):
     path = _cache_dir / f"{key}.json"
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text())
         age = time.time() - data.get("_ts", 0)
-        if age > 86400:
+        if age > max_age:
             path.unlink(missing_ok=True)
             return None
         return data.get("data")
@@ -138,6 +139,32 @@ def _cache_clear():
     import shutil
     shutil.rmtree(_cache_dir, ignore_errors=True)
     _cache_dir.mkdir(exist_ok=True)
+
+
+# ── Screener Progress Tracker ──
+_screener_progress = {"current": 0, "total": 0, "status": "idle", "batch": 0}
+
+
+def _reset_progress(total: int):
+    global _screener_progress
+    _screener_progress = {"current": 0, "total": total, "status": "scanning", "batch": 0}
+
+
+def _update_progress(n: int, batch: int = 0):
+    global _screener_progress
+    _screener_progress["current"] = n
+    if batch:
+        _screener_progress["batch"] = batch
+
+
+def _finish_progress():
+    global _screener_progress
+    _screener_progress["status"] = "done"
+    _screener_progress["current"] = _screener_progress["total"]
+
+
+SCREENER_BATCH_SIZE = 50
+SCREENER_CACHE_TTL = 900  # 15 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -921,29 +948,8 @@ def _fetch_screener_data(sym: str, halal_only: bool) -> dict | None:
 # Smart Screener — halal + profitability + fair price scoring (0-100)
 # ---------------------------------------------------------------------------
 
-_SMART_UNIVERSE = [
-    # Technology (20)
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "AVGO", "ORCL", "CRM", "ADBE",
-    "AMD", "INTC", "TXN", "QCOM", "IBM", "SAP", "CSCO", "ACN", "NOW", "UBER",
-    # Healthcare (20)
-    "JNJ", "UNH", "LLY", "ABT", "TMO", "NVS", "PFE", "MRK", "ABBV", "BMY",
-    "AMGN", "ISRG", "SYK", "BSX", "REGN", "VRTX", "GILD", "BIIB", "EW", "ZTS",
-    # Consumer Cyclical (16)
-    "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "BKNG", "TJX", "TGT", "ROST",
-    "MAR", "HLT", "GM", "F", "RCL", "ABNB",
-    # Consumer Defensive (16)
-    "PG", "KO", "PEP", "WMT", "COST", "PM", "MO", "CL", "KMB", "EL",
-    "GIS", "K", "SYY", "MDLZ", "MNST", "CAG",
-    # Energy (10)
-    "XOM", "CVX", "COP", "EOG", "SLB", "HAL", "OXY", "MPC", "VLO", "PSX",
-    # Industrials (16)
-    "CAT", "BA", "GE", "HON", "UPS", "FDX", "RTX", "LMT", "UNP", "CSX",
-    "WM", "RSG", "CARR", "OTIS", "DE", "CMI",
-    # Basic Materials (10)
-    "LIN", "SHW", "APD", "ECL", "NEM", "FCX", "DOW", "DD", "PPG", "ALB",
-    # Communication Services (8)
-    "NFLX", "DIS", "CMCSA", "CHTR", "T", "VZ", "TMUS", "EA",
-]
+# Full 357 halal S&P 500 universe — used by smart screener
+_SMART_UNIVERSE = HALAL_STOCKS_FALLBACK
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -1375,11 +1381,13 @@ def _analyze_smart(symbol: str) -> dict | None:
         # ── Forecast Consensus (0-30) — placeholder until post-processing ──
         forecast = {"score": 0, "details": {"note": "computed in post-process"}}
 
-        # ── USX PRO Extra Columns: Ext%, ATR%, ADV$M, Chg%, Signal ──
+        # ── USX PRO Extra Columns: Ext%, ATR%, ADV$M, Chg%, Signal, ADX, RSvsSPY ──
         ext_pct = None
         atr_pct = None
         adv_dollar_m = None
         chg_pct = None
+        adx_val = None
+        rs_vs_spy = "NEUTRAL"
         signal = "WAIT"
         if hist_df is not None and len(hist_df) > 14:
             closes = hist_df["close"].values.astype(float)
@@ -1404,6 +1412,39 @@ def _analyze_smart(symbol: str) -> dict | None:
             # Chg%: daily change
             if len(closes) >= 2:
                 chg_pct = round((closes[-1] - closes[-2]) / closes[-2] * 100, 2)
+
+            # ADX(14): Average Directional Index
+            if len(closes) > 28:
+                try:
+                    up = np.diff(highs)
+                    down = -np.diff(lows)
+                    plus_dm = np.where((up > down) & (up > 0), up, 0)
+                    minus_dm = np.where((down > up) & (down > 0), down, 0)
+                    tr14 = np.array([float(np.mean(tr[max(0,i-13):i+1])) for i in range(len(tr))])
+                    atr14 = np.where(tr14 > 0, tr14, 1)
+                    plus_di = 100 * np.convolve(plus_dm[:len(tr)], np.ones(14)/14, mode='same') / atr14
+                    minus_di = 100 * np.convolve(minus_dm[:len(tr)], np.ones(14)/14, mode='same') / atr14
+                    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
+                    adx_val = round(float(np.mean(dx[-14:])), 1)
+                except Exception:
+                    adx_val = None
+
+            # RS vs SPY: 20-day relative performance
+            try:
+                _, spy_df = _fetch_data("SPY", period="2mo")
+                if spy_df is not None and len(spy_df) >= 20:
+                    spy_closes = spy_df["close"].values.astype(float)
+                    sym_ret_20d = (closes[-1] - closes[-20]) / closes[-20] * 100 if len(closes) >= 20 else 0
+                    spy_ret_20d = (spy_closes[-1] - spy_closes[-20]) / spy_closes[-20] * 100 if len(spy_closes) >= 20 else 0
+                    rel = sym_ret_20d - spy_ret_20d
+                    if rel > 2:
+                        rs_vs_spy = "LEADER"
+                    elif rel < -2:
+                        rs_vs_spy = "LAGGARD"
+                    else:
+                        rs_vs_spy = "NEUTRAL"
+            except Exception:
+                rs_vs_spy = "N/A"
 
             # Signal classification
             mom = momentum.get("details", {})
@@ -1487,7 +1528,7 @@ async def smart_screener(
     _use_cache = str(use_cache).lower() in ("true", "1", "yes")
     cache_key = "smart_screener"
     if _use_cache:
-        cached = _cache_get(cache_key)
+        cached = _cache_get(cache_key, max_age=SCREENER_CACHE_TTL)
         if cached:
             return {"source": "cache", **cached}
 
@@ -1504,72 +1545,107 @@ async def smart_screener(
         effective_min_score = market_status.get("min_gate", 60)
     strong_gate = market_status.get("strong_gate", 75)
 
-    # Use watchlist symbols if provided, otherwise default universe
-    scan_symbols = [s.strip().upper() for s in watchlist.split(",") if s.strip()] if watchlist else _SMART_UNIVERSE
+    # Use watchlist symbols if provided, otherwise full 357 halal universe
+    scan_symbols = [s.strip().upper() for s in watchlist.split(",") if s.strip()] if watchlist else list(_SMART_UNIVERSE)
 
-    all_results = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(_analyze_smart, sym): sym for sym in scan_symbols}
-        for f in as_completed(futures):
-            r = f.result()
-            if r:
-                all_results.append(r)
-
-    # Filter halal-only, score, sector, market cap
-    filtered = [r for r in all_results if r.get("is_halal")]
-    if sector:
-        filtered = [r for r in filtered if sector.lower() in r.get("sector", "").lower()]
-    if min_market_cap > 0:
-        filtered = [r for r in filtered if r.get("market_cap", 0) >= min_market_cap]
-
-    filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
-    if effective_min_score > 0:
-        filtered = [r for r in filtered if r["smart_score"] >= effective_min_score]
-    top = filtered[:max_results]
-
-    # ── Forecast Consensus post-processing (0-30) on top results ──
-    _do_forecast = str(add_forecast).lower() in ("true", "1", "yes")
-    if _do_forecast and top:
-        logger.info(f"Computing forecast consensus for {len(top)} top stocks...")
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top}
-            for ff in as_completed(f_futures):
-                r = f_futures[ff]
-                try:
-                    fc = ff.result()
-                    r["forecast_score"] = fc["score"]
-                    r["forecast_details"] = fc["details"]
-                    r["smart_score"] = r.get("fundamental_score", 0) + r.get("momentum_score", 0) + fc["score"]
-                except Exception:
-                    pass
-
-        # Re-sort after forecast scores added
-        top.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
-
-    # Count qualified vs watch candidates
-    qualified_count = sum(1 for r in top if r["smart_score"] >= strong_gate)
-    watch_count = sum(1 for r in top if effective_min_score <= r["smart_score"] < strong_gate)
-
-    # Build signal reasons for market context
-    regimed = sum(1 for r in top if r.get("signal") == "REGIME")
-    credited = sum(1 for r in top if r.get("signal") == "CREDIT")
-
-    result = {
+    # Kick off background scan; return current cache or scanning status
+    import threading
+    if _screener_progress.get("status") not in ("scanning",):
+        t = threading.Thread(target=_run_screener_bg, args=(scan_symbols,), daemon=True)
+        t.start()
+    stale = _cache_get(cache_key, max_age=SCREENER_CACHE_TTL * 2)
+    if stale:
+        pct = round(_screener_progress.get("current", 0) / max(_screener_progress.get("total", 1), 1) * 100, 1)
+        result = {**stale, "source": "stale_cache", "scan_pct": pct}
+        if effective_min_score > 0 and market_status.get("halt_pipeline"):
+            result["halt_pipeline"] = True
+        return result
+    return {
+        "source": "scanning",
+        "status": "scanning",
         "total_scanned": len(scan_symbols),
+        "scan_pct": 0,
+        "message": f"Scanning {len(scan_symbols)} symbols in background. Check /api/screener/progress for status."
+    }
+
+
+def _run_screener_bg(scan_symbols: list):
+    """Run screener scan in background thread, store results in cache."""
+    cache_key = "smart_screener"
+    total = len(scan_symbols)
+    _reset_progress(total)
+    logger.info("Background scan starting for %d symbols", total)
+    all_results = []
+    batch_size = SCREENER_BATCH_SIZE
+    batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]
+    for batch_idx, batch in enumerate(batches):
+        _update_progress(batch_idx * batch_size + len(batch), batch_idx + 1)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(_analyze_smart, sym): sym for sym in batch}
+            for f in as_completed(futures):
+                r = f.result()
+                if r:
+                    all_results.append(r)
+    _finish_progress()
+    logger.info("Background scan complete: %d halal results from %d symbols",
+                sum(1 for r in all_results if r.get("is_halal")), total)
+
+    # Filter, sort, build result
+    filtered = [r for r in all_results if r.get("is_halal")]
+    filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
+    top = filtered[:50]
+
+    # Forecast on top
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top}
+        for ff in as_completed(f_futures):
+            r = f_futures[ff]
+            try:
+                fc = ff.result()
+                if fc:
+                    r["forecast_score"] = fc.get("score", 0)
+                    r["forecast_details"] = fc.get("details", {})
+                    r["smart_score"] = min(100, r.get("smart_score", 0) + fc.get("score", 0))
+            except Exception:
+                pass
+
+    # Market status for gates
+    try:
+        from app.services.market_context import get_market_status
+        market_status = get_market_status()
+    except Exception:
+        market_status = {"status": "RISK ON", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
+
+    qualified_count = sum(1 for r in top if r.get("smart_score", 0) >= market_status.get("strong_gate", 75))
+    watch_count = sum(1 for r in top if market_status.get("min_gate", 60) <= r.get("smart_score", 0) < market_status.get("strong_gate", 75))
+
+    cache_result = {
+        "total_scanned": total,
         "halal_count": sum(1 for r in all_results if r.get("is_halal")),
         "results_count": len(top),
         "qualified_count": qualified_count,
         "watch_count": watch_count,
-        "min_score": effective_min_score,
-        "strong_gate": strong_gate,
+        "min_score": market_status.get("min_gate", 60),
+        "strong_gate": market_status.get("strong_gate", 75),
         "market_status": market_status.get("status", "RISK ON"),
         "halt_pipeline": market_status.get("halt_pipeline", False),
-        "filters": {"sector": sector, "min_market_cap": min_market_cap},
         "results": top,
     }
+    _cache_set(cache_key, cache_result)
 
     _cache_set(cache_key, result)
     return {"source": "live", **result}
+
+
+@app.get("/api/screener/progress")
+async def screener_progress():
+    """Return current scan progress."""
+    p = dict(_screener_progress)
+    if p["total"] > 0:
+        p["pct"] = round(p["current"] / p["total"] * 100, 1)
+    else:
+        p["pct"] = 0
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -3410,8 +3486,8 @@ async def get_dashboard_alt():
 
 def main():
     """Start the workspace backend server."""
-    host = os.getenv("WORKSPACE_HOST", "127.0.0.1")
-    port = int(os.getenv("WORKSPACE_PORT", "6910"))
+    host = os.getenv("WORKSPACE_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", os.getenv("WORKSPACE_PORT", "6910")))
     logger.info("Starting OpenBB Forecast Workspace Backend on http://%s:%d", host, port)
     logger.info("Widgets available at http://%s:%d/widgets.json", host, port)
     logger.info("Dashboards available at http://%s:%d/apps.json", host, port)

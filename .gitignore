@@ -14,6 +14,14 @@ __pycache__/
 reports/
 *.docx
 
+# Runtime cache / session artifacts — not source
+app/.cache/
+data/
+docs/
+drift_references/
+models/gru/
+CHANGELOG_SESSION.md
+
 # Standalone experimental copilot service — not part of Railway deploy
 # (the production copilot lives at /agent/chat in halal_screener.py)
 copilot.py
