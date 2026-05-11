@@ -20,8 +20,8 @@ ENV PYTHONPATH="/app:/app/_vendor:$PYTHONPATH"
 # Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Debug: test import of openbb_forecast subpackages
-RUN PYTHONPATH="/app:/app/_vendor" python -c "import os, sys; pkg=__import__('openbb_forecast'); print('PKG:', pkg.__file__); print('PATH:', pkg.__path__); sub=__import__('openbb_forecast.data'); print('DATA:', sub.__file__)"
+# Debug: verify data directory and files
+RUN ls -laR /app/_vendor/openbb_forecast/ && echo "=== data/__init__.py ===" && cat /app/_vendor/openbb_forecast/data/__init__.py
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
