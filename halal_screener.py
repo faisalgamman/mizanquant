@@ -585,16 +585,25 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
                     in_trade = True
                     entry_idx = i + 1  # entry bar is the NEXT bar
         if not trades: return [{"Symbol": symbol, "Message": "No trades found"}]
-        wins = [t for t in trades if t["Result"] == "Take Profit"]
-        losses = [t for t in trades if t["Result"] == "Stop Loss"]
+        # Classify every trade by PnL, not by exit reason
+        for t in trades:
+            if t["PnL"] > 0:
+                t["Classification"] = "WIN"
+            elif t["PnL"] < 0:
+                t["Classification"] = "LOSS"
+            else:
+                t["Classification"] = "BREAKEVEN"
+        wins = [t for t in trades if t["Classification"] == "WIN"]
+        losses = [t for t in trades if t["Classification"] == "LOSS"]
         metrics = calc_metrics(trade_returns)
         # Chan Ch.2 / Bailey & Lopez de Prado: Deflated Sharpe penalises trial count.
         from app.services.backtest_qc import deflated_sharpe, permutation_pvalue
         dsr = deflated_sharpe(trade_returns, n_trials=1)
         pval = permutation_pvalue(trade_returns, n_perm=200)
+        total_closed = len(trades)
         summary = [{"Symbol": symbol, "Period": f"{start_date} to {end_date}",
-                    "Total Trades": len(trades), "Winners": len(wins), "Losers": len(losses),
-                    "Win Rate %": round(len(wins) / len(trades) * 100, 1),
+                    "Total Trades": total_closed, "Winners": len(wins), "Losers": len(losses),
+                    "Win Rate %": round(len(wins) / total_closed * 100, 1) if total_closed else 0,
                     "Total PnL": round(sum(t["PnL"] for t in trades), 2),
                     "Final Portfolio": round(port, 2),
                     "Return %": round((port - portfolio) / portfolio * 100, 2),
@@ -693,7 +702,7 @@ def _preload_persisted_models():
         _load_persisted_model(model_name)
 
 
-_preload_persisted_models()
+# _preload_persisted_models()  # lazy-load on first use to save RAM (~500 MB on Railway)
 
 def run_lstm(symbol, horizon, df=None):
     return _run_with_memory_guard(_run_lstm_inner, symbol, horizon, df=df)
@@ -4446,12 +4455,54 @@ from app.routers.forecast import router as forecast_router
 from app.routers.consensus import router as consensus_router
 from app.routers.portfolio import router as portfolio_router
 from app.routers.admin import router as admin_router
+from app.routers.dashboard import router as dashboard_router
 
+# Mount static files for dashboard
+from fastapi.staticfiles import StaticFiles
+import os
+_static_dir = os.path.join(os.path.dirname(__file__), "app", "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+
+# Include routers
 app.include_router(screener_router)
 app.include_router(forecast_router)
 app.include_router(consensus_router)
 app.include_router(portfolio_router)
 app.include_router(admin_router)
+app.include_router(dashboard_router)
+
+
+@app.get("/api/info", include_in_schema=False)
+async def api_info():
+    """Model/agent info for the dashboard."""
+    from app.routers.dashboard import _dashboard_health
+    from app.config import STRATEGY_CONFIGS
+    from app.services.regime import get_regime
+    health = await _dashboard_health()
+    regime = get_regime()
+    model_status = _check_model_degradation()
+    model_items = [{"name": n, "category": "Neural Network", "status": s.get("status", "idle"), "sharpe": s.get("sharpe", 0), "win_rate": s.get("acc", 0)} for n, s in model_status.items()]
+    return {
+        "status": health.get("status", "degraded"), "broker": health.get("broker", "unknown"),
+        "database": health.get("database", "unknown"), "regime": regime.state if regime else "UNKNOWN",
+        "symbols_count": len(_universe_symbols()), "strategies_count": len(STRATEGY_CONFIGS),
+        "model_items": model_items, "agent_items": [],
+        "last_full_retrain": None, "smart_scan_freshness": None,
+        "uptime_hours": health.get("uptime_seconds", 0) / 3600 if health.get("uptime_seconds") else 0,
+        "version": "17.0.0",
+    }
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard_page():
+    """Serve the professional dashboard UI."""
+    from fastapi.responses import FileResponse
+    _dash = os.path.join(os.path.dirname(__file__), "app", "static", "dashboard.html")
+    if os.path.isfile(_dash):
+        return FileResponse(_dash)
+    return {"error": "Dashboard not found"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

@@ -1,5 +1,10 @@
-"""Interactive Brokers adapter for the broker interface (Phase B).
+"""Interactive Brokers adapter — DEPRECATED.
 
+This adapter is kept for reference but is no longer wired into the
+broker factory. Alpaca is the sole broker for all trading operations.
+
+Previous docstring:
+---
 Connects to a running IB Gateway (or TWS) over the standard TWS API
 socket using `ib_insync`. The gateway runs as a separate Railway
 service via the `gnzsnz/ib-gateway` Docker image with IBC handling

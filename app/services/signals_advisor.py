@@ -1,5 +1,5 @@
 """Signals-advisor service — 3-stage funnel that produces only the
-highest-conviction STRONG BUY alerts for manual execution on IBKR.
+highest-conviction STRONG BUY alerts for manual execution on Alpaca.
 
 Pipeline:
 
@@ -96,7 +96,7 @@ def _scan_one(symbol: str, runner, label: str) -> dict | None:
 def scan_universe_for_strategy(
     strategy_id: str,
     symbols: list[str] | None = None,
-    max_workers: int = 8,
+    max_workers: int = 3,
     min_confidence: float = 70.0,
 ) -> list[dict]:
     """Stage 2 helper — run AI consensus for one strategy across the
@@ -219,7 +219,7 @@ def _format_signal(
     lines.extend([
         f"Time:       {now_et}",
         "",
-        "Manual execution on IBKR — review chart before placing.",
+        "Review chart and confirm via Alpaca before placing.",
     ])
 
     levels = {"entry": price, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
@@ -281,7 +281,7 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
 # ---------------------------------------------------------------------------
 
 def _stage1_usx_filter(symbols: list[str], min_usx_score: float = 65.0,
-                       max_workers: int = 8) -> tuple[list[dict], dict]:
+                       max_workers: int = 3) -> tuple[list[dict], dict]:
     """Run USX V4 regime gate + per-stock qualifier across the universe.
 
     Returns (passing_rows, regime_dict). Each passing row includes
@@ -313,7 +313,7 @@ def _stage1_usx_filter(symbols: list[str], min_usx_score: float = 65.0,
 def scan_and_notify_strong_buys(
     strategy_ids: tuple[str, ...] = ("A", "B", "C"),
     symbols: list[str] | None = None,
-    max_workers: int = 8,
+    max_workers: int = 3,
     min_confidence: float = 70.0,
     min_usx_score: float = 65.0,
     account_usd: float = _DEFAULT_ACCOUNT_USD,
@@ -432,7 +432,7 @@ def scan_and_notify_strong_buys(
                 f"Stage 1 (USX V4): {summary['stage1_pass']}/{summary['scanned_total']}\n"
                 f"Stage 2 (AI):     {summary['stage2_pass']}\n"
                 f"By strategy: A={by.get('A',0)} B={by.get('B',0)} C={by.get('C',0)}\n"
-                "Charts and trade plans posted above. Review and execute manually on IBKR."
+                "Charts and trade plans posted above. Review and execute via Alpaca."
             )
         except Exception:
             pass
