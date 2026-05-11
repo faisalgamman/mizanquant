@@ -5,8 +5,11 @@ WORKDIR /app
 # Copy app package
 COPY app/ /app/app/
 
-# Copy openbb_forecast to a non-conflicting path (avoid namespace package clash)
+# Copy openbb_forecast to a non-conflicting path
+# Note: COPY openbb_forecast/openbb_forecast/ sometimes misses data/ on Windows builders
 COPY openbb_forecast/openbb_forecast/ /app/_vendor/openbb_forecast/
+# Explicitly copy data subpackage as a workaround for Docker COPY issues
+COPY openbb_forecast/openbb_forecast/data/ /app/_vendor/openbb_forecast/data/
 
 # Copy project root files
 COPY requirements.txt railway.json /app/
@@ -19,9 +22,6 @@ ENV PYTHONPATH="/app:/app/_vendor:$PYTHONPATH"
 
 # Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Debug: verify data directory and files
-RUN ls -laR /app/_vendor/openbb_forecast/ && echo "=== data/__init__.py ===" && cat /app/_vendor/openbb_forecast/data/__init__.py
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
