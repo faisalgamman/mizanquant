@@ -63,4 +63,3 @@ RUSSELL_1000_HALAL = [
 
 # إزالة التكرارات
 RUSSELL_1000_HALAL = list(dict.fromkeys(RUSSELL_1000_HALAL))
-print(f"Total Halal Stocks: {len(RUSSELL_1000_HALAL)}")

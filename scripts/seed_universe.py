@@ -26,10 +26,9 @@ logger = logging.getLogger("seed_universe")
 
 
 def seed_from_russell(db):
-    """Seed from calibration/stocks/russell1000_halal.py (curated ~120 symbols)."""
-    sys.path.insert(0, ".")
+    """Seed from app/data/russell1000_halal.py (curated ~120 symbols)."""
     try:
-        from calibration.stocks.russell1000_halal import RUSSELL_1000_HALAL
+        from app.data.russell1000_halal import RUSSELL_1000_HALAL
     except ImportError:
         logger.error("Could not import russell1000_halal — falling back to HALAL_STOCKS")
         return seed_from_fallback(db)
@@ -60,7 +59,7 @@ def main():
     try:
         if args.dry_run:
             if args.from_russell:
-                from calibration.stocks.russell1000_halal import RUSSELL_1000_HALAL
+                from app.data.russell1000_halal import RUSSELL_1000_HALAL
                 symbols = set(RUSSELL_1000_HALAL)
             else:
                 symbols = set(HALAL_STOCKS_FALLBACK)
