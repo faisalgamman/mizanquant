@@ -131,6 +131,26 @@ def adx(df, n=14):
     return adx_val, plus_di, minus_di
 
 
+def volume_ratio(df, period=20):
+    """Volume Ratio — current volume / average volume over `period` days.
+
+    Args:
+        df: DataFrame with 'volume' column.
+        period: lookback window (default 20).
+
+    Returns:
+        Float ratio (current / average). NaN-safe, defaults to 1.0.
+    """
+    if "volume" not in df.columns or len(df) < period:
+        return 1.0
+    vol = df["volume"].astype(float)
+    latest = float(vol.iloc[-1])
+    avg = float(vol.iloc[-period:].mean())
+    if avg == 0:
+        return 1.0
+    return latest / avg
+
+
 def roc(s, n=10):
     """Rate of Change (percentage).
 
