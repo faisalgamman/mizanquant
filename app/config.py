@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     TRAILING_STOP_ENABLED: bool = True   # use trailing stops instead of static SL
     TRAILING_STOP_PCT: float = 2.5       # trailing stop distance (% from peak)
 
+    # --- Interactive Brokers (TWS/IB Gateway) ---
+    IBKR_HOST: str = "127.0.0.1"
+    IBKR_PORT: int = 7497
+    IBKR_CLIENT_ID: int = 1
+
     # --- Live whitelist (SF-3) ---
     # Comma-separated list of ticker symbols allowed for live trading.
     # When empty, validate_for_live() will refuse to arm auto-trade.
