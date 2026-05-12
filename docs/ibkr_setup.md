@@ -30,7 +30,8 @@ the gateway over the Railway private network.
 In the openbb-trading project on Railway:
 
 1. **+ New** → **Empty Service** (name it `ib-gateway`)
-2. **Source** → **Docker Image** → `gnzsnz/ib-gateway:latest`
+2. **Source** → **Docker Image** → `ghcr.io/gnzsnz/ib-gateway:stable`
+   - إذا لم يعمل، جرب: `docker.io/gnzsnz/ib-gateway:latest`
 3. **Settings → Networking → Private Networking → Enabled**
 4. **Variables**:
 
