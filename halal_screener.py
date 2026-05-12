@@ -125,7 +125,7 @@ async def root():
         "status": "live",
     }
 
-import keep_alive
+from app.services import keep_alive
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
