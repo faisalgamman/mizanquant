@@ -41,6 +41,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+@app.get("/health")
+async def health():
+    """Railway health check endpoint."""
+    return {"status": "ok"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://pro.openbb.co", "https://openbb.co", "http://localhost:4200"],
