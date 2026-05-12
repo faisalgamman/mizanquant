@@ -32,6 +32,9 @@ def _resolve_broker_name(strategy_id: str | None) -> str:
 def _build(broker_name: str) -> BrokerClient:
     if broker_name == "alpaca":
         return AlpacaBroker()
+    if broker_name == "ibkr":
+        from app.services.broker.ibkr_adapter import IBBroker
+        return IBBroker()
     logger.warning("Unknown broker '%s'; falling back to Alpaca", broker_name)
     return AlpacaBroker()
 
