@@ -367,3 +367,47 @@ async def trading_disable(x_api_key: OperatorAPIKey = None):
     settings.AUTO_TRADE_ENABLED = False
     tg_send("AUTO-TRADING DISABLED\n\nAuto-execution has been stopped.\nAll existing positions remain open.")
     return {"auto_trade_enabled": False, "message": "Auto-trading disabled"}
+
+
+@router.get("/api/ibkr/ping")
+async def ibkr_ping(x_api_key: OperatorAPIKey = None):
+    import socket
+    from halal_screener import _require_api_key, settings
+    _require_api_key(x_api_key)
+    host = settings.IBKR_HOST
+    port = settings.IBKR_PORT
+    client_id = settings.IBKR_CLIENT_ID
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        return {
+            "status": "ok",
+            "host": host,
+            "port": port,
+            "client_id": client_id,
+            "message": "TWS/IB Gateway is reachable",
+        }
+    except socket.timeout:
+        return {
+            "status": "error",
+            "host": host,
+            "port": port,
+            "client_id": client_id,
+            "message": "Connection timed out. Check that TWS/IB Gateway is running and the port is correct.",
+        }
+    except ConnectionRefusedError:
+        return {
+            "status": "error",
+            "host": host,
+            "port": port,
+            "client_id": client_id,
+            "message": "Connection refused. TWS/IB Gateway is not running on this host:port.",
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "host": host,
+            "port": port,
+            "client_id": client_id,
+            "message": str(exc),
+        }
