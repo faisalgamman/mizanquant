@@ -622,9 +622,15 @@ def _score_to_dict_old(result: dict) -> dict:
 
 
 def get_market_status() -> dict:
-    """Get current market status with dynamic gate values."""
+    """Get dynamic market status with gate values from market_context.
+
+    Delegates to market_context.get_market_status() which uses
+    VIX percentile + HY/IG credit ratio for classification.
+    Then maps status to min_gate / strong_gate values.
+    """
     try:
-        mc = get_market_context()
+        from app.services.market_context import get_market_status as _mc_status
+        mc = _mc_status()
         status = mc.get("status", "RISK ON")
     except Exception:
         status = "RISK ON"

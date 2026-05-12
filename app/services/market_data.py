@@ -149,6 +149,10 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
     - Retry with exponential backoff on 429
     - Max 3 retries before giving up
     """
+    if _alpaca_breaker.is_open():
+        logger.warning("Alpaca circuit breaker OPEN — skipping %s", symbol)
+        return None
+
     symbol = _validate_symbol(symbol)
     if not symbol:
         return None
@@ -361,6 +365,10 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
 
 def fetch_yf(symbol, period="2y", start=None, end=None):
     """Fetch historical data from yfinance (fallback)."""
+    if _yfinance_breaker.is_open():
+        logger.warning("yfinance circuit breaker OPEN — skipping %s", symbol)
+        return None
+
     symbol = _validate_symbol(symbol)
     if not symbol:
         return None
@@ -374,6 +382,7 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
         else:
             df = t.history(period=period, auto_adjust=True)
         if df.empty:
+            _yfinance_breaker.record_failure()
             return None
         df.columns = [c.lower() for c in df.columns]
         df = df.reset_index()
@@ -381,10 +390,60 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
         for col in ["dividends", "stock splits", "capital gains"]:
             df.drop(columns=[col], errors="ignore", inplace=True)
         min_rows = 40
-        return df if len(df) >= min_rows else None
+        result = df if len(df) >= min_rows else None
+        if result is not None:
+            _yfinance_breaker.record_success()
+        else:
+            _yfinance_breaker.record_failure()
+        return result
     except Exception as e:
         logger.error(f"yfinance {symbol}: {e}")
+        _yfinance_breaker.record_failure()
         return None
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker for external services
+# ---------------------------------------------------------------------------
+
+
+class CircuitBreaker:
+    """Tracks failures; cuts off after threshold, auto-resets after timeout."""
+
+    def __init__(self, name: str, failure_threshold: int = 5, reset_timeout: float = 60.0):
+        self.name = name
+        self.failure_threshold = failure_threshold
+        self.reset_timeout = reset_timeout
+        self.failures = 0
+        self.last_failure_time = 0.0
+        self.state = "closed"
+        self._lock = threading.Lock()
+
+    def record_failure(self) -> None:
+        with self._lock:
+            self.failures += 1
+            self.last_failure_time = time.time()
+            if self.failures >= self.failure_threshold:
+                self.state = "open"
+
+    def record_success(self) -> None:
+        with self._lock:
+            self.failures = 0
+            self.state = "closed"
+
+    def is_open(self) -> bool:
+        with self._lock:
+            if self.state == "open":
+                if time.time() - self.last_failure_time > self.reset_timeout:
+                    self.state = "half-open"
+                    return False
+                return True
+            return False
+
+
+# Global circuit breakers
+_yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=10, reset_timeout=120.0)
+_alpaca_breaker = CircuitBreaker("alpaca", failure_threshold=10, reset_timeout=60.0)
 
 
 def fetch(symbol, period="2y", start=None, end=None):

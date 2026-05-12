@@ -550,6 +550,30 @@ def _run_post_market():
     # Send strategy comparison report
     alert_strategy_comparison()
 
+    # Roadmap 1.6 — End of Day Report
+    try:
+        from app.services.telegram_alert import alert_end_of_day_report
+        from app.services.market_context import get_market_context, get_market_status
+
+        mkt_status = get_market_status()
+        mkt_ctx = get_market_context()
+
+        passed = len([r for r in results if r.get("swing_score", 0) >= 65])
+        qual = [r for r in results if r.get("swing_score", 0) >= 75][:5]
+        watch = [r for r in results if 60 <= r.get("swing_score", 0) < 75][:3]
+
+        alert_end_of_day_report(
+            market_status={**mkt_status, **mkt_ctx},
+            total_scanned=len(results),
+            passed_gates=passed,
+            qualified_signals=qual,
+            watch_signals=watch,
+            pipeline_runtime=None,
+            system_status="operational",
+        )
+    except Exception as e:
+        logger.warning("End of day report failed: %s", e)
+
     gc.collect()
 
 
