@@ -49,6 +49,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Strategy imports
+try:
+    from app.strategies import get_strategy_selector, StrategyInput, StrategySignal
+    _strategy_selector = None  # lazy init
+
+    def _get_selector():
+        global _strategy_selector
+        if _strategy_selector is None:
+            _strategy_selector = get_strategy_selector()
+        return _strategy_selector
+
+    def _get_symbol_strategy(symbol: str, hist_df, spy_df=None) -> StrategySignal | None:
+        """Run all 4 strategies and return the best one for a symbol."""
+        import pandas as pd
+        if hist_df is None or len(hist_df) < 30:
+            return None
+        try:
+            sel = _get_selector()
+            mkt = {}
+            try:
+                from app.services.market_context import get_market_status
+                mkt = get_market_status()
+            except Exception:
+                pass
+            df_w = None
+            try:
+                tw = yf.Ticker(symbol)
+                wf = tw.history(period="3mo", interval="1wk")
+                if wf is not None and len(wf) > 20:
+                    wf.index = pd.DatetimeIndex(wf.index)
+                    wf.columns = [c.lower() for c in wf.columns]
+                    df_w = wf
+            except Exception:
+                pass
+            df_15 = None
+            try:
+                t15 = yf.Ticker(symbol)
+                m15 = t15.history(period="5d", interval="15m")
+                if m15 is not None and len(m15) > 30:
+                    m15.index = pd.DatetimeIndex(m15.index)
+                    m15.columns = [c.lower() for c in m15.columns]
+                    df_15 = m15
+            except Exception:
+                pass
+            inp = StrategyInput(
+                df_daily=hist_df,
+                spy_df=spy_df,
+                market_status=mkt,
+                df_weekly=df_w,
+                df_15min=df_15,
+            )
+            return sel.best_for_symbol(inp)
+        except Exception:
+            return None
+
+    _HAS_STRATEGIES = True
+except ImportError:
+    _HAS_STRATEGIES = False
+    def _get_symbol_strategy(*args): return None
+
 
 # ---------------------------------------------------------------------------
 # Timeout helper — wrap slow endpoints so OpenBB Workspace never hangs
@@ -1335,7 +1395,7 @@ def _score_forecast_consensus(symbol: str) -> dict:
     return {"score": min(score, 30), "details": details}
 
 
-def _analyze_smart(symbol: str) -> dict | None:
+def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None:
     """Full analysis: halal + fundamental (40) + technical momentum (30).
 
     Smart Score = fundamental(0-40) + forecast_consensus(0-30) + momentum(0-30).
@@ -1357,6 +1417,7 @@ def _analyze_smart(symbol: str) -> dict | None:
         halal = _screen_halal(symbol)
         is_halal = halal.get("is_halal", False)
         halal_screens = halal.get("screens_passed", 0)
+        in_watchlist = bool(watchlist_set and symbol.upper() in watchlist_set)
 
         # ── Fundamental Score (0-40) ──
         prof = _score_profitability(info)
@@ -1463,6 +1524,20 @@ def _analyze_smart(symbol: str) -> dict | None:
             else:
                 signal = "WAIT"
 
+        # Strategy selection (best of 4 strategies)
+        strategy_label = "WAIT"
+        strategy_score = 0
+        strategy_reason = ""
+        if _HAS_STRATEGIES and hist_df is not None and len(hist_df) > 20:
+            try:
+                sel_sig = _get_symbol_strategy(symbol, hist_df, None)
+                if sel_sig:
+                    strategy_label = sel_sig.strategy
+                    strategy_score = sel_sig.score
+                    strategy_reason = sel_sig.reason
+            except Exception:
+                pass
+
         smart_score = fundamental + momentum["score"]  # + forecast added later
 
         return {
@@ -1475,6 +1550,7 @@ def _analyze_smart(symbol: str) -> dict | None:
             "market_cap": mcap,
             "is_halal": is_halal,
             "halal_screens": halal_screens,
+            "in_watchlist": in_watchlist,
             "fundamental_score": fundamental,
             "fundamental_details": {
                 "profitability": prof["score"],
@@ -1500,6 +1576,22 @@ def _analyze_smart(symbol: str) -> dict | None:
             "atr_pct": atr_pct,
             "adv_dollar_m": adv_dollar_m,
             "signal": signal,
+            # Strategy assignment
+            "strategy": strategy_label,
+            "strategy_score": strategy_score,
+            "strategy_reason": strategy_reason,
+            # Pipeline stages
+            "pipeline": {
+                "1_data": "loaded",
+                "2_halal": "passed" if is_halal else "blocked",
+                "3_fundamental": f"{fundamental}/40",
+                "4_momentum": f"{momentum['score']}/30",
+                "5_strategy_selector": f"{strategy_label} (score={strategy_score})",
+                "6_ai_confirm": "confirmed" if strategy_score >= 65 and strategy_label != "WAIT" else "rejected" if strategy_label != "WAIT" else "no_signal",
+                "7_kelly": "pending",
+                "8_guardian": "pending",
+                "9_execute": "pending",
+            },
         }
     except Exception:
         return None
@@ -1543,8 +1635,17 @@ async def smart_screener(
         effective_min_score = market_status.get("min_gate", 60)
     strong_gate = market_status.get("strong_gate", 75)
 
+    # Load current watchlist to prioritize
+    from app.services.watchlist_service import get_watchlist_set
+    watchlist_set = get_watchlist_set()
+    watchlist_syms = [s for s in watchlist_set if s in _SMART_UNIVERSE]
+
     # Use watchlist symbols if provided, otherwise full 357 halal universe
-    scan_symbols = [s.strip().upper() for s in watchlist.split(",") if s.strip()] if watchlist else list(_SMART_UNIVERSE)
+    if watchlist:
+        scan_symbols = [s.strip().upper() for s in watchlist.split(",") if s.strip()]
+    else:
+        # Prioritize watchlist symbols first, then fill remaining from universe
+        scan_symbols = list(_SMART_UNIVERSE)
 
     # Kick off background scan; return current cache or scanning status
     import threading
@@ -1574,12 +1675,17 @@ def _run_screener_bg(scan_symbols: list):
     _reset_progress(total)
     logger.info("Background scan starting for %d symbols", total)
     all_results = []
+
+    # Load current watchlist to flag watched symbols
+    from app.services.watchlist_service import get_watchlist_set
+    watchlist_set = get_watchlist_set()
+
     batch_size = SCREENER_BATCH_SIZE
     batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]
     for batch_idx, batch in enumerate(batches):
         _update_progress(batch_idx * batch_size + len(batch), batch_idx + 1)
         with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {pool.submit(_analyze_smart, sym): sym for sym in batch}
+            futures = {pool.submit(_analyze_smart, sym, watchlist_set): sym for sym in batch}
             for f in as_completed(futures):
                 r = f.result()
                 if r:
@@ -1630,9 +1736,6 @@ def _run_screener_bg(scan_symbols: list):
         "results": top,
     }
     _cache_set(cache_key, cache_result)
-
-    _cache_set(cache_key, result)
-    return {"source": "live", **result}
 
 
 @app.get("/api/screener/progress")

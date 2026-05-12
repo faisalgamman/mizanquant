@@ -1,9 +1,12 @@
 """Professional Dashboard — unified API for the live trading dashboard."""
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Query
 
@@ -384,27 +387,63 @@ async def api_sector_performance(force_refresh: bool = False):
 async def api_weighted_score(symbol: str = "AAPL"):
     """Return 100-point weighted score for a symbol."""
     from app.services.market_data import fetch
-    from app.services.scoring import weighted_score
+    from app.services.scoring import weighted_score, _score_to_dict
     df = fetch(symbol, period="6mo")
     if df is None:
         return {"error": f"No data for {symbol}"}
     spy_df = fetch("SPY", period="6mo")
     result = weighted_score(df, spy_df=spy_df)
-    result["symbol"] = symbol.upper()
-    return result
+    result_dict = _score_to_dict(result)
+    result_dict["symbol"] = symbol.upper()
+    return result_dict
 
 
 @router.get("/api/trade/plan")
 async def api_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
-    """Return trade plan (TP/SL + position sizing) for a symbol."""
+    """Return trade plan (strategy + TP/SL + position sizing) for a symbol."""
     from app.services.market_data import fetch
     from app.services.trade_plan import generate_trade_plan
+    import yfinance as yf
+    import pandas as pd
     df = fetch(symbol, period="6mo")
     if df is None:
         return {"error": f"No data for {symbol}"}
-    result = generate_trade_plan(df, portfolio_equity=portfolio)
-    result["symbol"] = symbol.upper()
-    return result
+    plan = generate_trade_plan(df, portfolio_equity=portfolio)
+    plan["symbol"] = symbol.upper()
+
+    # Strategy context
+    try:
+        spy_df = fetch("SPY", period="6mo")
+        from app.workspace_server import _get_symbol_strategy
+        sig = _get_symbol_strategy(symbol, df, spy_df)
+        if sig:
+            plan["strategy"] = sig.strategy
+            plan["strategy_score"] = sig.score
+            plan["strategy_reason"] = sig.reason
+            plan["strategy_confidence"] = round(sig.confidence, 2)
+            plan["hold_days_min"] = sig.hold_days_min
+            plan["hold_days_max"] = sig.hold_days_max
+            plan["strategy_entry"] = sig.entry
+            plan["strategy_stop"] = sig.stop
+            plan["strategy_tp1"] = sig.tp1
+            plan["strategy_tp2"] = sig.tp2
+            plan["strategy_tp3"] = sig.tp3
+            plan["details"] = sig.details
+            plan["pipeline"] = {
+                "data": "loaded",
+                "halal": "pending",
+                "smart": "scored",
+                "strategy_selector": f"{sig.strategy} (score={sig.score})",
+                "ai_confirm": f"{'confirmed' if sig.score >= 65 else 'rejected'}",
+            }
+        else:
+            plan["strategy"] = "WAIT"
+            plan["strategy_reason"] = "No strategy triggered"
+    except Exception as e:
+        plan["strategy"] = "WAIT"
+        plan["strategy_reason"] = f"Strategy error: {e}"
+
+    return plan
 
 
 @router.get("/api/block/status")
@@ -453,6 +492,117 @@ async def api_pipeline_run(
     }
 
 
+BACKTEST_CACHE_PATH = Path(__file__).parent.parent / ".cache" / "backtest_summary.json"
+BACKTEST_CACHE_TTL = 3600  # 1 hour
+
+@router.get("/api/strategies/backtest-data")
+async def api_strategies_backtest_data(force_refresh: bool = False):
+    """Return cached backtest results for all 4 strategies on 25 symbols (2015-2026)."""
+    now = time.time()
+    if not force_refresh and BACKTEST_CACHE_PATH.exists():
+        try:
+            data = json.loads(BACKTEST_CACHE_PATH.read_text())
+            age = now - data.get("_ts", 0)
+            if age < BACKTEST_CACHE_TTL:
+                return {k: v for k, v in data.items() if k != "_ts"}
+        except Exception:
+            pass
+
+    # Run backtest and collect structured data
+    from app.strategies.backtest import (
+        SYMBOLS, backtest_momentum, backtest_reversion,
+        backtest_breakout, backtest_swing, fetch_data
+    )
+    import numpy as np
+
+    spy_df = fetch_data("SPY")
+    if spy_df is None:
+        return {"error": "Cannot fetch SPY data"}
+
+    strategies_data = {
+        "Momentum": {"func": backtest_momentum, "extra": spy_df},
+        "Mean Reversion": {"func": backtest_reversion, "extra": None},
+        "Breakout": {"func": backtest_breakout, "extra": None},
+        "Swing": {"func": backtest_swing, "extra": spy_df},
+    }
+
+    result = {"strategies": {}, "symbols": {}}
+    for symbol in SYMBOLS:
+        df = fetch_data(symbol)
+        if df is None:
+            continue
+        result["symbols"][symbol] = {}
+        for sname, cfg in strategies_data.items():
+            try:
+                if cfg["extra"] is not None:
+                    r = cfg["func"](df, cfg["extra"], symbol)
+                else:
+                    r = cfg["func"](df, symbol)
+                result["symbols"][symbol][sname] = {
+                    "trades": r.total_trades,
+                    "win_rate": r.win_rate,
+                    "avg_return": r.avg_return,
+                    "total_return": r.total_return,
+                    "sharpe": r.sharpe,
+                    "max_dd": r.max_drawdown,
+                    "avg_hold": r.avg_hold_days,
+                    "profit_factor": r.profit_factor,
+                }
+            except Exception:
+                pass
+
+    # Per-strategy averages
+    for sname in strategies_data:
+        sym_data = {sym: result["symbols"][sym].get(sname) for sym in result["symbols"]
+                    if sname in result["symbols"][sym] and result["symbols"][sym][sname]["trades"] > 0}
+        sym_data = {k: v for k, v in sym_data.items() if v}
+        if not sym_data:
+            continue
+        trades_total = sum(v["trades"] for v in sym_data.values())
+        wr = float(np.mean([v["win_rate"] for v in sym_data.values()]))
+        sh = float(np.mean([v["sharpe"] for v in sym_data.values()]))
+        dd = float(np.mean([v["max_dd"] for v in sym_data.values()]))
+        ret = float(np.mean([v["avg_return"] for v in sym_data.values()]))
+        pf = float(np.mean([v["profit_factor"] for v in sym_data.values()]))
+        result["strategies"][sname] = {
+            "total_trades": trades_total,
+            "avg_win_rate": round(wr, 1),
+            "avg_sharpe": round(sh, 2),
+            "avg_max_dd": round(dd, 2),
+            "avg_return": round(ret, 2),
+            "avg_profit_factor": round(pf, 2),
+            "symbol_count": len(sym_data),
+            "pass_win_rate": wr > 50,
+            "pass_sharpe": sh > 1.5,
+            "pass_max_dd": dd > -20,
+        }
+
+    # Best symbol per strategy
+    for sname in strategies_data:
+        best_sym = None
+        best_sharpe = -999
+        for sym, sdata in result["symbols"].items():
+            sd = sdata.get(sname)
+            if sd and sd["trades"] >= 5 and sd["sharpe"] > best_sharpe:
+                best_sharpe = sd["sharpe"]
+                best_sym = sym
+        if best_sym:
+            result["strategies"][sname]["best_symbol"] = best_sym
+            result["strategies"][sname]["best_symbol_sharpe"] = best_sharpe
+
+    # Overall verdict
+    passes = [v.get("pass_sharpe", False) for v in result["strategies"].values()]
+    result["verdict"] = "all_pass" if all(passes) else "needs_improvement"
+    result["symbol_count"] = len(result["symbols"])
+
+    # Cache
+    BACKTEST_CACHE_PATH.parent.mkdir(exist_ok=True)
+    result["_ts"] = now
+    BACKTEST_CACHE_PATH.write_text(json.dumps(result, default=str))
+
+    return {k: v for k, v in result.items() if k != "_ts"}
+
+
 # ── Watchlist ──
 
 
@@ -486,3 +636,14 @@ async def api_remove_from_watchlist(symbol: str):
     from app.services.watchlist_service import remove_symbol
     updated = remove_symbol(symbol)
     return {"symbols": updated, "count": len(updated)}
+
+
+@router.post("/api/model/promote/{name}")
+async def api_promote_model(name: str):
+    """Promote a staging model to production."""
+    from app.services.model_registry import resolve, promote_to_production
+    staging = resolve(name, "staging")
+    if not staging:
+        return {"success": False, "error": f"No staging version for '{name}'"}
+    promote_to_production(name, staging["version"], staging["artifact_path"], staging.get("metrics"))
+    return {"success": True, "name": name, "version": staging["version"]}

@@ -1,46 +1,37 @@
-"""Watchlist service â€” save/load user watchlist to JSON file."""
+"""Watchlist service — persist user watchlist to the database."""
 from __future__ import annotations
 
-import json
 import logging
-import os
-import threading
+
+from sqlalchemy import select
+
+from app.db.database import SessionLocal
+from app.db.models import Watchlist
 
 logger = logging.getLogger("screener")
-
-_WATCHLIST_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "app", ".cache", "watchlist.json",
-)
-_lock = threading.Lock()
-
-
-def _ensure_dir() -> None:
-    os.makedirs(os.path.dirname(_WATCHLIST_FILE), exist_ok=True)
 
 
 def get_watchlist() -> list[str]:
     """Return list of symbols in watchlist."""
-    _ensure_dir()
-    if not os.path.exists(_WATCHLIST_FILE):
-        return []
     try:
-        with _lock:
-            data = json.loads(open(_WATCHLIST_FILE, encoding="utf-8").read())
-        return data if isinstance(data, list) else []
+        db = SessionLocal()
+        rows = db.execute(select(Watchlist.symbol).order_by(Watchlist.created_at)).scalars().all()
+        db.close()
+        return rows or []
     except Exception:
         return []
 
 
 def set_watchlist(symbols: list[str]) -> list[str]:
     """Replace entire watchlist. Returns saved list."""
-    clean = [s.strip().upper() for s in symbols if s.strip()]
-    clean = list(dict.fromkeys(clean))  # dedup preserving order
-    _ensure_dir()
+    clean = list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
     try:
-        with _lock:
-            with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
-                f.write(json.dumps(clean))
+        db = SessionLocal()
+        db.query(Watchlist).delete()
+        for sym in clean:
+            db.add(Watchlist(symbol=sym))
+        db.commit()
+        db.close()
     except Exception as e:
         logger.error("Failed to save watchlist: %s", e)
     return clean
@@ -48,19 +39,38 @@ def set_watchlist(symbols: list[str]) -> list[str]:
 
 def add_symbol(symbol: str) -> list[str]:
     """Add a symbol to watchlist. Returns updated list."""
-    current = get_watchlist()
     sym = symbol.strip().upper()
-    if sym and sym not in current:
-        current.append(sym)
-        set_watchlist(current)
-    return current
+    if not sym:
+        return get_watchlist()
+    try:
+        db = SessionLocal()
+        existing = db.execute(select(Watchlist).where(Watchlist.symbol == sym)).scalar_one_or_none()
+        if not existing:
+            db.add(Watchlist(symbol=sym))
+            db.commit()
+            logger.info("Added %s to watchlist", sym)
+        db.close()
+    except Exception as e:
+        logger.error("Failed to add %s to watchlist: %s", sym, e)
+    return get_watchlist()
 
 
 def remove_symbol(symbol: str) -> list[str]:
     """Remove a symbol from watchlist. Returns updated list."""
-    current = get_watchlist()
     sym = symbol.strip().upper()
-    if sym in current:
-        current.remove(sym)
-        set_watchlist(current)
-    return current
+    try:
+        db = SessionLocal()
+        row = db.execute(select(Watchlist).where(Watchlist.symbol == sym)).scalar_one_or_none()
+        if row:
+            db.delete(row)
+            db.commit()
+            logger.info("Removed %s from watchlist", sym)
+        db.close()
+    except Exception as e:
+        logger.error("Failed to remove %s from watchlist: %s", sym, e)
+    return get_watchlist()
+
+
+def get_watchlist_set() -> set[str]:
+    """Return watchlist as a set for fast lookup."""
+    return set(get_watchlist())
