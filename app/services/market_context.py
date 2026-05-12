@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -22,8 +23,26 @@ logger = logging.getLogger("screener")
 # ── Cache ──
 _context_cache: dict = {}
 _context_cache_ts: float = 0.0
-_CONTEXT_CACHE_TTL = 300
+_CONTEXT_CACHE_TTL = 900  # 15 min — yfinance is slow & rate-limited
 _cache_lock = threading.Lock()
+_refresh_in_flight = threading.Lock()
+
+# Bounded executor for yfinance calls so a stalled fetch can't pin the event loop.
+_yf_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yf-ctx")
+
+
+def _run_with_timeout(fn: Callable, timeout: float, fallback):
+    """Run fn() in a worker thread; return fallback on timeout or exception."""
+    future = _yf_executor.submit(fn)
+    try:
+        return future.result(timeout=timeout)
+    except FuturesTimeout:
+        logger.warning("yfinance call %s timed out after %.1fs", getattr(fn, "__name__", "?"), timeout)
+        future.cancel()
+        return fallback
+    except Exception as e:
+        logger.warning("yfinance call %s failed: %s", getattr(fn, "__name__", "?"), e)
+        return fallback
 
 
 def _cache_valid() -> bool:
@@ -139,33 +158,27 @@ def _yf_safe(symbol: str) -> str:
 
 
 def get_market_breadth() -> dict:
-    """% of halal symbols with close above EMA 50 (batch yFinance download).
-
-    Uses a representative sample (first 80 symbols) for speed.
-    Converts BRK.B → BRK-B for yFinance compatibility.
-    """
+    """% of halal symbols with close above EMA 50 (batch yFinance download)."""
     from app.services.universe import HALAL_STOCKS_FALLBACK
     all_syms = list(HALAL_STOCKS_FALLBACK)
-    # Sample first 80 for speed; sorted by S&P 500 weight it's representative
-    symbols = all_syms[:80]
+    symbols = all_syms[:30]
     safe_map = {s: _yf_safe(s) for s in symbols}
     safe_tickers = list(safe_map.values())
 
-    try:
+    def _download():
         import yfinance as yf
-        data = yf.download(
+        return yf.download(
             tickers=" ".join(safe_tickers),
             period="3mo",
             interval="1d",
             progress=False,
             threads=True,
             group_by="ticker",
+            timeout=8,
         )
-    except Exception as e:
-        logger.warning("Breadth download failed: %s", e)
-        return {"breadth_pct": None, "above": 0, "total": 0, "error": str(e)}
 
-    if data is None or data.empty:
+    data = _run_with_timeout(_download, timeout=8.0, fallback=None)
+    if data is None or getattr(data, "empty", True):
         return {"breadth_pct": None, "above": 0, "total": 0, "error": "no_data"}
 
     above = 0
@@ -341,15 +354,8 @@ def get_market_status(force_refresh: bool = False) -> dict:
 # ── Combined Context ──
 
 
-def get_market_context(force_refresh: bool = False) -> dict:
-    """Return all market context indicators with caching."""
-    global _context_cache, _context_cache_ts
-
-    with _cache_lock:
-        if not force_refresh and _cache_valid():
-            return dict(_context_cache)
-
-    result = {
+def _compute_market_context() -> dict:
+    return {
         "vix": get_vix_context(),
         "spy_regime": get_spy_regime(),
         "breadth": get_market_breadth(),
@@ -358,8 +364,46 @@ def get_market_context(force_refresh: bool = False) -> dict:
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
+def _background_refresh() -> None:
+    if not _refresh_in_flight.acquire(blocking=False):
+        return
+    try:
+        result = _compute_market_context()
+        with _cache_lock:
+            global _context_cache, _context_cache_ts
+            _context_cache = result
+            _context_cache_ts = time.time()
+    except Exception as e:
+        logger.warning("Background market-context refresh failed: %s", e)
+    finally:
+        _refresh_in_flight.release()
+
+
+def get_market_context(force_refresh: bool = False) -> dict:
+    """Return all market context indicators with stale-while-revalidate caching.
+
+    - Fresh cache → return immediately.
+    - Stale cache → return stale value, kick off background refresh.
+    - No cache → compute synchronously (first call only).
+    """
+    global _context_cache, _context_cache_ts
+
+    with _cache_lock:
+        have_cache = bool(_context_cache)
+        is_fresh = _cache_valid()
+        cached_copy = dict(_context_cache) if have_cache else None
+
+    if not force_refresh and is_fresh:
+        return cached_copy
+
+    if have_cache and not force_refresh:
+        threading.Thread(target=_background_refresh, name="mc-refresh", daemon=True).start()
+        cached_copy["stale"] = True
+        return cached_copy
+
+    result = _compute_market_context()
     with _cache_lock:
         _context_cache = result
         _context_cache_ts = time.time()
-
     return result

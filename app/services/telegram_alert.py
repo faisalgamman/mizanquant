@@ -79,6 +79,9 @@ _BUY_SIGNAL_MARKERS = (
     "STRONG BUY SIGNAL",     # signals_advisor per-symbol alert
     "PRE-MARKET SIGNALS",    # signals_advisor daily header
     "READY TO TRADE",        # legacy ready-to-trade alert (also buy-side)
+    "QUALIFIED",             # smart_screener qualified signal (Roadmap 1.6)
+    "MARKET BLOCK",          # market block alert (always critical)
+    "END OF DAY REPORT",     # daily end-of-day summary
 )
 
 
@@ -354,4 +357,151 @@ def alert_system_health(issue: str, severity: str = "WARNING"):
         f"\n"
         f"{_utc_label()} UTC"
     )
+    return send_message(text)
+
+
+# ---------------------------------------------------------------------------
+# Roadmap 1.6 — Telegram Integration (3 new alert types)
+# ---------------------------------------------------------------------------
+
+
+def alert_qualified_signal(
+    symbol: str,
+    company: str,
+    score: int,
+    price: float,
+    strategy: str,
+    stop_loss: float = 0,
+    take_profits: list = None,
+    rr_ratio: float = 0,
+    top_indicators: list = None,
+    halal_status: str = "",
+) -> bool:
+    """Type 1 — QUALIFIED signal: stock passed Hard Gates + Strong Gate."""
+    tp_lines = []
+    if take_profits:
+        for i, tp in enumerate(take_profits[:3]):
+            pct = (tp / price - 1) * 100 if price > 0 else 0
+            qty_pct = [40, 35, 25][i] if i < 3 else 0
+            tp_lines.append(f"TP{i+1}: ${tp:.2f} ({pct:+.1f}%) — sell {qty_pct}%")
+
+    sl_pct = (stop_loss / price - 1) * 100 if price > 0 and stop_loss > 0 else 0
+    indicators_str = " | ".join((top_indicators or [])[:3])
+    halal_badge = "✅ HALAL" if "HALAL" in halal_status.upper() else "⚠️ " + halal_status if halal_status else ""
+
+    text = (
+        f"🚀 QUALIFIED SIGNAL\n"
+        f"{symbol} — {company}\n"
+    )
+    if halal_badge:
+        text += f"{halal_badge}\n"
+    text += (
+        f"\n"
+        f"Price: ${price:.2f}\n"
+        f"Score: {score}/100\n"
+        f"Strategy: {strategy}\n"
+    )
+    if stop_loss > 0:
+        text += f"\nEntry: ${price:.2f}\n"
+        text += f"Stop Loss: ${stop_loss:.2f} ({sl_pct:+.1f}%)\n"
+    for line in tp_lines:
+        text += f"{line}\n"
+    if rr_ratio > 0:
+        text += f"R:R Ratio: 1:{rr_ratio:.1f}\n"
+    if indicators_str:
+        text += f"\nTop Indicators:\n{indicators_str}\n"
+    text += (
+        f"\n"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
+    )
+    return send_message(text)
+
+
+def alert_market_block(
+    status: str,
+    reason: str,
+    vix: float,
+    vix_threshold: float,
+    hyg_lqd_ratio: float = None,
+    spy_regime: str = None,
+) -> bool:
+    """Type 2 — MARKET BLOCK: market status changed to CREDIT STRESS or BEAR."""
+    block_icon = "🛑" if "BEAR" in status or "EXTREME" in status else "⚠️"
+    text = (
+        f"{block_icon} MARKET BLOCK ACTIVATED\n"
+        f"Status: {status}\n"
+        f"\n"
+        f"Reason: {reason}\n"
+        f"\n"
+        f"VIX: {vix:.1f} (threshold: {vix_threshold})\n"
+    )
+    if hyg_lqd_ratio is not None:
+        text += f"HYG/LQD Ratio: {hyg_lqd_ratio:.4f}\n"
+    if spy_regime:
+        text += f"SPY Regime: {spy_regime}\n"
+
+    text += (
+        f"\nAction: No new signals will be generated\n"
+        f"Open positions: remain with existing stops\n"
+        f"\n"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
+    )
+    return send_message(text)
+
+
+def alert_end_of_day_report(
+    market_status: dict,
+    total_scanned: int,
+    passed_gates: int,
+    qualified_signals: list,
+    watch_signals: list,
+    open_positions: list = None,
+    pipeline_runtime: float = None,
+    system_status: str = "ok",
+) -> bool:
+    """Type 3 — End of Day Report, sent daily at 4:00 PM ET."""
+    spy_regime = market_status.get("spy_regime", market_status.get("status", "N/A"))
+    vix_val = market_status.get("vix", "N/A")
+    vix_cls = market_status.get("classification", "N/A")
+
+    text = (
+        f"📊 END OF DAY REPORT\n"
+        f"{_utc_day()}\n"
+        f"\n"
+        f"Market:\n"
+        f"  SPY Regime: {spy_regime}\n"
+        f"  VIX: {vix_val} ({vix_cls})\n"
+        f"  Status: {market_status.get('status', 'N/A')}\n"
+        f"\n"
+        f"Today's Scan:\n"
+        f"  Scanned: {total_scanned}\n"
+        f"  Passed Gates: {passed_gates}\n"
+    )
+
+    if qualified_signals:
+        text += f"\n  Qualified Signals ({len(qualified_signals)}):\n"
+        for s in qualified_signals[:5]:
+            sym = s.get("symbol", s) if isinstance(s, dict) else s
+            sc = s.get("smart_score", "") if isinstance(s, dict) else ""
+            text += f"    • {sym}" + (f" ({sc}/100)" if sc else "") + "\n"
+
+    if watch_signals:
+        text += f"\n  Watch List (top):\n"
+        for s in watch_signals[:3]:
+            sym = s.get("symbol", s) if isinstance(s, dict) else s
+            text += f"    • {sym}\n"
+
+    if open_positions:
+        text += f"\n  Open Positions:\n"
+        for p in open_positions:
+            sym = p.get("symbol", "")
+            pl = p.get("unrealized_pl", 0)
+            pl_sign = "+" if pl >= 0 else ""
+            text += f"    {sym}: {pl_sign}${pl:.2f}\n"
+
+    if pipeline_runtime is not None:
+        text += f"\n  Pipeline Runtime: {pipeline_runtime:.1f}s\n"
+    text += f"  System: {system_status}\n"
+    text += f"\n🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
+
     return send_message(text)

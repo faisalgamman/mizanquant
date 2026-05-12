@@ -198,6 +198,16 @@ class Universe(Base):
     last_updated = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class Watchlist(Base):
+    """Persistent user watchlist — symbols the user wants to track."""
+
+    __tablename__ = "watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(10), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class BacktestRun(Base):
     """Reproducibility-gated backtest result (Phase 2).
 

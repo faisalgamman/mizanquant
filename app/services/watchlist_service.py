@@ -1,4 +1,4 @@
-"""Watchlist service — persist user watchlist to the database."""
+"""Watchlist service â€” persist user watchlist to the database."""
 from __future__ import annotations
 
 import logging

@@ -140,19 +140,49 @@ PROJECT_DIR = CURRENT_DIR.parent
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def _fetch_data(symbol: str, period: str = "1y") -> list[dict]:
-    """Fetch OHLCV data and return as list of dicts."""
-    data = yf.download(symbol, period=period, progress=False)
-    data = data.reset_index()
-    cols = []
-    for c in data.columns:
-        if isinstance(c, tuple):
-            cols.append(str(c[0]).lower())
-        else:
-            cols.append(str(c).lower())
-    data.columns = cols
-    data["date"] = data["date"].astype(str)
-    return data.to_dict("records"), data
+def _fetch_data(symbol: str, period: str = "1y") -> tuple[list[dict], pd.DataFrame]:
+    """Fetch OHLCV data with timeout, cache, and Alpaca-first fallback pipeline."""
+    sym_clean = _cache_key(symbol)
+    cache_key = f"ohlcv_{sym_clean}_{period}"
+    cached = _cache_get(cache_key, max_age=3600)
+    if cached:
+        try:
+            df = pd.DataFrame(cached)
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"])
+            return cached, df
+        except Exception:
+            pass
+
+    # Use market_data.fetch() — Alpaca first, yfinance fallback, rate-limited, cached
+    from app.services.market_data import fetch as _md_fetch
+    from app.services.market_context import _run_with_timeout
+
+    df = _run_with_timeout(lambda: _md_fetch(symbol, period=period), timeout=30.0, fallback=None)
+    if df is not None and not df.empty:
+        records = df.to_dict("records")
+        _cache_set(cache_key, records)
+        return records, df
+
+    # Direct yfinance download as last resort (with timeout)
+    try:
+        data = _run_with_timeout(
+            lambda: yf.download(symbol, period=period, progress=False),
+            timeout=30.0,
+            fallback=None,
+        )
+        if data is not None and not data.empty:
+            data = data.reset_index()
+            cols = [str(c[0]).lower() if isinstance(c, tuple) else str(c).lower() for c in data.columns]
+            data.columns = cols
+            data["date"] = data["date"].astype(str)
+            records = data.to_dict("records")
+            _cache_set(cache_key, records)
+            return records, data
+    except Exception:
+        pass
+
+    return [], pd.DataFrame()
 
 
 def _records_to_df(records: list[dict]) -> pd.DataFrame:
@@ -1437,6 +1467,35 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
         try:
             _, hist_df = _fetch_data(symbol, period="1y")
             if hist_df is not None and len(hist_df) > 20:
+                # Roadmap 1.1 — Hard Gates: must-pass or score = 0
+                from app.services.scoring import check_hard_gates
+                gates = check_hard_gates(hist_df, spy_df=None)
+                if not gates.passed:
+                    return {
+                        "symbol": symbol, "company": name,
+                        "sector": sector_val.title() if sector_val else "",
+                        "industry": industry_val.title() if industry_val else "",
+                        "price": price, "change_pct": None, "market_cap": mcap,
+                        "is_halal": is_halal, "halal_screens": halal_screens,
+                        "in_watchlist": in_watchlist,
+                        "fundamental_score": fundamental, "fundamental_details": {},
+                        "profitability_score": 0, "profitability_details": {},
+                        "valuation_score": 0, "valuation_details": {},
+                        "market_score": 0, "market_details": {},
+                        "momentum_score": 0, "momentum_details": {"error": "Hard Gates failed"},
+                        "forecast_score": 0, "forecast_details": {},
+                        "smart_score": 0,
+                        "ext_pct": None, "atr_pct": None, "adv_dollar_m": None,
+                        "signal": "AVOID", "strategy": "NONE", "strategy_score": 0, "strategy_reason": "",
+                        "hard_gates_passed": False, "hard_gates_failed": gates.failed_gates,
+                        "pipeline": {
+                            "1_data": "loaded", "2_halal": "passed" if is_halal else "blocked",
+                            "3_fundamental": f"{fundamental}/40",
+                            "4_hard_gates": f"BLOCKED ({'; '.join(gates.failed_gates)})",
+                            "5_momentum": "skipped", "6_strategy_selector": "skipped",
+                            "7_ai_confirm": "skipped", "8_kelly": "skipped", "9_execute": "skipped",
+                        },
+                    }
                 momentum = _score_momentum(symbol, hist_df)
             else:
                 momentum = {"score": 0, "details": {"error": "No history data"}}
@@ -1742,6 +1801,27 @@ def _run_screener_bg(scan_symbols: list):
         "results": top,
     }
     _cache_set(cache_key, cache_result)
+
+    # Roadmap 1.6 — Telegram alert for qualified signals
+    if qualified_count > 0:
+        try:
+            from app.services.telegram_alert import alert_qualified_signal
+            for r in top[:3]:
+                if r.get("smart_score", 0) >= market_status.get("strong_gate", 75):
+                    alert_qualified_signal(
+                        symbol=r.get("symbol", "?"),
+                        company=r.get("company", ""),
+                        score=r.get("smart_score", 0),
+                        price=r.get("price", 0) or 0,
+                        strategy=r.get("strategy", "N/A"),
+                        stop_loss=0,
+                        take_profits=[],
+                        rr_ratio=0,
+                        top_indicators=[r.get("signal", "N/A")],
+                        halal_status="HALAL" if r.get("is_halal") else "NON-HALAL",
+                    )
+        except Exception as e:
+            logger.warning("Qualified signal alert failed: %s", e)
 
 
 @app.get("/api/screener/progress")
@@ -2759,6 +2839,37 @@ AGENT_CATEGORIES: dict[str, list[str]] = {
     "Classic": ["turtle", "moving_average", "signal_rolling", "abcd_strategy"],
 }
 
+# ── Agent Tiers (Production vs Staging) ──
+# Production: Sharpe >= 1.5 AND Win Rate >= 55% on 2015–2026 backtest
+# Staging: everything else
+_AGENT_TIERS: dict[str, str] = {
+    # Production — promoted per OpenBB Roadmap 1.7
+    "turtle": "production",                # Sharpe 2.54, WR 64%
+    "neuro_evolution_novelty": "production",  # Sharpe 1.85, WR 77%
+    "evolution_strategy": "production",    # Sharpe 2.00, WR 76%
+    "moving_average": "production",        # Sharpe 2.41, WR 61%
+    "abcd_strategy": "production",         # Sharpe 1.50+, WR 75%
+    # Staging — experimental / below threshold
+    "actor_critic": "staging",             # Sharpe 2.50 but WR 44% — demoted
+    "actor_critic_duel": "staging",
+    "actor_critic_recurrent": "staging",
+    "double_dqn": "staging",
+    "policy_gradient": "staging",
+    "q_learning": "staging",
+    "double_q_learning": "staging",
+    "recurrent_q_learning": "staging",
+    "duel_q_learning": "staging",
+    "double_duel_q_learning": "staging",
+    "curiosity_q_learning": "staging",
+    "recurrent_curiosity_q_learning": "staging",
+    "signal_rolling": "staging",
+    "neuro_evolution": "staging",
+}
+
+
+def _agent_tier(name: str) -> str:
+    return _AGENT_TIERS.get(name, "staging")
+
 
 # ---------------------------------------------------------------------------
 # Leaderboard — run all agents on a symbol and rank by Sharpe
@@ -2820,6 +2931,26 @@ def _model_category(name: str) -> str:
         if name in members:
             return cat
     return "Other"
+
+
+@app.get("/api/models/status")
+async def api_model_status():
+    """Return production/staging tiers for all agents and models."""
+    agent_tiers = {}
+    for name in AGENT_NAMES:
+        tier = _agent_tier(name)
+        agent_tiers[name] = {
+            "tier": tier,
+            "category": _agent_category(name),
+        }
+
+    return {
+        "agents": agent_tiers,
+        "production_count": sum(1 for v in agent_tiers.values() if v["tier"] == "production"),
+        "staging_count": sum(1 for v in agent_tiers.values() if v["tier"] == "staging"),
+        "promotion_rule": "Sharpe >= 1.5 AND Win Rate >= 55% on 2015-2026 backtest",
+        "demotion_rule": "Win Rate < 50% on last 30 paper/live trades OR Sharpe < 1.0 in a month",
+    }
 
 
 # ---------------------------------------------------------------------------

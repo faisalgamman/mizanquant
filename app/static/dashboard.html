@@ -1090,6 +1090,9 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
           <option value="Breakout">Breakout</option>
           <option value="Swing">Swing</option>
         </select>
+        <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" id="hideAvoidToggle" onchange="renderFullTable()" checked> Hide AVOID
+        </label>
         <span class="badge" id="stratCount" style="font-size:11px;padding:4px 10px;">0 symbols</span>
       </div>
     </div>
@@ -1137,10 +1140,16 @@ function toggleSidebar() {
 }
 
 // ===== API HELPER =====
-async function apiGet(path) {
-  const r = await fetch(API + path);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+async function apiGet(path, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(API + path, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 // ===== STATUS =====
@@ -1191,10 +1200,11 @@ function updateFooterStatus(info) {
   const dot = document.getElementById('sfDot');
   const status = document.getElementById('sfStatus');
   const latency = document.getElementById('sfLatency');
-  const ok = info && info.status !== 'error';
-  dot.className = 'sf-dot ' + (ok ? 'green' : 'red');
-  status.textContent = ok ? 'Connected' : 'Issue';
-  if (info) {
+  const degraded = info && info.status === 'degraded';
+  const ok = info && !degraded && info.status !== 'error';
+  dot.className = 'sf-dot ' + (ok ? 'green' : (degraded ? 'orange' : 'red'));
+  status.textContent = ok ? 'Connected' : (degraded ? 'Degraded' : 'Issue');
+  if (info && !degraded) {
     document.getElementById('sfBroker').style.background = info.broker === 'connected' ? 'var(--green)' : 'var(--red)';
     document.getElementById('sfDb').style.background = info.database === 'connected' ? 'var(--green)' : 'var(--red)';
     document.getElementById('sfTelegram').style.background = info.telegram === 'active' ? 'var(--green)' : 'var(--orange)';
@@ -1376,18 +1386,27 @@ async function loadTopSignals() {
 
 async function loadOverview() {
   try {
-    const [info, trading, guards, history, sched, mc, blockData] = await Promise.all([
+    const settled = await Promise.allSettled([
       apiGet('/api/system/status'),
       apiGet('/api/trading/summary'),
-      apiGet('/api/guards/summary').catch(() => ({})),
-      apiGet('/api/trading/history/recent?limit=5').catch(() => []),
-      apiGet('/api/scheduler/status').catch(() => ({})),
-      apiGet('/api/market/context').catch(() => ({})),
-      apiGet('/api/block/status').catch(() => ({block_level:'NORMAL'})),
+      apiGet('/api/guards/summary'),
+      apiGet('/api/trading/history/recent?limit=5'),
+      apiGet('/api/scheduler/status'),
+      apiGet('/api/market/context'),
+      apiGet('/api/block/status'),
     ]);
+    const valueOr = (i, fallback) => settled[i].status === 'fulfilled' ? settled[i].value : fallback;
+    const info       = valueOr(0, null);
+    const trading    = valueOr(1, {});
+    const guards     = valueOr(2, {});
+    const history    = valueOr(3, []);
+    const sched      = valueOr(4, {});
+    const mc         = valueOr(5, {});
+    const blockData  = valueOr(6, {block_level:'NORMAL'});
+    settled.forEach((s, i) => { if (s.status === 'rejected') console.warn('Overview endpoint', i, 'failed:', s.reason); });
 
     // ── FOOTER ──
-    updateFooterStatus(info);
+    updateFooterStatus(info || {status:'degraded'});
 
     // ── BLOCK BANNER ──
     const level = blockData.block_level || 'NORMAL';
@@ -1501,7 +1520,6 @@ async function loadOverview() {
     `;
 
     // ── FIRE-AND-FORGET ──
-    loadPipelineStatus();
     loadTopSignals();
 
     // ── POSITIONS ──
@@ -1541,37 +1559,7 @@ async function loadOverview() {
 
   } catch(e) {
     console.error('Overview load error:', e);
-  }
-}
-        </div>
-        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">SPY Regime</div>
-          <div style="font-size:20px;font-weight:700;color:${spyColor};">${(spy.regime || 'N/A').toUpperCase()}</div>
-          <div style="font-size:10px;color:var(--text-secondary);margin-top:2px;">$${spy.price ?? 'N/A'}</div>
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">EMA200 ${spy.price_vs_ema200_pct ?? 'N/A'}%</div>
-        </div>
-        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Breadth</div>
-          <div style="font-size:24px;font-weight:700;color:${breadthColor};">${breadth.breadth_pct != null ? breadth.breadth_pct + '%' : 'N/A'}</div>
-          <div style="font-size:10px;color:${breadthColor};text-transform:capitalize;margin-top:2px;">${(breadth.classification || 'N/A').replace(/_/g,' ')}</div>
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${breadth.above ?? 0}/${breadth.total ?? 0}</div>
-        </div>
-        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Credit</div>
-          <div style="font-size:20px;font-weight:700;color:${creditColor};">${credit.ratio != null ? credit.ratio : 'N/A'}</div>
-          <div style="font-size:10px;color:${creditColor};text-transform:capitalize;margin-top:2px;">${(credit.classification || 'N/A').replace(/_/g,' ')}</div>
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${credit.daily_change_pct != null ? credit.daily_change_pct + '%' : ''}</div>
-        </div>
-        <div style="padding:14px;background:var(--bg-card);border-radius:var(--radius-sm);text-align:center;">
-          <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Liquidity</div>
-          <div style="font-size:20px;font-weight:700;color:${liqColor};">${liquidity.liquidity_pct != null ? liquidity.liquidity_pct + '%' : 'N/A'}</div>
-          <div style="font-size:10px;color:${liqColor};text-transform:capitalize;margin-top:2px;">${(liquidity.classification || 'N/A').replace(/_/g,' ')}</div>
-        </div>
-      </div>
-    `;
-  } catch(e) {
-    const el = document.getElementById('marketContext');
-    if (el) el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px;">Market context unavailable</div>';
+    try { updateFooterStatus({status:'degraded'}); } catch(_) {}
   }
 }
 
@@ -4017,24 +4005,30 @@ function renderBestPerStrategy(data) {
 function renderFullTable(data) {
   const container = document.getElementById('fullBreakdown');
   const filter = document.getElementById('stratFilter').value;
+  const hideAvoid = document.getElementById('hideAvoidToggle').checked;
   const symbols = data.symbols || {};
   let rows = [];
   for (const [sym, sdata] of Object.entries(symbols)) {
     for (const [sname, sd] of Object.entries(sdata)) {
       if (filter !== 'all' && sname !== filter) continue;
       if (sd.trades === 0) continue;
+      if (hideAvoid && sd.quality === 'AVOID') continue;
       rows.push({symbol: sym, strategy: sname, ...sd});
     }
   }
   rows.sort((a,b) => b.sharpe - a.sharpe);
   const colors = {Momentum:'#3b82f6','Mean Reversion':'#f59e0b',Breakout:'#a855f7',Swing:'#22c55e'};
+  const qualityColors = {AVOID:'#fee2e2',WEAK:'#ffedd5',OK:'#fef9c3',GOOD:'#dcfce7',EXCELLENT:'#14532d'};
+  const qualityText = {AVOID:'#991b1b',WEAK:'#9a3412',OK:'#854d0e',GOOD:'#166534',EXCELLENT:'#ffffff'};
   document.getElementById('stratCount').textContent = rows.length + ' rows';
   let html = '<table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="color:var(--text-muted);text-transform:uppercase;font-size:9px;letter-spacing:0.5px;">';
-  html += '<th style="padding:6px 8px;text-align:left;">Symbol</th><th style="padding:6px 8px;text-align:left;">Strategy</th><th style="padding:6px 8px;text-align:right;">Trades</th><th style="padding:6px 8px;text-align:right;">Win Rate</th><th style="padding:6px 8px;text-align:right;">Sharpe</th><th style="padding:6px 8px;text-align:right;">Max DD</th><th style="padding:6px 8px;text-align:right;">Avg Ret</th><th style="padding:6px 8px;text-align:right;">PF</th><th style="padding:6px 8px;text-align:right;">Hold(d)</th></tr></thead><tbody>';
+  html += '<th style="padding:6px 8px;text-align:left;">Symbol</th><th style="padding:6px 8px;text-align:left;">Strategy</th><th style="padding:6px 8px;text-align:right;">Trades</th><th style="padding:6px 8px;text-align:right;">Win Rate</th><th style="padding:6px 8px;text-align:right;">Sharpe</th><th style="padding:6px 8px;text-align:right;">Max DD</th><th style="padding:6px 8px;text-align:right;">Avg Ret</th><th style="padding:6px 8px;text-align:right;">PF</th><th style="padding:6px 8px;text-align:right;">Hold(d)</th><th style="padding:6px 8px;text-align:center;">Quality</th></tr></thead><tbody>';
   for (const r of rows) {
     const c = colors[r.strategy] || '#3b82f6';
     const sharpeOk = r.sharpe > 1.5;
     const wrOk = r.win_rate > 50;
+    const qBg = qualityColors[r.quality] || '#f3f4f6';
+    const qTxt = qualityText[r.quality] || '#374151';
     html += '<tr style="border-top:1px solid var(--border);">';
     html += '<td style="padding:4px 8px;font-weight:600;">' + r.symbol + '</td>';
     html += '<td style="padding:4px 8px;"><span style="background:' + c + '20;color:' + c + ';padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;">' + r.strategy + '</span></td>';
@@ -4045,6 +4039,7 @@ function renderFullTable(data) {
     html += '<td style="padding:4px 8px;text-align:right;">' + (r.avg_return > 0 ? '+' : '') + r.avg_return.toFixed(2) + '%</td>';
     html += '<td style="padding:4px 8px;text-align:right;">' + r.profit_factor.toFixed(2) + '</td>';
     html += '<td style="padding:4px 8px;text-align:right;color:var(--text-muted);">' + r.avg_hold.toFixed(1) + '</td>';
+    html += '<td style="padding:4px 8px;text-align:center;"><span style="display:inline-block;padding:1px 8px;border-radius:4px;font-size:9px;font-weight:700;background:' + qBg + ';color:' + qTxt + ';">' + r.quality + '</span></td>';
     html += '</tr>';
   }
   html += '</tbody></table>';

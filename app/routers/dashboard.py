@@ -1,6 +1,7 @@
 """Professional Dashboard — unified API for the live trading dashboard."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -366,7 +367,18 @@ async def api_pipeline_status():
 async def api_market_context(force_refresh: bool = False):
     """Return market context indicators: VIX, SPY Regime, Breadth, Credit, Liquidity."""
     from app.services.market_context import get_market_context
-    return get_market_context(force_refresh=force_refresh)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(get_market_context, force_refresh),
+            timeout=10.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("/api/market/context exceeded 10s — returning empty stale shell")
+        return {
+            "vix": {}, "spy_regime": {}, "breadth": {}, "credit": {}, "liquidity": {},
+            "stale": True, "error": "timeout",
+            "cached_at": datetime.utcnow().isoformat(),
+        }
 
 
 @router.get("/api/market/status")
@@ -495,6 +507,20 @@ async def api_pipeline_run(
 BACKTEST_CACHE_PATH = Path(__file__).parent.parent / ".cache" / "backtest_summary.json"
 BACKTEST_CACHE_TTL = 3600  # 1 hour
 
+
+def _quality_flag(sharpe: float, profit_factor: float, win_rate: float) -> str:
+    """Classify backtest quality: AVOID / WEAK / OK / GOOD / EXCELLENT."""
+    if sharpe < 0 or profit_factor < 0.5 or win_rate < 30:
+        return "AVOID"
+    if sharpe < 0.5:
+        return "WEAK"
+    if sharpe < 1.0:
+        return "OK"
+    if sharpe < 2.0:
+        return "GOOD"
+    return "EXCELLENT"
+
+
 @router.get("/api/strategies/backtest-data")
 async def api_strategies_backtest_data(force_refresh: bool = False):
     """Return cached backtest results for all 4 strategies on 25 symbols (2015-2026)."""
@@ -538,6 +564,7 @@ async def api_strategies_backtest_data(force_refresh: bool = False):
                     r = cfg["func"](df, cfg["extra"], symbol)
                 else:
                     r = cfg["func"](df, symbol)
+                quality = _quality_flag(r.sharpe, r.profit_factor, r.win_rate)
                 result["symbols"][symbol][sname] = {
                     "trades": r.total_trades,
                     "win_rate": r.win_rate,
@@ -547,6 +574,7 @@ async def api_strategies_backtest_data(force_refresh: bool = False):
                     "max_dd": r.max_drawdown,
                     "avg_hold": r.avg_hold_days,
                     "profit_factor": r.profit_factor,
+                    "quality": quality,
                 }
             except Exception:
                 pass
