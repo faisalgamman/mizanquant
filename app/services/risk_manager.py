@@ -306,6 +306,9 @@ def get_risk_status(account: dict, positions: list[dict], strategy_id: str = Non
     total_exposure = sum(abs(float(position.get("market_value", 0) or 0)) for position in positions)
     exposure_pct = (total_exposure / equity * 100) if equity > 0 else 0
 
+    from app.services.portfolio_stop import get_status as portfolio_stop_status
+    ps = portfolio_stop_status()
+
     return {
         "equity": round(equity, 2),
         "cash": round(float(account.get("cash", 0) or 0), 2),
@@ -326,6 +329,9 @@ def get_risk_status(account: dict, positions: list[dict], strategy_id: str = Non
         "kill_switch": app_cfg.killed,
         "portfolio_dd_cap_pct": app_cfg.risk.portfolio_dd_cap_pct,
         "correlation_threshold": app_cfg.risk.correlation_block_threshold,
+        "portfolio_stop_tier": ps["tier"],
+        "portfolio_drawdown_pct": ps["drawdown_pct"],
+        "portfolio_peak_equity": ps["peak_equity"],
     }
 
 

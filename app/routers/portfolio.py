@@ -411,3 +411,22 @@ async def ibkr_ping(x_api_key: OperatorAPIKey = None):
             "client_id": client_id,
             "message": str(exc),
         }
+
+
+@router.get("/api/v1/portfolio/stop-status")
+async def portfolio_stop_status(x_api_key: OperatorAPIKey = None):
+    from halal_screener import _require_api_key
+    from app.services.portfolio_stop import get_status, check_drawdown
+    _require_api_key(x_api_key)
+    check_drawdown()
+    return get_status()
+
+
+@router.get("/api/v1/portfolio/purification")
+async def portfolio_purification(x_api_key: OperatorAPIKey = None):
+    from halal_screener import _require_api_key, _primary_broker_strategy_id, _has_alpaca_broker_config, alpaca_get_positions
+    from app.services.purification_calculator import calculate_purification
+    _require_api_key(x_api_key)
+    sid = _primary_broker_strategy_id() if _has_alpaca_broker_config() else None
+    positions = alpaca_get_positions(strategy_id=sid) if sid else []
+    return calculate_purification(positions=positions, strategy_id=sid)

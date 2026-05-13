@@ -1,0 +1,9 @@
+{
+  "artifact_path": "models/evolution_strategy/v1.pt",
+  "version": "1.0",
+  "metrics": {
+    "sharpe": 2.0,
+    "win_rate": 76.0,
+    "avg_return": 11.2
+  }
+}

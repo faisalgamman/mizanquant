@@ -47,8 +47,10 @@ In the openbb-trading project on Railway:
    | `AUTO_LOGOFF_MINUTES` | `0` | Disable auto-logoff |
 
 5. **No public domain needed** — leave the service private. The
-   private networking hostname will be something like
-   `ib-gateway.railway.internal`.
+    private networking hostname will be something like
+    `ib-gateway.railway.internal`.  
+    **ملاحظة:** بسبب وجود مسافة في اسم الخدمة (` ib-gateway`)، الاستضافة الفعلية هي
+    `content-miracle.railway.internal`.
 
 ### 2. Wire the main bot to the gateway
 
@@ -56,7 +58,7 @@ In the openbb-trading main service, add these variables:
 
 | Variable | Value |
 |----------|-------|
-| `IBKR_HOST` | `ib-gateway.railway.internal` |
+| `IBKR_HOST` | `content-miracle.railway.internal` |
 | `IBKR_PORT` | `4002` |
 | `IBKR_CLIENT_ID` | `1` |
 | `IBKR_CLIENT_ID_A` | `11` |

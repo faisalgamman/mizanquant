@@ -429,6 +429,28 @@ def execute_buy(
         sizing = eligibility["sizing"]
         qty = sizing["qty"]
 
+        # Portfolio Stop drawdown check — reduce sizing or block
+        from app.services.portfolio_stop import check_drawdown, reduce_sizing
+        dd_status = check_drawdown()
+        if dd_status["tier"] in ("halt", "emergency"):
+            result["reason"] = (
+                f"Portfolio Stop {dd_status['tier'].upper()}: "
+                f"{dd_status['message']}"
+            )
+            logger.warning(f"{label} Trade blocked for {symbol}: {result['reason']}")
+            _notify_trade(result)
+            return result
+        if dd_status["tier"] == "warning":
+            orig_qty = qty
+            qty = reduce_sizing(qty)
+            if qty != orig_qty:
+                logger.info(
+                    f"{label} Portfolio Stop WARNING: reduced {symbol} "
+                    f"qty from {orig_qty} to {qty} (50% sizing)"
+                )
+                sizing["qty"] = qty
+                sizing["note"] = "Portfolio stop warning: sizing halved"
+
         # Determine stop-loss method from strategy config
         cfg = STRATEGY_CONFIGS.get(strategy_id) if strategy_id else None
         use_trailing = cfg.trailing_stop_enabled if cfg else settings.TRAILING_STOP_ENABLED

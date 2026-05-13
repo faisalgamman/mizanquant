@@ -48,6 +48,7 @@ from app.services.trading_engine import (
     get_trade_history, get_performance_report,
 )
 from app.services.risk_manager import get_risk_status
+from app.services.smart_ensemble import weighted_consensus
 from openbb_forecast.data.time_guard import signal_cutoff
 
 # Limit PyTorch/OpenMP threads to prevent memory bloat on small containers
@@ -1729,29 +1730,45 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
             logger.debug(f"PolicyGrad tool error: {e}")
             details.append({"Tool": "PolicyGrad", "Signal": "ERROR", "Vote": "-", "Score": 0})
 
-        # --- Final Verdict ---
-        # Only count actual votes (exclude SKIP from non-functional tools)
-        total = votes_buy + votes_sell + votes_hold
-        if total == 0: total = 1
-        confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
-
-        # Verdict thresholds — rebalanced to reduce neutral bias
-        # With 14 tools, ~10-12 actually vote (DQN/PolicyGrad often SKIP)
-        # STRONG needs >40% of votes, BUY needs plurality with >=35% confidence
-        if votes_buy >= 5:
-            verdict, action_str = "STRONG BUY", "STRONG ENTER"
-        elif votes_buy > votes_sell and confidence >= 35:
-            verdict, action_str = "BUY", "ENTER"
-        elif votes_buy > votes_sell:
-            verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
-        elif votes_sell >= 5:
-            verdict, action_str = "STRONG SELL", "STRONG AVOID"
-        elif votes_sell > votes_buy and confidence >= 35:
-            verdict, action_str = "SELL", "AVOID"
-        elif votes_sell > votes_buy:
-            verdict, action_str = "WEAK SELL", "WEAK SELL"
-        else:
-            verdict, action_str = "NEUTRAL", "WAIT"
+        # --- Final Verdict (Smart Ensemble — weighted consensus) ---
+        try:
+            ensemble = weighted_consensus(details)
+            verdict = ensemble["verdict"]
+            confidence = ensemble["confidence"]
+            if verdict == "STRONG BUY":
+                action_str = "STRONG ENTER"
+            elif verdict == "BUY":
+                action_str = "ENTER"
+            elif verdict == "SELL":
+                action_str = "AVOID"
+            elif verdict == "NEUTRAL":
+                action_str = "WAIT"
+            else:
+                action_str = "HOLD"
+            logger.info(
+                "Smart Ensemble for %s: %s (%.1f%%) — top models: %s",
+                symbol, verdict, confidence,
+                ", ".join(ensemble.get("top_models", [])),
+            )
+        except Exception:
+            logger.warning("Smart Ensemble failed, falling back to equal-weighted vote")
+            total = votes_buy + votes_sell + votes_hold
+            if total == 0: total = 1
+            confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
+            if votes_buy >= 5:
+                verdict, action_str = "STRONG BUY", "STRONG ENTER"
+            elif votes_buy > votes_sell and confidence >= 35:
+                verdict, action_str = "BUY", "ENTER"
+            elif votes_buy > votes_sell:
+                verdict, action_str = "WEAK BUY", "WEAK SIGNAL"
+            elif votes_sell >= 5:
+                verdict, action_str = "STRONG SELL", "STRONG AVOID"
+            elif votes_sell > votes_buy and confidence >= 35:
+                verdict, action_str = "SELL", "AVOID"
+            elif votes_sell > votes_buy:
+                verdict, action_str = "WEAK SELL", "WEAK SELL"
+            else:
+                verdict, action_str = "NEUTRAL", "WAIT"
 
         levels = ATR_TARGETS["base"]
         sl  = round(price - levels["sl"] * atr_val, 2)
