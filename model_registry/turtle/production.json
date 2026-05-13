@@ -1,0 +1,9 @@
+{
+  "artifact_path": "models/turtle/v1.pt",
+  "version": "1.0",
+  "metrics": {
+    "sharpe": 2.54,
+    "win_rate": 64.0,
+    "avg_return": 12.3
+  }
+}
