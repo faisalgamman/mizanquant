@@ -1607,16 +1607,25 @@ function toggleSidebar() {
 }
 
 // ===== API HELPER =====
-async function apiGet(path, timeoutMs = 12000) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const r = await fetch(API + path, { signal: ctrl.signal });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-  } finally {
-    clearTimeout(t);
+async function apiGet(path, timeoutMs = 30000, retries = 1) {
+  var lastErr;
+  for (var attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(API + path, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(await r.text());
+      return await r.json();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) {
+        await new Promise(function(res) { setTimeout(res, 1000 * (attempt + 1)); });
+      }
+    } finally {
+      clearTimeout(t);
+    }
   }
+  throw lastErr;
 }
 
 // ===== STATUS =====
@@ -2441,7 +2450,15 @@ function showSkeleton(sectionId) {
   if (!gen) return;
   var target;
   switch (sectionId) {
-    case 'portfolio': target = document.getElementById('portfolioHero'); break;
+    case 'portfolio':
+      // Portfolio has child elements (phEquity, phPositions, etc.) that must survive.
+      // Just fade the hero instead of replacing innerHTML.
+      target = document.getElementById('portfolioHero');
+      if (target) {
+        target.style.opacity = '0.3';
+        target.style.transition = 'opacity 0.3s ease';
+      }
+      return;
     case 'market': target = document.getElementById('mcGrid'); break;
     case 'signals': target = document.getElementById('signalsFeatured'); break;
     case 'positions': target = document.getElementById('openPositions'); break;
@@ -2617,7 +2634,7 @@ async function loadOverview() {
     document.getElementById('hbRegime').innerHTML = `<span style="color:${regimeColor}">${(spy.regime||'?').toUpperCase()}</span> <span class="arrow" style="color:${regimeColor}">${regimeArrow}</span>`;
     document.getElementById('hbVix').innerHTML = `<span style="color:${vixColor}">${vix.vix ?? '—'}</span> <span class="arrow" style="color:${vixColor}">${vixArrow}</span>`;
     document.getElementById('hbBreadth').innerHTML = `<span style="color:${brColor}">${breadth.breadth_pct ?? '—'}%</span> <span class="arrow" style="color:${brColor}">${brArrow}</span>`;
-    loadRegimeTimeline(regime || 'neutral', vix.vix || 0);
+    loadRegimeTimeline(regime || 'neutral', vix.vix != null ? vix.vix : null);
     document.getElementById('hbCredit').innerHTML = `<span style="color:${crColor}">${(credit.ratio ?? '—')}</span> <span class="arrow" style="color:${crColor}">${crArrow}</span>`;
     document.getElementById('hbLiquidity').innerHTML = `<span style="color:${lqColor}">${liquidity.liquidity_pct ?? '—'}%</span> <span class="arrow" style="color:${lqColor}">${lqArrow}</span>`;
 
