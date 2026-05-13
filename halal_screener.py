@@ -45,8 +45,9 @@ from app.services.signal_tracker import (
 from app.services.trading_engine import (
     on_signal as auto_trade_signal,
     execute_buy, execute_sell,
-    get_trade_history, get_performance_report,
+    get_performance_report,
 )
+from app.services.trade_history import get_trade_history
 from app.services.risk_manager import get_risk_status
 from app.services.smart_ensemble import weighted_consensus
 from openbb_forecast.data.time_guard import signal_cutoff
@@ -4287,6 +4288,7 @@ from app.routers.consensus import router as consensus_router
 from app.routers.portfolio import router as portfolio_router
 from app.routers.admin import router as admin_router
 from app.routers.dashboard import router as dashboard_router
+from app.api.v1 import v1_router
 
 # Mount static files for dashboard
 from fastapi.staticfiles import StaticFiles
@@ -4303,6 +4305,7 @@ app.include_router(consensus_router)
 app.include_router(portfolio_router)
 app.include_router(admin_router)
 app.include_router(dashboard_router)
+app.include_router(v1_router)
 
 
 @app.get("/api/info", include_in_schema=False)

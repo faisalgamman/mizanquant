@@ -512,6 +512,28 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 @keyframes countUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 .count-anim { animation:countUp 0.5s ease; }
 
+/* ===== PIPELINE FLOW ===== */
+.pflow-container { display:flex; align-items:center; justify-content:center; gap:2px; padding:12px 4px; overflow-x:auto; }
+.pflow-stage { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:48px; }
+.pflow-dot { width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; border:2px solid; background:rgba(255,255,255,0.03); transition:all 0.3s; }
+.pflow-stage:hover .pflow-dot { transform:scale(1.2); }
+.pflow-label { font-size:7px; text-align:center; color:var(--text-muted); line-height:1.2; }
+.pflow-connector { width:16px; height:2px; background:var(--border); flex-shrink:0; }
+
+/* ===== SORT ICONS ===== */
+.sort-icon { font-size:8px; margin-left:2px; }
+.signal-table th { cursor:pointer; user-select:none; }
+.signal-table th:hover { color:var(--accent); }
+
+/* ===== LOADING SKELETON ===== */
+@keyframes shimmer { 0%{background-position:-200px 0} 100%{background-position:calc(200px + 100%) 0} }
+.skeleton { background:linear-gradient(90deg,var(--bg-card) 25%,rgba(255,255,255,0.05) 50%,var(--bg-card) 75%); background-size:200px 100%; animation:shimmer 1.5s infinite; border-radius:6px; }
+.skeleton-text { height:14px; margin:8px 0; }
+.skeleton-card { height:80px; margin:8px 0; }
+
+/* ===== RESPONSIVE GRID ===== */
+@media(max-width:1199px){ .mc-grid{grid-template-columns:repeat(3,1fr)!important;} }
+@media(max-width:767px){ .mc-grid{grid-template-columns:repeat(2,1fr)!important;} }
 </style>
 </head>
 <body>
@@ -620,7 +642,13 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   </div>
 
   <!-- ═══ MARKET CONTEXT GAUGES ═══ -->
-  <div class="mc-grid" id="mcGrid"></div>
+  <div class="mc-grid" id="mcGrid">
+    <div class="mc-card"><div class="mc-label">VIX</div><div class="skeleton skeleton-card" style="width:80px;height:80px;margin:8px auto;"></div></div>
+    <div class="mc-card"><div class="mc-label">SPY Regime</div><div class="skeleton skeleton-card" style="width:80px;height:80px;margin:8px auto;"></div></div>
+    <div class="mc-card"><div class="mc-label">Breadth</div><div class="skeleton skeleton-card" style="width:80px;height:80px;margin:8px auto;"></div></div>
+    <div class="mc-card"><div class="mc-label">Credit</div><div class="skeleton skeleton-card" style="width:80px;height:80px;margin:8px auto;"></div></div>
+    <div class="mc-card"><div class="mc-label">Liquidity</div><div class="skeleton skeleton-card" style="width:80px;height:80px;margin:8px auto;"></div></div>
+  </div>
 
   <!-- ═══ OVERVIEW LAYOUT: 65/35 SPLIT ═══ -->
   <div class="overview-layout">
@@ -1247,6 +1275,8 @@ async function checkStatus() {
 let _allSignals = [];
 let _signalsFilter = 'all';
 let _showAvoided = false;
+let _sortField = null;
+let _sortDir = 1;
 
 function filterSignals(filter) {
   _signalsFilter = filter;
@@ -1262,6 +1292,19 @@ function toggleAvoided() {
   if (_showAvoided) renderSignalsAvoided();
 }
 
+function sortBy(field) {
+  if (_sortField === field) { _sortDir *= -1; } else { _sortField = field; _sortDir = 1; }
+  _allSignals.sort((a, b) => {
+    const va = a[field] ?? 0;
+    const vb = b[field] ?? 0;
+    return (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb))) * _sortDir;
+  });
+  renderSignals();
+}
+function getSortIcon(field) {
+  if (_sortField !== field) return '';
+  return _sortDir === 1 ? ' ▲' : ' ▼';
+}
 function getScoreColor(score) {
   return score >= 75 ? '#4ade80' : score >= 50 ? '#fbbf24' : '#f87171';
 }
@@ -1302,6 +1345,8 @@ function renderSignals() {
       const sigColor = signal === 'BUY' ? '#4ade80' : signal === 'WAIT' ? '#fbbf24' : '#f87171';
       const spark = genSignalSparkline(r.symbol);
       const pct = Math.min(score, 100);
+      const sector = r.sector || r.industry || '';
+      const strategy = r.strategy || '';
       return `<div class="signal-featured-card" onclick="switchTab('research');setTimeout(()=>{document.getElementById('smartSector').value='';runSmartScreener()},300)">
         <div style="display:flex;align-items:center;gap:12px;">
           <div class="sfc-score-ring" style="background:${sc}22;color:${sc}">${score}
@@ -1310,6 +1355,7 @@ function renderSignals() {
           <div style="flex:1;">
             <div class="sfc-symbol">${r.symbol}</div>
             <div class="sfc-change" style="color:${chgColor}">${chgIcon} ${chg != null ? chg.toFixed(2) + '%' : '—'}</div>
+            ${sector ? '<div style="font-size:9px;color:var(--text-muted);margin-top:2px;"><i class="fas fa-tag" style="font-size:8px;"></i> '+sector+'</div>' : ''}
           </div>
         </div>
         <svg class="sfc-sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
@@ -1317,6 +1363,7 @@ function renderSignals() {
         </svg>
         <div class="sfc-footer">
           <span style="padding:2px 10px;border-radius:4px;font-size:10px;font-weight:600;color:${sigColor};background:${sigColor}22;">${signal}</span>
+          ${strategy ? '<span style="font-size:9px;color:var(--text-muted);">'+strategy+'</span>' : ''}
           <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();showTradePlan('${r.symbol}')" style="font-size:10px;padding:3px 10px;"><i class="fas fa-file-invoice"></i> Trade Plan</button>
         </div>
       </div>`;
@@ -1328,7 +1375,14 @@ function renderSignals() {
   // Watch list table
   const wlEl = document.getElementById('signalsWatchList');
   if (watchList.length > 0) {
-    wlEl.innerHTML = `<div class="table-wrap"><table class="signal-table"><thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Change</th><th>Signal</th><th>Trend</th></tr></thead><tbody>${
+    wlEl.innerHTML = `<div class="table-wrap"><table class="signal-table"><thead><tr>
+      <th style="cursor:pointer;user-select:none;" onclick="sortBy('symbol')">#<span class="sort-icon">${getSortIcon('symbol')}</span></th>
+      <th style="cursor:pointer;user-select:none;" onclick="sortBy('symbol')">Symbol<span class="sort-icon">${getSortIcon('symbol')}</span></th>
+      <th style="cursor:pointer;user-select:none;" onclick="sortBy('smart_score')">Score<span class="sort-icon">${getSortIcon('smart_score')}</span></th>
+      <th style="cursor:pointer;user-select:none;" onclick="sortBy('change_pct')">Change<span class="sort-icon">${getSortIcon('change_pct')}</span></th>
+      <th style="cursor:pointer;user-select:none;" onclick="sortBy('signal')">Signal<span class="sort-icon">${getSortIcon('signal')}</span></th>
+      <th>Trend</th>
+    </tr></thead><tbody>${
       watchList.map((r, i) => {
         const score = r.smart_score || 0;
         const sc = getScoreColor(score);
@@ -1391,17 +1445,28 @@ async function loadPipelineStatus() {
       el.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:11px;">No pipeline run yet today</div>';
       return;
     }
-    el.innerHTML = '<div style="display:flex;flex-direction:column;gap:4px;">' +
-      stages.map(s => {
-        const statusIcon = s.status === 'completed' ? '<span style="color:var(--green);">&#10003;</span>'
-          : s.status === 'running' ? '<span style="color:var(--accent);"><div class="spinner" style="width:12px;height:12px;display:inline-block;"></div></span>'
-          : '<span style="color:var(--text-muted);">&#9679;</span>';
-        return '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;background:var(--bg-card);">'
-          + statusIcon
-          + '<span style="font-size:11px;flex:1;">' + s.label + '</span>'
-          + '<span style="font-size:10px;color:var(--text-muted);">' + s.status + '</span>'
-          + '</div>';
-      }).join('') + '</div>';
+    // Horizontal flow visualization
+    const stageDots = stages.map(s => {
+      const done = s.status === 'completed';
+      const running = s.status === 'running';
+      const failed = s.status === 'failed';
+      const cls = done ? 'pflow-done' : failed ? 'pflow-fail' : running ? 'pflow-run' : 'pflow-idle';
+      const icon = done ? '✓' : failed ? '✗' : running ? '◉' : '○';
+      const color = done ? 'var(--green)' : failed ? 'var(--red)' : running ? 'var(--accent)' : 'var(--text-muted)';
+      const elapsed = s.elapsed_s ? s.elapsed_s.toFixed(1) + 's' : '';
+      return `<div class="pflow-stage ${cls}" title="${s.label}: ${s.status}${elapsed?' ('+elapsed+')':''}" style="cursor:help;">
+        <div class="pflow-dot" style="color:${color};border-color:${color};">${icon}</div>
+        <div class="pflow-label">${s.label.replace(' ','<br>')}</div>
+      </div>`;
+    }).join('<div class="pflow-connector"></div>');
+    el.innerHTML = `<div class="pflow-container">${stageDots}</div>
+      <div style="display:flex;gap:12px;margin-top:8px;font-size:10px;color:var(--text-muted);flex-wrap:wrap;">
+        <span><span style="color:var(--green);">✓</span> Done</span>
+        <span><span style="color:var(--accent);">◉</span> Running</span>
+        <span><span style="color:var(--red);">✗</span> Failed</span>
+        <span><span style="color:var(--text-muted);">○</span> Idle</span>
+        ${data.last_run ? '<span style="margin-left:auto;">Last run: ' + new Date(data.last_run).toLocaleTimeString() + '</span>' : ''}
+      </div>`;
   } catch(e) {
     document.getElementById('pipelineStatus').innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:11px;">Pipeline status unavailable</div>';
   }
@@ -1413,24 +1478,41 @@ async function loadPipelineStatus() {
 
 async function loadOverview() {
   try {
-    const settled = await Promise.allSettled([
-      apiGet('/api/system/status'),
-      apiGet('/api/trading/summary'),
-      apiGet('/api/guards/summary'),
-      apiGet('/api/trading/history/recent?limit=5'),
-      apiGet('/api/scheduler/status'),
-      apiGet('/api/market/context'),
-      apiGet('/api/block/status'),
-    ]);
-    const valueOr = (i, fallback) => settled[i].status === 'fulfilled' ? settled[i].value : fallback;
-    const info       = valueOr(0, null);
-    const trading    = valueOr(1, {});
-    const guards     = valueOr(2, {});
-    const history    = valueOr(3, []);
-    const sched      = valueOr(4, {});
-    const mc         = valueOr(5, {});
-    const blockData  = valueOr(6, {block_level:'NORMAL'});
-    settled.forEach((s, i) => { if (s.status === 'rejected') console.warn('Overview endpoint', i, 'failed:', s.reason); });
+    // Try V1 aggregated endpoint first (1 request vs 7)
+    let overviewData = null;
+    try {
+      overviewData = await apiGet('/api/v1/overview');
+    } catch (_) { /* fall through to individual endpoints */ }
+
+    let info, trading, guards, history, sched, mc, blockData;
+    if (overviewData) {
+      info       = overviewData.system || {};
+      trading    = overviewData.portfolio || {};
+      guards     = overviewData.guards_recent || [];
+      history    = overviewData.top_signals || [];
+      sched      = overviewData.pipeline?.schedule || {};
+      mc         = overviewData.market_context || {};
+      blockData  = {block_level: 'NORMAL'};
+    } else {
+      const settled = await Promise.allSettled([
+        apiGet('/api/system/status'),
+        apiGet('/api/trading/summary'),
+        apiGet('/api/guards/summary'),
+        apiGet('/api/trading/history/recent?limit=5'),
+        apiGet('/api/scheduler/status'),
+        apiGet('/api/market/context'),
+        apiGet('/api/block/status'),
+      ]);
+      const valueOr = (i, fallback) => settled[i].status === 'fulfilled' ? settled[i].value : fallback;
+      info       = valueOr(0, null);
+      trading    = valueOr(1, {});
+      guards     = valueOr(2, {});
+      history    = valueOr(3, []);
+      sched      = valueOr(4, {});
+      mc         = valueOr(5, {});
+      blockData  = valueOr(6, {block_level:'NORMAL'});
+      settled.forEach((s, i) => { if (s.status === 'rejected') console.warn('Overview endpoint', i, 'failed:', s.reason); });
+    }
 
     // ── FOOTER ──
     updateFooterStatus(info || {status:'degraded'});
@@ -1546,12 +1628,17 @@ async function loadOverview() {
     const crLabel = credit.classification === 'ok' ? 'OK' : credit.classification === 'stress' ? 'STRESS' : 'WATCH';
     const liqPct = liquidity.liquidity_pct || 50;
 
+    const vixTooltip = 'CBOE Volatility Index — below 15 = low fear (green), 15-25 = normal (yellow), above 25 = high fear (red)';
+    const spyTooltip = 'SPY trend regime based on EMA20/50/200 crossovers — BULL = uptrend, BEAR = downtrend, NEUTRAL = ranging';
+    const brTooltip = 'Market breadth — percentage of S&P 500 stocks trading above their 20-day EMA. Above 60% = broad participation, below 40% = narrow';
+    const crTooltip = 'Credit spread ratio (HY OAS / IG OAS) — below 1.0 = healthy credit markets, above 2.0 = credit stress';
+    const lqTooltip = 'Market liquidity score — percentage of stocks with above-average volume. Above 50% = healthy, below 30% = illiquid';
     document.getElementById('mcGrid').innerHTML = `
-      <div class="mc-card"><div class="mc-label">VIX</div><div class="mc-gauge-wrap"><svg width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/><circle cx="40" cy="40" r="34" fill="none" stroke="${vixGaugeColor}" stroke-width="6" stroke-dasharray="${vixGauge*2.13} 999" stroke-linecap="round" transform="rotate(-90,40,40)"/><text x="40" y="40" text-anchor="middle" dominant-baseline="central" fill="${vixGaugeColor}" font-size="16" font-weight="700">${vix.vix||'—'}</text></svg></div><div class="mc-gauge-sub" style="color:${vixGaugeColor};">${(vix.classification||'').replace(/_/g,' ')}</div></div>
-      <div class="mc-card"><div class="mc-label">SPY Regime</div><div class="mc-gauge-wrap"><svg width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/><circle cx="40" cy="40" r="34" fill="none" stroke="${spyGaugeColor}" stroke-width="6" stroke-dasharray="${spyGaugeVal*2.13} 999" stroke-linecap="round" transform="rotate(-90,40,40)"/><text x="40" y="40" text-anchor="middle" dominant-baseline="central" fill="${spyGaugeColor}" font-size="12" font-weight="700">${(spy.regime||'?').toUpperCase()}</text></svg></div><div class="mc-gauge-sub" style="color:${spyGaugeColor};">${spy.regime||'—'}</div></div>
-      <div class="mc-card"><div class="mc-label">Breadth</div><div class="breadth-bar-wrap" style="margin:16px auto 8px;width:70px;"><div class="breadth-above" style="width:${brPct}%"></div><div class="breadth-below" style="width:${100-brPct}%"></div></div><div class="mc-gauge-val" style="font-size:16px;">${brPct}%</div><div class="mc-gauge-sub">Above EMA20</div></div>
-      <div class="mc-card"><div class="mc-label">Credit</div><div style="font-size:32px;margin:12px 0 4px;" class="${crClass}">${credit.ratio||'—'}</div><div class="mc-gauge-sub ${crClass}" style="font-weight:600;">${crLabel}</div></div>
-      <div class="mc-card"><div class="mc-label">Liquidity</div><div class="breadth-bar-wrap" style="margin:16px auto 8px;width:70px;"><div style="height:100%;width:${liqPct}%;background:${liqPct>60?'#22c55e':liqPct>40?'#f59e0b':'#ef4444'};border-radius:4px;"></div></div><div class="mc-gauge-val" style="font-size:16px;">${liqPct}%</div><div class="mc-gauge-sub">Market Liquidity</div></div>
+      <div class="mc-card" title="${vixTooltip}"><div class="mc-label">VIX</div><div class="mc-gauge-wrap"><svg width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/><circle cx="40" cy="40" r="34" fill="none" stroke="${vixGaugeColor}" stroke-width="6" stroke-dasharray="${vixGauge*2.13} 999" stroke-linecap="round" transform="rotate(-90,40,40)"/><text x="40" y="40" text-anchor="middle" dominant-baseline="central" fill="${vixGaugeColor}" font-size="16" font-weight="700">${vix.vix||'—'}</text></svg></div><div class="mc-gauge-sub" style="color:${vixGaugeColor};">${(vix.classification||'').replace(/_/g,' ')}</div></div>
+      <div class="mc-card" title="${spyTooltip}"><div class="mc-label">SPY Regime</div><div class="mc-gauge-wrap"><svg width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="6"/><circle cx="40" cy="40" r="34" fill="none" stroke="${spyGaugeColor}" stroke-width="6" stroke-dasharray="${spyGaugeVal*2.13} 999" stroke-linecap="round" transform="rotate(-90,40,40)"/><text x="40" y="40" text-anchor="middle" dominant-baseline="central" fill="${spyGaugeColor}" font-size="12" font-weight="700">${(spy.regime||'?').toUpperCase()}</text></svg></div><div class="mc-gauge-sub" style="color:${spyGaugeColor};">${spy.regime||'—'}</div></div>
+      <div class="mc-card" title="${brTooltip}"><div class="mc-label">Breadth</div><div class="breadth-bar-wrap" style="margin:16px auto 8px;width:70px;"><div class="breadth-above" style="width:${brPct}%"></div><div class="breadth-below" style="width:${100-brPct}%"></div></div><div class="mc-gauge-val" style="font-size:16px;">${brPct}%</div><div class="mc-gauge-sub">Above EMA20</div></div>
+      <div class="mc-card" title="${crTooltip}"><div class="mc-label">Credit</div><div style="font-size:32px;margin:12px 0 4px;" class="${crClass}">${credit.ratio||'—'}</div><div class="mc-gauge-sub ${crClass}" style="font-weight:600;">${crLabel}</div></div>
+      <div class="mc-card" title="${lqTooltip}"><div class="mc-label">Liquidity</div><div class="breadth-bar-wrap" style="margin:16px auto 8px;width:70px;"><div style="height:100%;width:${liqPct}%;background:${liqPct>60?'#22c55e':liqPct>40?'#f59e0b':'#ef4444'};border-radius:4px;"></div></div><div class="mc-gauge-val" style="font-size:16px;">${liqPct}%</div><div class="mc-gauge-sub">Market Liquidity</div></div>
     `;
 
     // ── FIRE-AND-FORGET ──
