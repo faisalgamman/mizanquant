@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 logger = logging.getLogger("screener")
 
@@ -115,6 +116,17 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    @field_validator("AUTO_TRADE_ENABLED", mode="before")
+    @classmethod
+    def _strip_bool(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v.lower() in ("true", "1", "yes"):
+                return True
+            if v.lower() in ("false", "0", "no"):
+                return False
+        return v
 
     # ------------------------------------------------------------------
     # Safety helpers
