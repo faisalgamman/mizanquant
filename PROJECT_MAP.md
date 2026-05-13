@@ -12,7 +12,7 @@ _Last updated: 2026-05-13 (M1-M6 complete, M7 done)_
 | **Web** | FastAPI + Uvicorn | 0.136.1 / 0.46.0 | Async HTTP, lifespan mgmt |
 | **DB** | SQLAlchemy 2.0 | 2.0.49 | SQLite (dev) / PostgreSQL (Railway) |
 | **Broker** | Alpaca Markets (paper) | — | 4 accounts: default + A/B/C |
-| **Broker** | Interactive Brokers (ib_insync) | 0.9.86 | Adapter active (TWS Paper connected via port 7497) |
+| **Broker** | Interactive Brokers (ib_insync) | 0.9.86 | Adapter active (IB Gateway Docker on Railway, port 4002, paper) |
 | **ML** | PyTorch (CPU) | 2.11.0 | LSTM, Transformer models |
 | **ML** | scikit-learn | 1.8.0 | Ensemble, preprocessing |
 | **ML** | XGBoost | 3.2.0 | Stacking ensemble member |
@@ -169,5 +169,5 @@ openbb-trading/
 | **M3** | Wire USX Pro V4 | 3-stage signals pipeline (USX → AI → Telegram) | ✅ Done (commit `42059e6`) |
 | **M4** | Merge copilot into main app | `POST /v1/query` streaming endpoint on main FastAPI; `copilot.py` removed | ✅ Done (commit pending) |
 | **M5** | Clean orphans | `keep_alive.py` → `app/services/`, `russell1000_halal.py` → `app/data/` | ✅ Done |
-| **M6** | Activate IBKR | TWS Paper connected via port 7497, `BROKER_TYPE=ibkr`, `/api/ibkr/ping` endpoint | ✅ Done |
+| **M6** | Activate IBKR | IB Gateway Docker on Railway (paper, port 4002), `BROKER_TYPE=ibkr`, `/api/ibkr/ping` → `ok` | ✅ Done |
 | **M7** | OpenBB Workspace Integration | Custom backend at `app/workspace_server.py` serving 40 widgets (19 models + 19 agents + MC + metrics) with OpenBB Platform extension registration | ✅ Done |

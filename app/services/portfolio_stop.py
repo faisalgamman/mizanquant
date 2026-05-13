@@ -55,7 +55,10 @@ def _save_state(state: dict) -> None:
 
 
 def _get_total_equity() -> float | None:
-    """Aggregate equity across all configured Alpaca strategies."""
+    """Aggregate equity across all configured broker strategies."""
+    import os
+    if os.environ.get("BROKER_TYPE", "alpaca").lower() == "ibkr":
+        return None
     try:
         from app.config import STRATEGY_CONFIGS
         from app.services.alpaca_client import get_account as alpaca_get_account
