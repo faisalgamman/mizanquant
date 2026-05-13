@@ -42,16 +42,29 @@ async def _dashboard_health():
         checks["database"] = True
     except Exception:
         pass
+
+    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    checks["broker_type"] = broker_type
+
     try:
-        from halal_screener import _has_alpaca_broker_config
-        if _has_alpaca_broker_config():
-            from halal_screener import alpaca_get_account
-            acct = alpaca_get_account()
-            checks["broker"] = "connected" if acct and acct.get("status") == "ACTIVE" else "error"
+        if broker_type == "ibkr":
+            import socket
+            host = os.environ.get("IBKR_HOST", "127.0.0.1")
+            port = int(os.environ.get("IBKR_PORT", "7497"))
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.close()
+            checks["broker"] = "connected"
         else:
-            checks["broker"] = "not_configured"
+            from halal_screener import _has_alpaca_broker_config
+            if _has_alpaca_broker_config():
+                from halal_screener import alpaca_get_account
+                acct = alpaca_get_account()
+                checks["broker"] = "connected" if acct and acct.get("status") == "ACTIVE" else "error"
+            else:
+                checks["broker"] = "not_configured"
     except Exception:
-        checks["broker"] = "error"
+        checks["broker"] = "error" if broker_type == "ibkr" else "not_configured"
+
     telegram_ok = bool(os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TGBOT"))
     checks["telegram"] = "active" if telegram_ok else "not_configured"
     from app.services.scheduler_metrics import scheduler_metrics
@@ -68,7 +81,7 @@ async def _dashboard_health():
     return {
         "status": status,
         "broker": checks["broker"],
-        "broker_type": "alpaca",
+        "broker_type": checks["broker_type"],
         "database": "connected" if db_ok else "disconnected",
         "market_data": "available" if md_ok else "unavailable",
         "telegram": checks["telegram"],
@@ -102,14 +115,29 @@ async def api_symbols_search(q: str = "", limit: int = 20):
 @router.get("/api/trading/summary")
 async def api_trading_summary():
     """Portfolio + positions + P&L summary."""
-    from halal_screener import (
-        alpaca_get_account, alpaca_get_positions, settings,
-    )
-    sid = None
+    from halal_screener import settings
     from app.config import STRATEGY_CONFIGS
+
+    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    sid = None
     for sid_key in STRATEGY_CONFIGS:
         sid = sid_key
         break
+
+    if broker_type == "ibkr":
+        return {
+            "broker_type": "ibkr",
+            "equity": 0, "cash": 0, "buying_power": 0, "portfolio_value": 0,
+            "daily_pnl": 0, "daily_pnl_pct": 0,
+            "open_positions": 0,
+            "auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
+            "positions": [],
+            "message": "IBKR account details not yet available via REST API. Use IB Gateway desktop to view positions.",
+        }
+
+    from halal_screener import (
+        alpaca_get_account, alpaca_get_positions,
+    )
 
     account = alpaca_get_account(strategy_id=sid) if sid else None
     positions = alpaca_get_positions(strategy_id=sid) if sid else []
@@ -126,6 +154,7 @@ async def api_trading_summary():
         equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
 
     return {
+        "broker_type": "alpaca",
         "equity": equity,
         "cash": cash,
         "buying_power": buying_power,
@@ -307,6 +336,7 @@ async def api_system_status():
     return {
         "status": health.get("status", "unknown"),
         "broker": health.get("broker", "unknown"),
+        "broker_type": health.get("broker_type", "unknown"),
         "database": health.get("database", "unknown"),
         "telegram": health.get("telegram", "unknown"),
         "data_source": health.get("data_source", "unknown"),

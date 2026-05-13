@@ -1,4 +1,5 @@
 """Screener, USX, BCF, Halal, Backtest, Monte Carlo, Health, Widgets, Intraday endpoints"""
+import os
 from fastapi import APIRouter
 
 router = APIRouter(tags=["Screener"])
@@ -239,10 +240,22 @@ async def health():
         checks["database"] = True
     except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"database health check failed: {e}")
+    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
     alpaca_configured = _has_alpaca_broker_config()
     broker_connected = False
     broker_error = {}
-    if alpaca_configured:
+    if broker_type == "ibkr":
+        try:
+            import socket
+            host = os.environ.get("IBKR_HOST", "127.0.0.1")
+            port = int(os.environ.get("IBKR_PORT", "7497"))
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.close()
+            broker_connected = True
+            checks["broker"] = True
+        except Exception:
+            checks["broker"] = False
+    elif alpaca_configured:
         try:
             broker_connected = bool(alpaca_get_account(strategy_id=_primary_broker_strategy_id()))
             checks["broker"] = broker_connected
@@ -256,6 +269,8 @@ async def health():
     telegram_configured = bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
     core_ok = all(checks[name] for name in ("openbb_forecast", "market_data", "database"))
     broker_ok = (not alpaca_configured) or broker_connected
+    if broker_type == "ibkr":
+        broker_ok = broker_connected
     all_ok = core_ok and broker_ok
     if settings.AUTO_TRADE_ENABLED and not broker_connected:
         all_ok = False
@@ -274,7 +289,8 @@ async def health():
         "halal_screening": "fmp_live" if fmp_configured else "hardcoded_lists",
         "telegram": "active" if telegram_configured else "not_configured",
         "operator_api": "configured" if settings.API_KEY else "not_configured",
-        "broker": "connected" if broker_connected else "configured_unavailable" if alpaca_configured else "not_configured",
+        "broker": "connected" if broker_connected else "configured_unavailable" if alpaca_configured or broker_type == "ibkr" else "not_configured",
+        "broker_type": broker_type,
         "broker_reason": broker_error.get("reason") if broker_error else "",
         "broker_status_code": broker_error.get("status_code") if broker_error else None,
         "database": "connected" if checks["database"] else "unavailable",

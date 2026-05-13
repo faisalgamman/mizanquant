@@ -67,9 +67,14 @@ async def admin_scan_signals(strategy: str = "ABC", min_confidence: float = 70.0
 
 @router.get("/admin/alpaca_check")
 async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
-    from halal_screener import _require_api_key, settings, alpaca_get_account, alpaca_get_last_error
+    from halal_screener import _require_api_key, settings
     from app.config import STRATEGY_CONFIGS
     _require_api_key(x_api_key)
+    bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    if bt == "ibkr":
+        return {"broker_type": "ibkr", "message": "IBKR configured. Use IB Gateway desktop for account check.",
+                "ibkr_host": settings.IBKR_HOST, "ibkr_port": settings.IBKR_PORT}
+    from halal_screener import alpaca_get_account, alpaca_get_last_error
     results = {}
     if settings.ALPACA_API_KEY:
         acct = alpaca_get_account(strategy_id=None)
@@ -87,7 +92,7 @@ async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
         err = alpaca_get_last_error(strategy_id=sid)
         results[sid] = {"configured": True, "name": cfg.name, "account_status": acct.get("status") if acct else None,
                         "equity": acct.get("equity") if acct else None, "last_error": err}
-    return {"results": results, "base_url": settings.ALPACA_BASE_URL}
+    return {"broker_type": "alpaca", "results": results, "base_url": settings.ALPACA_BASE_URL}
 
 
 @router.post("/admin/rearm_orphans")
