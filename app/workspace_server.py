@@ -47,6 +47,26 @@ async def health():
     """Railway health check endpoint."""
     return {"status": "ok"}
 
+
+@app.get("/api/ibkr/ping")
+async def ibkr_ping():
+    """Test TWS/IB Gateway connectivity via socket."""
+    import socket
+    import os
+    host = os.environ.get("IBKR_HOST", "127.0.0.1")
+    port = int(os.environ.get("IBKR_PORT", "7497"))
+    client_id = int(os.environ.get("IBKR_CLIENT_ID", "1"))
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        return {"status": "ok", "host": host, "port": port, "client_id": client_id, "message": "TWS/IB Gateway is reachable"}
+    except socket.timeout:
+        return {"status": "error", "host": host, "port": port, "client_id": client_id, "message": "Connection timed out"}
+    except ConnectionRefusedError:
+        return {"status": "error", "host": host, "port": port, "client_id": client_id, "message": "Connection refused. TWS/IB Gateway is not running."}
+    except Exception as exc:
+        return {"status": "error", "host": host, "port": port, "client_id": client_id, "message": str(exc)}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://pro.openbb.co", "https://openbb.co", "http://localhost:4200"],
