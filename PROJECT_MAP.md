@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-05-07 (M1-M4 complete)_
+_Last updated: 2026-05-13 (M1-M6 complete, M7 done)_
 
 ---
 
@@ -12,7 +12,7 @@ _Last updated: 2026-05-07 (M1-M4 complete)_
 | **Web** | FastAPI + Uvicorn | 0.136.1 / 0.46.0 | Async HTTP, lifespan mgmt |
 | **DB** | SQLAlchemy 2.0 | 2.0.49 | SQLite (dev) / PostgreSQL (Railway) |
 | **Broker** | Alpaca Markets (paper) | — | 4 accounts: default + A/B/C |
-| **Broker** | Interactive Brokers (ib_insync) | 0.9.86 | Adapter complete, inert (no keys) |
+| **Broker** | Interactive Brokers (ib_insync) | 0.9.86 | Adapter active (TWS Paper connected via port 7497) |
 | **ML** | PyTorch (CPU) | 2.11.0 | LSTM, Transformer models |
 | **ML** | scikit-learn | 1.8.0 | Ensemble, preprocessing |
 | **ML** | XGBoost | 3.2.0 | Stacking ensemble member |
@@ -57,7 +57,7 @@ _Last updated: 2026-05-07 (M1-M4 complete)_
 │                     Trading Engine (trading_engine.py)                │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐ │
 │  │Strategy A│  │Strategy B│  │Strategy C│  │ Broker Abstraction   │ │
-│  │  HANA    │  │  marem   │  │  mazem   │  │ Alpaca ── IBKR (inert)│ │
+│  │  HANA    │  │  marem   │  │  mazem   │  │ Alpaca ── IBKR (active)│ │
 │  │ trend-fw │  │mean-rev  │  │ ML-drive │  │ factory → adapter    │ │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────────────────┘ │
 └───────┼──────────────┼────────────┼──────────────────────────────────┘
@@ -114,7 +114,7 @@ openbb-trading/
 │   │   ├── *.py (20 files)    [Domain: Core Business Logic] Trading, screening,
 │   │   │                        technical analysis, regime, ML, Telegram, etc.
 │   │   └── ...
-│   └── routers/               [✅ Populated] 5 modules: screener, forecast, consensus, portfolio, admin
+│   └── routers/               [✅ Populated] 5 modules: screener, forecast, consensus, portfolio (+/api/ibkr/ping), admin
 ├── openbb_forecast/           [Domain: ML/RL/Simulation] OpenBB extension
 │   ├── agents/                RL: DQN, PG, ES
 │   ├── models/                LSTM, Transformer, Ensemble
@@ -134,6 +134,7 @@ openbb-trading/
 - ✅ **No micro-fragmentation** — files are meaningful units
 - ✅ **`out_of_scope.md`** — explicit scope control, 10 deferred items
 - ✅ **Fail-fast config** — `validate_for_live()` called at boot
+- ✅ **IBKR diagnostic endpoint** — `GET /api/ibkr/ping` tests TWS connectivity via socket
 - ✅ **Cache layer** — DB-backed, survives restarts
 - ✅ **RL agents isolated** — separate package, no leakage into trading engine
 
@@ -150,13 +151,12 @@ openbb-trading/
 
 | Item | Status | Location | Action Required |
 |------|--------|----------|----------------|
-| IBKR adapter | Implemented, inert | `app/services/broker/ibkr_adapter.py` | Needs IBKR account + keys |
 | Strategy D (pairs) | Deferred | (Phase 5 cointegration exists) | See `docs/out_of_scope.md` |
 | HMM regime detector | Deferred | — | See `docs/out_of_scope.md`, item 2 |
 | Walk-forward optimization | Deferred | — | See `docs/out_of_scope.md`, item 3 |
 | Cross-strategy Kelly | Deferred | — | See `docs/out_of_scope.md`, item 8 |
-| `keep_alive.py` | Loose utility | `keep_alive.py` | Review if still needed (Railway has built-in health checks) |
-| `russell1000_halal.py` | Standalone listing | `russell1000_halal.py` | Could move to `app/data/` or `calibration/` |
+| `keep_alive.py` | Moved to `app/services/keep_alive.py` | Reviewed — still needed for Railway health checks | ✅ Done |
+| `russell1000_halal.py` | Moved to `app/data/russell1000_halal.py` | Reviewed — correctly placed in `app/data/` | ✅ Done |
 
 ---
 
@@ -168,6 +168,6 @@ openbb-trading/
 | **M2** | Refactor halal_screener into routers | 5 router modules in `app/routers/`; all 178 tests pass | ✅ Done (commit `c852437`) |
 | **M3** | Wire USX Pro V4 | 3-stage signals pipeline (USX → AI → Telegram) | ✅ Done (commit `42059e6`) |
 | **M4** | Merge copilot into main app | `POST /v1/query` streaming endpoint on main FastAPI; `copilot.py` removed | ✅ Done (commit pending) |
-| **M5** | Clean orphans | Review `keep_alive.py`, `russell1000_halal.py` for relocation | 🔶 Pending |
-| **M6** | Activate IBKR (gate: user decision) | IBKR adapter receives real credentials | ⏸️ Deferred (needs VPS + ≥$25k) |
+| **M5** | Clean orphans | `keep_alive.py` → `app/services/`, `russell1000_halal.py` → `app/data/` | ✅ Done |
+| **M6** | Activate IBKR | TWS Paper connected via port 7497, `BROKER_TYPE=ibkr`, `/api/ibkr/ping` endpoint | ✅ Done |
 | **M7** | OpenBB Workspace Integration | Custom backend at `app/workspace_server.py` serving 40 widgets (19 models + 19 agents + MC + metrics) with OpenBB Platform extension registration | ✅ Done |

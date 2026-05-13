@@ -1,11 +1,7 @@
 """Broker factory.
 
 `get_broker(strategy_id)` returns the adapter to use for a given
-strategy. Today this always resolves to the Alpaca adapter.
-
-The factory and broker protocol exist so alternate brokers can be
-added behind a per-strategy or global config switch with no callsite
-changes, should the need arise in the future.
+strategy. Resolves via `BROKER_TYPE` env var: "alpaca" (default) or "ibkr".
 """
 
 from __future__ import annotations
