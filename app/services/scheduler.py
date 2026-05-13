@@ -415,22 +415,7 @@ def _run_market_scan():
             time.sleep(2)
         gc.collect()
 
-    # ===== STRATEGY B: Mean Reversion — oversold stocks (lowest scores) =====
-    if "B" in STRATEGY_CONFIGS:
-        # For mean reversion, we want stocks that have DROPPED — low swing scores
-        reversion_candidates = [r for r in scored if r.get("swing_score", 0) >= 30]
-        reversion_candidates.sort(key=lambda x: x.get("swing_score", 0))  # lowest first
-        reversion_candidates = reversion_candidates[:5]
-        for stock in reversion_candidates:
-            symbol = stock["symbol"]
-            try:
-                logger.info(f"[B] Reversion scan: {symbol}")
-                hs.run_consensus_reversion(symbol, horizon=3)
-            except Exception as e:
-                logger.error(f"[B] Reversion {symbol}: {e}")
-            hs._flush_all_caches()
-            time.sleep(2)
-        gc.collect()
+    # ===== STRATEGY B: Mean Reversion — DISABLED (A-Pre.1, Sharpe -1.93, WR 26.3%) =====
 
     # ===== STRATEGY C: AI Ensemble — top 2 stocks (ML is memory-heavy) =====
     if "C" in STRATEGY_CONFIGS:

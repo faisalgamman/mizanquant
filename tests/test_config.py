@@ -90,7 +90,7 @@ def test_live_whitelist_empty_when_not_set():
 
 
 def test_happy_path_empty_errors():
-    s = _make(ALPACA_API_KEY_A="k", ALPACA_SECRET_KEY_A="s")
+    s = _make(ALPACA_API_KEY_A="k", ALPACA_SECRET_KEY_A="s", LIVE_CONFIRMED=True)
     assert s.validate_for_live() == []
 
 
