@@ -26,7 +26,7 @@ if str(_app_root) not in sys.path:
 import pandas as pd
 import uvicorn
 import yfinance as yf
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from app.services.universe import HALAL_STOCKS_FALLBACK
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -2169,8 +2169,43 @@ async def daily_scan(
 
 
 # ---------------------------------------------------------------------------
-# Scheduler — auto-scan at market open (every weekday 09:30 ET)
+# Scheduler — auto-scan + pipeline runs
 # ---------------------------------------------------------------------------
+
+
+def _run_pipeline_data_collection():
+    """Pipeline Stage 1: data collection at ~08:00 ET."""
+    try:
+        from app.services.pipeline_orchestrator import run_pipeline
+        report = run_pipeline(dry_run=True, skip_stages={"halal","smart","consensus","kelly","guardian","execute","report"})
+        logger.info("Pipeline data collection: %.1fs", report.elapsed_s)
+    except Exception as e:
+        logger.error("Pipeline data collection failed: %s", e)
+
+
+def _run_pipeline_filter():
+    """Pipeline Stages 2-3: halal + smart filter at ~08:30 ET."""
+    try:
+        from app.services.pipeline_orchestrator import run_pipeline
+        report = run_pipeline(dry_run=True, skip_stages={"consensus","kelly","guardian","execute","report"})
+        logger.info("Pipeline filter: %d halal, %d smart in %.1fs",
+                    report.stages[1].count_out if len(report.stages) > 1 else 0,
+                    report.stages[2].count_out if len(report.stages) > 2 else 0,
+                    report.elapsed_s)
+    except Exception as e:
+        logger.error("Pipeline filter failed: %s", e)
+
+
+def _run_pipeline_full():
+    """Pipeline Stages 4-7: full analysis + paper execution at ~09:00 ET."""
+    try:
+        from app.services.pipeline_orchestrator import run_pipeline
+        report = run_pipeline(dry_run=True)
+        logger.info("Pipeline full: %d signals, %d executed, %d rejected in %.1fs",
+                    report.signals_passed, report.signals_executed, report.signals_rejected, report.elapsed_s)
+    except Exception as e:
+        logger.error("Pipeline full run failed: %s", e)
+
 
 def _run_scheduled_scan():
     """Run daily scan and send Telegram report."""
@@ -2288,14 +2323,16 @@ def _start_scheduler():
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         sched = BackgroundScheduler()
-        # Existing scan at 09:30 ET (13:30 UTC) on weekdays
-        sched.add_job(_run_scheduled_scan, "cron", day_of_week="mon-fri", hour=13, minute=30)
-        # Smart screener at 08:30 ET (12:30 UTC) on weekdays — before market open
-        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="mon-fri", hour=12, minute=30)
-        # Also run smart scan on Sunday evening (12:30 UTC = 08:30 ET) for Monday prep
-        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="sun", hour=12, minute=30)
+        # ── Pipeline schedule (Phase A paper trading, ET via UTC offsets) ──
+        sched.add_job(_run_pipeline_data_collection, "cron", day_of_week="mon-fri", hour=12, minute=0)   # 08:00 ET
+        sched.add_job(_run_pipeline_filter,          "cron", day_of_week="mon-fri", hour=12, minute=30)  # 08:30 ET
+        sched.add_job(_run_pipeline_full,            "cron", day_of_week="mon-fri", hour=13, minute=0)   # 09:00 ET
+        # ── Existing scans (offset to avoid pipeline contention) ──
+        sched.add_job(_run_scheduled_scan, "cron", day_of_week="mon-fri", hour=13, minute=30)              # 09:30 ET
+        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="mon-fri", hour=12, minute=45)       # 08:45 ET
+        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="sun", hour=12, minute=30)           # Sunday 08:30 ET
         sched.start()
-        logger.info("Scheduler started: daily-scan at 09:30 ET, smart-screener at 08:30 ET")
+        logger.info("Scheduler started: pipeline at 08:00/08:30/09:00 ET, smart-screener at 08:45 ET, daily-scan at 09:30 ET")
     except ImportError:
         logger.warning("APScheduler not installed. Install: pip install apscheduler")
     except Exception as e:
@@ -3740,6 +3777,90 @@ async def get_dashboard_alt():
 
 
 # ---------------------------------------------------------------------------
+# WebSocket — Real-time overview updates
+# ---------------------------------------------------------------------------
+
+import hashlib
+
+_ws_cache = {}
+
+
+@app.websocket("/ws/overview")
+async def ws_overview(websocket: WebSocket):
+    await websocket.accept()
+    client_hash = {}
+    try:
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+                msg = json.loads(data) if data.strip() else {"type": "ping"}
+            except asyncio.TimeoutError:
+                msg = {"type": "ping"}
+
+            if msg.get("type") in ("ping", "subscribe"):
+                # ── Signal check ──
+                try:
+                    sc = _cache_get("smart_screener")
+                    if sc and sc.get("results"):
+                        h = hashlib.md5(str(sc["results"][:5]).encode()).hexdigest()
+                        if client_hash.get("signals") != h:
+                            client_hash["signals"] = h
+                            await websocket.send_json({"type": "signal_new", "count": len(sc["results"]), "source": sc.get("source", "cache")})
+                except Exception:
+                    pass
+
+                # ── Pipeline check ──
+                try:
+                    from app.services.pipeline_orchestrator import _orchestrator
+                    if _orchestrator is not None and _orchestrator.report:
+                        rpt = _orchestrator.report
+                        stages_data = [
+                            {"name": s.stage, "status": "completed" if s.status == "ok" else s.status, "label": s.stage.replace("_", " ").title(), "elapsed_s": round(s.elapsed_s, 1) if s.elapsed_s else 0}
+                            for s in rpt.stages
+                        ]
+                        h = hashlib.md5(str(stages_data).encode()).hexdigest()
+                        if client_hash.get("pipeline") != h:
+                            client_hash["pipeline"] = h
+                            last_run = rpt.started_at.isoformat() if rpt.started_at else None
+                            await websocket.send_json({"type": "pipeline_stage", "stages": stages_data, "last_run": last_run})
+                except Exception:
+                    pass
+
+                # ── Portfolio check ──
+                try:
+                    from app.config import STRATEGY_CONFIGS
+                    from app.services.alpaca_client import get_account, get_positions as gp
+                    sid = next(iter(STRATEGY_CONFIGS), None)
+                    acct = get_account(strategy_id=sid) if sid else None
+                    pos_list = gp(strategy_id=sid) if sid else []
+                    pf = {"equity": float(acct.get("equity", 0)) if acct else 0,
+                          "open_positions": len(pos_list)}
+                    h = hashlib.md5(str(pf).encode()).hexdigest()
+                    if client_hash.get("portfolio") != h:
+                        client_hash["portfolio"] = h
+                        await websocket.send_json({"type": "portfolio_update", "data": pf})
+                except Exception:
+                    pass
+
+                # ── Market context check ──
+                try:
+                    from app.services.market_context import get_market_context
+                    mc = get_market_context()
+                    h = hashlib.md5(str(mc).encode()).hexdigest()
+                    if client_hash.get("market") != h:
+                        client_hash["market"] = h
+                        await websocket.send_json({"type": "market_context", "data": mc})
+                except Exception:
+                    pass
+
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -3751,7 +3872,7 @@ def main():
     logger.info("Starting OpenBB Forecast Workspace Backend on http://%s:%d", host, port)
     logger.info("Widgets available at http://%s:%d/widgets.json", host, port)
     logger.info("Dashboards available at http://%s:%d/apps.json", host, port)
-    logger.info("Features: Caching=24h, Scheduler=09:30ET, Charts, Comparison, Portfolio")
+    logger.info("Features: Caching=24h, Pipeline=08:00/08:30/09:00ET, Scheduler=09:30ET, Charts, Comparison, Portfolio")
     _start_scheduler()
     uvicorn.run(app, host=host, port=port)
 

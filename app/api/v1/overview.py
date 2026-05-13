@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
+from app.services.memory_cache import memory_cache
+
 logger = logging.getLogger("screener")
 
 router = APIRouter(tags=["v1-overview"])
@@ -233,26 +235,32 @@ async def _get_guards_recent(limit: int = 10):
 
 
 @router.get("/overview")
-async def v1_overview():
-    results = await asyncio.gather(
-        _get_system_status(),
-        _get_portfolio(),
-        _get_market(),
-        _get_pipeline(),
-        _get_top_signals(),
-        _get_guards_recent(),
-        return_exceptions=True,
+async def v1_overview(force_refresh: bool = False):
+
+    async def _compute():
+        results = await asyncio.gather(
+            _get_system_status(),
+            _get_portfolio(),
+            _get_market(),
+            _get_pipeline(),
+            _get_top_signals(),
+            _get_guards_recent(),
+            return_exceptions=True,
+        )
+
+        def _r(val, default=None):
+            return default if isinstance(val, Exception) else val
+
+        return {
+            "system": _r(results[0], {}),
+            "portfolio": _r(results[1], {}),
+            "market": _r(results[2], {}),
+            "pipeline": _r(results[3], {}),
+            "top_signals": _r(results[4], []),
+            "guards_recent": _r(results[5], []),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return await memory_cache.get_or_compute(
+        "overview:aggregated", 30, _compute, force_refresh=force_refresh
     )
-
-    def _r(val, default=None):
-        return default if isinstance(val, Exception) else val
-
-    return {
-        "system": _r(results[0], {}),
-        "portfolio": _r(results[1], {}),
-        "market": _r(results[2], {}),
-        "pipeline": _r(results[3], {}),
-        "top_signals": _r(results[4], []),
-        "guards_recent": _r(results[5], []),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
