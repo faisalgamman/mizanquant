@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-05-13 (M1-M6 complete, M7 done)_
+_Last updated: 2026-05-13 (M1-M6 complete, M7 done, A-Pre done, V1 API deployed)_
 
 ---
 
@@ -115,6 +115,18 @@ openbb-trading/
 │   │   │                        technical analysis, regime, ML, Telegram, etc.
 │   │   └── ...
 │   └── routers/               [✅ Populated] 5 modules: screener, forecast, consensus, portfolio (+/api/ibkr/ping), admin
+├── app/api/                   [✅ NEW] V1 API endpoints
+│   ├── deps.py                Auth + validation dependencies
+│   └── v1/
+│       ├── __init__.py        Combines all V1 routers under /api/v1/
+│       ├── system.py          System status, health, scheduler, block, symbols
+│       ├── market.py          Market context, status, sector performance
+│       ├── trading.py         Trading summary, controls, history, halal, backtest
+│       ├── pipeline.py        Pipeline status + manual run
+│       ├── guards.py          Recent guard activity + daily summary
+│       ├── scoring.py         Weighted score + trade plan
+│       ├── watchlist.py       Watchlist CRUD
+│       └── overview.py        Aggregator endpoint (1 call replaces 7 separate endpoints)
 ├── openbb_forecast/           [Domain: ML/RL/Simulation] OpenBB extension
 │   ├── agents/                RL: DQN, PG, ES
 │   ├── models/                LSTM, Transformer, Ensemble

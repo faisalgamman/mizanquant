@@ -88,6 +88,9 @@ _SP500_DELISTED_HALAL = [
 
 HALAL_STOCKS_FALLBACK = [s for s in _SP500_ALL if s not in _HARAM_EXCLUDE]
 
+# Public export for other modules (e.g. halal_screening.verify_halal)
+HARAM_EXCLUDE = _HARAM_EXCLUDE
+
 HALAL_STOCKS_BACKTEST_FALLBACK = HALAL_STOCKS_FALLBACK + [
     s for s in _SP500_DELISTED_HALAL if s not in _HARAM_EXCLUDE
 ]

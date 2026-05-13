@@ -431,6 +431,80 @@ def get_screening_report() -> list[dict]:
         return []
 
 
+# ---------------------------------------------------------------------------
+# verify_halal — runtime halal check with session cache (moved from halal_screener)
+# ---------------------------------------------------------------------------
+
+_VERIFIED_HARAM: set = set()
+_VERIFIED_HALAL: set = set()
+_CURATED_SET = None
+
+
+def _get_curated_set():
+    global _CURATED_SET
+    if _CURATED_SET is None:
+        from app.services.universe import HALAL_STOCKS_FALLBACK
+        _CURATED_SET = set(HALAL_STOCKS_FALLBACK)
+    return _CURATED_SET
+
+
+def verify_halal(symbol: str) -> tuple[bool, str]:
+    """Check if a symbol is verified halal. Returns (is_halal, reason).
+
+    Priority:
+    1. If in HARAM_EXCLUDE → blocked (sector-level exclusion)
+    2. If already verified this session → use cached result
+    3. If in curated HALAL_STOCKS list → allowed (already sector-filtered)
+    4. If FMP data available → run live AAOIFI screening
+    5. If not in curated list AND FMP unavailable → blocked
+    """
+    from app.services.universe import HARAM_EXCLUDE
+
+    sym = symbol.upper().strip()
+
+    # 1. Sector-level exclusion (instant reject)
+    if sym in HARAM_EXCLUDE:
+        return False, "Excluded sector (banks/insurance/alcohol/gambling/weapons/utilities/REITs)"
+
+    # 2. Session cache — fast path
+    if sym in _VERIFIED_HALAL:
+        return True, "Verified halal"
+    if sym in _VERIFIED_HARAM:
+        return False, "Verified haram (AAOIFI screening failed)"
+
+    # 3. Curated list — stocks already passed sector exclusion
+    curated = _get_curated_set()
+    if sym in curated:
+        _VERIFIED_HALAL.add(sym)
+        return True, "Halal (curated S&P 500 list, sector-verified)"
+
+    # 4. Not in curated list — must verify via FMP AAOIFI screening
+    try:
+        result = get_halal_status(sym)
+        if result is not None:
+            if result.get("is_halal"):
+                _VERIFIED_HALAL.add(sym)
+                return True, "Verified halal (AAOIFI)"
+            else:
+                _VERIFIED_HARAM.add(sym)
+                reasons = []
+                if not result.get("debt_pass", True):
+                    reasons.append(f"debt {result.get('debt_ratio', '?')}% > 33%")
+                if not result.get("interest_pass", True):
+                    reasons.append(f"interest {result.get('interest_ratio', '?')}% > 5%")
+                if not result.get("haram_pass", True):
+                    reasons.append("haram sector/industry")
+                if not result.get("liquidity_pass", True):
+                    reasons.append(f"liquidity {result.get('liquidity_ratio', '?')}% > 33%")
+                return False, f"Haram: {', '.join(reasons)}" if reasons else "Verified haram"
+        else:
+            logger.warning(f"Halal gate: {sym} BLOCKED — not in curated list, no FMP data")
+            return False, "Cannot verify — not in curated list and no financial data"
+    except Exception as e:
+        logger.error(f"Halal verification error for {sym}: {e}")
+        return False, f"Verification error: {e}"
+
+
 def batch_screen(symbols: list[str], max_per_run: int = 80) -> dict:
     """Screen multiple symbols in batch. Respects FMP daily limit.
 

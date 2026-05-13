@@ -16,6 +16,7 @@ reports/
 
 # Runtime cache / session artifacts — not source
 app/.cache/
+portfolio_stop.json
 # data/ � root level only; openbb_forecast/data/ is tracked
 docs/
 drift_references/

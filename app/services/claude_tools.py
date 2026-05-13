@@ -333,7 +333,7 @@ def _exec_get_portfolio(strategy: str = "all") -> dict:
 
 def _exec_get_trade_history(limit: int = 20) -> dict:
     """Recent trade history."""
-    from app.services.trading_engine import get_trade_history
+    from app.services.trade_history import get_trade_history
     trades = get_trade_history(limit=limit)
     if not trades:
         return {"message": "No trades executed yet"}
