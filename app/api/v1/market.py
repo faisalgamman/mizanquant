@@ -21,10 +21,10 @@ async def v1_market_context(force_refresh: bool = False):
         try:
             return await asyncio.wait_for(
                 asyncio.to_thread(get_market_context, False),
-                timeout=10.0,
+                timeout=25.0,
             )
         except asyncio.TimeoutError:
-            logger.warning("/api/v1/market/context exceeded 10s — returning stale shell")
+            logger.warning("/api/v1/market/context exceeded 25s — returning stale shell")
             return {
                 "vix": {}, "spy_regime": {}, "breadth": {}, "credit": {}, "liquidity": {},
                 "stale": True, "error": "timeout",
