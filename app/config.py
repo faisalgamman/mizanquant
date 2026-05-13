@@ -92,6 +92,7 @@ class Settings(BaseSettings):
 
     # --- Auto-trading (Stage 1: Paper) ---
     AUTO_TRADE_ENABLED: bool = False  # MUST be explicitly enabled
+    LIVE_CONFIRMED: bool = False      # Second factor: must be true for live execution
     TRADE_RISK_PCT: float = 1.5      # max risk per trade (% of equity)
     MAX_POSITION_PCT: float = 15.0   # max single position size (% of equity)
     MAX_OPEN_POSITIONS: int = 6      # max concurrent positions
@@ -138,6 +139,14 @@ class Settings(BaseSettings):
         Called at boot when AUTO_TRADE_ENABLED=True. Empty list means OK.
         """
         errors: list[str] = []
+
+        # LIVE_CONFIRMED must be explicitly set to true for live execution
+        if not self.LIVE_CONFIRMED:
+            errors.append(
+                "AUTO_TRADE_ENABLED=True but LIVE_CONFIRMED is False. "
+                "Set LIVE_CONFIRMED=true in environment to enable live execution. "
+                "Until then, trading remains in shadow/paper mode."
+            )
 
         # At least one Alpaca account must be configured
         any_strategy_keys = any(

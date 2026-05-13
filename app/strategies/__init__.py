@@ -209,9 +209,9 @@ class StrategySelector:
         if status in ("BULL", "RISK ON") and vix < 20:
             market_preferred = [StrategyType.MOMENTUM, StrategyType.BREAKOUT]
         elif status in ("CREDIT STRESS", "VIX", "EXTREME FEAR"):
-            market_preferred = [StrategyType.REVERSION]
+            market_preferred = []  # REVERSION DISABLED — A-Pre.1
         else:
-            market_preferred = [StrategyType.SWING, StrategyType.REVERSION]
+            market_preferred = [StrategyType.SWING]  # REVERSION DISABLED — A-Pre.1
 
         # Step 2: Stock-specific filtering
         df = inp.df_daily
@@ -239,11 +239,8 @@ class StrategySelector:
                     stock_filtered.append(st)
                 elif adx_val >= 20:
                     stock_filtered.append(st)
-            elif st == StrategyType.REVERSION:
-                if adx_val < 25 or rs_val < 0:
-                    stock_filtered.append(st)
-                elif status in ("CREDIT STRESS",):
-                    stock_filtered.append(st)
+            # REVERSION (Mean Reversion) DISABLED — see A-Pre.1 / A-Pre.2
+            # Re-enable only after Sharpe >= 0.8 and Win Rate >= 55% confirmed
             elif st == StrategyType.SWING:
                 if adx_val < 25 and rs_val > -2:
                     stock_filtered.append(st)
@@ -331,13 +328,12 @@ class StrategySelector:
 
 def get_strategy_selector() -> StrategySelector:
     from app.strategies.momentum import MomentumStrategy
-    from app.strategies.mean_reversion import MeanReversionStrategy
-    from app.strategies.breakout import BreakoutStrategy
     from app.strategies.swing import SwingStrategy
+    from app.strategies.breakout import BreakoutStrategy
 
     selector = StrategySelector()
     selector.register(MomentumStrategy())
-    selector.register(MeanReversionStrategy())
+    # MeanReversionStrategy DISABLED — A-Pre.1 (Sharpe -1.93, WR 26.3%)
     selector.register(BreakoutStrategy())
     selector.register(SwingStrategy())
     return selector

@@ -18,6 +18,7 @@ router = APIRouter(tags=["Dashboard"])
 
 async def _dashboard_health():
     """Check service health directly."""
+    from app.config import settings
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
         import openbb_forecast  # noqa: F401
@@ -86,7 +87,7 @@ async def _dashboard_health():
         "market_data": "available" if md_ok else "unavailable",
         "telegram": checks["telegram"],
         "data_source": "yfinance" if md_ok else "unknown",
-        "auto_trading": "enabled" if os.environ.get("AUTO_TRADE_ENABLED", "").lower() in ("true", "1") else "disabled",
+        "auto_trading": "enabled" if settings.AUTO_TRADE_ENABLED else "disabled",
         "uptime_seconds": metrics.get("uptime", 0),
     }
 
@@ -351,9 +352,41 @@ async def api_system_status():
 @router.get("/api/pipeline/status")
 async def api_pipeline_status():
     """Unified pipeline status for the dashboard."""
-    from app.services.pipeline_orchestrator import PipelineReport
     from app.db.database import SessionLocal
     from app.db.models import PortfolioSnapshot
+
+    pipeline_stages = []
+    pipeline_runs_today = 0
+    last_run = None
+    try:
+        from app.services.pipeline_orchestrator import _orchestrator
+        if _orchestrator is not None and _orchestrator.report:
+            rpt = _orchestrator.report
+            pipeline_runs_today = 1 if rpt.date_utc else 0
+            last_run = rpt.started_at or None
+            for s in rpt.stages:
+                status_map = {"ok": "completed", "skipped": "completed", "failed": "failed"}
+                pipeline_stages.append({
+                    "name": s.stage,
+                    "label": s.stage.replace("_", " ").title(),
+                    "status": status_map.get(s.status, "idle"),
+                    "count": max(s.count_in, s.count_out),
+                    "elapsed_s": round(s.elapsed_s, 1) if s.elapsed_s else 0,
+                })
+    except Exception:
+        pass
+
+    if not pipeline_stages:
+        pipeline_stages = [
+            {"name": "collect", "label": "Data Collection", "status": "idle"},
+            {"name": "halal", "label": "Halal Filter", "status": "idle"},
+            {"name": "smart", "label": "Smart Filter", "status": "idle"},
+            {"name": "consensus", "label": "AI Consensus", "status": "idle"},
+            {"name": "kelly", "label": "Kelly Allocation", "status": "idle"},
+            {"name": "guardian", "label": "Guardian Approval", "status": "idle"},
+            {"name": "execute", "label": "Alpaca Execution", "status": "idle"},
+            {"name": "report", "label": "Report & Snapshot", "status": "idle"},
+        ]
 
     latest_positions = None
     try:
@@ -366,18 +399,9 @@ async def api_pipeline_status():
         pass
 
     return {
-        "pipeline_runs_today": 0,
-        "last_run": None,
-        "stages": [
-            {"name": "collect", "label": "Data Collection", "status": "idle"},
-            {"name": "halal", "label": "Halal Filter", "status": "idle"},
-            {"name": "smart", "label": "Smart Filter", "status": "idle"},
-            {"name": "consensus", "label": "AI Consensus", "status": "idle"},
-            {"name": "kelly", "label": "Kelly Allocation", "status": "idle"},
-            {"name": "guardian", "label": "Guardian Approval", "status": "idle"},
-            {"name": "execute", "label": "Alpaca Execution", "status": "idle"},
-            {"name": "report", "label": "Report & Snapshot", "status": "idle"},
-        ],
+        "pipeline_runs_today": pipeline_runs_today,
+        "last_run": last_run,
+        "stages": pipeline_stages,
         "positions": latest_positions or [],
         "schedule": [
             {"time": "02:00", "task": "Model retraining", "type": "maintenance"},

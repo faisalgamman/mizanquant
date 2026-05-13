@@ -546,10 +546,11 @@ async def compute_metrics(
 ):
     """Compute risk/return metrics."""
     records, df = _fetch_data(symbol)
-    prices = df[target_column].values.astype(float)
+    prices = np.nan_to_num(df[target_column].values.astype(float), nan=0.0)
 
-    simple_returns = (prices[1:] - prices[:-1]) / prices[:-1]
-    equity = prices / prices[0] * 10000
+    simple_returns = (prices[1:] - prices[:-1]) / np.where(prices[:-1] != 0, prices[:-1], 1)
+    simple_returns = np.nan_to_num(simple_returns, nan=0.0, posinf=0.0, neginf=0.0)
+    equity = np.nan_to_num(prices / prices[0] * 10000, nan=0.0)
 
     return {
         "symbol": symbol,
@@ -1157,8 +1158,8 @@ def _score_market(info: dict) -> dict:
     else: s = 1; details["beta_comment"] = "Extreme"
     score += s; details["beta_val"] = round(beta, 2) if beta else 0
 
-    if div_yield > 0.02: s = 5; details["div_comment"] = "High Yield"
-    elif div_yield > 0.01: s = 3; details["div_comment"] = "Moderate Yield"
+    if div_yield > 4.0: s = 5; details["div_comment"] = "High Yield"
+    elif div_yield > 2.0: s = 3; details["div_comment"] = "Moderate Yield"
     elif div_yield > 0: s = 1; details["div_comment"] = "Low Yield"
     else: s = 0; details["div_comment"] = "No Dividend"
     score += s; details["div_yield_val"] = round(div_yield, 4) if div_yield else 0
@@ -1488,8 +1489,9 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
             _, hist_df = _fetch_data(symbol, period="1y")
             if hist_df is not None and len(hist_df) > 20:
                 # Roadmap 1.1 — Hard Gates: must-pass or score = 0
+                _, spy_df_hard = _fetch_data("SPY", period="2mo")
                 from app.services.scoring import check_hard_gates
-                gates = check_hard_gates(hist_df, spy_df=None)
+                gates = check_hard_gates(hist_df, spy_df=spy_df_hard)
                 if not gates.passed:
                     return {
                         "symbol": symbol, "company": name,
@@ -1506,7 +1508,7 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
                         "forecast_score": 0, "forecast_details": {},
                         "smart_score": 0,
                         "ext_pct": None, "atr_pct": None, "adv_dollar_m": None,
-                        "signal": "AVOID", "strategy": "NONE", "strategy_score": 0, "strategy_reason": "",
+                        "signal": "AVOID", "strategy": "NONE", "strategy_score": 0, "strategy_reason": "Hard Gates: " + "; ".join(gates.failed_gates),
                         "hard_gates_passed": False, "hard_gates_failed": gates.failed_gates,
                         "pipeline": {
                             "1_data": "loaded", "2_halal": "passed" if is_halal else "blocked",

@@ -298,11 +298,12 @@ def vwap(df):
 # Risk / performance metrics
 # ---------------------------------------------------------------------------
 
-def calc_metrics(returns):
+def calc_metrics(returns, annualization=252):
     """Calculate a suite of risk-adjusted performance metrics.
 
     Args:
         returns: array-like of simple period returns.
+        annualization: periods per year (252 for daily, ~84 for 3-day holds).
 
     Returns:
         Dict with Sharpe Ratio, Sortino Ratio, Max Drawdown %,
@@ -314,17 +315,17 @@ def calc_metrics(returns):
         return {}
     mean_r = np.mean(returns)
     std_r = np.std(returns) + 1e-9
-    rf_daily = 0.043 / 252  # Current US T-bill ~4.3% annualized
-    excess_return = mean_r - rf_daily
-    sharpe = float(excess_return / std_r * np.sqrt(252))
+    rf_period = 0.043 / annualization
+    excess_return = mean_r - rf_period
+    sharpe = float(excess_return / std_r * np.sqrt(annualization))
     downside = returns[returns < 0]
     sortino_denom = np.std(downside) + 1e-9 if len(downside) > 0 else 1e-9
-    sortino = float(excess_return / sortino_denom * np.sqrt(252))
+    sortino = float(excess_return / sortino_denom * np.sqrt(annualization))
     cumulative = np.cumprod(1 + returns)
     peak = np.maximum.accumulate(cumulative)
     drawdowns = (cumulative - peak) / peak
     max_dd = float(np.min(drawdowns))
-    calmar = float(mean_r * 252 / abs(max_dd)) if max_dd != 0 else 0
+    calmar = float(mean_r * annualization / abs(max_dd)) if max_dd != 0 else 0
     sorted_r = np.sort(returns)
     var_95 = float(-np.percentile(sorted_r, 5))
     tail = sorted_r[sorted_r <= -var_95]

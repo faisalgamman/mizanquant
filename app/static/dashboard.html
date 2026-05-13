@@ -593,7 +593,7 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
       <div class="hb-brand">USX PRO <small>Professional Trading Suite</small></div>
     </div>
     <div class="hb-metrics" id="hbMetrics">
-      <div class="hb-m"><div class="hb-label">SPY Regime</div><div class="hb-val" id="hbRegime">—</div></div>
+      <div class="hb-m"><div class="hb-label">SPY Regime</div><div class="hb-val" id="hbRegime" title="SPY trend regime (EMA20/50/200 crossing) — differs from Market Status (VIX-based)">—</div></div>
       <div class="hb-m"><div class="hb-label">VIX</div><div class="hb-val" id="hbVix">—</div></div>
       <div class="hb-m"><div class="hb-label">Breadth</div><div class="hb-val" id="hbBreadth">—</div></div>
       <div class="hb-m"><div class="hb-label">Credit</div><div class="hb-val" id="hbCredit">—</div></div>
@@ -1083,15 +1083,15 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
       <div class="card-subtitle">All symbols sorted by best Sharpe ratio</div></div>
       <div style="display:flex;gap:8px;align-items:center;">
         <label style="font-size:11px;color:var(--text-muted);">Filter:</label>
-        <select id="stratFilter" onchange="renderFullTable()" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;">
+        <select id="stratFilter" onchange="loadStrategies()" style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;">
           <option value="all">All Strategies</option>
           <option value="Momentum">Momentum</option>
-          <option value="Mean Reversion">Mean Reversion</option>
+          <option value="Mean Reversion" disabled style="color:var(--red);">🔴 Mean Reversion — DISABLED</option>
           <option value="Breakout">Breakout</option>
           <option value="Swing">Swing</option>
         </select>
         <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
-          <input type="checkbox" id="hideAvoidToggle" onchange="renderFullTable()" checked> Hide AVOID
+           <input type="checkbox" id="hideAvoidToggle" onchange="loadStrategies()" checked> Hide AVOID
         </label>
         <span class="badge" id="stratCount" style="font-size:11px;padding:4px 10px;">0 symbols</span>
       </div>
@@ -1362,12 +1362,14 @@ function renderSignalsAvoided() {
     el.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">No avoided signals</div>';
     return;
   }
-  el.innerHTML = `<div class="table-wrap"><table class="signal-table"><thead><tr><th>Symbol</th><th>Score</th><th>Change</th><th>Signal</th></tr></thead><tbody>${
+  el.innerHTML = `<div class="table-wrap"><table class="signal-table"><thead><tr><th>Symbol</th><th>Score</th><th>Change</th><th>Signal</th><th>Reason</th></tr></thead><tbody>${
     avoided.map(r => {
       const score = r.smart_score || 0;
       const sc = getScoreColor(score);
       const chg = r.change_pct;
-      return `<tr><td><strong>${r.symbol}</strong></td><td><span style="font-weight:600;color:${sc};">${score}</span></td><td style="color:${chg>=0?'var(--green)':'var(--red)'};">${chg!=null?chg.toFixed(2)+'%':'—'}</td><td><span class="badge-tag badge-red">AVOID</span></td></tr>`;
+      const reason = r.hard_gates_failed ? 'Hard Gates: ' + r.hard_gates_failed.join(', ')
+        : r.momentum_details?.error || r.strategy_reason || '—';
+      return `<tr><td><strong>${r.symbol}</strong></td><td><span style="font-weight:600;color:${sc};">${score}</span></td><td style="color:${chg>=0?'var(--green)':'var(--red)'};">${chg!=null?chg.toFixed(2)+'%':'—'}</td><td><span class="badge-tag badge-red">AVOID</span></td><td style="font-size:10px;color:var(--text-muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reason}">${reason}</td></tr>`;
     }).join('')
   }</tbody></table></div>`;
 }
@@ -1378,6 +1380,31 @@ async function loadTopSignals() {
     _allSignals = data.results || [];
     renderSignals();
   } catch(e) { /* signals unavailable */ }
+}
+
+async function loadPipelineStatus() {
+  try {
+    const data = await apiGet('/api/pipeline/status');
+    const stages = data.stages || [];
+    const el = document.getElementById('pipelineStatus');
+    if (stages.length === 0) {
+      el.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:11px;">No pipeline run yet today</div>';
+      return;
+    }
+    el.innerHTML = '<div style="display:flex;flex-direction:column;gap:4px;">' +
+      stages.map(s => {
+        const statusIcon = s.status === 'completed' ? '<span style="color:var(--green);">&#10003;</span>'
+          : s.status === 'running' ? '<span style="color:var(--accent);"><div class="spinner" style="width:12px;height:12px;display:inline-block;"></div></span>'
+          : '<span style="color:var(--text-muted);">&#9679;</span>';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;background:var(--bg-card);">'
+          + statusIcon
+          + '<span style="font-size:11px;flex:1;">' + s.label + '</span>'
+          + '<span style="font-size:10px;color:var(--text-muted);">' + s.status + '</span>'
+          + '</div>';
+      }).join('') + '</div>';
+  } catch(e) {
+    document.getElementById('pipelineStatus').innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:11px;">Pipeline status unavailable</div>';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1431,8 +1458,9 @@ async function loadOverview() {
     const credit = mc.credit || {};
     const liquidity = mc.liquidity || {};
 
-    const regimeColor = spy.regime === 'bull' ? 'var(--green)' : spy.regime === 'bear' ? 'var(--red)' : 'var(--orange)';
-    const regimeArrow = spy.regime === 'bull' ? '↑' : spy.regime === 'bear' ? '↓' : '→';
+    const regime = (spy.regime || '').toLowerCase();
+    const regimeColor = regime === 'bull' ? 'var(--green)' : regime === 'bear' ? 'var(--red)' : 'var(--orange)';
+    const regimeArrow = regime === 'bull' ? '↑' : regime === 'bear' ? '↓' : '→';
     const vixColor = (vix.vix||20) < 15 ? 'var(--green)' : (vix.vix||20) < 25 ? 'var(--orange)' : 'var(--red)';
     const vixArrow = (vix.vix||20) < 15 ? '↓' : (vix.vix||20) < 25 ? '→' : '↑';
     const brColor = (breadth.breadth_pct||50) > 60 ? 'var(--green)' : (breadth.breadth_pct||50) > 40 ? 'var(--orange)' : 'var(--red)';
@@ -1449,6 +1477,7 @@ async function loadOverview() {
     document.getElementById('hbLiquidity').innerHTML = `<span style="color:${lqColor}">${liquidity.liquidity_pct ?? '—'}%</span> <span class="arrow" style="color:${lqColor}">${lqArrow}</span>`;
 
     // ── PORTFOLIO HERO ──
+    const isIBKR = trading.broker_type === 'ibkr';
     const equity = trading.equity || 0;
     const dailyPnl = trading.daily_pnl || 0;
     const pnlPct = trading.daily_pnl_pct || 0;
@@ -1456,7 +1485,13 @@ async function loadOverview() {
     const pnlSign = dailyPnl >= 0 ? '+' : '';
     const pnlColor = dailyPnl >= 0 ? 'var(--green)' : 'var(--red)';
 
-    document.getElementById('phEquity').innerHTML = `$${equity.toLocaleString()} <span class="ph-change ${pnlClass}">${pnlSign}$${dailyPnl.toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%)</span>`;
+    if (isIBKR && equity === 0) {
+      document.getElementById('phEquity').innerHTML = '<span style="font-size:14px;color:var(--text-muted);">IBKR — see Gateway</span>';
+    } else if (!isIBKR && equity === 0 && Object.keys(trading).length <= 1) {
+      document.getElementById('phEquity').innerHTML = '<span style="font-size:14px;color:var(--orange);">⚠ API unavailable</span>';
+    } else {
+      document.getElementById('phEquity').innerHTML = `$${equity.toLocaleString()} <span class="ph-change ${pnlClass}">${pnlSign}$${dailyPnl.toFixed(2)} (${pnlSign}${pnlPct.toFixed(2)}%)</span>`;
+    }
     document.getElementById('phPositions').textContent = trading.open_positions || 0;
     document.getElementById('phGuards').textContent = Object.values(guards).reduce((a, b) => a + b, 0);
     document.getElementById('phAutoTrade').textContent = trading.auto_trade_enabled ? 'ON' : 'OFF';
@@ -1521,6 +1556,7 @@ async function loadOverview() {
 
     // ── FIRE-AND-FORGET ──
     loadTopSignals();
+    loadPipelineStatus();
 
     // ── POSITIONS ──
     const posEl = document.getElementById('openPositions');
@@ -2135,7 +2171,6 @@ async function runForecast(model) {
   document.getElementById('forecastResult').style.display = 'block';
   document.getElementById('forecastMetrics').innerHTML = '<div class="loading"><div class="spinner"></div>Running forecast...</div>';
   document.getElementById('forecastResultData').textContent = '';
-  destroyChart('forecastChart');
 
   try {
     const data = await apiGet(`/api/forecast/${model}?symbol=${sym}&forecast_horizon=5&epochs=10`);
@@ -2151,6 +2186,7 @@ async function runForecast(model) {
 
     // Chart
     if (results.length > 0) {
+      destroyChart('forecastChart');
       const ctx = document.getElementById('forecastChart').getContext('2d');
       const labels = results.map(r => r.date ? r.date.slice(5,10) : '');
       charts.forecastChart = new Chart(ctx, {
@@ -2268,7 +2304,6 @@ async function runAgent(agent) {
   document.getElementById('agentResult').style.display = 'block';
   document.getElementById('agentMetrics').innerHTML = '<div class="loading"><div class="spinner"></div>Running agent backtest...</div>';
   document.getElementById('agentResultData').textContent = '';
-  destroyChart('agentChart');
 
   try {
     const data = await apiGet(`/api/agent/${agent}?symbol=${sym}&episodes=15`);
@@ -2283,6 +2318,7 @@ async function runAgent(agent) {
     document.getElementById('agentResultData').textContent = JSON.stringify(data, null, 2);
 
     if (results.length > 0) {
+      destroyChart('agentChart');
       const ctx = document.getElementById('agentChart').getContext('2d');
       charts.agentChart = new Chart(ctx, {
         type: 'line',
@@ -2326,7 +2362,6 @@ async function runMonteCarlo() {
   const sym = document.getElementById('mcSymbol').value;
   const sims = document.getElementById('mcSims').value;
   const days = document.getElementById('mcDays').value;
-  destroyChart('mcChart');
   document.getElementById('mcResult').textContent = 'Running...';
 
   try {
@@ -2366,6 +2401,7 @@ async function runMonteCarlo() {
     `;
 
     if (stats.length > 0) {
+      destroyChart('mcChart');
       const ctx = document.getElementById('mcChart').getContext('2d');
       charts.mcChart = new Chart(ctx, {
         type: 'line',
@@ -2414,6 +2450,14 @@ async function runMetrics() {
           const e = explain[k];
           const label = e ? e.label : k.replace(/_/g,' ');
           const desc = e ? e.desc : '';
+          if (v == null || v === '') {
+            return '<div style="display:flex;flex-direction:column;padding:8px 12px;background:var(--bg-card);border-radius:6px;">'
+              + '<div style="display:flex;justify-content:space-between;align-items:center;">'
+              + '<span style="font-size:12px;color:var(--text-muted);text-transform:capitalize;">' + label + '</span>'
+              + '<span style="font-weight:700;font-size:14px;color:var(--text-muted);">—</span></div>'
+              + (desc ? '<span style="font-size:10px;color:var(--text-muted);margin-top:2px;">' + desc + '</span>' : '')
+              + '</div>';
+          }
           let color = 'var(--text-primary)';
           let icon = '';
           if (e) {
@@ -2562,7 +2606,6 @@ async function loadChartsTab() {
 async function runComparison() {
   const sym = document.getElementById('compSymbol').value;
   const agents = document.getElementById('compAgents').value;
-  destroyChart('compChart');
   document.getElementById('compResult').innerHTML = '<div class="loading"><div class="spinner"></div>Running agents...</div>';
 
   try {
@@ -2579,6 +2622,7 @@ async function runComparison() {
 
     const colors = ['#3b82f6','#22c55e','#a855f7','#f59e0b'];
     if (data.dates && curves.length > 0) {
+      destroyChart('compChart');
       const ctx = document.getElementById('compChart').getContext('2d');
       charts.compChart = new Chart(ctx, {
         type: 'line',
@@ -2607,10 +2651,10 @@ async function runComparison() {
 async function loadAgentChart() {
   const sym = document.getElementById('chartAgentSymbol').value;
   const agent = document.getElementById('chartAgentName').value;
-  destroyChart('singleAgentChart');
   try {
     const data = await apiGet(`/api/chart/agent/${agent}?symbol=${sym}&episodes=15`);
     const chartData = data.data || [];
+    destroyChart('singleAgentChart');
     const ctx = document.getElementById('singleAgentChart').getContext('2d');
     charts.singleAgentChart = new Chart(ctx, {
       type: 'line',
@@ -2777,8 +2821,12 @@ async function loadDividends() {
   document.getElementById('divResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
     const data = await apiGet(`/api/stock/dividends?symbol=${sym}`);
+    const divYield = data.dividend_yield;
+    const divYieldStr = divYield != null && divYield > 0
+      ? divYield.toFixed(2) + '%'
+      : 'N/A';
     const info = [
-      {label:'Dividend Yield',value:data.dividend_yield},
+      {label:'Dividend Yield',value:divYieldStr},
       {label:'Dividend Rate',value:data.dividend_rate},
       {label:'Payout Ratio',value:data.payout_ratio},
       {label:'Ex-Dividend Date',value:data.ex_dividend_date},
@@ -2827,7 +2875,7 @@ async function runScreener() {
       results.forEach(r => {
         const mcap = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
         const pe = r.pe ? r.pe.toFixed(1) : 'N/A';
-        const div = r.dividend_yield ? (r.dividend_yield * 100).toFixed(2) + '%' : 'N/A';
+        const div = r.dividend_yield ? r.dividend_yield.toFixed(2) + '%' : 'N/A';
         const halalBadge = r.is_halal === true ? '<span style="color:var(--green);">✅</span>' :
                           r.is_halal === false ? '<span style="color:var(--red);">❌</span>' :
                           '<span style="color:var(--text-muted);">—</span>';
@@ -2871,6 +2919,7 @@ async function loadMarketStatus() {
 
     bar.style.display = 'flex';
     bar.className = statusClass;
+    bar.title = 'Market Status (VIX-percentile-based) — differs from SPY Regime (EMA-based trend)';
     bar.style.cssText += 'display:flex;padding:8px 16px;border-radius:8px;margin:8px 12px 0;font-size:12px;font-weight:600;align-items:center;gap:16px;flex-wrap:wrap;';
     bar.innerHTML = `
       <span>${statusIcon} <strong>${statusText}</strong></span>
@@ -3376,7 +3425,7 @@ async function scanHalalUniverse() {
       results.forEach((r, i) => {
         const mcap = r.market_cap ? (r.market_cap / 1e9).toFixed(1) + 'B' : 'N/A';
         const pe = r.pe ? r.pe.toFixed(1) : 'N/A';
-        const div = r.dividend_yield ? (r.dividend_yield * 100).toFixed(2) + '%' : 'N/A';
+        const div = r.dividend_yield ? r.dividend_yield.toFixed(2) + '%' : 'N/A';
         html += `<tr><td style="color:var(--text-muted);">${i+1}</td><td style="font-weight:600;">${r.symbol}</td><td>${(r.company||'').slice(0,22)}</td><td>${r.sector || ''}</td><td>${mcap}</td><td>${pe}</td><td>${div}</td></tr>`;
       });
       html += '</tbody></table>';
@@ -3891,7 +3940,7 @@ async function showTradePlan(symbol) {
         </div>
       </div>
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-success btn-sm" style="flex:1;" onclick="alert('Paper trade executed for ${symbol}: $${value.toFixed(2)}')"><i class="fas fa-play"></i> Execute Paper</button>
+        <button class="btn btn-success btn-sm" style="flex:1;" onclick="showToast('Paper trade executed for ${symbol}: $${value.toFixed(2)}', 'success')"><i class="fas fa-play"></i> Execute Paper</button>
         <button class="btn btn-outline btn-sm" onclick="hideTradePlan()">Dismiss</button>
       </div>
     `;
@@ -4012,7 +4061,7 @@ function renderFullTable(data) {
     for (const [sname, sd] of Object.entries(sdata)) {
       if (filter !== 'all' && sname !== filter) continue;
       if (sd.trades === 0) continue;
-      if (hideAvoid && sd.quality === 'AVOID') continue;
+      if (hideAvoid && (sd.quality === 'AVOID' || sd.signal === 'AVOID')) continue;
       rows.push({symbol: sym, strategy: sname, ...sd});
     }
   }

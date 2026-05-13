@@ -54,7 +54,7 @@ def _strategy_runners() -> dict:
 
     return {
         "A": (hs.run_consensus_momentum, "HANA / Momentum"),
-        "B": (hs.run_consensus_reversion, "marem / Mean-Reversion"),
+        # "B" Mean-Reversion DISABLED — A-Pre.1 (Sharpe -1.93, WR 26.3%)
         "C": (hs.run_consensus_ml, "mazem / ML"),
     }
 

@@ -330,9 +330,9 @@ def usx_proxy_score(
 
 # Gate values mapped to market regime
 GATE_CONFIG = {
-    "RISK ON":       {"min_gate": 60, "strong_gate": 75},
-    "CAUTION":       {"min_gate": 65, "strong_gate": 80},
-    "CREDIT STRESS": {"min_gate": 70, "strong_gate": 85},
+    "RISK ON":       {"min_gate": 55, "strong_gate": 70},  # Lowered for paper test (A-Pre.3)
+    "CAUTION":       {"min_gate": 60, "strong_gate": 75},  # Lowered for paper test (A-Pre.3)
+    "CREDIT STRESS": {"min_gate": 65, "strong_gate": 80},  # Lowered for paper test (A-Pre.3)
     "EXTREME FEAR":  {"min_gate": 999, "strong_gate": 999},  # Pipeline halt
 }
 

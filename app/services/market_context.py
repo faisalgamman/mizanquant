@@ -326,9 +326,9 @@ def get_market_status(force_refresh: bool = False) -> dict:
 
     # Gate levels tied to market status
     gate_map = {
-        "RISK ON":       {"min_gate": 60, "strong_gate": 75},
-        "CAUTION":       {"min_gate": 65, "strong_gate": 80},
-        "CREDIT STRESS":  {"min_gate": 70, "strong_gate": 85},
+        "RISK ON":       {"min_gate": 55, "strong_gate": 70},  # A-Pre.3 lowered for paper test
+        "CAUTION":       {"min_gate": 60, "strong_gate": 75},  # A-Pre.3 lowered for paper test
+        "CREDIT STRESS":  {"min_gate": 65, "strong_gate": 80},  # A-Pre.3 lowered for paper test
         "EXTREME FEAR":   {"min_gate": 99, "strong_gate": 99, "halt": True},
     }
     gates = gate_map.get(status, {"min_gate": 60, "strong_gate": 75})
