@@ -7,7 +7,9 @@ importing from ``halal_screener`` directly.
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -16,6 +18,30 @@ from app.db.database import SessionLocal
 from app.db.models import Universe
 
 logger = logging.getLogger("screener")
+
+# ── Expanded universe loader ──
+
+_UNIVERSE_JSON_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "halal_universe_v2.json"
+_EXPANDED_UNIVERSE: list[str] | None = None
+
+
+def _load_expanded_universe() -> list[str] | None:
+    """Load the expanded halal universe from JSON, if available."""
+    global _EXPANDED_UNIVERSE
+    if _EXPANDED_UNIVERSE is not None:
+        return _EXPANDED_UNIVERSE
+    try:
+        if _UNIVERSE_JSON_PATH.exists():
+            data = json.loads(_UNIVERSE_JSON_PATH.read_text())
+            symbols = data.get("symbols", [])
+            if symbols:
+                _EXPANDED_UNIVERSE = symbols
+                logger.info("Loaded expanded halal universe from %s (%d symbols)",
+                            _UNIVERSE_JSON_PATH, len(symbols))
+                return _EXPANDED_UNIVERSE
+    except Exception as exc:
+        logger.warning("Failed to load expanded universe from %s: %s", _UNIVERSE_JSON_PATH, exc)
+    return None
 
 # ── Fallback constants (used when DB is empty / unavailable) ──
 
@@ -86,12 +112,12 @@ _SP500_DELISTED_HALAL = [
     "TWTR", "SBNY", "DISCA", "XLNX", "CERN", "FBHS", "RE", "NLSN", "DRE", "VIAC",
 ]
 
-HALAL_STOCKS_FALLBACK = [s for s in _SP500_ALL if s not in _HARAM_EXCLUDE]
+HALAL_STOCKS_FALLBACK = _load_expanded_universe() or [s for s in _SP500_ALL if s not in _HARAM_EXCLUDE]
 
 # Public export for other modules (e.g. halal_screening.verify_halal)
 HARAM_EXCLUDE = _HARAM_EXCLUDE
 
-HALAL_STOCKS_BACKTEST_FALLBACK = HALAL_STOCKS_FALLBACK + [
+HALAL_STOCKS_BACKTEST_FALLBACK = [s for s in HALAL_STOCKS_FALLBACK if s not in _HARAM_EXCLUDE] + [
     s for s in _SP500_DELISTED_HALAL if s not in _HARAM_EXCLUDE
 ]
 
