@@ -1089,6 +1089,125 @@ def _fetch_screener_data(sym: str, halal_only: bool) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Stock News — latest headlines via yfinance
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stock/news")
+async def stock_news(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+    limit: int = Query(10, description="Max news items"),
+):
+    """Latest news headlines for a stock symbol."""
+    async def compute():
+        ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
+        news = []
+        try:
+            items = ticker.news or []
+            for item in items[:limit]:
+                news.append({
+                    "title": item.get("title", ""),
+                    "publisher": item.get("publisher", ""),
+                    "link": item.get("link", ""),
+                    "published": item.get("providerPublishTime"),
+                    "type": item.get("type", ""),
+                    "summary": (item.get("summary") or "")[:300],
+                })
+        except Exception:
+            pass
+        return {"symbol": symbol, "count": len(news), "news": news}
+    return await cached_or_compute(f"stock:news:{symbol.upper()}:{limit}", 900, compute)
+
+
+# ---------------------------------------------------------------------------
+# Stock Chart — OHLCV price history via yfinance
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stock/chart")
+async def stock_chart(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+    range: str = Query("1mo", description="1d | 5d | 1mo | 3mo | 6mo | 1y | 2y | 5y"),
+):
+    """OHLCV price history for charting."""
+    period_map = {"1d": "1d", "5d": "5d", "1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "2y": "2y", "5y": "5y"}
+    period = period_map.get(range, "1mo")
+
+    async def compute():
+        df = await asyncio.to_thread(lambda: yf.download(symbol, period=period, progress=False))
+        if df is None or df.empty:
+            return {"symbol": symbol, "range": range, "bars": []}
+        bars = []
+        for idx, row in df.iterrows():
+            ts = str(idx.date()) if hasattr(idx, 'date') else str(idx)
+            bars.append({
+                "date": ts,
+                "open": round(float(row["Open"]), 2) if "Open" in row else None,
+                "high": round(float(row["High"]), 2) if "High" in row else None,
+                "low": round(float(row["Low"]), 2) if "Low" in row else None,
+                "close": round(float(row["Close"]), 2) if "Close" in row else None,
+                "volume": int(row["Volume"]) if "Volume" in row else 0,
+            })
+        return {"symbol": symbol, "range": range, "bars": bars}
+    return await cached_or_compute(f"stock:chart:{symbol.upper()}:{range}", 300, compute)
+
+
+# ---------------------------------------------------------------------------
+# Stock Peers — companies in the same sector
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stock/peers")
+async def stock_peers(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+    limit: int = Query(10, description="Max peers"),
+):
+    """Find peer companies in the same sector with key comparison metrics."""
+    async def compute():
+        info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        sector = info.get("sector", "")
+        industry = info.get("industry", "")
+        company = info.get("longName") or info.get("shortName") or symbol
+
+        peers = []
+        for candidate in ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+                          "JPM", "V", "JNJ", "PG", "HD", "DIS", "NFLX", "CRM",
+                          "ADBE", "AMD", "KO", "PEP", "WMT"]:
+            if candidate == symbol:
+                continue
+            try:
+                cinfo = await asyncio.to_thread(lambda: yf.Ticker(candidate).info or {})
+                csector = cinfo.get("sector", "")
+                if csector != sector:
+                    continue
+                peers.append({
+                    "symbol": candidate,
+                    "company": cinfo.get("shortName") or cinfo.get("longName") or candidate,
+                    "price": _safe_float(cinfo.get("currentPrice") or cinfo.get("regularMarketPrice")),
+                    "market_cap": cinfo.get("marketCap"),
+                    "pe_ratio": cinfo.get("trailingPE"),
+                    "forward_pe": cinfo.get("forwardPE"),
+                    "eps": cinfo.get("trailingEps"),
+                    "dividend_yield": cinfo.get("dividendYield"),
+                    "beta": cinfo.get("beta"),
+                    "52w_high": cinfo.get("fiftyTwoWeekHigh"),
+                    "52w_low": cinfo.get("fiftyTwoWeekLow"),
+                })
+                if len(peers) >= limit:
+                    break
+            except Exception:
+                continue
+        return {
+            "symbol": symbol,
+            "company": company,
+            "sector": sector,
+            "industry": industry,
+            "peers": peers,
+        }
+    return await cached_or_compute(f"stock:peers:{symbol.upper()}:{limit}", 3600, compute)
+
+
+# ---------------------------------------------------------------------------
 # Smart Screener — halal + profitability + fair price scoring (0-100)
 # ---------------------------------------------------------------------------
 
