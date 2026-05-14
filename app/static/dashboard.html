@@ -403,6 +403,10 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 .compare-bar.hidden { display:none; }
 
 /* Filter chips for USX PRO */
+.tab-rs { padding:4px 14px; font-size:12px; font-weight:500; border-radius:20px; cursor:pointer; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border); transition:all .15s; }
+.tab-rs:hover { background:var(--bg-card-hover); color:var(--text-primary); }
+.tab-rs-active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.rs-tab-content { animation:fadeIn 0.2s ease; }
 .filter-chip {
   display:inline-flex; align-items:center; gap:4px;
   padding:3px 10px; border-radius:12px; font-size:10px; font-weight:600;
@@ -1335,57 +1339,71 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 
 <!-- TAB: Research Lab -->
 <div class="tab-content" id="tab-research">
-  <div class="stats-grid" id="researchStats"></div>
-  <div class="grid-2">
-    <div class="card"><div class="card-header"><div><div class="card-title">Stock Summary</div></div></div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <input type="text" id="rsSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
-        <button class="btn btn-sm btn-primary" onclick="loadStockSummary()"><i class="fas fa-search"></i> Lookup</button>
-      </div>
-      <div id="rsResult"><div class="loading"><div class="spinner"></div></div></div>
-    </div>
-    <div class="card"><div class="card-header"><div><div class="card-title">Financial Ratios</div></div></div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <input type="text" id="ratioSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
-        <button class="btn btn-sm btn-primary" onclick="loadRatios()"><i class="fas fa-percentage"></i> Load</button>
-      </div>
-      <div id="ratioResult"><div class="loading"><div class="spinner"></div></div></div>
+  <!-- ═══ Research Tabs ═══ -->
+  <div style="display:flex;gap:4px;padding:8px 0;flex-wrap:wrap;">
+    <span class="tab-rs tab-rs-active" data-rstab="overview" onclick="switchRsTab('overview')">Overview</span>
+    <span class="tab-rs" data-rstab="financials" onclick="switchRsTab('financials')">Financials</span>
+    <span class="tab-rs" data-rstab="ratios" onclick="switchRsTab('ratios')">Ratios</span>
+    <span class="tab-rs" data-rstab="dividends" onclick="switchRsTab('dividends')">Dividends</span>
+    <span class="tab-rs" data-rstab="holders" onclick="switchRsTab('holders')">Holders</span>
+    <span class="tab-rs" data-rstab="screener" onclick="switchRsTab('screener')">Screener</span>
+  </div>
+
+  <!-- ═══ Stock Header ═══ -->
+  <div class="card" style="margin-bottom:8px;padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <input type="text" id="rsSymbol" placeholder="AAPL" value="AAPL" style="width:90px;font-size:14px;font-weight:700;padding:6px 10px;border-radius:8px;background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;text-transform:uppercase;">
+      <button class="btn btn-primary btn-sm" onclick="loadAllResearch()"><i class="fas fa-search"></i> Search</button>
+      <span id="rsHeaderInfo" style="font-size:13px;color:var(--text-muted);flex:1;"></span>
     </div>
   </div>
-  <div class="grid-2">
+
+  <!-- ═══ Tab Panels ═══ -->
+  <div class="rs-tab-content" id="rs-tab-overview">
+    <div class="grid-2">
+      <div class="card"><div class="card-header"><div><div class="card-title">Stock Summary</div></div></div>
+        <div id="rsResult"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><div><div class="card-title">Financial Ratios</div></div></div>
+        <div id="ratioResult"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rs-tab-content" id="rs-tab-financials" style="display:none;">
     <div class="card"><div class="card-header"><div><div class="card-title">Financial Statements</div></div></div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <input type="text" id="finSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
-        <select id="finType"><option>income</option><option>balance</option><option>cashflow</option></select>
-        <button class="btn btn-sm btn-primary" onclick="loadFinancials()"><i class="fas fa-file-invoice"></i> Load</button>
+      <div class="form-group" style="margin-bottom:8px;">
+        <select id="finType" style="font-size:11px;padding:4px 8px;"><option>income</option><option>balance</option><option>cashflow</option></select>
+        <button class="btn btn-sm btn-primary" onclick="loadFinancials()"><i class="fas fa-sync"></i> Reload</button>
       </div>
-      <div id="finResult" class="result-box" style="max-height:300px;"></div>
-    </div>
-    <div class="card"><div class="card-header"><div><div class="card-title">Dividends & Earnings</div></div></div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <input type="text" id="divSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
-        <button class="btn btn-sm btn-primary" onclick="loadDividends()"><i class="fas fa-coins"></i> Load</button>
-      </div>
-      <div id="divResult"><div class="loading"><div class="spinner"></div></div></div>
+      <div id="finResult" class="result-box" style="max-height:400px;"></div>
     </div>
   </div>
-  <div class="grid-2">
+
+  <div class="rs-tab-content" id="rs-tab-ratios" style="display:none;">
+    <div class="card"><div class="card-header"><div><div class="card-title">Financial Ratios Detail</div></div></div>
+      <div id="ratioDetail"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <div class="rs-tab-content" id="rs-tab-dividends" style="display:none;">
+    <div class="grid-2">
+      <div class="card"><div class="card-header"><div><div class="card-title">Dividends</div></div></div>
+        <div id="divResult"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><div><div class="card-title">Earnings</div></div></div>
+        <div id="earnResult"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rs-tab-content" id="rs-tab-holders" style="display:none;">
     <div class="card"><div class="card-header"><div><div class="card-title">Institutional Holders</div></div></div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <input type="text" id="holdSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;">
-        <button class="btn btn-sm btn-primary" onclick="loadHolders()"><i class="fas fa-building"></i> Load</button>
-      </div>
-      <div id="holdResult" class="result-box" style="max-height:250px;"></div>
-    </div>
-        <div class="card"><div class="card-header"><div><div class="card-title">Stock Screener</div><div class="card-subtitle">Screen 55 stocks by sector, halal status, market cap</div></div></div>
-      <div class="form-group" style="margin-bottom:12px;">
-        <label>Sector</label><input type="text" id="screenerSector" value="" placeholder="e.g. Technology" style="width:120px;">
-        <label>Halal only</label><select id="screenerHalal"><option selected>True</option><option>False</option></select>
-        <button class="btn btn-sm btn-primary" onclick="runScreener()"><i class="fas fa-filter"></i> Screen</button>
-      </div>
-      <div id="screenerResult" class="result-box" style="max-height:300px;"></div>
+      <div id="holdResult"><div class="loading"><div class="spinner"></div></div></div>
     </div>
   </div>
+
+  <div class="rs-tab-content" id="rs-tab-screener" style="display:none;">
   <!-- Full Smart Screener — USX PRO V4.1 Edition (inside Research tab) -->
   <div class="card" id="smartScreenerCard" style="border-color:var(--accent);border-width:2px;">
 
@@ -3936,14 +3954,41 @@ async function loadAgentChart() {
 }
 
 // ===== RESEARCH TAB =====
+var _currentSymbol = 'AAPL';
+
+function switchRsTab(name) {
+  document.querySelectorAll('.tab-rs').forEach(function(t) { t.classList.remove('tab-rs-active'); });
+  document.querySelectorAll('.rs-tab-content').forEach(function(t) { t.style.display = 'none'; });
+  var tab = document.querySelector('.tab-rs[data-rstab="' + name + '"]');
+  if (tab) tab.classList.add('tab-rs-active');
+  var pane = document.getElementById('rs-tab-' + name);
+  if (pane) pane.style.display = 'block';
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var rsInput = document.getElementById('rsSymbol');
+  if (rsInput) rsInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') loadAllResearch(); });
+});
+
+async function loadAllResearch() {
+  var sym = document.getElementById('rsSymbol').value.toUpperCase().trim();
+  if (!sym) return;
+  _currentSymbol = sym;
+  document.getElementById('rsHeaderInfo').textContent = 'Loading ' + sym + '...';
+  // Fire all in parallel
+  await Promise.allSettled([
+    loadStockSummary(),
+    loadRatios(),
+    loadFinancials(),
+    loadDividends(),
+    loadEarnings(),
+    loadHolders(),
+  ]);
+  document.getElementById('rsHeaderInfo').textContent = sym + ' · Data loaded';
+}
+
 async function loadResearchTab() {
   loadMarketStatus();
-  document.getElementById('researchStats').innerHTML = `
-    <div class="stat-card"><div class="stat-icon" style="background:rgba(59,130,246,0.15);color:var(--accent)"><i class="fas fa-search"></i></div><div class="stat-value">7</div><div class="stat-label">Research Tools</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,197,94,0.15);color:var(--green)"><i class="fas fa-database"></i></div><div class="stat-value">yFinance</div><div class="stat-label">Data Source</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:rgba(168,85,247,0.15);color:var(--purple)"><i class="fas fa-filter"></i></div><div class="stat-value">50+</div><div class="stat-label">Screener Universe</div></div>
-  `;
-  loadStockSummary();
+  loadAllResearch();
   // Populate Category Overview table (moved here from Overview)
   const cats = [
     {name:'LSTM Models',type:'Deep Learning',count:4,status:'Operational'},
@@ -3966,7 +4011,8 @@ async function loadResearchTab() {
 }
 
 async function loadStockSummary() {
-  const sym = document.getElementById('rsSymbol').value;
+  const sym = _currentSymbol;
+  if (!sym) return;
   document.getElementById('rsResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
     const data = await apiGet(`/api/stock/summary?symbol=${sym}`);
@@ -3987,7 +4033,8 @@ async function loadStockSummary() {
 }
 
 async function loadRatios() {
-  const sym = document.getElementById('ratioSymbol').value;
+  const sym = _currentSymbol;
+  if (!sym) return;
   document.getElementById('ratioResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
     const data = await apiGet(`/api/stock/ratios?symbol=${sym}`);
@@ -4000,13 +4047,15 @@ async function loadRatios() {
       html += '</div>';
     });
     document.getElementById('ratioResult').innerHTML = html;
+    document.getElementById('ratioDetail').innerHTML = html;
   } catch(e) {
     document.getElementById('ratioResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
+    document.getElementById('ratioDetail').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;
   }
 }
 
 async function loadFinancials() {
-  const sym = document.getElementById('finSymbol').value;
+  const sym = _currentSymbol;
   const stmt = document.getElementById('finType').value;
   const el = document.getElementById('finResult');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Loading financials...</div>';
@@ -4076,7 +4125,8 @@ async function loadFinancials() {
 }
 
 async function loadDividends() {
-  const sym = document.getElementById('divSymbol').value;
+  const sym = _currentSymbol;
+  if (!sym) return;
   document.getElementById('divResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
     const data = await apiGet(`/api/stock/dividends?symbol=${sym}`);
@@ -4104,14 +4154,57 @@ async function loadDividends() {
   }
 }
 
+async function loadEarnings() {
+  const sym = _currentSymbol;
+  if (!sym) return;
+  var el = document.getElementById('earnResult');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet(`/api/stock/earnings?symbol=${sym}`);
+    var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">EPS</span><span style="font-weight:500;font-size:12px;">' + (data.eps || 'N/A') + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">Forward EPS</span><span style="font-weight:500;font-size:12px;">' + (data.forward_eps || 'N/A') + '</span></div>';
+    html += '</div>';
+    if (data.quarterly_surprises && data.quarterly_surprises.length > 0) {
+      html += '<div style="font-size:11px;font-weight:600;color:var(--accent);margin:8px 0 4px;">Quarterly Earnings Surprises</div>';
+      html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Estimate</th><th>Actual</th><th>Surprise %</th></tr></thead><tbody>';
+      data.quarterly_surprises.forEach(function(s) {
+        var color = s.surprise_pct >= 0 ? 'var(--green)' : 'var(--red)';
+        html += '<tr><td>' + s.date + '</td><td>$' + s.estimate.toFixed(2) + '</td><td>$' + s.actual.toFixed(2) + '</td><td style="color:' + color + ';font-weight:600;">' + (s.surprise_pct >= 0 ? '+' : '') + s.surprise_pct.toFixed(2) + '%</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+  }
+}
+
 async function loadHolders() {
-  const sym = document.getElementById('holdSymbol').value;
-  document.getElementById('holdResult').textContent = 'Loading...';
+  const sym = _currentSymbol;
+  if (!sym) return;
+  document.getElementById('holdResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
     const data = await apiGet(`/api/stock/holders?symbol=${sym}`);
-    document.getElementById('holdResult').textContent = JSON.stringify(data, null, 2);
+    var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">Insider Ownership</span><span style="font-weight:500;font-size:12px;">' + (data.insider_ownership_pct ? (data.insider_ownership_pct*100).toFixed(2) + '%' : 'N/A') + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">Institutional Ownership</span><span style="font-weight:500;font-size:12px;">' + (data.institutional_ownership_pct ? (data.institutional_ownership_pct*100).toFixed(2) + '%' : 'N/A') + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">Short Ratio</span><span style="font-weight:500;font-size:12px;">' + (data.short_ratio || 'N/A') + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--bg-card);border-radius:6px;"><span style="font-size:11px;color:var(--text-muted);">Short % of Float</span><span style="font-weight:500;font-size:12px;">' + (data.short_pct ? (data.short_pct*100).toFixed(2) + '%' : 'N/A') + '</span></div>';
+    html += '</div>';
+
+    if (data.institutional_holders && data.institutional_holders.length > 0) {
+      html += '<div style="font-size:11px;font-weight:600;color:var(--accent);margin:8px 0 4px;">Top Institutional Holders</div>';
+      html += '<div class="table-wrap"><table><thead><tr><th>Holder</th><th>Shares</th><th>Value</th></tr></thead><tbody>';
+      data.institutional_holders.forEach(function(h) {
+        html += '<tr><td>' + h.holder + '</td><td>' + (h.shares ? h.shares.toLocaleString() : 'N/A') + '</td><td>$' + (h.value ? h.value.toLocaleString(undefined,{maximumFractionDigits:0}) : 'N/A') + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    document.getElementById('holdResult').innerHTML = html;
   } catch(e) {
-    document.getElementById('holdResult').textContent = 'Error: ' + e.message;
+    document.getElementById('holdResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
   }
 }
 
