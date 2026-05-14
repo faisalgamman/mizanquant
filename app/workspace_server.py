@@ -783,36 +783,36 @@ async def stock_ratios(
     async def compute():
         info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
         profitability = {
-        "profit_margin": info.get("profitMargins"),
-        "operating_margin": info.get("operatingMargins"),
-        "return_on_equity": info.get("returnOnEquity"),
-        "return_on_assets": info.get("returnOnAssets"),
-        "revenue_per_share": info.get("revenuePerShare"),
-        "gross_margin": info.get("grossMargins"),
-        "ebitda_margin": info.get("ebitdaMargins"),
-    }
-    valuation = {
-        "pe_ratio": info.get("trailingPE"),
-        "forward_pe": info.get("forwardPE"),
-        "peg_ratio": info.get("pegRatio"),
-        "price_to_book": info.get("priceToBook"),
-        "price_to_sales": info.get("priceToSalesTrailing12Months"),
-        "enterprise_to_revenue": info.get("enterpriseToRevenue"),
-        "enterprise_to_ebitda": info.get("enterpriseToEbitda"),
-    }
-    liquidity = {
-        "current_ratio": info.get("currentRatio"),
-        "quick_ratio": info.get("quickRatio"),
-        "debt_to_equity": info.get("debtToEquity"),
-        "total_debt": info.get("totalDebt"),
-        "total_cash": info.get("totalCash"),
-        "cash_per_share": info.get("cashPerShare"),
-    }
-    growth = {
-        "revenue_growth": info.get("revenueGrowth"),
-        "earnings_growth": info.get("earningsGrowth"),
-        "earnings_quarterly_growth": info.get("earningsQuarterlyGrowth"),
-    }
+            "profit_margin": info.get("profitMargins"),
+            "operating_margin": info.get("operatingMargins"),
+            "return_on_equity": info.get("returnOnEquity"),
+            "return_on_assets": info.get("returnOnAssets"),
+            "revenue_per_share": info.get("revenuePerShare"),
+            "gross_margin": info.get("grossMargins"),
+            "ebitda_margin": info.get("ebitdaMargins"),
+        }
+        valuation = {
+            "pe_ratio": info.get("trailingPE"),
+            "forward_pe": info.get("forwardPE"),
+            "peg_ratio": info.get("pegRatio"),
+            "price_to_book": info.get("priceToBook"),
+            "price_to_sales": info.get("priceToSalesTrailing12Months"),
+            "enterprise_to_revenue": info.get("enterpriseToRevenue"),
+            "enterprise_to_ebitda": info.get("enterpriseToEbitda"),
+        }
+        liquidity = {
+            "current_ratio": info.get("currentRatio"),
+            "quick_ratio": info.get("quickRatio"),
+            "debt_to_equity": info.get("debtToEquity"),
+            "total_debt": info.get("totalDebt"),
+            "total_cash": info.get("totalCash"),
+            "cash_per_share": info.get("cashPerShare"),
+        }
+        growth = {
+            "revenue_growth": info.get("revenueGrowth"),
+            "earnings_growth": info.get("earningsGrowth"),
+            "earnings_quarterly_growth": info.get("earningsQuarterlyGrowth"),
+        }
         return {
             "symbol": symbol,
             "profitability": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in profitability.items()},
@@ -1205,6 +1205,132 @@ async def stock_peers(
             "peers": peers,
         }
     return await cached_or_compute(f"stock:peers:{symbol.upper()}:{limit}", 3600, compute)
+
+
+# ---------------------------------------------------------------------------
+# Stock Analyst — upgrades/downgrades, recommendations, earnings calendar, profile
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stock/analyst")
+async def stock_analyst(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+):
+    """Analyst ratings, upgrades/downgrades, earnings calendar, and company profile."""
+    async def compute():
+        ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
+        info = ticker.info or {}
+
+        # --- Upgrades / Downgrades ---
+        upgrades_downgrades = []
+        try:
+            ud = ticker.upgrades_downgrades
+            if ud is not None and not ud.empty:
+                for idx, row in ud.head(25).iterrows():
+                    date_val = idx if not hasattr(idx, 'date') else idx.date()
+                    upgrades_downgrades.append({
+                        "date": str(date_val),
+                        "firm": str(row.get("Firm", "")),
+                        "to_grade": str(row.get("ToGrade", "")),
+                        "from_grade": str(row.get("FromGrade", "")),
+                        "action": str(row.get("Action", "")),
+                    })
+        except Exception:
+            pass
+
+        # --- Recommendations Summary ---
+        recommendations = {}
+        try:
+            rec = ticker.recommendations
+            if rec is not None and not rec.empty:
+                r = rec.iloc[0]
+                recommendations = {
+                    "strong_buy": int(r.get("strongBuy", 0)),
+                    "buy": int(r.get("buy", 0)),
+                    "hold": int(r.get("hold", 0)),
+                    "sell": int(r.get("sell", 0)),
+                    "strong_sell": int(r.get("strongSell", 0)),
+                    "period": str(r.name) if hasattr(r, 'name') else "current",
+                }
+        except Exception:
+            pass
+
+        # --- Price Targets ---
+        price_targets = {
+            "high": _safe_float(info.get("targetHighPrice")),
+            "low": _safe_float(info.get("targetLowPrice")),
+            "mean": _safe_float(info.get("targetMeanPrice")),
+            "median": _safe_float(info.get("targetMedianPrice")),
+        }
+
+        # --- Analyst Consensus ---
+        analyst_consensus = {
+            "rating": info.get("recommendationKey"),
+            "mean_rating": _safe_float(info.get("recommendationMean")),
+            "num_opinions": info.get("numberOfAnalystOpinions"),
+            "avg_rating_text": info.get("averageAnalystRating"),
+        }
+
+        # --- Earnings Calendar ---
+        earnings_calendar = {}
+        try:
+            cal = ticker.calendar
+            if cal is not None:
+                if isinstance(cal, dict):
+                    cal_dict = cal
+                elif hasattr(cal, 'to_dict'):
+                    cal_dict = cal.to_dict()
+                else:
+                    cal_dict = {}
+                earnings_dates = []
+                raw_dates = cal_dict.get("Earnings Date", [])
+                if isinstance(raw_dates, list):
+                    for d in raw_dates:
+                        try:
+                            earnings_dates.append(str(d.date()) if hasattr(d, 'date') else str(d))
+                        except Exception:
+                            earnings_dates.append(str(d))
+                earnings_calendar = {
+                    "earnings_date": earnings_dates,
+                    "earnings_high": _safe_float(cal_dict.get("Earnings High")),
+                    "earnings_low": _safe_float(cal_dict.get("Earnings Low")),
+                    "earnings_avg": _safe_float(cal_dict.get("Earnings Average")),
+                    "revenue_high": _safe_float(cal_dict.get("Revenue High")),
+                    "revenue_low": _safe_float(cal_dict.get("Revenue Low")),
+                    "revenue_avg": _safe_float(cal_dict.get("Revenue Average")),
+                }
+        except Exception:
+            pass
+
+        # --- Company Profile ---
+        company_profile = {
+            "name": info.get("longName") or info.get("shortName") or symbol,
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+            "website": info.get("website"),
+            "employees": info.get("fullTimeEmployees"),
+            "country": info.get("country"),
+            "city": info.get("city"),
+            "state": info.get("state"),
+            "address": info.get("address1"),
+            "zip": info.get("zip"),
+            "description": (info.get("longBusinessSummary") or "")[:2000],
+            "market_cap": info.get("marketCap"),
+            "enterprise_value": info.get("enterpriseValue"),
+            "exchange": info.get("exchange"),
+            "currency": info.get("currency"),
+        }
+
+        return {
+            "symbol": symbol,
+            "upgrades_downgrades": upgrades_downgrades,
+            "recommendations": recommendations,
+            "price_targets": price_targets,
+            "analyst_consensus": analyst_consensus,
+            "earnings_calendar": earnings_calendar,
+            "company_profile": company_profile,
+        }
+    return await cached_or_compute(f"stock:analyst:{symbol.upper()}", 1800, compute)
 
 
 # ---------------------------------------------------------------------------
