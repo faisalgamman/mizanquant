@@ -1,6 +1,8 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-05-13 (M1-M6 complete, M7 done, A-Pre done, V1 API deployed)_
+_Last updated: 2026-05-15 (M1-M6 complete, M7 done, A-Pre done, V1 API deployed, Options 1-3 complete)_
+
+> **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
 ---
 
@@ -111,7 +113,8 @@ openbb-trading/
 │   ├── services/
 │   │   ├── broker/            [Domain: Broker Abstraction] Protocol + 2 adapters
 │   │   ├── guards/            [Domain: Risk] 14 individual guard modules
-│   │   ├── *.py (20 files)    [Domain: Core Business Logic] Trading, screening,
+│   │   ├── gate_settings.py   [Domain: Config] In-memory gate toggle UI overrides
+│   │   ├── *.py (21 files)    [Domain: Core Business Logic] Trading, screening,
 │   │   │                        technical analysis, regime, ML, Telegram, etc.
 │   │   └── ...
 │   └── routers/               [✅ Populated] 5 modules: screener, forecast, consensus, portfolio (+/api/ibkr/ping), admin
@@ -169,6 +172,16 @@ openbb-trading/
 | Cross-strategy Kelly | Deferred | — | See `docs/out_of_scope.md`, item 8 |
 | `keep_alive.py` | Moved to `app/services/keep_alive.py` | Reviewed — still needed for Railway health checks | ✅ Done |
 | `russell1000_halal.py` | Moved to `app/data/russell1000_halal.py` | Reviewed — correctly placed in `app/data/` | ✅ Done |
+
+---
+
+## RECENT ADDITIONS (Signal Expansion — Options 1+2+3)
+
+| # | Feature | Files | Status |
+|---|---------|-------|--------|
+| **O3** | Gate Toggle UI — dynamic min_gate/strong_gate via slider + override + Telegram alert | `app/services/gate_settings.py` (new), `app/services/scoring.py` (mod), `app/routers/dashboard.py` (mod), `app/static/dashboard.html` (mod) | ✅ Done |
+| **O1** | Universe expansion: S&P 500 + Russell 1000 → 680 halal symbols, JSON loader with fallback | `scripts/build_halal_universe.py` (new), `data/halal_universe_v2.json` (new), `app/services/universe.py` (mod) | ✅ Done |
+| **O2** | Momentum Burst Strategy: 8-condition daily breakout detector + backtest + registration | `app/strategies/momentum_burst.py` (new), `app/strategies/__init__.py` (mod), `app/strategies/backtest.py` (mod), `app/routers/dashboard.py` (mod) | ✅ Done |
 
 ---
 
