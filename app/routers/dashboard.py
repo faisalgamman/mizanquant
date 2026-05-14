@@ -89,6 +89,45 @@ router.get("/api/guards/summary")(_guards_summary)
 router.get("/api/scoring/weighted")(_weighted_score)
 router.get("/api/trade/plan")(_trade_plan)
 
+# ── Gate Settings (dynamic overrides) ──
+
+
+@router.get("/api/settings/gates")
+async def api_get_gate_settings():
+    from app.services.gate_settings import get_active_gates
+    return get_active_gates()
+
+
+@router.put("/api/settings/gates")
+async def api_update_gate_settings(body: dict):
+    from app.services.gate_settings import get_gate_settings
+    mg = body.get("min_gate", 60)
+    sg = body.get("strong_gate", 75)
+    gs = get_gate_settings()
+    gs.update(mg, sg)
+    try:
+        from app.services.notify import send_message
+        send_message(
+            f"\u2699\ufe0f Gate Settings Updated\n"
+            f"Min: {gs.min_gate}\nStrong: {gs.strong_gate}\nActive until reset"
+        )
+    except Exception:
+        pass
+    return {"status": "ok", "min_gate": gs.min_gate, "strong_gate": gs.strong_gate}
+
+
+@router.post("/api/settings/gates/reset")
+async def api_reset_gate_settings():
+    from app.services.gate_settings import get_gate_settings
+    gs = get_gate_settings()
+    gs.reset()
+    try:
+        from app.services.notify import send_message
+        send_message(f"\u2699\ufe0f Gate Settings Reset to defaults (min={gs.min_gate}, strong={gs.strong_gate})")
+    except Exception:
+        pass
+    return {"status": "ok", "min_gate": gs.min_gate, "strong_gate": gs.strong_gate}
+
 router.get("/api/watchlist")(_get_watchlist)
 router.put("/api/watchlist")(_set_watchlist)
 router.post("/api/watchlist/add/{symbol}")(_add_to_watchlist)
