@@ -2218,7 +2218,7 @@ function connectWebSocket() {
           notifyPush('signal', 'New signal: ' + (msg.symbol || 'Unknown'), (msg.signal || '') + ' @ ' + (msg.smart_score || '?'));
           break;
         case 'portfolio_update':
-          if (document.querySelector('.tab-content.active')?.id === 'tab-overview') loadOverview();
+          if (document.querySelector('.tab-content.active')?.id === 'tab-overview') loadOverview(false);
           notifyPush('trade', 'Portfolio updated', 'Positions changed');
           break;
         case 'pipeline_stage':
@@ -2226,7 +2226,7 @@ function connectWebSocket() {
           notifyPush('report', 'Pipeline: ' + (msg.stage || 'stage'), (msg.status || '') + (msg.count != null ? ' — ' + msg.count + ' items' : ''));
           break;
         case 'market_context':
-          if (document.querySelector('.tab-content.active')?.id === 'tab-overview') loadOverview();
+          if (document.querySelector('.tab-content.active')?.id === 'tab-overview') loadOverview(false);
           if (msg.regime) notifyPush('regime', 'Regime: ' + msg.regime.toUpperCase(), 'Market context refreshed');
           break;
       }
@@ -2632,8 +2632,8 @@ function showSectionError(sectionId, error) {
 // OVERVIEW — MAIN ENTRY POINT
 // ═══════════════════════════════════════════════════════════════
 
-async function loadOverview() {
-  showSkeletons();
+async function loadOverview(showLoading = true) {
+  if (showLoading) showSkeletons();
   try {
     // Try V1 aggregated endpoint first (1 request vs 7)
     let overviewData = null;
@@ -3007,7 +3007,7 @@ function refreshData() {
 // ===== TAB DATA LOADING =====
 function loadTabData(tabId) {
   switch(tabId) {
-    case 'overview': loadOverview(); break;
+    case 'overview': loadOverview(true); break;
     case 'forecast': loadForecastLab(); break;
     case 'trading': loadTradingLab(); break;
     case 'risk': loadRiskDesk(); break;
@@ -5704,7 +5704,7 @@ function showKeyboardHelp() {
     updateTimestamp();
     updateETClock();
     const active = document.querySelector('.tab-content.active');
-    if (active && active.id === 'tab-overview' && !_wsConnected) loadOverview();
+    if (active && active.id === 'tab-overview' && !_wsConnected) loadOverview(false);
     updateAlertBadge();
   }, 15000);
   // ET clock every second
