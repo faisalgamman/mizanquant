@@ -30,6 +30,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from app.services.universe import HALAL_STOCKS_FALLBACK
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from app.services.redis_client import cached_or_compute
 
 
 logging.basicConfig(level=logging.INFO)
@@ -721,8 +722,9 @@ async def halal_status(
     symbol: str = Query("AAPL", description="Stock symbol"),
 ):
     """AAOIFI Halal compliance screening for any stock symbol."""
-    result = _screen_halal(symbol)
-    return result
+    async def compute():
+        return _screen_halal(symbol)
+    return await cached_or_compute(f"halal:status:{symbol.upper()}", 86400, compute)
 
 
 # ---------------------------------------------------------------------------
@@ -735,43 +737,42 @@ async def stock_summary(
     symbol: str = Query("AAPL", description="Stock symbol"),
 ):
     """Comprehensive stock summary: profile, sector, valuation ratios, dividend."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
-
-    price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
-    prev_close = _safe_float(info.get("previousClose"))
-    change = round(price - prev_close, 2) if price and prev_close else 0
-    change_pct = round(change / prev_close * 100, 2) if prev_close and prev_close != 0 else 0
-
-    return {
-        "symbol": symbol,
-        "company_name": info.get("longName") or info.get("shortName") or symbol,
-        "sector": info.get("sector", ""),
-        "industry": info.get("industry", ""),
-        "description": (info.get("longBusinessSummary") or "")[:500],
-        "website": info.get("website", ""),
-        "employees": info.get("fullTimeEmployees", 0),
-        "exchange": info.get("exchange", ""),
-        "currency": info.get("currency", "USD"),
-        "price": price,
-        "change": change,
-        "change_pct": change_pct,
-        "market_cap": info.get("marketCap", 0),
-        "enterprise_value": info.get("enterpriseValue", 0),
-        "pe_ratio": info.get("trailingPE") or info.get("forwardPE"),
-        "forward_pe": info.get("forwardPE"),
-        "eps": info.get("trailingEps"),
-        "book_value": info.get("bookValue"),
-        "price_to_book": info.get("priceToBook"),
-        "dividend_yield": info.get("dividendYield"),
-        "dividend_rate": info.get("dividendRate"),
-        "payout_ratio": info.get("payoutRatio"),
-        "beta": info.get("beta"),
-        "52w_high": info.get("fiftyTwoWeekHigh"),
-        "52w_low": info.get("fiftyTwoWeekLow"),
-        "avg_volume": info.get("averageVolume"),
-        "market_state": info.get("marketState", ""),
-    }
+    async def compute():
+        info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
+        prev_close = _safe_float(info.get("previousClose"))
+        change = round(price - prev_close, 2) if price and prev_close else 0
+        change_pct = round(change / prev_close * 100, 2) if prev_close and prev_close != 0 else 0
+        return {
+            "symbol": symbol,
+            "company_name": info.get("longName") or info.get("shortName") or symbol,
+            "sector": info.get("sector", ""),
+            "industry": info.get("industry", ""),
+            "description": (info.get("longBusinessSummary") or "")[:500],
+            "website": info.get("website", ""),
+            "employees": info.get("fullTimeEmployees", 0),
+            "exchange": info.get("exchange", ""),
+            "currency": info.get("currency", "USD"),
+            "price": price,
+            "change": change,
+            "change_pct": change_pct,
+            "market_cap": info.get("marketCap", 0),
+            "enterprise_value": info.get("enterpriseValue", 0),
+            "pe_ratio": info.get("trailingPE") or info.get("forwardPE"),
+            "forward_pe": info.get("forwardPE"),
+            "eps": info.get("trailingEps"),
+            "book_value": info.get("bookValue"),
+            "price_to_book": info.get("priceToBook"),
+            "dividend_yield": info.get("dividendYield"),
+            "dividend_rate": info.get("dividendRate"),
+            "payout_ratio": info.get("payoutRatio"),
+            "beta": info.get("beta"),
+            "52w_high": info.get("fiftyTwoWeekHigh"),
+            "52w_low": info.get("fiftyTwoWeekLow"),
+            "avg_volume": info.get("averageVolume"),
+            "market_state": info.get("marketState", ""),
+        }
+    return await cached_or_compute(f"stock:summary:{symbol.upper()}", 300, compute)
 
 
 @app.get("/api/stock/ratios")
@@ -779,10 +780,9 @@ async def stock_ratios(
     symbol: str = Query("AAPL", description="Stock symbol"),
 ):
     """Key financial ratios: profitability, liquidity, leverage, efficiency."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
-
-    profitability = {
+    async def compute():
+        info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        profitability = {
         "profit_margin": info.get("profitMargins"),
         "operating_margin": info.get("operatingMargins"),
         "return_on_equity": info.get("returnOnEquity"),
@@ -813,13 +813,14 @@ async def stock_ratios(
         "earnings_growth": info.get("earningsGrowth"),
         "earnings_quarterly_growth": info.get("earningsQuarterlyGrowth"),
     }
-    return {
-        "symbol": symbol,
-        "profitability": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in profitability.items()},
-        "valuation": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in valuation.items()},
-        "liquidity": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in liquidity.items()},
-        "growth": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in growth.items()},
-    }
+        return {
+            "symbol": symbol,
+            "profitability": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in profitability.items()},
+            "valuation": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in valuation.items()},
+            "liquidity": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in liquidity.items()},
+            "growth": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in growth.items()},
+        }
+    return await cached_or_compute(f"stock:ratios:{symbol.upper()}", 600, compute)
 
 
 @app.get("/api/stock/financials")
@@ -829,41 +830,43 @@ async def stock_financials(
     periods: int = Query(4, description="Number of periods"),
 ):
     """Annual financial statements from yfinance with YoY comparison."""
-    ticker = yf.Ticker(symbol)
-    fetcher = {"income": ticker.financials, "balance": ticker.balance_sheet, "cashflow": ticker.cashflow}
-    df = fetcher.get(statement)
-    if df is None or df.empty:
-        return {"symbol": symbol, "statement": statement, "error": "No data", "rows": [], "years": []}
+    async def compute():
+        ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
+        fetcher = {"income": ticker.financials, "balance": ticker.balance_sheet, "cashflow": ticker.cashflow}
+        df = fetcher.get(statement)
+        if df is None or df.empty:
+            return {"symbol": symbol, "statement": statement, "error": "No data", "rows": [], "years": []}
 
-    years = []
-    for col in df.columns[:periods]:
-        try:
-            years.append(str(col.year))
-        except AttributeError:
-            years.append(str(col))
-
-    rows = []
-    for idx in df.index:
-        item_name = str(idx)
-        item_short = item_name.replace(" ", "_").replace("/", "_").replace("-", "_").replace(".", "")[:40]
-        row = {"item": item_name, "item_short": item_short}
-        values = []
+        years = []
         for col in df.columns[:periods]:
-            val = df.loc[idx, col]
-            num_val = round(float(val), 2) if isinstance(val, (int, float)) else None
-            row[str(col.year)] = num_val
-            values.append(num_val)
+            try:
+                years.append(str(col.year))
+            except AttributeError:
+                years.append(str(col))
 
-        # YoY change for last two periods
-        yoy_change = None
-        if len(values) >= 2 and all(v is not None for v in values[:2]):
-            prev, curr = values[1], values[0]
-            if prev != 0:
-                yoy_change = round((curr - prev) / abs(prev) * 100, 1)
-        row["yoy_change_pct"] = yoy_change
-        rows.append(row)
+        rows = []
+        for idx in df.index:
+            item_name = str(idx)
+            item_short = item_name.replace(" ", "_").replace("/", "_").replace("-", "_").replace(".", "")[:40]
+            row = {"item": item_name, "item_short": item_short}
+            values = []
+            for col in df.columns[:periods]:
+                val = df.loc[idx, col]
+                num_val = round(float(val), 2) if isinstance(val, (int, float)) else None
+                row[str(col.year)] = num_val
+                values.append(num_val)
 
-    return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
+            # YoY change for last two periods
+            yoy_change = None
+            if len(values) >= 2 and all(v is not None for v in values[:2]):
+                prev, curr = values[1], values[0]
+                if prev != 0:
+                    yoy_change = round((curr - prev) / abs(prev) * 100, 1)
+            row["yoy_change_pct"] = yoy_change
+            rows.append(row)
+
+        return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
+    return await cached_or_compute(f"stock:financials:{symbol.upper()}:{statement}", 3600, compute)
 
 
 @app.get("/api/stock/dividends")
@@ -871,23 +874,23 @@ async def stock_dividends(
     symbol: str = Query("AAPL", description="Stock symbol"),
 ):
     """Dividend history, yield, payout ratio."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
-    div_history = ticker.dividends
-
-    history = []
-    if div_history is not None and not div_history.empty:
-        for date, val in div_history.tail(24).items():
-            history.append({"date": str(date.date()), "dividend": round(float(val), 4)})
-
-    return {
-        "symbol": symbol,
-        "dividend_yield": info.get("dividendYield"),
-        "dividend_rate": info.get("dividendRate"),
-        "payout_ratio": info.get("payoutRatio"),
-        "ex_dividend_date": str(info.get("exDividendDate")) if info.get("exDividendDate") else None,
-        "last_24_payments": history,
-    }
+    async def compute():
+        ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
+        info = ticker.info or {}
+        div_history = ticker.dividends
+        history = []
+        if div_history is not None and not div_history.empty:
+            for date, val in div_history.tail(24).items():
+                history.append({"date": str(date.date()), "dividend": round(float(val), 4)})
+        return {
+            "symbol": symbol,
+            "dividend_yield": info.get("dividendYield"),
+            "dividend_rate": info.get("dividendRate"),
+            "payout_ratio": info.get("payoutRatio"),
+            "ex_dividend_date": str(info.get("exDividendDate")) if info.get("exDividendDate") else None,
+            "last_24_payments": history,
+        }
+    return await cached_or_compute(f"stock:dividends:{symbol.upper()}", 3600, compute)
 
 
 @app.get("/api/stock/holders")
@@ -895,40 +898,39 @@ async def stock_holders(
     symbol: str = Query("AAPL", description="Stock symbol"),
 ):
     """Major institutional holders and insider ownership."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
-
-    major_holders = []
-    try:
-        mh = ticker.major_holders
-        if mh is not None and not mh.empty:
-            for _, row in mh.iterrows():
-                major_holders.append({str(row.index[0]) if hasattr(row, 'index') else 'holder': str(row.iloc[0])})
-    except Exception:
-        pass
-
-    institutional = []
-    try:
-        ih = ticker.institutional_holders
-        if ih is not None and not ih.empty:
-            for _, row in ih.iterrows():
-                institutional.append({
-                    "holder": str(row.get("Holder", row.index[0] if hasattr(row, 'index') else "")),
-                    "shares": int(row.get("Shares", 0)) if isinstance(row.get("Shares"), (int, float)) else 0,
-                    "value": float(row.get("Value", 0)) if isinstance(row.get("Value"), (int, float)) else 0,
-                })
-    except Exception:
-        pass
-
-    return {
-        "symbol": symbol,
-        "insider_ownership_pct": info.get("heldPercentInsiders"),
-        "institutional_ownership_pct": info.get("heldPercentInstitutions"),
-        "short_ratio": info.get("shortRatio"),
-        "short_pct": info.get("shortPercentOfFloat"),
-        "major_holders": major_holders[:5],
-        "institutional_holders": institutional[:10],
-    }
+    async def compute():
+        ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
+        info = ticker.info or {}
+        major_holders = []
+        try:
+            mh = ticker.major_holders
+            if mh is not None and not mh.empty:
+                for _, row in mh.iterrows():
+                    major_holders.append({str(row.index[0]) if hasattr(row, 'index') else 'holder': str(row.iloc[0])})
+        except Exception:
+            pass
+        institutional = []
+        try:
+            ih = ticker.institutional_holders
+            if ih is not None and not ih.empty:
+                for _, row in ih.iterrows():
+                    institutional.append({
+                        "holder": str(row.get("Holder", row.index[0] if hasattr(row, 'index') else "")),
+                        "shares": int(row.get("Shares", 0)) if isinstance(row.get("Shares"), (int, float)) else 0,
+                        "value": float(row.get("Value", 0)) if isinstance(row.get("Value"), (int, float)) else 0,
+                    })
+        except Exception:
+            pass
+        return {
+            "symbol": symbol,
+            "insider_ownership_pct": info.get("heldPercentInsiders"),
+            "institutional_ownership_pct": info.get("heldPercentInstitutions"),
+            "short_ratio": info.get("shortRatio"),
+            "short_pct": info.get("shortPercentOfFloat"),
+            "major_holders": major_holders[:5],
+            "institutional_holders": institutional[:10],
+        }
+    return await cached_or_compute(f"stock:holders:{symbol.upper()}", 86400, compute)
 
 
 @app.get("/api/stock/earnings")
@@ -936,43 +938,43 @@ async def stock_earnings(
     symbol: str = Query("AAPL", description="Stock symbol"),
 ):
     """Annual earnings history and quarterly surprises."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
-
-    surprises = []
-    try:
-        surp = ticker.earnings_dates
-        if surp is not None and not surp.empty:
-            for idx in surp.index[:8]:
-                row = surp.loc[idx]
-                est = row.get("EPS Estimate")
-                act = row.get("Reported EPS")
-                surprise_raw = row.get("Surprise(%)")
-                if est is not None and act is not None:
-                    try:
-                        est_val = float(est)
-                        act_val = float(act)
-                        surp_val = float(surprise_raw) if surprise_raw is not None else (
-                            round((act_val - est_val) / abs(est_val) * 100, 2) if est_val != 0 else 0
-                        )
-                        date_str = str(idx.date()) if hasattr(idx, 'date') else str(idx)
-                    except (TypeError, ValueError):
-                        continue
-                    surprises.append({
-                            "date": date_str,
-                            "estimate": est_val,
-                            "actual": act_val,
-                            "surprise_pct": round(surp_val, 2),
-                        })
-    except Exception:
-        pass
-
-    return {
-        "symbol": symbol,
-        "eps": info.get("trailingEps"),
-        "forward_eps": info.get("forwardEps"),
-        "quarterly_surprises": surprises,
-    }
+    async def compute():
+        ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
+        info = ticker.info or {}
+        surprises = []
+        try:
+            surp = ticker.earnings_dates
+            if surp is not None and not surp.empty:
+                for idx in surp.index[:8]:
+                    row = surp.loc[idx]
+                    est = row.get("EPS Estimate")
+                    act = row.get("Reported EPS")
+                    surprise_raw = row.get("Surprise(%)")
+                    if est is not None and act is not None:
+                        try:
+                            est_val = float(est)
+                            act_val = float(act)
+                            surp_val = float(surprise_raw) if surprise_raw is not None else (
+                                round((act_val - est_val) / abs(est_val) * 100, 2) if est_val != 0 else 0
+                            )
+                            date_str = str(idx.date()) if hasattr(idx, 'date') else str(idx)
+                        except (TypeError, ValueError):
+                            continue
+                        surprises.append({
+                                "date": date_str,
+                                "estimate": est_val,
+                                "actual": act_val,
+                                "surprise_pct": round(surp_val, 2),
+                            })
+        except Exception:
+            pass
+        return {
+            "symbol": symbol,
+            "eps": info.get("trailingEps"),
+            "forward_eps": info.get("forwardEps"),
+            "quarterly_surprises": surprises,
+        }
+    return await cached_or_compute(f"stock:earnings:{symbol.upper()}", 3600, compute)
 
 
 @app.get("/api/stock/screener")
