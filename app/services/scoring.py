@@ -631,6 +631,9 @@ def get_market_status() -> dict:
     Delegates to market_context.get_market_status() which uses
     VIX percentile + HY/IG credit ratio for classification.
     Then maps status to min_gate / strong_gate values.
+
+    If user has overridden gates via GateSettings, those values
+    take precedence over the regime-based defaults.
     """
     try:
         from app.services.market_context import get_market_status as _mc_status
@@ -645,6 +648,13 @@ def get_market_status() -> dict:
         "min_score": gates["min_gate"],
         "strong_gate": gates["strong_gate"],
     }
+
+    from app.services.gate_settings import get_gate_settings
+    gs = get_gate_settings()
+    if gs.is_overridden:
+        result["min_score"] = gs.min_gate
+        result["strong_gate"] = gs.strong_gate
+        result["gate_override"] = True
 
     # Halt pipeline for EXTREME FEAR
     result["halt_pipeline"] = status == "EXTREME FEAR"
