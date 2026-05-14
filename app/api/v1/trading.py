@@ -127,6 +127,71 @@ async def v1_auto_trade(enabled: bool = True, x_api_key: str = Query(None)):
     return {"auto_trade_enabled": settings.AUTO_TRADE_ENABLED}
 
 
+@router.post("/trading/orders")
+async def v1_submit_order(
+    symbol: str,
+    side: str = "buy",
+    qty: float = Query(..., description="Number of shares"),
+    order_type: str = "market",
+    time_in_force: str = "DAY",
+    limit_price: float | None = None,
+    stop_price: float | None = None,
+    take_profit_price: float | None = None,
+    stop_loss_price: float | None = None,
+    x_api_key: str | None = Query(None),
+):
+    from app.services.broker.factory import get_broker
+
+    payload: dict = {
+        "symbol": symbol.upper(),
+        "side": side.lower(),
+        "qty": qty,
+        "type": order_type.lower(),
+        "time_in_force": time_in_force.upper(),
+    }
+    if limit_price is not None:
+        payload["limit_price"] = limit_price
+    if stop_price is not None:
+        payload["stop_price"] = stop_price
+
+    if take_profit_price is not None or stop_loss_price is not None:
+        payload["order_class"] = "bracket"
+        payload["take_profit"] = {"limit_price": take_profit_price or 0}
+        payload["stop_loss"] = {"stop_price": stop_loss_price or 0}
+
+    broker = get_broker()
+    if broker is None:
+        return {"status": "error", "message": "No broker configured"}
+    result = broker.submit_order(payload)
+    if result is None:
+        return {"status": "error", "message": "Order submission failed"}
+    return {"status": "ok", "order": result}
+
+
+@router.delete("/trading/orders/{order_id}")
+async def v1_cancel_order(order_id: str, x_api_key: str | None = Query(None)):
+    from app.services.broker.factory import get_broker
+
+    broker = get_broker()
+    if broker is None:
+        return {"status": "error", "message": "No broker configured"}
+    ok = broker.cancel_order(order_id)
+    return {"status": "ok" if ok else "error", "cancelled": ok}
+
+
+@router.delete("/trading/positions/{symbol}")
+async def v1_close_position(symbol: str, x_api_key: str | None = Query(None)):
+    from app.services.broker.factory import get_broker
+
+    broker = get_broker()
+    if broker is None:
+        return {"status": "error", "message": "No broker configured"}
+    result = broker.close_position(symbol.upper())
+    if result is None:
+        return {"status": "error", "message": "Close position failed or position not found"}
+    return {"status": "ok", "order": result}
+
+
 @router.get("/trading/history/recent")
 async def v1_trading_history(limit: int = 20):
     from app.services.trade_history import get_trade_history

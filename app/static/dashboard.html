@@ -5923,7 +5923,7 @@ async function showQuickTrade(symbol) {
       '<div class="qtp-section-title">Execute</div>' +
       '<div class="qtp-actions">' +
         '<button class="qtp-paper" onclick="executePaperTrade()"><i class="fas fa-flask"></i> Paper Trade</button>' +
-        '<button class="qtp-live" onclick="showToast(\'Live trading is a Premium feature. Contact support to upgrade.\', \'warning\')"><i class="fas fa-lock"></i> Live Trade <span class="premium-lock">PREMIUM</span></button>' +
+        '<button class="qtp-live" style="cursor:pointer;border-color:var(--green);color:var(--green);" onclick="executeLiveTrade()"><i class="fas fa-bolt"></i> Live Trade</button>' +
       '</div>';
   } catch(e) {
     body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--orange);font-size:12px;"><i class="fas fa-exclamation-triangle" style="font-size:24px;display:block;margin-bottom:8px;"></i> Trade data unavailable: ' + (e.message||'') + '<br><br><button class="btn btn-sm btn-outline" onclick="closeQuickTrade()">Close</button></div>';
@@ -5953,6 +5953,40 @@ function executePaperTrade() {
   notifyPush('trade', 'Paper trade: ' + _qtpData.symbol + ' ' + _qtpData.shares + 'sh @ $' + _qtpData.entry.toFixed(2), _qtpData.shares + ' shares, $' + _qtpData.value.toFixed(0) + ' value');
   showToast('Paper trade executed: ' + _qtpData.shares + ' shares of ' + _qtpData.symbol + ' @ $' + _qtpData.entry.toFixed(2), 'success');
   closeQuickTrade();
+}
+
+function executeLiveTrade() {
+  if (!_qtpData) return;
+  var d = _qtpData;
+  if (!d.symbol || !d.shares || !d.entry) {
+    showToast('Missing trade data', 'error');
+    return;
+  }
+  var params = new URLSearchParams();
+  params.set('symbol', d.symbol);
+  params.set('side', 'buy');
+  params.set('qty', String(d.shares));
+  params.set('order_type', 'market');
+  params.set('time_in_force', 'DAY');
+  if (d.stop > 0) params.set('stop_loss_price', String(d.stop));
+  if (d.tp1 > 0) params.set('take_profit_price', String(d.tp1));
+
+  showToast('Submitting live order for ' + d.symbol + '...', 'info');
+  fetch('/api/v1/trading/orders?' + params.toString(), {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'}
+  }).then(function(r) { return r.json(); }).then(function(resp) {
+    if (resp.status === 'ok') {
+      showToast('Live order submitted: ' + d.symbol + ' ' + d.shares + 'sh', 'success');
+      notifyPush('trade', 'Live order: ' + d.symbol + ' ' + d.shares + 'sh @ $' + d.entry.toFixed(2), 'Submitted to ' + (resp.order.broker || 'IBKR'));
+    } else {
+      showToast('Order failed: ' + (resp.message || 'unknown error'), 'error');
+    }
+  }).catch(function(e) {
+    showToast('Network error: ' + (e.message || e), 'error');
+  }).finally(function() {
+    closeQuickTrade();
+  });
 }
 
 function persistPaperTrade(trade) {
