@@ -46,7 +46,7 @@ async def v1_market_status(force_refresh: bool = False):
 async def v1_sector_performance(force_refresh: bool = False):
     from app.services.sector_analysis import get_sector_performance
 
-    def compute():
+    async def compute():
         return get_sector_performance(force_refresh=False)
 
     return await memory_cache.get_or_compute(

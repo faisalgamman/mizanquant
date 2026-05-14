@@ -127,7 +127,7 @@ async def v1_trading_controls():
 async def v1_kill_switch(killed: bool = True, x_api_key: str = Query(None)):
     require_api_key(x_api_key)
     app_cfg.killed = killed
-    from app.services.notify import tg_send
+    from app.services.notify import send_message as tg_send
     tg_send(f"🔴 KILL SWITCH {'ENABLED' if killed else 'DISABLED'} from Dashboard")
     return {"killed": app_cfg.killed}
 
@@ -136,7 +136,7 @@ async def v1_kill_switch(killed: bool = True, x_api_key: str = Query(None)):
 async def v1_auto_trade(enabled: bool = True, x_api_key: str = Query(None)):
     require_api_key(x_api_key)
     settings.AUTO_TRADE_ENABLED = enabled
-    from app.services.notify import tg_send
+    from app.services.notify import send_message as tg_send
     tg_send(f"{'🟢' if enabled else '🔴'} AUTO-TRADING {'ENABLED' if enabled else 'DISABLED'} from Dashboard")
     return {"auto_trade_enabled": settings.AUTO_TRADE_ENABLED}
 
