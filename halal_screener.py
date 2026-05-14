@@ -661,14 +661,27 @@ def _run_with_memory_guard(func, *args, **kwargs):
         _model_semaphore.release()
 
 
-from openbb_forecast.models.factory import create_model as _create_forecast_model, get_model_class, get_model_suffix, MODEL_NAMES as ALL_MODEL_NAMES
-from openbb_forecast.agents.factory import create_agent as _create_rl_agent, AGENT_NAMES as ALL_AGENT_NAMES
+try:
+    from openbb_forecast.models.factory import create_model as _create_forecast_model, get_model_class, get_model_suffix, MODEL_NAMES as ALL_MODEL_NAMES
+    from openbb_forecast.agents.factory import create_agent as _create_rl_agent, AGENT_NAMES as ALL_AGENT_NAMES
+    _HAS_OPENBB = True
+except Exception:
+    logger.warning("openbb_forecast imports failed (torch may be unavailable); forecast/RL endpoints disabled")
+    _HAS_OPENBB = False
+    _create_forecast_model = None
+    _create_rl_agent = None
+    ALL_MODEL_NAMES = []
+    ALL_AGENT_NAMES = []
+    get_model_class = None
+    get_model_suffix = None
 
 _PERSISTED_MODELS = {}
 _PERSISTED_MODEL_ATTEMPTS = set()
 
 
 def _load_persisted_model(model_name):
+    if not _HAS_OPENBB:
+        return None
     if not app_cfg.thresholds.ml_tools_enabled.get(model_name, True):
         return None
     if model_name in _PERSISTED_MODEL_ATTEMPTS:
@@ -701,6 +714,8 @@ def _predict_persisted_model(model_name, X_test):
 
 
 def _preload_persisted_models():
+    if not _HAS_OPENBB:
+        return
     for model_name in ALL_MODEL_NAMES:
         _load_persisted_model(model_name)
 

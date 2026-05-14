@@ -285,8 +285,16 @@ SCREENER_CACHE_TTL = 900  # 15 minutes
 # DL Forecast Endpoints (18+ models)
 # ---------------------------------------------------------------------------
 
-from openbb_forecast.models.base import compute_forecast_metrics
-from openbb_forecast.models.factory import create_model, MODEL_NAMES
+try:
+    from openbb_forecast.models.base import compute_forecast_metrics
+    from openbb_forecast.models.factory import create_model, MODEL_NAMES
+    _HAS_FORECAST = True
+except Exception:
+    logger.warning("openbb_forecast.models imports failed (torch unavailable); forecast endpoints disabled")
+    _HAS_FORECAST = False
+    compute_forecast_metrics = None
+    create_model = None
+    MODEL_NAMES = []
 
 # AI Agent — LLM-powered investment analyst with template fallback
 from app.ai_agent import AIAgent
@@ -365,7 +373,14 @@ async def forecast_model(
 # RL Agent Endpoints (19 agents)
 # ---------------------------------------------------------------------------
 
-from openbb_forecast.agents.factory import create_agent, AGENT_NAMES
+try:
+    from openbb_forecast.agents.factory import create_agent, AGENT_NAMES
+    _HAS_AGENTS = True
+except Exception:
+    logger.warning("openbb_forecast.agents imports failed; RL endpoints disabled")
+    _HAS_AGENTS = False
+    create_agent = None
+    AGENT_NAMES = []
 
 
 @app.get("/api/agent/{agent_name}")
@@ -501,7 +516,13 @@ def _run_agent_backtest(agent, prices, dates, agent_name, symbol):
 # Monte Carlo Simulation
 # ---------------------------------------------------------------------------
 
-from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
+try:
+    from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
+    _HAS_MC = True
+except Exception:
+    logger.warning("openbb_forecast.simulation imports failed; Monte Carlo disabled")
+    _HAS_MC = False
+    MonteCarloSimulator = None
 
 
 @app.get("/api/monte-carlo")
@@ -535,7 +556,13 @@ async def monte_carlo(
 # Risk Metrics
 # ---------------------------------------------------------------------------
 
-from openbb_forecast.risk import metrics as risk_metrics
+try:
+    from openbb_forecast.risk import metrics as risk_metrics
+    _HAS_RISK = True
+except Exception:
+    logger.warning("openbb_forecast.risk imports failed; risk metrics disabled")
+    _HAS_RISK = False
+    risk_metrics = None
 
 
 @app.get("/api/metrics")
