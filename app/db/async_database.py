@@ -28,7 +28,7 @@ def _get_async_engine():
     if not db_url:
         db_url = "sqlite+aiosqlite:///./trading_app.db"
 
-    if db_url.startswith("sqlite"):
+    if db_url.startswith("sqlite") and not db_url.startswith("sqlite+aiosqlite"):
         db_url = db_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
     elif db_url.startswith("postgresql://") or db_url.startswith("postgres://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
