@@ -217,7 +217,6 @@ async def v1_backtest(
         return cached
 
     result = run_backtest(s, start_date, end_date, portfolio, risk_pct, hold_days)
-    result_dict = result if isinstance(result, dict) else {"result": str(result)}
 
-    await asyncio.to_thread(_save_backtest_cache, key, result_dict)
-    return result_dict
+    await asyncio.to_thread(_save_backtest_cache, key, result)
+    return result
