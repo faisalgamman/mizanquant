@@ -46,66 +46,45 @@ async def _get_system_status():
 
 async def _get_portfolio():
     from app.config import settings as cfg, STRATEGY_CONFIGS
-    import os
+    from app.services.broker.factory import get_broker
 
-    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
     sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
 
-    if broker_type == "ibkr":
-        return {
-            "broker_type": "ibkr",
-            "equity": 0, "cash": 0, "buying_power": 0, "portfolio_value": 0,
-            "daily_pnl": 0, "daily_pnl_pct": 0, "open_positions": 0,
-            "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
-            "positions": [],
+    account = broker.get_account(strategy_id=sid) if broker else None
+    positions = broker.get_positions(strategy_id=sid) if broker else []
+
+    if account:
+        equity = float(account.get("equity", 0))
+        cash = float(account.get("cash", 0))
+        buying_power = float(account.get("buying_power", 0))
+        portfolio_value = float(account.get("portfolio_value", 0))
+        last_equity = float(account.get("last_equity", 0))
+        daily_pnl = round(equity - last_equity, 2) if last_equity else 0
+        daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
+    else:
+        equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
+
+    positions_list = [
+        {
+            "symbol": p["symbol"], "qty": float(p.get("qty", 0)),
+            "avg_entry": float(p.get("avg_entry_price", 0)),
+            "current_price": float(p.get("current_price", 0)),
+            "market_value": float(p.get("market_value", 0)),
+            "unrealized_pl": float(p.get("unrealized_pl", 0)),
+            "unrealized_plpc": float(p.get("unrealized_plpc", 0)),
         }
+        for p in (positions or [])
+    ]
 
-    try:
-        from app.services.alpaca_client import get_account, get_positions
-
-        account = get_account(strategy_id=sid) if sid else None
-        positions = get_positions(strategy_id=sid) if sid else []
-
-        if account:
-            equity = float(account.get("equity", 0))
-            cash = float(account.get("cash", 0))
-            buying_power = float(account.get("buying_power", 0))
-            portfolio_value = float(account.get("portfolio_value", 0))
-            last_equity = float(account.get("last_equity", 0))
-            daily_pnl = round(equity - last_equity, 2)
-            daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
-        else:
-            equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
-
-        positions_list = [
-            {
-                "symbol": p["symbol"], "qty": float(p.get("qty", 0)),
-                "avg_entry": float(p.get("avg_entry_price", 0)),
-                "current_price": float(p.get("current_price", 0)),
-                "market_value": float(p.get("market_value", 0)),
-                "unrealized_pl": float(p.get("unrealized_pl", 0)),
-                "unrealized_plpc": float(p.get("unrealized_plpc", 0)),
-            }
-            for p in (positions or [])
-        ]
-
-        return {
-            "broker_type": "alpaca",
-            "equity": equity, "cash": cash, "buying_power": buying_power,
-            "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
-            "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
-            "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
-            "positions": positions_list,
-        }
-    except Exception as exc:
-        logger.warning("Portfolio fetch failed: %s — returning fallback", exc)
-        return {
-            "broker_type": "alpaca",
-            "equity": 0, "cash": 0, "buying_power": 0, "portfolio_value": 0,
-            "daily_pnl": 0, "daily_pnl_pct": 0, "open_positions": 0,
-            "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
-            "positions": [],
-        }
+    return {
+        "broker_type": broker.name if broker else "unknown",
+        "equity": equity, "cash": cash, "buying_power": buying_power,
+        "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
+        "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
+        "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
+        "positions": positions_list,
+    }
 
 
 async def _get_market():
