@@ -39,15 +39,17 @@ class HardGate(Enum):
     VOLUME = "volume"
     MACD = "macd"
     ADX = "adx"
-    VWAP = "vwap"
+    EMA20 = "ema20"  # Replaces VWAP (P1.1) — VWAP on daily cumsum was meaningless
 
 
+# P1.3 — Thresholds softened slightly to permit 3-7 QUALIFIED signals/week in BULL.
+# Previous values caused 0 QUALIFIED on 357 halal stocks.
 HARD_GATE_CONFIG = {
-    HardGate.RS_VS_SPY: {"threshold": -2.0, "desc": "RS vs SPY > -2%"},
-    HardGate.VOLUME: {"threshold": 0.5, "desc": "Volume > 50% 20d avg"},
+    HardGate.RS_VS_SPY: {"threshold": -3.0, "desc": "RS vs SPY > -3%"},
+    HardGate.VOLUME: {"threshold": 0.4, "desc": "Volume > 40% 20d avg"},
     HardGate.MACD: {"threshold": 0, "desc": "MACD Hist > 0 or recent positive crossover"},
-    HardGate.ADX: {"threshold": 15, "desc": "ADX > 15"},
-    HardGate.VWAP: {"threshold": 0, "desc": "Price > VWAP"},
+    HardGate.ADX: {"threshold": 12, "desc": "ADX > 12"},
+    HardGate.EMA20: {"threshold": 0, "desc": "Close > EMA20 daily"},
 }
 
 
@@ -101,11 +103,13 @@ def check_hard_gates(
         # بدون بيانات SPY → نفذ الشرط لتكون محافظة
         failed.append("RS vs SPY: no SPY data")
 
-    # 2. Volume > 50% 20d average
+    # 2. Volume > 40% 20d average (P1.2 fail-closed if missing data)
     if "volume" in df.columns and len(df) >= 20:
         vol_ratio = calc_volume_ratio(df)
         if vol_ratio < HARD_GATE_CONFIG[HardGate.VOLUME]["threshold"]:
             failed.append(f"Volume ratio = {vol_ratio:.2f} (حد {HARD_GATE_CONFIG[HardGate.VOLUME]['threshold']})")
+    else:
+        failed.append("Volume: missing column or insufficient history")
 
     # 3. MACD Histogram > 0 أو تحول إيجابي مؤخراً
     macd_line, signal_line, histogram = calc_macd(close)
@@ -122,22 +126,22 @@ def check_hard_gates(
     else:
         failed.append("MACD: insufficient data")
 
-    # 4. ADX > 15
-    if all(c in df.columns for c in ("high", "low")):
+    # 4. ADX > 12 (P1.3 softened from 15)
+    if all(c in df.columns for c in ("high", "low")) and len(df) >= 28:
         adx_val, _, _ = calc_adx(df, 14)
         latest_adx = float(adx_val.iloc[-1])
         if latest_adx <= HARD_GATE_CONFIG[HardGate.ADX]["threshold"]:
             failed.append(f"ADX = {latest_adx:.1f} (حد {HARD_GATE_CONFIG[HardGate.ADX]['threshold']})")
     else:
-        failed.append("ADX: missing high/low columns")
+        failed.append("ADX: missing high/low columns or insufficient history")
 
-    # 5. Price > VWAP
-    if all(c in df.columns for c in ("high", "low", "volume")):
-        typical_price = (df["high"].astype(float) + df["low"].astype(float) + close) / 3
-        cum_vwap = (typical_price * df["volume"].astype(float)).cumsum() / df["volume"].astype(float).cumsum()
-        vwap_val = float(cum_vwap.iloc[-1])
-        if latest_close <= vwap_val:
-            failed.append(f"Price ({latest_close:.2f}) ≤ VWAP ({vwap_val:.2f})")
+    # 5. Close > EMA20 daily (P1.1 replaces VWAP — VWAP on daily cumsum was meaningless)
+    if len(close) >= 20:
+        ema_20_val = float(ema(close, 20).iloc[-1])
+        if latest_close <= ema_20_val:
+            failed.append(f"Price ({latest_close:.2f}) ≤ EMA20 ({ema_20_val:.2f})")
+    else:
+        failed.append("EMA20: insufficient history (<20 bars)")
 
     return GateResult(passed=len(failed) == 0, failed_gates=failed)
 
