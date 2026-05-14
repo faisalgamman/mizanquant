@@ -26,7 +26,10 @@ logger = logging.getLogger("screener")
 # ---------------------------------------------------------------------------
 _data_cache = {}
 _data_cache_ts = {}
-_DATA_CACHE_TTL = 300  # 5 minutes
+# P2.4 — dynamic TTL: short in market hours, long outside (data doesn't change)
+_DATA_CACHE_TTL_MARKET_OPEN = 60     # 1 minute — frequent intraday updates
+_DATA_CACHE_TTL_MARKET_CLOSED = 1800  # 30 minutes — bars are final
+_DATA_CACHE_TTL = _DATA_CACHE_TTL_MARKET_CLOSED  # backward-compat for old callers
 _YF_CACHE_CONFIGURED = False
 
 
@@ -45,12 +48,13 @@ def _session_bucket() -> str:
 
 
 def _cache_ttl_seconds() -> int:
+    """Dynamic TTL: short in market hours (data changes), long outside (data stable)."""
     try:
         from app.services.guards.market_hours import is_market_open
 
-        return 60 if is_market_open() else _DATA_CACHE_TTL
+        return _DATA_CACHE_TTL_MARKET_OPEN if is_market_open() else _DATA_CACHE_TTL_MARKET_CLOSED
     except Exception:
-        return _DATA_CACHE_TTL
+        return _DATA_CACHE_TTL_MARKET_CLOSED
 
 
 def _configure_yfinance_cache(yf_module) -> None:

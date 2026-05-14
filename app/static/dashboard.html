@@ -2868,6 +2868,7 @@ async function loadOverview() {
 
     // ── FIRE-AND-FORGET ──
     loadTopSignals();
+    loadPipelineStatus();  // P5.1 — restored after confirming function exists at line 2255
     loadPipelineStatus();
     loadPaperTrades();
     loadPerformance();
@@ -2944,14 +2945,23 @@ async function runBacktest() {
   document.getElementById('btStats').innerHTML = '<div class="loading"><div class="spinner"></div>Running backtest...</div>';
   document.getElementById('btTrades').innerHTML = '';
   try {
-    const data = await apiGet(`/api/backtest?symbol=${sym}&start_date=${start}&end_date=${end}&portfolio=${portfolio}&risk_pct=${risk}&hold_days=${hold}`);
-    if (!data || data.length === 0) {
+    var data = await apiGet(`/api/backtest?symbol=${sym}&start_date=${start}&end_date=${end}&portfolio=${portfolio}&risk_pct=${risk}&hold_days=${hold}`);
+    if (!data) {
       document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No results returned</div>';
       return;
     }
-    const summary = data[0];
-    if (summary.Message) {
-      document.getElementById('btStats').innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);">${summary.Message}</div>`;
+    if (!Array.isArray(data)) {
+      var msg = data && (data.Error || data.Message || data.result);
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">' + (msg || 'Backtest returned invalid format') + '</div>';
+      return;
+    }
+    if (data.length === 0) {
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No results returned</div>';
+      return;
+    }
+    var summary = data[0];
+    if (summary.Error || summary.Message) {
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">' + (summary.Error || summary.Message) + '</div>';
       return;
     }
     const trades = data.slice(1);
@@ -3687,7 +3697,16 @@ async function loadRiskDesk() {
 }
 
 function destroyChart(name) {
-  if (charts[name]) { charts[name].destroy(); delete charts[name]; }
+  // P5.3 — also clean orphaned Chart.js instances attached to the canvas
+  // (Chart.js v3+ tracks canvases internally; our `charts` dict may miss them)
+  if (charts[name]) { try { charts[name].destroy(); } catch(_) {} delete charts[name]; }
+  try {
+    const canvas = document.getElementById(name);
+    if (canvas && typeof Chart !== 'undefined' && Chart.getChart) {
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+    }
+  } catch(_) {}
 }
 
 async function runMonteCarlo() {
