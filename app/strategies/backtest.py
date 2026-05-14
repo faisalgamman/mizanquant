@@ -490,6 +490,58 @@ def backtest_swing(df: pd.DataFrame, spy_df: pd.DataFrame, symbol: str) -> Backt
     return BacktestResult(symbol=symbol, strategy="Swing", trades=trades, **metrics)
 
 
+def backtest_momentum_burst(df: pd.DataFrame, spy_df: pd.DataFrame, symbol: str) -> BacktestResult:
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
+    vol = df["volume"]
+
+    day_change = close.pct_change() * 100
+    vol_ratio = vol / vol.rolling(20).mean()
+    daily_range = high - low
+    close_position = (close - low) / daily_range.replace(0, float("nan"))
+
+    adx_val = adx(df, 14)
+    rsi_val = rsi(close, 14)
+    ema50 = ema(close, 50)
+    atr_val = atr(df, 14)
+
+    cond_day_change = day_change >= 5.0
+    cond_vol = vol_ratio >= 3.0
+    cond_close_pos = close_position >= 0.7
+    cond_adx = adx_val > 20
+    cond_rsi = (rsi_val >= 40) & (rsi_val <= 70)
+    cond_ema50 = close > ema50
+
+    entry_signal = cond_day_change & cond_vol & cond_close_pos & cond_adx & cond_rsi & cond_ema50
+
+    trades = []
+    in_trade = False
+    for i in range(200, len(df) - 10):
+        if not in_trade and entry_signal.iloc[i]:
+            price = float(close.iloc[i])
+            atr_i = float(atr_val.iloc[i]) if not pd.isna(atr_val.iloc[i]) else price * 0.02
+            stop = price - 1.5 * atr_i
+            tp1 = price * 1.05
+            tp2 = price * 1.08
+            tp3 = price * 1.12
+
+            tr = _simulate_trade(df, i, stop, tp1, tp2, tp3, 5, "momentum_burst")
+            tr.symbol = symbol
+            tr.strategy = "Momentum Burst"
+            trades.append(tr)
+            in_trade = True
+
+        if in_trade:
+            exit_day = trades[-1].exit_date
+            exit_idx = df.index.get_loc(pd.Timestamp(exit_day)) if pd.Timestamp(exit_day) in df.index else i
+            if i > exit_idx + 2:
+                in_trade = False
+
+    metrics = _compute_metrics(trades)
+    return BacktestResult(symbol=symbol, strategy="Momentum Burst", trades=trades, **metrics)
+
+
 # ── Main Runner ──
 
 def print_result(r: BacktestResult):
