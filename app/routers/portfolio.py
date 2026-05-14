@@ -36,16 +36,13 @@ async def list_strategies(x_api_key: OperatorAPIKey = None):
 async def strategy_account(strategy_id: str, x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
     from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
     sid = strategy_id.upper()
     if sid not in STRATEGY_CONFIGS:
         return [{"Error": f"Strategy {sid} not configured"}]
-    bt = _broker_type()
-    if bt == "ibkr":
-        return [{"strategy": f"{sid}: {STRATEGY_CONFIGS[sid].name}", "broker_type": "ibkr",
-                 "message": "IBKR account details available via IB Gateway desktop only."}]
-    from halal_screener import alpaca_get_account
-    account = alpaca_get_account(strategy_id=sid)
+    broker = get_broker(strategy_id=sid)
+    account = broker.get_account(strategy_id=sid) if broker else None
     if not account:
         return [{"Error": f"Cannot fetch account for strategy {sid}"}]
     account["strategy"] = f"{sid}: {STRATEGY_CONFIGS[sid].name}"
@@ -87,16 +84,13 @@ async def debug_alpaca(x_api_key: OperatorAPIKey = None):
 async def strategy_positions(strategy_id: str, x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
     from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
     sid = strategy_id.upper()
     if sid not in STRATEGY_CONFIGS:
         return [{"Error": f"Strategy {sid} not configured"}]
-    bt = _broker_type()
-    if bt == "ibkr":
-        return [{"strategy": f"{sid}: {STRATEGY_CONFIGS[sid].name}", "broker_type": "ibkr",
-                 "message": "IBKR positions available via IB Gateway desktop only."}]
-    from halal_screener import alpaca_get_positions
-    positions = alpaca_get_positions(strategy_id=sid)
+    broker = get_broker(strategy_id=sid)
+    positions = broker.get_positions(strategy_id=sid) if broker else []
     if not positions:
         return [{"message": f"No open positions for strategy {sid}: {STRATEGY_CONFIGS[sid].name}"}]
     for p in positions:
@@ -122,11 +116,8 @@ async def strategy_scan(strategy_id: str, symbol: str = "AAPL", x_api_key: Opera
 async def strategy_comparison(x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
     from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
-    bt = _broker_type()
-    if bt == "ibkr":
-        return [{"broker_type": "ibkr", "message": "Strategy comparison not available for IBKR. Use IB Gateway desktop."}]
-    from halal_screener import alpaca_get_account, alpaca_get_positions
     result = []
     total_equity = 0
     total_pnl = 0
@@ -134,8 +125,9 @@ async def strategy_comparison(x_api_key: OperatorAPIKey = None):
         cfg = STRATEGY_CONFIGS.get(sid)
         if not cfg:
             continue
-        account = alpaca_get_account(strategy_id=sid)
-        positions = alpaca_get_positions(strategy_id=sid)
+        broker = get_broker(strategy_id=sid)
+        account = broker.get_account(strategy_id=sid) if broker else None
+        positions = broker.get_positions(strategy_id=sid) if broker else []
         if account:
             equity = account.get("equity", 0)
             last_eq = account.get("last_equity", 0)
@@ -156,52 +148,45 @@ async def strategy_comparison(x_api_key: OperatorAPIKey = None):
 @router.get("/portfolio/summary")
 async def portfolio_summary(x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
+    from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
-    bt = _broker_type()
-    if bt == "ibkr":
-        return [{"broker_type": "ibkr", "message": "Portfolio summary available via IB Gateway desktop only."}]
-    from halal_screener import _has_alpaca_broker_config, _primary_broker_strategy_id, alpaca_get_account
-    if not _has_alpaca_broker_config():
-        return [{"Error": "Alpaca API keys not configured"}]
-    sid = _primary_broker_strategy_id()
-    account = alpaca_get_account(strategy_id=sid)
+    sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
+    if not broker:
+        return [{"Error": "No broker configured"}]
+    account = broker.get_account(strategy_id=sid)
     if not account:
-        return [{"Error": "Could not connect to Alpaca"}]
-    daily_pl = account["equity"] - account["last_equity"]
-    daily_pl_pct = (daily_pl / account["last_equity"] * 100) if account["last_equity"] > 0 else 0
+        return [{"Error": "Could not connect to broker"}]
+    daily_pl = account.get("equity", 0) - account.get("last_equity", 0)
+    daily_pl_pct = (daily_pl / account["last_equity"] * 100) if account.get("last_equity", 0) > 0 else 0
     return [{
         "Equity": f"${account['equity']:,.2f}", "Cash": f"${account['cash']:,.2f}",
         "Buying Power": f"${account['buying_power']:,.2f}",
         "Portfolio Value": f"${account['portfolio_value']:,.2f}",
-        "Long Mkt Value": f"${account['long_market_value']:,.2f}",
         "Daily P&L": f"${daily_pl:+,.2f}", "Daily P&L %": f"{daily_pl_pct:+.2f}%",
-        "Day Trades": account["daytrade_count"], "Status": account["status"],
-        "Currency": account["currency"],
+        "Status": account.get("status", "ACTIVE"),
     }]
 
 
 @router.get("/portfolio/positions")
 async def portfolio_positions(x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
+    from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
-    bt = _broker_type()
-    if bt == "ibkr":
-        return [{"broker_type": "ibkr", "message": "Positions available via IB Gateway desktop only."}]
-    from halal_screener import _has_alpaca_broker_config, _primary_broker_strategy_id, alpaca_get_positions
-    if not _has_alpaca_broker_config():
-        return [{"Error": "Alpaca API keys not configured"}]
-    sid = _primary_broker_strategy_id()
-    positions = alpaca_get_positions(strategy_id=sid)
+    sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
+    positions = broker.get_positions(strategy_id=sid) if broker else []
     if not positions:
         return [{"Message": "No open positions"}]
     result = []
     for p in positions:
         result.append({
-            "Symbol": p["symbol"], "Qty": p["qty"], "Side": p["side"].upper(),
-            "Avg Entry": f"${p['avg_entry_price']:.2f}", "Current": f"${p['current_price']:.2f}",
-            "Market Value": f"${p['market_value']:,.2f}", "Cost Basis": f"${p['cost_basis']:,.2f}",
-            "Unrealized P&L": f"${p['unrealized_pl']:+,.2f}", "P&L %": f"{p['unrealized_plpc']:+.2f}%",
-            "Today %": f"{p['change_today']:+.2f}%",
+            "Symbol": p["symbol"], "Qty": p["qty"], "Side": p.get("side", "long").upper(),
+            "Avg Entry": f"${float(p.get('avg_entry_price', 0)):.2f}", "Current": f"${float(p.get('current_price', 0)):.2f}",
+            "Market Value": f"${float(p.get('market_value', 0)):,.2f}",
+            "Unrealized P&L": f"${float(p.get('unrealized_pl', 0)):+,.2f}", "P&L %": f"{float(p.get('unrealized_plpc', 0)):+.2f}%",
         })
     return result
 
@@ -209,15 +194,12 @@ async def portfolio_positions(x_api_key: OperatorAPIKey = None):
 @router.get("/portfolio/orders")
 async def portfolio_orders(status: str = "all", limit: int = 20, x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
+    from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
-    bt = _broker_type()
-    if bt == "ibkr":
-        return [{"broker_type": "ibkr", "message": "Orders available via IB Gateway desktop only."}]
-    from halal_screener import _has_alpaca_broker_config, _primary_broker_strategy_id, alpaca_get_orders
-    if not _has_alpaca_broker_config():
-        return [{"Error": "Alpaca API keys not configured"}]
-    sid = _primary_broker_strategy_id()
-    orders = alpaca_get_orders(status=status, limit=limit, strategy_id=sid)
+    sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
+    orders = broker.get_orders(status=status, limit=limit, strategy_id=sid) if broker else []
     if not orders:
         return [{"Message": "No orders found"}]
     return orders
@@ -229,7 +211,7 @@ async def portfolio_history(period: str = "1M", x_api_key: OperatorAPIKey = None
     _require_api_key(x_api_key)
     bt = _broker_type()
     if bt == "ibkr":
-        return [{"broker_type": "ibkr", "message": "Portfolio history available via IB Gateway desktop only."}]
+        return [{"broker_type": "ibkr", "message": "Portfolio history not available via IBKR REST API."}]
     from halal_screener import _has_alpaca_broker_config, _primary_broker_strategy_id, alpaca_get_portfolio_history
     if not _has_alpaca_broker_config():
         return [{"Error": "Alpaca API keys not configured"}]
@@ -335,15 +317,12 @@ async def telegram_daily_summary(x_api_key: OperatorAPIKey = None):
     cached, _ = _get_cached(key)
     if not cached or not isinstance(cached, list):
         return [{"Error": "Screener data not available yet"}]
-    bt = _broker_type()
     portfolio_info = None
-    if bt != "ibkr":
-        from halal_screener import alpaca_get_account
-        _sid = next(iter(STRATEGY_CONFIGS), None)
-        portfolio = alpaca_get_account(strategy_id=_sid)
-        if portfolio:
-            daily_pl = portfolio["equity"] - portfolio["last_equity"]
-            portfolio_info = {"equity": portfolio["equity"], "daily_pl": daily_pl}
+    broker = get_broker(strategy_id=_sid)
+    portfolio = broker.get_account(strategy_id=_sid) if broker else None
+    if portfolio:
+        daily_pl = portfolio.get("equity", 0) - portfolio.get("last_equity", 0)
+        portfolio_info = {"equity": portfolio.get("equity", 0), "daily_pl": daily_pl}
     ok = alert_daily_summary(cached, portfolio_info)
     return [{"Status": "sent" if ok else "failed"}]
 
@@ -351,39 +330,27 @@ async def telegram_daily_summary(x_api_key: OperatorAPIKey = None):
 @router.get("/api/v1/trading/status")
 async def trading_status(x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key, settings
+    from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     _require_api_key(x_api_key)
     bt = _broker_type()
     base = {"auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
             "min_confidence": settings.MIN_TRADE_CONFIDENCE, "trade_risk_pct": settings.TRADE_RISK_PCT,
             "max_position_pct": settings.MAX_POSITION_PCT, "broker_type": bt}
-    if bt == "ibkr":
-        return {"broker_configured": True, "broker_connected": True,
-                "message": "IBKR broker configured. Use IB Gateway for account details.",
-                **base}
-    from halal_screener import _primary_broker_strategy_id, _has_alpaca_broker_config, alpaca_get_account, alpaca_get_last_error, alpaca_get_positions, get_risk_status
-    sid = _primary_broker_strategy_id()
-    broker_configured = _has_alpaca_broker_config()
-    if not broker_configured:
-        return {"error": "Alpaca API keys not configured", "broker_configured": False,
-                "broker_connected": False, **base}
-    account = alpaca_get_account(strategy_id=sid)
+    sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
+    account = broker.get_account(strategy_id=sid) if broker else None
     if not account:
-        broker_error = alpaca_get_last_error(strategy_id=sid)
-        return {"error": "Cannot connect to Alpaca", "broker_configured": True,
-                "broker_connected": False, "broker_reason": broker_error.get("reason") or "unknown",
-                "broker_status_code": broker_error.get("status_code"), **base,
-                "strategy_id": sid or "default"}
-    positions = alpaca_get_positions(strategy_id=sid)
-    risk = get_risk_status(account, positions)
-    risk["broker_configured"] = True
-    risk["broker_connected"] = True
-    risk["strategy_id"] = sid or "default"
-    risk["broker_type"] = bt
-    risk["auto_trade_enabled"] = settings.AUTO_TRADE_ENABLED
-    risk["min_confidence"] = settings.MIN_TRADE_CONFIDENCE
-    risk["trade_risk_pct"] = settings.TRADE_RISK_PCT
-    risk["max_position_pct"] = settings.MAX_POSITION_PCT
-    return risk
+        return {"broker_configured": broker is not None, "broker_connected": False,
+                "message": "Cannot connect to broker" if broker else "No broker configured",
+                **base}
+    positions = broker.get_positions(strategy_id=sid) if broker else []
+    return {
+        "broker_configured": True, "broker_connected": True,
+        "equity": account.get("equity", 0), "cash": account.get("cash", 0),
+        "buying_power": account.get("buying_power", 0), "positions": len(positions),
+        "status": account.get("status", "ACTIVE"), **base,
+    }
 
 
 @router.get("/api/v1/trading/history")
@@ -474,12 +441,11 @@ async def portfolio_stop_status(x_api_key: OperatorAPIKey = None):
 @router.get("/api/v1/portfolio/purification")
 async def portfolio_purification(x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
+    from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
     from app.services.purification_calculator import calculate_purification
     _require_api_key(x_api_key)
-    bt = _broker_type()
-    if bt == "ibkr":
-        return calculate_purification(positions=[], strategy_id=None)
-    from halal_screener import _primary_broker_strategy_id, _has_alpaca_broker_config, alpaca_get_positions
-    sid = _primary_broker_strategy_id() if _has_alpaca_broker_config() else None
-    positions = alpaca_get_positions(strategy_id=sid) if sid else []
+    sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
+    positions = broker.get_positions(strategy_id=sid) if broker else []
     return calculate_purification(positions=positions, strategy_id=sid)
