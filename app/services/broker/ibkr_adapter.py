@@ -120,7 +120,9 @@ def _connect(strategy_id: str | None):
         client_id = _client_id_for(strategy_id)
 
         try:
-            ib.connect(host, port, clientId=client_id, timeout=8.0)
+            result = _run_in_thread(ib.connect, host, port, clientId=client_id, timeout=8.0)
+            if not result:
+                return None
         except Exception as exc:
             logger.error(
                 "IBKR connect failed (host=%s port=%s client_id=%s strategy=%s): %s",
@@ -134,6 +136,34 @@ def _connect(strategy_id: str | None):
             host, port, client_id, strategy_id,
         )
         return ib
+
+
+def _run_in_thread(fn, *args, **kwargs):
+    """Run an ib_insync blocking call in a dedicated thread with its own
+    event loop, avoiding 'Cannot run the event loop while another loop
+    is running' errors when called from FastAPI's async context."""
+    result = [None]
+    error = [None]
+
+    def _target():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result[0] = fn(*args, **kwargs)
+        except Exception as exc:
+            error[0] = exc
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=15)
+    if t.is_alive():
+        logger.warning("IBKR thread still running after 15s — returning None")
+        return None
+    if error[0] is not None:
+        raise error[0]
+    return result[0]
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +321,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            values = ib.accountValues()
+            values = _run_in_thread(ib.accountValues)
             return _account_to_dict(values)
         except Exception as exc:
             logger.error("IBKR get_account failed: %s", exc)
@@ -302,7 +332,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            positions = ib.positions()
+            positions = _run_in_thread(ib.positions)
             return [_position_to_dict(p) for p in positions if float(getattr(p, "position", 0) or 0) != 0]
         except Exception as exc:
             logger.error("IBKR get_positions failed: %s", exc)
@@ -318,7 +348,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            trades = ib.trades()  # all trades known to this client session
+            trades = _run_in_thread(ib.trades)
         except Exception as exc:
             logger.error("IBKR get_orders failed: %s", exc)
             return []
@@ -339,7 +369,8 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            for t in ib.trades():
+            trades = _run_in_thread(ib.trades)
+            for t in trades:
                 order = getattr(t, "order", None)
                 pid = str(getattr(order, "permId", ""))
                 oid = str(getattr(order, "orderId", ""))
@@ -360,23 +391,20 @@ class IBBroker:
             return None
         try:
             contract = _stock(symbol)
-            ib.qualifyContracts(contract)
+            _run_in_thread(ib.qualifyContracts, contract)
             orders = _build_orders(payload)
-            # Wire up parent/child ids for bracket orders
             if len(orders) == 3:
-                # Submit parent first to get an orderId, then attach children
-                parent_trade = ib.placeOrder(contract, orders[0])
+                parent_trade = _run_in_thread(ib.placeOrder, contract, orders[0])
                 parent_id = parent_trade.order.orderId
                 orders[1].parentId = parent_id
                 orders[2].parentId = parent_id
-                ib.placeOrder(contract, orders[1])
-                last_trade = ib.placeOrder(contract, orders[2])
-                # Return the parent so the caller can match by client_order_id
-                ib.sleep(0.5)
+                _run_in_thread(ib.placeOrder, contract, orders[1])
+                last_trade = _run_in_thread(ib.placeOrder, contract, orders[2])
+                time.sleep(0.5)
                 return _trade_to_dict(parent_trade)
             else:
-                trade = ib.placeOrder(contract, orders[0])
-                ib.sleep(0.5)
+                trade = _run_in_thread(ib.placeOrder, contract, orders[0])
+                time.sleep(0.5)
                 return _trade_to_dict(trade)
         except Exception as exc:
             logger.error("IBKR submit_order failed for %s: %s", symbol, exc)
@@ -387,13 +415,14 @@ class IBBroker:
         if ib is None:
             return False
         try:
-            for t in ib.trades():
+            trades = _run_in_thread(ib.trades)
+            for t in trades:
                 order = getattr(t, "order", None)
                 if not order:
                     continue
                 if str(getattr(order, "orderId", "")) == str(order_id) or \
                    str(getattr(order, "permId", "")) == str(order_id):
-                    ib.cancelOrder(order)
+                    _run_in_thread(ib.cancelOrder, order)
                     return True
         except Exception as exc:
             logger.error("IBKR cancel_order failed: %s", exc)
@@ -404,7 +433,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            positions = ib.positions()
+            positions = _run_in_thread(ib.positions)
             pos = next((p for p in positions if getattr(p.contract, "symbol", "") == symbol), None)
             if not pos:
                 return None
@@ -415,9 +444,9 @@ class IBBroker:
             order = _MarketOrder(action, abs(qty))
             order.tif = "DAY"
             contract = _stock(symbol)
-            ib.qualifyContracts(contract)
-            trade = ib.placeOrder(contract, order)
-            ib.sleep(0.5)
+            _run_in_thread(ib.qualifyContracts, contract)
+            trade = _run_in_thread(ib.placeOrder, contract, order)
+            time.sleep(0.5)
             return _trade_to_dict(trade)
         except Exception as exc:
             logger.error("IBKR close_position failed for %s: %s", symbol, exc)
