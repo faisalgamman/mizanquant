@@ -91,6 +91,58 @@ async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
     return {"broker_type": bt, "results": results}
 
 
+@router.get("/admin/broker-diagnose")
+async def admin_broker_diagnose(x_api_key: OperatorAPIKey = None):
+    from halal_screener import _require_api_key, settings
+    from app.config import STRATEGY_CONFIGS
+    _require_api_key(x_api_key)
+
+    bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    result = {"broker_type": bt, "checks": {}}
+
+    # 1. Socket check — can we reach the Gateway at all?
+    import socket
+    host = os.environ.get("IBKR_HOST", "127.0.0.1")
+    try:
+        port = int(os.environ.get("IBKR_PORT", "4002"))
+    except ValueError:
+        port = 4002
+    result["config"] = {"host": host, "port": port}
+
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        result["checks"]["socket"] = "connected"
+    except Exception as exc:
+        result["checks"]["socket"] = f"FAILED — {exc}"
+        return result
+
+    # 2. IB API connect — can the ib_insync library connect?
+    try:
+        from app.services.broker.ibkr_adapter import IBBroker, disconnect_all
+        disconnect_all()  # force fresh connect for diagnosis
+        broker = IBBroker()
+        acct = broker.get_account()
+        if acct is not None:
+            result["checks"]["ib_api"] = "connected"
+            result["account"] = {k: v for k, v in acct.items() if k != "positions"}
+        else:
+            result["checks"]["ib_api"] = "connected_but_no_account_data"
+            result["account"] = None
+    except Exception as exc:
+        result["checks"]["ib_api"] = f"FAILED — {exc}"
+
+    # 3. Try fetching positions
+    try:
+        broker = IBBroker()
+        positions = broker.get_positions()
+        result["checks"]["positions"] = f"ok ({len(positions)} positions)"
+    except Exception as exc:
+        result["checks"]["positions"] = f"FAILED — {exc}"
+
+    return result
+
+
 @router.post("/admin/rearm_orphans")
 async def admin_rearm_orphans(strategy_id: str | None = None, x_api_key: OperatorAPIKey = None):
     from halal_screener import _require_api_key
