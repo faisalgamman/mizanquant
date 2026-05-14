@@ -2306,7 +2306,7 @@ async function runPipeline() {
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
   try {
-    await apiGet('/api/pipeline/run?dry_run=' + dryRun + '&strategy=ABC');
+    await apiGet('/api/pipeline/run?dry_run=' + dryRun + '&strategy=ABC', 120000);
     await loadPipelineStatus();
   } catch(e) {
     document.getElementById('pipelineStatus').innerHTML = '<div style="padding:12px;color:var(--red);font-size:11px;">Pipeline run failed: ' + (e.message||e) + '</div>';
