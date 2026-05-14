@@ -80,13 +80,14 @@ async def v1_pipeline_status(db: AsyncSession = Depends(get_async_db)):
 
 @router.get("/pipeline/run")
 async def v1_pipeline_run(dry_run: bool = True, strategy: str = "ABC"):
+    import asyncio
     from app.services.pipeline_orchestrator import run_pipeline
 
     sids = tuple(c for c in (strategy or "ABC").upper() if c in "ABC")
     if not sids:
         sids = ("A", "B", "C")
 
-    report = run_pipeline(strategy_ids=sids, dry_run=dry_run)
+    report = await asyncio.to_thread(run_pipeline, strategy_ids=sids, dry_run=dry_run)
     return {
         "date_utc": report.date_utc,
         "started_at": report.started_at,
