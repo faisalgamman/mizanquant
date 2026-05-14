@@ -2944,14 +2944,22 @@ async function runBacktest() {
   document.getElementById('btStats').innerHTML = '<div class="loading"><div class="spinner"></div>Running backtest...</div>';
   document.getElementById('btTrades').innerHTML = '';
   try {
-    const data = await apiGet(`/api/backtest?symbol=${sym}&start_date=${start}&end_date=${end}&portfolio=${portfolio}&risk_pct=${risk}&hold_days=${hold}`);
-    if (!data || data.length === 0) {
+    var data = await apiGet(`/api/backtest?symbol=${sym}&start_date=${start}&end_date=${end}&portfolio=${portfolio}&risk_pct=${risk}&hold_days=${hold}`);
+    if (!data) {
       document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No results returned</div>';
       return;
     }
-    const summary = data[0];
-    if (summary.Message) {
-      document.getElementById('btStats').innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);">${summary.Message}</div>`;
+    if (!Array.isArray(data)) {
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">Unexpected response format</div>';
+      return;
+    }
+    if (data.length === 0) {
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No results returned</div>';
+      return;
+    }
+    var summary = data[0];
+    if (summary.Error || summary.Message) {
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">' + (summary.Error || summary.Message) + '</div>';
       return;
     }
     const trades = data.slice(1);
