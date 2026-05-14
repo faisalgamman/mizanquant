@@ -407,6 +407,9 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
 .tab-rs:hover { background:var(--bg-card-hover); color:var(--text-primary); }
 .tab-rs-active { background:var(--accent); color:#fff; border-color:var(--accent); }
 .rs-tab-content { animation:fadeIn 0.2s ease; }
+.chart-range { padding:2px 10px; font-size:11px; border-radius:12px; cursor:pointer; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border); }
+.chart-range:hover { background:var(--bg-card-hover); color:var(--text-primary); }
+.chart-range.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 .filter-chip {
   display:inline-flex; align-items:center; gap:4px;
   padding:3px 10px; border-radius:12px; font-size:10px; font-weight:600;
@@ -1347,6 +1350,9 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
     <span class="tab-rs" data-rstab="dividends" onclick="switchRsTab('dividends')">Dividends</span>
     <span class="tab-rs" data-rstab="holders" onclick="switchRsTab('holders')">Holders</span>
     <span class="tab-rs" data-rstab="screener" onclick="switchRsTab('screener')">Screener</span>
+    <span class="tab-rs" data-rstab="news" onclick="switchRsTab('news')">News</span>
+    <span class="tab-rs" data-rstab="chart" onclick="switchRsTab('chart')">Chart</span>
+    <span class="tab-rs" data-rstab="peers" onclick="switchRsTab('peers')">Peers</span>
   </div>
 
   <!-- ═══ Stock Header ═══ -->
@@ -1400,6 +1406,34 @@ select:focus,input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(
   <div class="rs-tab-content" id="rs-tab-holders" style="display:none;">
     <div class="card"><div class="card-header"><div><div class="card-title">Institutional Holders</div></div></div>
       <div id="holdResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <div class="rs-tab-content" id="rs-tab-news" style="display:none;">
+    <div class="card"><div class="card-header"><div><div class="card-title">Latest News</div></div></div>
+      <div id="newsResult"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <div class="rs-tab-content" id="rs-tab-chart" style="display:none;">
+    <div class="card"><div class="card-header"><div><div class="card-title">Price Chart</div><div class="card-subtitle">Historical OHLCV data</div></div>
+      <div style="display:flex;gap:4px;">
+        <span class="chart-range active" data-range="1d" onclick="loadChart('1d')">1D</span>
+        <span class="chart-range" data-range="5d" onclick="loadChart('5d')">5D</span>
+        <span class="chart-range" data-range="1mo" onclick="loadChart('1mo')">1M</span>
+        <span class="chart-range" data-range="3mo" onclick="loadChart('3mo')">3M</span>
+        <span class="chart-range" data-range="1y" onclick="loadChart('1y')">1Y</span>
+        <span class="chart-range" data-range="5y" onclick="loadChart('5y')">5Y</span>
+      </div>
+    </div>
+      <canvas id="priceChart" style="width:100%;height:350px;"></canvas>
+      <div id="chartTable" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <div class="rs-tab-content" id="rs-tab-peers" style="display:none;">
+    <div class="card"><div class="card-header"><div><div class="card-title">Peer Comparison</div><div class="card-subtitle">Same-sector companies</div></div></div>
+      <div id="peersResult"><div class="loading"><div class="spinner"></div></div></div>
     </div>
   </div>
 
@@ -3963,6 +3997,11 @@ function switchRsTab(name) {
   if (tab) tab.classList.add('tab-rs-active');
   var pane = document.getElementById('rs-tab-' + name);
   if (pane) pane.style.display = 'block';
+  // Redraw chart when tab shown (hidden canvas loses dimensions)
+  if (name === 'chart' && _currentSymbol) {
+    var activeRange = document.querySelector('.chart-range.active');
+    loadChart(activeRange ? activeRange.getAttribute('data-range') : '1mo');
+  }
 }
 document.addEventListener('DOMContentLoaded', function() {
   var rsInput = document.getElementById('rsSymbol');
@@ -3982,7 +4021,10 @@ async function loadAllResearch() {
     loadDividends(),
     loadEarnings(),
     loadHolders(),
+    loadNews(),
+    loadPeers(),
   ]);
+  loadChart('1mo');
   document.getElementById('rsHeaderInfo').textContent = sym + ' · Data loaded';
 }
 
@@ -4205,6 +4247,126 @@ async function loadHolders() {
     document.getElementById('holdResult').innerHTML = html;
   } catch(e) {
     document.getElementById('holdResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+  }
+}
+
+async function loadNews() {
+  const sym = _currentSymbol;
+  if (!sym) return;
+  document.getElementById('newsResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet(`/api/stock/news?symbol=${sym}&limit=10`);
+    if (!data.news || data.news.length === 0) {
+      document.getElementById('newsResult').innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;">No recent news</div>';
+      return;
+    }
+    var html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+    data.news.forEach(function(item) {
+      var timeStr = '';
+      if (item.published) {
+        var d = new Date(item.published * 1000);
+        timeStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      }
+      html += '<div style="padding:10px 12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">';
+      html += '<div style="flex:1;">';
+      html += '<a href="' + item.link + '" target="_blank" style="color:var(--text-primary);text-decoration:none;font-weight:600;font-size:13px;">' + item.title + '</a>';
+      html += '<div style="display:flex;gap:8px;margin-top:4px;font-size:10px;color:var(--text-muted);">';
+      html += '<span>' + item.publisher + '</span>';
+      if (timeStr) html += '<span>·</span><span>' + timeStr + '</span>';
+      html += '</div>';
+      if (item.summary) html += '<div style="margin-top:4px;font-size:11px;color:var(--text-secondary);line-height:1.4;">' + item.summary + '</div>';
+      html += '</div>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+    document.getElementById('newsResult').innerHTML = html;
+  } catch(e) {
+    document.getElementById('newsResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+  }
+}
+
+async function loadChart(range) {
+  const sym = _currentSymbol;
+  if (!sym) return;
+  document.querySelectorAll('.chart-range').forEach(function(el) { el.classList.remove('active'); });
+  var activeEl = document.querySelector('.chart-range[data-range="' + range + '"]');
+  if (activeEl) activeEl.classList.add('active');
+  try {
+    const data = await apiGet('/api/stock/chart?symbol=' + sym + '&range=' + range);
+    var bars = data.bars || [];
+    if (bars.length === 0) {
+      document.getElementById('chartTable').innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">No price data</div>';
+      return;
+    }
+    // Render mini table
+    var html = '<div style="max-height:200px;overflow-y:auto;"><table class="result-table"><thead><tr><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Vol</th></tr></thead><tbody>';
+    bars.forEach(function(b) {
+      html += '<tr><td>' + b.date + '</td><td>$' + (b.open || '—') + '</td><td>$' + (b.high || '—') + '</td><td>$' + (b.low || '—') + '</td><td style="font-weight:600;">$' + (b.close || '—') + '</td><td>' + (b.volume || '—') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('chartTable').innerHTML = html;
+
+    // Try canvas chart via Chart.js
+    var canvas = document.getElementById('priceChart');
+    if (canvas && window.Chart) {
+      var ctx = canvas.getContext('2d');
+      if (window._priceChart) window._priceChart.destroy();
+      window._priceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: bars.map(function(b) { return b.date; }),
+          datasets: [{
+            label: sym + ' Close',
+            data: bars.map(function(b) { return b.close; }),
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            fill: true,
+            tension: 0.2,
+            pointRadius: 0,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 10 } },
+            y: { grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+          }
+        }
+      });
+    }
+  } catch(e) {
+    document.getElementById('chartTable').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
+  }
+}
+
+async function loadPeers() {
+  const sym = _currentSymbol;
+  if (!sym) return;
+  document.getElementById('peersResult').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const data = await apiGet('/api/stock/peers?symbol=' + sym + '&limit=10');
+    var peers = data.peers || [];
+    if (peers.length === 0) {
+      document.getElementById('peersResult').innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;">No peers found</div>';
+      return;
+    }
+    var html = '<div style="margin-bottom:8px;font-size:11px;color:var(--text-muted);">Sector: ' + data.sector + ' · Industry: ' + data.industry + '</div>';
+    html += '<div class="table-wrap"><table class="result-table"><thead><tr><th>Symbol</th><th>Company</th><th>Price</th><th>Mkt Cap</th><th>P/E</th><th>EPS</th><th>Div Yield</th><th>Beta</th></tr></thead><tbody>';
+    peers.forEach(function(p) {
+      var mcap = p.market_cap ? (p.market_cap / 1e9).toFixed(2) + 'B' : 'N/A';
+      var pe = p.pe_ratio ? p.pe_ratio.toFixed(1) : 'N/A';
+      var eps = p.eps || 'N/A';
+      var div = p.dividend_yield ? (p.dividend_yield * 100).toFixed(2) + '%' : 'N/A';
+      var beta = p.beta || 'N/A';
+      var price = p.price ? '$' + p.price.toFixed(2) : 'N/A';
+      html += '<tr><td><strong>' + p.symbol + '</strong></td><td>' + p.company + '</td><td>' + price + '</td><td>' + mcap + '</td><td>' + pe + '</td><td>' + eps + '</td><td>' + div + '</td><td>' + beta + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('peersResult').innerHTML = html;
+  } catch(e) {
+    document.getElementById('peersResult').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';
   }
 }
 
