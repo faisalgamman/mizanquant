@@ -14,6 +14,8 @@ Stages (run sequentially):
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -348,51 +350,66 @@ class UnifiedPipeline:
                 profiles.append((sid, runners[sid][1], runners[sid][0]))
 
         all_signals: list[Signal] = []
+        signals_lock = threading.Lock()
+
+        def _scan_one(sid: str, profile_name: str, runner, sym: str):
+            """Run a single symbol scan and append signal if it qualifies. Thread-safe."""
+            try:
+                result = runner(sym)
+                if not result:
+                    return
+                row = result[0] if isinstance(result, list) else result
+                if row is None or row.get("Error"):
+                    return
+
+                verdict = str(row.get("Verdict", "")).upper()
+                if verdict not in ("STRONG BUY", "BUY"):
+                    return
+
+                confidence = float(row.get("Confidence %", 0) or 0)
+                if confidence < 60.0:
+                    return
+
+                sig = Signal(
+                    symbol=sym.upper(),
+                    price=float(row.get("Price", 0) or 0),
+                    stop_loss=float(row.get("Stop Loss", 0) or 0),
+                    take_profit=float(row.get("TP1", 0) or 0),
+                    avg_entry=float(row.get("Price", 0) or 0),
+                    position_size_qty=0,
+                    position_value=0.0,
+                    risk_amount=0.0,
+                    confidence=confidence,
+                    votes_buy=int(row.get("Votes BUY", 0) or 0),
+                    votes_total=int(row.get("Votes BUY", 0) or 0)
+                                + int(row.get("Votes SELL", 0) or 0)
+                                + int(row.get("Votes HOLD", 0) or 0),
+                    verdict=verdict,
+                    profile=profile_name,
+                    strategy_id=sid,
+                )
+                with signals_lock:
+                    all_signals.append(sig)
+            except Exception as exc:
+                logger.debug("Stage 4: %s %s failed: %s", profile_name, sym, exc)
+
+        # P3.1 — Parallelize symbol scans within each profile using ThreadPoolExecutor.
+        # Profiles still run sequentially to avoid races on hs._flush_all_caches().
+        scan_workers = max(2, min(8, int(os.environ.get("PIPELINE_SCAN_WORKERS", "4"))))
 
         for sid, profile_name, runner in profiles:
             symbols_to_scan = [r["symbol"] for r in candidates]
             logger.info(
-                "Pipeline stage 4: scanning %d symbols for strategy %s (%s)",
-                len(symbols_to_scan), sid, profile_name,
+                "Pipeline stage 4: scanning %d symbols for strategy %s (%s) with %d workers",
+                len(symbols_to_scan), sid, profile_name, scan_workers,
             )
-
-            for sym in symbols_to_scan:
-                try:
-                    result = runner(sym)
-                    if not result:
-                        continue
-                    row = result[0] if isinstance(result, list) else result
-                    if row is None or row.get("Error"):
-                        continue
-
-                    verdict = str(row.get("Verdict", "")).upper()
-                    if verdict not in ("STRONG BUY", "BUY"):
-                        continue
-
-                    confidence = float(row.get("Confidence %", 0) or 0)
-                    if confidence < 60.0:
-                        continue
-
-                    all_signals.append(Signal(
-                        symbol=sym.upper(),
-                        price=float(row.get("Price", 0) or 0),
-                        stop_loss=float(row.get("Stop Loss", 0) or 0),
-                        take_profit=float(row.get("TP1", 0) or 0),
-                        avg_entry=float(row.get("Price", 0) or 0),
-                        position_size_qty=0,
-                        position_value=0.0,
-                        risk_amount=0.0,
-                        confidence=confidence,
-                        votes_buy=int(row.get("Votes BUY", 0) or 0),
-                        votes_total=int(row.get("Votes BUY", 0) or 0)
-                                    + int(row.get("Votes SELL", 0) or 0)
-                                    + int(row.get("Votes HOLD", 0) or 0),
-                        verdict=verdict,
-                        profile=profile_name,
-                        strategy_id=sid,
-                    ))
-                except Exception as exc:
-                    logger.debug("Stage 4: %s %s failed: %s", profile_name, sym, exc)
+            with ThreadPoolExecutor(max_workers=scan_workers, thread_name_prefix=f"scan-{sid}") as executor:
+                futures = [
+                    executor.submit(_scan_one, sid, profile_name, runner, sym)
+                    for sym in symbols_to_scan
+                ]
+                for fut in futures:
+                    fut.result()  # propagate exceptions if any (debug-logged inside)
 
             hs._flush_all_caches()
 
