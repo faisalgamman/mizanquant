@@ -236,29 +236,32 @@ async def _get_top_signals(limit: int = 3):
         return []
 
 
-async def _get_guards_recent(limit: int = 10):
+async def _get_guard_summary():
+    """Return {guard_name: count} for today's rejections — matches frontend expectation."""
     try:
         from app.db.database import SessionLocal as SyncSessionLocal
         from app.db.models import GuardLog
+        from sqlalchemy import func
+        from datetime import date
 
         def _fetch():
             db = SyncSessionLocal()
             try:
-                return db.query(GuardLog).order_by(GuardLog.ts.desc()).limit(limit).all()
+                today = date.today()
+                rows = (
+                    db.query(GuardLog.guard_name, func.count(GuardLog.id))
+                    .filter(GuardLog.passed == False)
+                    .filter(func.date(GuardLog.ts) == today)
+                    .group_by(GuardLog.guard_name)
+                    .all()
+                )
+                return {name: count for name, count in rows}
             finally:
                 db.close()
 
-        rows = await asyncio.to_thread(_fetch)
-        return [
-            {
-                "ts": row.ts.isoformat() if row.ts else "",
-                "symbol": row.symbol, "guard_name": row.guard_name,
-                "passed": row.passed, "code": row.code, "reason": row.reason,
-            }
-            for row in rows
-        ]
+        return await asyncio.to_thread(_fetch)
     except Exception:
-        return []
+        return {}
 
 
 @router.get("/overview")
@@ -271,7 +274,7 @@ async def v1_overview(force_refresh: bool = False):
             _get_market(),
             _get_pipeline(),
             _get_top_signals(),
-            _get_guards_recent(),
+            _get_guard_summary(),
             return_exceptions=True,
         )
 
@@ -284,7 +287,7 @@ async def v1_overview(force_refresh: bool = False):
             "market": _r(results[2], {}),
             "pipeline": _r(results[3], {}),
             "top_signals": _r(results[4], []),
-            "guards_recent": _r(results[5], []),
+            "guards_recent": _r(results[5], {}),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
