@@ -18,18 +18,28 @@ async def _get_system_status():
     from app.services.regime import get_regime
     from app.core.config import app_cfg
 
-    health = await _dashboard_health()
-    regime = get_regime()
+    try:
+        health = await _dashboard_health()
+    except Exception as exc:
+        logger.warning("Dashboard health check failed: %s", exc)
+        health = {}
+
+    try:
+        regime = get_regime()
+        regime_state = regime.state if regime else "UNKNOWN"
+    except Exception:
+        regime_state = "UNKNOWN"
+
     return {
-        "status": health.get("status", "unknown"),
+        "status": health.get("status", "degraded"),
         "broker": health.get("broker", "unknown"),
         "broker_type": health.get("broker_type", "unknown"),
         "database": health.get("database", "unknown"),
         "telegram": health.get("telegram", "unknown"),
         "data_source": health.get("data_source", "unknown"),
         "auto_trading": health.get("auto_trading", "unknown"),
-        "kill_switch": app_cfg.killed,
-        "regime": regime.state if regime else "UNKNOWN",
+        "kill_switch": getattr(app_cfg, 'killed', False),
+        "regime": regime_state,
         "uptime_seconds": health.get("uptime_seconds", 0),
     }
 
@@ -50,42 +60,52 @@ async def _get_portfolio():
             "positions": [],
         }
 
-    from app.services.alpaca_client import get_account, get_positions
+    try:
+        from app.services.alpaca_client import get_account, get_positions
 
-    account = get_account(strategy_id=sid) if sid else None
-    positions = get_positions(strategy_id=sid) if sid else []
+        account = get_account(strategy_id=sid) if sid else None
+        positions = get_positions(strategy_id=sid) if sid else []
 
-    if account:
-        equity = float(account.get("equity", 0))
-        cash = float(account.get("cash", 0))
-        buying_power = float(account.get("buying_power", 0))
-        portfolio_value = float(account.get("portfolio_value", 0))
-        last_equity = float(account.get("last_equity", 0))
-        daily_pnl = round(equity - last_equity, 2)
-        daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
-    else:
-        equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
+        if account:
+            equity = float(account.get("equity", 0))
+            cash = float(account.get("cash", 0))
+            buying_power = float(account.get("buying_power", 0))
+            portfolio_value = float(account.get("portfolio_value", 0))
+            last_equity = float(account.get("last_equity", 0))
+            daily_pnl = round(equity - last_equity, 2)
+            daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
+        else:
+            equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
 
-    positions_list = [
-        {
-            "symbol": p["symbol"], "qty": float(p.get("qty", 0)),
-            "avg_entry": float(p.get("avg_entry_price", 0)),
-            "current_price": float(p.get("current_price", 0)),
-            "market_value": float(p.get("market_value", 0)),
-            "unrealized_pl": float(p.get("unrealized_pl", 0)),
-            "unrealized_plpc": float(p.get("unrealized_plpc", 0)),
+        positions_list = [
+            {
+                "symbol": p["symbol"], "qty": float(p.get("qty", 0)),
+                "avg_entry": float(p.get("avg_entry_price", 0)),
+                "current_price": float(p.get("current_price", 0)),
+                "market_value": float(p.get("market_value", 0)),
+                "unrealized_pl": float(p.get("unrealized_pl", 0)),
+                "unrealized_plpc": float(p.get("unrealized_plpc", 0)),
+            }
+            for p in (positions or [])
+        ]
+
+        return {
+            "broker_type": "alpaca",
+            "equity": equity, "cash": cash, "buying_power": buying_power,
+            "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
+            "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
+            "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
+            "positions": positions_list,
         }
-        for p in (positions or [])
-    ]
-
-    return {
-        "broker_type": "alpaca",
-        "equity": equity, "cash": cash, "buying_power": buying_power,
-        "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
-        "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
-        "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
-        "positions": positions_list,
-    }
+    except Exception as exc:
+        logger.warning("Portfolio fetch failed: %s — returning fallback", exc)
+        return {
+            "broker_type": "alpaca",
+            "equity": 0, "cash": 0, "buying_power": 0, "portfolio_value": 0,
+            "daily_pnl": 0, "daily_pnl_pct": 0, "open_positions": 0,
+            "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
+            "positions": [],
+        }
 
 
 async def _get_market():
@@ -96,13 +116,20 @@ async def _get_market():
     try:
         context = await asyncio.wait_for(
             asyncio.to_thread(get_market_context, False),
-            timeout=8.0,
+            timeout=15.0,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Market context fetch failed: %s", exc)
 
-    status = get_market_status(force_refresh=False)
-    sectors = get_sector_performance(force_refresh=False)
+    try:
+        status = get_market_status(force_refresh=False)
+    except Exception:
+        status = {"market_open": False, "error": "unavailable"}
+
+    try:
+        sectors = get_sector_performance(force_refresh=False)
+    except Exception:
+        sectors = []
 
     return {
         "context": context,
