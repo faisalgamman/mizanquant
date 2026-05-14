@@ -72,14 +72,16 @@ async def _dashboard_health():
             )
             if has_alpaca:
                 from app.services.alpaca_client import get_account
-                acct = get_account()
+                from app.config import STRATEGY_CONFIGS
+                sid = next(iter(STRATEGY_CONFIGS), None)
+                acct = get_account(strategy_id=sid) if sid else get_account()
                 checks["broker"] = "connected" if acct and acct.get("status") == "ACTIVE" else "error"
             else:
                 checks["broker"] = "not_configured"
     except Exception:
         checks["broker"] = "error" if broker_type == "ibkr" else "not_configured"
 
-    telegram_ok = bool(os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TGBOT"))
+    telegram_ok = bool(settings.TELEGRAM_BOT_TOKEN or os.environ.get("TGBOT"))
     checks["telegram"] = "active" if telegram_ok else "not_configured"
     from app.services.scheduler_metrics import scheduler_metrics
     metrics = scheduler_metrics.health()
@@ -140,6 +142,10 @@ async def v1_scheduler_status():
     health = scheduler_metrics.health()
     health["running"] = _scheduler_running
     health["worker_mode"] = os.environ.get("WORKER_SERVICE", "").lower() == "true"
+    # Add per-cycle run counts for frontend scheduler timeline
+    snap = scheduler_metrics.snapshot()
+    health["run_counts"] = {name: c["total_runs"] for name, c in snap.get("cycles", {}).items()}
+    health["runs"] = health["run_counts"]
     return health
 
 
