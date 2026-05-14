@@ -167,3 +167,47 @@ async def v1_symbols_search(q: str = "", limit: int = 20):
     else:
         matches = sorted(symbols)
     return {"query": q, "count": len(matches[:limit]), "symbols": matches[:limit]}
+
+
+@router.get("/broker-diagnose")
+async def v1_broker_diagnose():
+    bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    result = {"broker_type": bt, "checks": {}}
+
+    import socket
+    host = os.environ.get("IBKR_HOST", "127.0.0.1")
+    try:
+        port = int(os.environ.get("IBKR_PORT", "4002"))
+    except ValueError:
+        port = 4002
+    result["config"] = {"host": host, "port": port}
+
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        result["checks"]["socket"] = "connected"
+    except Exception as exc:
+        result["checks"]["socket"] = f"FAILED — {exc}"
+        return result
+
+    try:
+        from app.services.broker.ibkr_adapter import IBBroker, disconnect_all
+        disconnect_all()
+        broker = IBBroker()
+        acct = broker.get_account()
+        if acct is not None:
+            result["checks"]["ib_api"] = "connected"
+            result["account"] = acct
+        else:
+            result["checks"]["ib_api"] = "connected_but_no_account_data"
+    except Exception as exc:
+        result["checks"]["ib_api"] = f"FAILED — {exc}"
+
+    try:
+        broker = IBBroker()
+        positions = broker.get_positions()
+        result["checks"]["positions"] = f"ok ({len(positions)} positions)"
+    except Exception as exc:
+        result["checks"]["positions"] = f"FAILED — {exc}"
+
+    return result
