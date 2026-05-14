@@ -21,12 +21,12 @@ router = APIRouter(tags=["v1-trading"])
 
 def _fetch_backtest_cache(key: str):
     from app.db.database import SessionLocal
-    from app.db.models import CacheEntry
+    from app.db.models import ModelResultsCache
     db = SessionLocal()
     try:
-        row = db.query(CacheEntry).filter(CacheEntry.cache_key == key).first()
+        row = db.query(ModelResultsCache).filter(ModelResultsCache.cache_key == key).first()
         if row:
-            return json.loads(row.value)
+            return row.result_json
     except Exception:
         pass
     finally:
@@ -36,11 +36,10 @@ def _fetch_backtest_cache(key: str):
 
 def _save_backtest_cache(key: str, value: dict):
     from app.db.database import SessionLocal
-    from app.db.models import CacheEntry
-    import json
+    from app.db.models import ModelResultsCache
     db = SessionLocal()
     try:
-        entry = CacheEntry(cache_key=key, value=json.dumps(value))
+        entry = ModelResultsCache(cache_key=key, result_json=value, model_type="backtest")
         db.add(entry)
         db.commit()
     except Exception:
@@ -201,7 +200,7 @@ async def v1_backtest(
     risk_pct: float = 1.0,
     hold_days: int = 3,
 ):
-    from app.services.backtest_qc import run_backtest
+    from halal_screener import run_backtest
 
     s = validate_symbol(symbol)
     validate_date(start_date)
