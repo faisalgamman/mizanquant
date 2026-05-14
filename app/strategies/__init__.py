@@ -330,10 +330,12 @@ def get_strategy_selector() -> StrategySelector:
     from app.strategies.momentum import MomentumStrategy
     from app.strategies.swing import SwingStrategy
     from app.strategies.breakout import BreakoutStrategy
+    from app.strategies.momentum_burst import MomentumBurstStrategy
 
     selector = StrategySelector()
     selector.register(MomentumStrategy())
     # MeanReversionStrategy DISABLED — A-Pre.1 (Sharpe -1.93, WR 26.3%)
     selector.register(BreakoutStrategy())
     selector.register(SwingStrategy())
+    selector.register(MomentumBurstStrategy())
     return selector

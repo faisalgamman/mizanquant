@@ -182,7 +182,7 @@ async def api_strategies_backtest_data(force_refresh: bool = False):
 
     from app.strategies.backtest import (
         SYMBOLS, backtest_momentum, backtest_reversion,
-        backtest_breakout, backtest_swing, fetch_data,
+        backtest_breakout, backtest_swing, backtest_momentum_burst, fetch_data,
     )
     import numpy as np
 
@@ -195,6 +195,7 @@ async def api_strategies_backtest_data(force_refresh: bool = False):
         "Mean Reversion": {"func": backtest_reversion, "extra": None},
         "Breakout": {"func": backtest_breakout, "extra": None},
         "Swing": {"func": backtest_swing, "extra": spy_df},
+        "Momentum Burst": {"func": backtest_momentum_burst, "extra": spy_df},
     }
 
     result = {"strategies": {}, "symbols": {}}
