@@ -2870,8 +2870,8 @@ async function loadOverview(showLoading = true) {
     loadTopSignals();
     loadPipelineStatus();  // P5.1 — restored after confirming function exists at line 2255
     loadPipelineStatus();
-    loadPaperTrades();
-    loadPerformance();
+    loadPaperTrades(showLoading);
+    loadPerformance(showLoading);
 
     // ── POSITIONS ──
     try {
@@ -5973,10 +5973,10 @@ function persistPaperTrade(trade) {
 }
 
 // ── Paper Trade Tracker ──
-function loadPaperTrades() {
+function loadPaperTrades(showLoading) {
   var el = document.getElementById('paperTradeTracker');
   if (!el) return;
-  showSkeleton('paper');
+  if (showLoading !== false) showSkeleton('paper');
 
   var localTrades = JSON.parse(localStorage.getItem('paperTrades') || '[]');
   var closedIds = new Set(JSON.parse(localStorage.getItem('paperClosedIds') || '[]'));
@@ -6121,11 +6121,11 @@ function closePaperTrade(index) {
 var _perfDays = 7;
 var _perfChart = null;
 
-function loadPerformance(days) {
-  if (days) _perfDays = days;
+function loadPerformance(days, showLoading) {
+  if (typeof days === 'boolean') { showLoading = days; days = undefined; }
   var el = document.getElementById('perfWidget');
   if (!el) return;
-  showSkeleton('performance');
+  if (showLoading !== false) showSkeleton('performance');
 
   Promise.all([
     fetch('/api/v1/paper/trades?limit=200').then(function(r) { return r.json(); }).catch(function() { return []; }),
