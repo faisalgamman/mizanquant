@@ -63,18 +63,12 @@ async def _dashboard_health():
             sock.close()
             checks["broker"] = "connected"
         else:
-            from app.config import settings as cfg
-            has_alpaca = bool(
-                (cfg.ALPACA_API_KEY and cfg.ALPACA_SECRET_KEY)
-                or (cfg.ALPACA_API_KEY_A and cfg.ALPACA_SECRET_KEY_A)
-                or (cfg.ALPACA_API_KEY_B and cfg.ALPACA_SECRET_KEY_B)
-                or (cfg.ALPACA_API_KEY_C and cfg.ALPACA_SECRET_KEY_C)
-            )
-            if has_alpaca:
-                from app.services.alpaca_client import get_account
-                from app.config import STRATEGY_CONFIGS
-                sid = next(iter(STRATEGY_CONFIGS), None)
-                acct = get_account(strategy_id=sid) if sid else get_account()
+            from app.services.broker.factory import get_broker
+            from app.config import STRATEGY_CONFIGS
+            sid = next(iter(STRATEGY_CONFIGS), None)
+            broker = get_broker(strategy_id=sid)
+            if broker:
+                acct = broker.get_account(strategy_id=sid)
                 checks["broker"] = "connected" if acct and acct.get("status") == "ACTIVE" else "error"
             else:
                 checks["broker"] = "not_configured"
