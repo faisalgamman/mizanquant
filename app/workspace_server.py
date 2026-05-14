@@ -4259,10 +4259,6 @@ from pathlib import Path
 import os
 
 
-# Include admin API routes
-from app.routers.admin import router as admin_router
-app.include_router(admin_router)
-
 # Include dashboard API routes
 from app.routers.dashboard import router as dashboard_router
 app.include_router(dashboard_router)
