@@ -1614,10 +1614,15 @@ async function apiGet(path, timeoutMs = 30000, retries = 1) {
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const r = await fetch(API + path, { signal: ctrl.signal });
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) {
+        var txt = await r.text();
+        console.warn('[apiGet]', path, 'HTTP', r.status, txt.slice(0, 200));
+        throw new Error(txt);
+      }
       return await r.json();
     } catch (e) {
       lastErr = e;
+      console.warn('[apiGet]', path, 'attempt', attempt + 1, 'error:', e.message || e);
       if (attempt < retries) {
         await new Promise(function(res) { setTimeout(res, 1000 * (attempt + 1)); });
       }
