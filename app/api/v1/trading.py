@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 
 from fastapi import APIRouter, Query
 
@@ -51,25 +50,13 @@ def _save_backtest_cache(key: str, value: dict):
 @router.get("/trading/summary")
 async def v1_trading_summary():
     from app.config import STRATEGY_CONFIGS
+    from app.services.broker.factory import get_broker
 
-    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
     sid = next(iter(STRATEGY_CONFIGS), None)
+    broker = get_broker(strategy_id=sid)
 
-    if broker_type == "ibkr":
-        return {
-            "broker_type": "ibkr",
-            "equity": 0, "cash": 0, "buying_power": 0, "portfolio_value": 0,
-            "daily_pnl": 0, "daily_pnl_pct": 0,
-            "open_positions": 0,
-            "auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
-            "positions": [],
-            "message": "IBKR account details not yet available via REST API. Use IB Gateway desktop to view positions.",
-        }
-
-    from app.services.alpaca_client import get_account, get_positions
-
-    account = get_account(strategy_id=sid) if sid else None
-    positions = get_positions(strategy_id=sid) if sid else []
+    account = broker.get_account(strategy_id=sid) if broker else None
+    positions = broker.get_positions(strategy_id=sid) if broker else []
 
     if account:
         equity = float(account.get("equity", 0))
@@ -77,13 +64,13 @@ async def v1_trading_summary():
         buying_power = float(account.get("buying_power", 0))
         portfolio_value = float(account.get("portfolio_value", 0))
         last_equity = float(account.get("last_equity", 0))
-        daily_pnl = round(equity - last_equity, 2)
+        daily_pnl = round(equity - last_equity, 2) if last_equity else 0
         daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
     else:
         equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
 
     return {
-        "broker_type": "alpaca",
+        "broker_type": broker.name if broker else "unknown",
         "equity": equity,
         "cash": cash,
         "buying_power": buying_power,
