@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import sys
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -4381,6 +4382,14 @@ def main():
     logger.info("Dashboards available at http://%s:%d/apps.json", host, port)
     logger.info("Features: Caching=24h, Pipeline=08:00/08:30/09:00ET, Scheduler=09:30ET, Charts, Comparison, Portfolio")
     _start_scheduler()
+    # Pre-warm smart screener cache so first dashboard load has results
+    try:
+        scan_symbols = list(_SMART_UNIVERSE)
+        t = threading.Thread(target=_run_screener_bg, args=(scan_symbols,), daemon=True)
+        t.start()
+        logger.info("Pre-warm smart screener background scan started for %d symbols", len(scan_symbols))
+    except Exception as e:
+        logger.warning("Pre-warm smart screener failed: %s", e)
     uvicorn.run(app, host=host, port=port)
 
 
