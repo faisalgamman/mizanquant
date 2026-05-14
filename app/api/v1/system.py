@@ -8,6 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from app.config import settings
+from app.core.config import app_cfg
 
 logger = logging.getLogger("screener")
 
