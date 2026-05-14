@@ -2950,7 +2950,12 @@ async function runBacktest() {
       return;
     }
     if (!Array.isArray(data)) {
-      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">Unexpected response format</div>';
+      var msg = data && (data.Error || data.Message || data.result);
+      if (msg) {
+        document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">' + msg + '</div>';
+      } else {
+        document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">Backtest returned invalid format</div>';
+      }
       return;
     }
     if (data.length === 0) {

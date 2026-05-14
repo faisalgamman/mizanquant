@@ -213,7 +213,7 @@ async def v1_backtest(
     key = hashlib.md5(raw.encode()).hexdigest()
 
     cached = await asyncio.to_thread(_fetch_backtest_cache, key)
-    if cached:
+    if cached and isinstance(cached, list):
         return cached
 
     result = run_backtest(s, start_date, end_date, portfolio, risk_pct, hold_days)
