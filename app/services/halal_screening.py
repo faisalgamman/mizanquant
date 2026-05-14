@@ -1,7 +1,7 @@
 """AAOIFI-standard Halal compliance screening.
 
 Implements the four AAOIFI screens using fundamental data from
-Financial Modeling Prep (FMP) free API:
+Financial Modeling Prep (FMP) free API (via consolidated FMPClient):
 
 1. Debt Screen:     Total Debt / Market Cap < 33%
 2. Interest Screen: Interest Income / Total Revenue < 5%
@@ -13,17 +13,15 @@ Free tier: 250 requests/day. Each symbol needs 3 API calls
 """
 
 import logging
-import threading
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import httpx
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.db.database import SessionLocal
 from app.db.models import ScreeningResult
+from app.services.fmp_client import fmp_client
 
 logger = logging.getLogger("screener")
 
@@ -78,60 +76,6 @@ HARAM_INDUSTRIES = {
     "insurance—specialty", "insurance—reinsurance",
     "mortgage finance", "capital markets",
 }
-
-# Rate limiting for FMP API (250/day = ~10/min to be safe)
-_fmp_last_call = 0.0
-_FMP_MIN_INTERVAL = 0.5  # seconds between calls
-_fmp_lock = threading.Lock()
-
-
-def _fmp_rate_limit():
-    """Thread-safe rate limiter for FMP API calls."""
-    global _fmp_last_call
-    with _fmp_lock:
-        elapsed = time.time() - _fmp_last_call
-        if elapsed < _FMP_MIN_INTERVAL:
-            time.sleep(_FMP_MIN_INTERVAL - elapsed)
-        _fmp_last_call = time.time()
-
-
-def _fmp_get(endpoint: str, symbol: str) -> Optional[dict | list]:
-    """Make a rate-limited GET request to FMP stable API."""
-    if not settings.FMP_API_KEY:
-        return None
-
-    _fmp_rate_limit()
-
-    # FMP migrated to /stable/ endpoints (Aug 2025)
-    url = f"https://financialmodelingprep.com/stable/{endpoint}"
-    params = {"symbol": symbol, "apikey": settings.FMP_API_KEY}
-
-    # Add period=annual for financial statements
-    if endpoint in ("balance-sheet-statement", "income-statement"):
-        params["period"] = "annual"
-        params["limit"] = 1  # latest only
-
-    try:
-        with httpx.Client(timeout=8) as client:
-            resp = client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            return data
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 429:
-            logger.warning("FMP rate limit hit — waiting 60s")
-            time.sleep(60)
-        elif e.response.status_code == 402:
-            logger.debug(f"FMP 402 (premium required) for {symbol}/{endpoint} — skipping")
-        elif e.response.status_code == 403:
-            logger.error("FMP API key invalid or expired")
-        else:
-            logger.error(f"FMP HTTP {e.response.status_code} for {symbol}/{endpoint}")
-        return None
-    except Exception as e:
-        logger.error(f"FMP request failed for {symbol}/{endpoint}: {e}")
-        return None
-
 
 def _yf_fallback(symbol: str) -> Optional[dict]:
     """Fallback: fetch fundamental data from yfinance when FMP fails (premium block)."""
@@ -208,9 +152,8 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     Uses FMP API with yfinance fallback for premium-blocked symbols.
     """
     # 1. Fetch profile (market cap + sector/industry)
-    profile_data = _fmp_get("profile", symbol)
-    if not profile_data or not isinstance(profile_data, list) or len(profile_data) == 0:
-        # Try yfinance fallback
+    profile = fmp_client.get_profile(symbol)
+    if not profile:
         yf_data = _yf_fallback(symbol)
         if not yf_data:
             return None
@@ -219,7 +162,6 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         income = yf_data["income"]
         used_fallback = True
     else:
-        profile = profile_data[0]
         used_fallback = False
 
     market_cap = _safe_float(profile.get("marketCap")) or _safe_float(profile.get("mktCap"))
@@ -237,9 +179,8 @@ def screen_symbol(symbol: str) -> Optional[dict]:
 
     # 3. Fetch balance sheet (skip if already from yfinance)
     if not used_fallback:
-        bs_data = _fmp_get("balance-sheet-statement", symbol)
-        if not bs_data or not isinstance(bs_data, list) or len(bs_data) == 0:
-            # FMP premium block — try yfinance
+        bs_data = fmp_client.get_balance_sheet(symbol, limit=1)
+        if not bs_data:
             yf_data = _yf_fallback(symbol)
             if not yf_data:
                 return None
@@ -256,8 +197,8 @@ def screen_symbol(symbol: str) -> Optional[dict]:
 
     # 4. Fetch income statement (skip if already from yfinance)
     if not used_fallback:
-        is_data = _fmp_get("income-statement", symbol)
-        if not is_data or not isinstance(is_data, list) or len(is_data) == 0:
+        is_data = fmp_client.get_income_statement(symbol, limit=1)
+        if not is_data:
             yf_data = _yf_fallback(symbol)
             if not yf_data:
                 return None

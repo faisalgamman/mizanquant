@@ -107,21 +107,8 @@ def is_symbol_tradable(symbol: str) -> bool | None:
 
 
 def _fmp_get_profile(symbol: str) -> dict | None:
-    if not settings.FMP_API_KEY:
-        return None
-    url = "https://financialmodelingprep.com/stable/profile"
-    params = {"symbol": symbol.upper(), "apikey": settings.FMP_API_KEY}
-    try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        if isinstance(data, list) and data:
-            return data[0]
-        return None
-    except Exception as exc:
-        logger.warning("Failed to fetch FMP profile for %s: %s", symbol, exc)
-        return None
+    from app.services.fmp_client import fmp_client
+    return fmp_client.get_profile(symbol)
 
 
 def get_symbol_sector(symbol: str) -> str:
@@ -160,29 +147,13 @@ def _business_days_between(left: date, right: date) -> int:
 
 
 def refresh_earnings_calendar(symbols: list[str] | None = None) -> dict[str, str]:
-    symbols = [s.upper() for s in (symbols or []) if s]
+    symbols_upper = [s.upper() for s in (symbols or []) if s]
     if not settings.FMP_API_KEY:
         return _load_json(EARNINGS_CACHE_FILE, {}).get("earnings", {})
-    today = _utc_now().date()
-    params = {
-        "from": today.isoformat(),
-        "to": (today + timedelta(days=30)).isoformat(),
-        "apikey": settings.FMP_API_KEY,
-    }
-    url = "https://financialmodelingprep.com/stable/earning-calendar"
+    from app.services.fmp_client import fmp_client
     try:
-        with httpx.Client(timeout=20) as client:
-            resp = client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        earnings: dict[str, str] = {}
-        for item in data if isinstance(data, list) else []:
-            sym = str(item.get("symbol", "")).upper()
-            if symbols and sym not in symbols:
-                continue
-            dt = item.get("date") or item.get("earningDate")
-            if sym and dt:
-                earnings[sym] = str(dt)[:10]
+        result = fmp_client.get_earnings_calendar(symbols_upper if symbols_upper else None)
+        earnings: dict[str, str] = result.get("earnings", {})
         _save_json(
             EARNINGS_CACHE_FILE,
             {"updated_at": _utc_now().isoformat(), "earnings": earnings},

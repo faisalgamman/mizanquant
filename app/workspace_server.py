@@ -31,6 +31,7 @@ from app.services.universe import HALAL_STOCKS_FALLBACK
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.services.redis_client import cached_or_compute
+from app.services.fmp_client import fmp_client
 
 
 logging.basicConfig(level=logging.INFO)
@@ -626,6 +627,11 @@ def _safe_float(val, default=0.0):
         return default
 
 
+async def _fmp_call(method, *args, **kwargs):
+    """Call an FMPClient method in a thread (it uses httpx sync)."""
+    return await asyncio.to_thread(lambda: method(*args, **kwargs))
+
+
 _HARAM_SECTORS = {
     "financial services", "financial", "banks", "insurance",
 }
@@ -739,6 +745,41 @@ async def stock_summary(
     """Comprehensive stock summary: profile, sector, valuation ratios, dividend."""
     async def compute():
         info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        if not info or not info.get("longName"):
+            fmp_data = await _fmp_call(fmp_client.get_company_data, symbol)
+            if fmp_data:
+                p = fmp_data["profile"]
+                m = fmp_data["metrics"]
+                return {
+                    "symbol": symbol,
+                    "company_name": p.get("companyName", symbol),
+                    "sector": p.get("sector", ""),
+                    "industry": p.get("industry", ""),
+                    "description": (p.get("description") or "")[:500],
+                    "website": p.get("website", ""),
+                    "employees": p.get("fullTimeEmployees", 0),
+                    "exchange": p.get("exchangeShortName", ""),
+                    "currency": p.get("currency", "USD"),
+                    "price": _safe_float(p.get("price")),
+                    "change": 0,
+                    "change_pct": 0,
+                    "market_cap": p.get("marketCap", 0),
+                    "enterprise_value": m.get("enterpriseValue", 0),
+                    "pe_ratio": m.get("peRatio"),
+                    "forward_pe": m.get("forwardPeRatio"),
+                    "eps": m.get("netProfitMargin"),
+                    "book_value": m.get("bookValuePerShare"),
+                    "price_to_book": m.get("priceToBookRatio"),
+                    "dividend_yield": m.get("dividendYield"),
+                    "dividend_rate": None,
+                    "payout_ratio": m.get("payoutRatio"),
+                    "beta": p.get("beta"),
+                    "52w_high": None,
+                    "52w_low": None,
+                    "avg_volume": p.get("volume"),
+                    "market_state": "",
+                }
+            return {"symbol": symbol, "error": "No data available"}
         price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
         prev_close = _safe_float(info.get("previousClose"))
         change = round(price - prev_close, 2) if price and prev_close else 0
@@ -782,6 +823,18 @@ async def stock_ratios(
     """Key financial ratios: profitability, liquidity, leverage, efficiency."""
     async def compute():
         info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        if not info or info.get("regularMarketPrice") is None and not info.get("marketCap"):
+            ratios = await _fmp_call(fmp_client.get_financial_ratios, symbol)
+            if ratios:
+                r = ratios[0]
+                return {
+                    "symbol": symbol,
+                    "profitability": {"profit_margin": r.get("profitMargin"), "operating_margin": r.get("operatingMargin"), "return_on_equity": r.get("returnOnEquity"), "return_on_assets": r.get("returnOnAssets"), "revenue_per_share": r.get("revenuePerShare"), "gross_margin": r.get("grossProfitMargin"), "ebitda_margin": None},
+                    "valuation": {"pe_ratio": r.get("priceEarningsRatio"), "forward_pe": r.get("priceEarningsRatio"), "peg_ratio": None, "price_to_book": r.get("priceToBookRatio"), "price_to_sales": r.get("priceToSalesRatio"), "enterprise_to_revenue": r.get("enterpriseValueToRevenue"), "enterprise_to_ebitda": r.get("enterpriseValueToEbitda")},
+                    "liquidity": {"current_ratio": r.get("currentRatio"), "quick_ratio": r.get("quickRatio"), "debt_to_equity": r.get("debtEquityRatio"), "total_debt": None, "total_cash": None, "cash_per_share": None},
+                    "growth": {"revenue_growth": r.get("revenueGrowth"), "earnings_growth": r.get("netIncomeGrowth"), "earnings_quarterly_growth": None},
+                }
+            return {"symbol": symbol, "error": "No data"}
         profitability = {
             "profit_margin": info.get("profitMargins"),
             "operating_margin": info.get("operatingMargins"),
@@ -829,43 +882,71 @@ async def stock_financials(
     statement: str = Query("income", description="income | balance | cashflow"),
     periods: int = Query(4, description="Number of periods"),
 ):
-    """Annual financial statements from yfinance with YoY comparison."""
+    """Annual financial statements with YoY comparison. yfinance primary, FMP fallback."""
     async def compute():
         ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
         fetcher = {"income": ticker.financials, "balance": ticker.balance_sheet, "cashflow": ticker.cashflow}
         df = fetcher.get(statement)
-        if df is None or df.empty:
-            return {"symbol": symbol, "statement": statement, "error": "No data", "rows": [], "years": []}
-
-        years = []
-        for col in df.columns[:periods]:
-            try:
-                years.append(str(col.year))
-            except AttributeError:
-                years.append(str(col))
-
-        rows = []
-        for idx in df.index:
-            item_name = str(idx)
-            item_short = item_name.replace(" ", "_").replace("/", "_").replace("-", "_").replace(".", "")[:40]
-            row = {"item": item_name, "item_short": item_short}
-            values = []
+        if df is not None and not df.empty:
+            years = []
             for col in df.columns[:periods]:
-                val = df.loc[idx, col]
-                num_val = round(float(val), 2) if isinstance(val, (int, float)) else None
-                row[str(col.year)] = num_val
-                values.append(num_val)
+                try:
+                    years.append(str(col.year))
+                except AttributeError:
+                    years.append(str(col))
 
-            # YoY change for last two periods
-            yoy_change = None
-            if len(values) >= 2 and all(v is not None for v in values[:2]):
-                prev, curr = values[1], values[0]
-                if prev != 0:
-                    yoy_change = round((curr - prev) / abs(prev) * 100, 1)
-            row["yoy_change_pct"] = yoy_change
-            rows.append(row)
+            rows = []
+            for idx in df.index:
+                item_name = str(idx)
+                item_short = item_name.replace(" ", "_").replace("/", "_").replace("-", "_").replace(".", "")[:40]
+                row = {"item": item_name, "item_short": item_short}
+                values = []
+                for col in df.columns[:periods]:
+                    val = df.loc[idx, col]
+                    num_val = round(float(val), 2) if isinstance(val, (int, float)) else None
+                    row[str(col.year)] = num_val
+                    values.append(num_val)
 
-        return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
+                yoy_change = None
+                if len(values) >= 2 and all(v is not None for v in values[:2]):
+                    prev, curr = values[1], values[0]
+                    if prev != 0:
+                        yoy_change = round((curr - prev) / abs(prev) * 100, 1)
+                row["yoy_change_pct"] = yoy_change
+                rows.append(row)
+
+            return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
+
+        # FMP fallback
+        fmp_fetcher = {
+            "income": fmp_client.get_income_statement,
+            "balance": fmp_client.get_balance_sheet,
+            "cashflow": fmp_client.get_cash_flow,
+        }
+        fmp_fn = fmp_fetcher.get(statement)
+        if fmp_fn:
+            fmp_data = await _fmp_call(fmp_fn, symbol, limit=periods)
+            if fmp_data:
+                years = []
+                for item in fmp_data:
+                    yr = str(item.get("date", ""))[:4]
+                    if yr not in years:
+                        years.append(yr)
+                if not years:
+                    years = [f"Year {i+1}" for i in range(len(fmp_data))]
+
+                rows = []
+                for item in fmp_data:
+                    for key, val in item.items():
+                        if isinstance(val, (int, float)) and key not in ("symbol", "date", "fillingDate", "calendarYear", "cik", "acceptedDate", "period", "link", "finalLink", "reportedCurrency"):
+                            rows.append({
+                                "item": key.replace("_", " ").title(),
+                                "item_short": key[:40],
+                                years[0] if years else "value": round(float(val), 2) if isinstance(val, (int, float)) else val,
+                            })
+                return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
+
+        return {"symbol": symbol, "statement": statement, "error": "No data", "rows": [], "years": []}
     return await cached_or_compute(f"stock:financials:{symbol.upper()}:{statement}", 3600, compute)
 
 
@@ -882,12 +963,30 @@ async def stock_dividends(
         if div_history is not None and not div_history.empty:
             for date, val in div_history.tail(24).items():
                 history.append({"date": str(date.date()), "dividend": round(float(val), 4)})
+            return {
+                "symbol": symbol,
+                "dividend_yield": info.get("dividendYield"),
+                "dividend_rate": info.get("dividendRate"),
+                "payout_ratio": info.get("payoutRatio"),
+                "ex_dividend_date": str(info.get("exDividendDate")) if info.get("exDividendDate") else None,
+                "last_24_payments": history,
+            }
+        # FMP fallback
+        fmp_div = await _fmp_call(fmp_client.get_historical_dividends, symbol, limit=24)
+        if fmp_div:
+            for item in fmp_div:
+                history.append({
+                    "date": str(item.get("date", "")),
+                    "dividend": _safe_float(item.get("dividend")),
+                })
+        profile = await _fmp_call(fmp_client.get_profile, symbol)
+        dy = _safe_float(profile.get("dividendYield")) if profile else None
         return {
             "symbol": symbol,
-            "dividend_yield": info.get("dividendYield"),
-            "dividend_rate": info.get("dividendRate"),
-            "payout_ratio": info.get("payoutRatio"),
-            "ex_dividend_date": str(info.get("exDividendDate")) if info.get("exDividendDate") else None,
+            "dividend_yield": dy,
+            "dividend_rate": _safe_float(profile.get("dividendPerShare")) if profile else None,
+            "payout_ratio": None,
+            "ex_dividend_date": None,
             "last_24_payments": history,
         }
     return await cached_or_compute(f"stock:dividends:{symbol.upper()}", 3600, compute)
@@ -968,6 +1067,27 @@ async def stock_earnings(
                             })
         except Exception:
             pass
+        if surprises:
+            return {
+                "symbol": symbol,
+                "eps": info.get("trailingEps"),
+                "forward_eps": info.get("forwardEps"),
+                "quarterly_surprises": surprises,
+            }
+        # FMP fallback: try analyst estimates
+        estimates = await _fmp_call(fmp_client.get_analyst_estimates, symbol, limit=4)
+        if estimates:
+            for est in estimates:
+                eps_avg = est.get("estimatedEpsAvg") or est.get("estimatedEps")
+                eps_high = est.get("estimatedEpsHigh")
+                eps_low = est.get("estimatedEpsLow")
+                if eps_avg:
+                    surprises.append({
+                        "date": str(est.get("date", est.get("period", ""))),
+                        "estimate": _safe_float(eps_avg),
+                        "actual": None,
+                        "surprise_pct": None,
+                    })
         return {
             "symbol": symbol,
             "eps": info.get("trailingEps"),
@@ -1115,7 +1235,13 @@ async def stock_news(
                 })
         except Exception:
             pass
-        return {"symbol": symbol, "count": len(news), "news": news}
+        if news:
+            return {"symbol": symbol, "count": len(news), "news": news}
+        # FMP fallback
+        fmp_news = await _fmp_call(fmp_client.get_stock_news, symbol, limit=limit)
+        if fmp_news:
+            return {"symbol": symbol, "count": len(fmp_news), "news": fmp_news}
+        return {"symbol": symbol, "count": 0, "news": []}
     return await cached_or_compute(f"stock:news:{symbol.upper()}:{limit}", 900, compute)
 
 
@@ -1220,6 +1346,10 @@ async def stock_analyst(
     async def compute():
         ticker = await asyncio.to_thread(lambda: yf.Ticker(symbol))
         info = ticker.info or {}
+
+        has_data = info.get("longName") or info.get("shortName") or info.get("marketCap")
+        if not has_data:
+            return await _analyst_fmp_fallback(symbol)
 
         # --- Upgrades / Downgrades ---
         upgrades_downgrades = []
@@ -1331,6 +1461,102 @@ async def stock_analyst(
             "company_profile": company_profile,
         }
     return await cached_or_compute(f"stock:analyst:{symbol.upper()}", 1800, compute)
+
+
+async def _analyst_fmp_fallback(symbol: str) -> dict:
+    """FMP fallback for /api/stock/analyst when yfinance has no data."""
+    profile = await _fmp_call(fmp_client.get_profile, symbol)
+    pt = await _fmp_call(fmp_client.get_price_target, symbol)
+    estimates = await _fmp_call(fmp_client.get_analyst_estimates, symbol)
+    cal = await _fmp_call(fmp_client.get_earnings_calendar, [symbol])
+
+    company_profile = {}
+    if profile:
+        company_profile = {
+            "name": profile.get("companyName", symbol),
+            "sector": profile.get("sector"),
+            "industry": profile.get("industry"),
+            "website": profile.get("website"),
+            "employees": profile.get("fullTimeEmployees"),
+            "country": profile.get("country"),
+            "city": profile.get("city"),
+            "state": profile.get("state"),
+            "address": profile.get("address"),
+            "zip": None,
+            "description": (profile.get("description") or "")[:2000],
+            "market_cap": profile.get("marketCap"),
+            "enterprise_value": profile.get("enterpriseValue"),
+            "exchange": profile.get("exchangeShortName"),
+            "currency": profile.get("currency"),
+        }
+
+    price_targets = {
+        "high": _safe_float(pt.get("targetHigh") if pt else None),
+        "low": _safe_float(pt.get("targetLow") if pt else None),
+        "mean": _safe_float(pt.get("targetMean") if pt else None),
+        "median": _safe_float(pt.get("targetMedian") if pt else None),
+    }
+
+    analyst_consensus = {}
+    if pt:
+        analyst_consensus = {
+            "rating": pt.get("rating"),
+            "mean_rating": _safe_float(pt.get("ratingScore")),
+            "num_opinions": pt.get("numberOfAnalysts"),
+            "avg_rating_text": pt.get("rating"),
+        }
+
+    earnings_calendar = {}
+    earnings_data = cal.get("earnings", {})
+    if symbol.upper() in earnings_data:
+        earnings_calendar = {"earnings_date": [earnings_data[symbol.upper()]]}
+
+    recommendations = {}
+    if estimates:
+        try:
+            e = estimates[0]
+            recommendations = {
+                "strong_buy": int(e.get("numberOfAnalysts", 0)) if e.get("estimate") and "strongBuy" in str(e).lower() else 0,
+                "buy": 0,
+                "hold": 0,
+                "sell": 0,
+                "strong_sell": 0,
+            }
+        except Exception:
+            pass
+
+    return {
+        "symbol": symbol,
+        "upgrades_downgrades": [],
+        "recommendations": recommendations,
+        "price_targets": price_targets,
+        "analyst_consensus": analyst_consensus,
+        "earnings_calendar": earnings_calendar,
+        "company_profile": company_profile,
+    }
+
+
+# ---------------------------------------------------------------------------
+# DCF Valuation — FMP-only endpoint (yfinance doesn't provide DCF)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stock/dcf")
+async def stock_dcf(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+):
+    """Discounted Cash Flow valuation via FMP."""
+    async def compute():
+        data = await _fmp_call(fmp_client.get_dcf, symbol)
+        if not data:
+            return {"symbol": symbol, "error": "DCF data not available"}
+        return {
+            "symbol": symbol,
+            "dcf": _safe_float(data.get("dcf")),
+            "stock_price": _safe_float(data.get("Stock Price")),
+            "date": data.get("date", ""),
+        }
+    return await cached_or_compute(f"stock:dcf:{symbol.upper()}", 86400, compute)
 
 
 # ---------------------------------------------------------------------------
