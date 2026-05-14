@@ -131,11 +131,9 @@ async def _get_market():
     except Exception:
         sectors = []
 
-    return {
-        "context": context,
-        "status": status,
-        "sectors": sectors,
-    }
+    context["_market_open"] = status.get("market_open", False)
+    context["_sectors"] = sectors
+    return context
 
 
 async def _get_pipeline():
@@ -284,7 +282,7 @@ async def v1_overview(force_refresh: bool = False):
         return {
             "system": _r(results[0], {}),
             "portfolio": _r(results[1], {}),
-            "market": _r(results[2], {}),
+            "market_context": _r(results[2], {}),
             "pipeline": _r(results[3], {}),
             "top_signals": _r(results[4], []),
             "guards_recent": _r(results[5], {}),
