@@ -2868,6 +2868,7 @@ async function loadOverview() {
 
     // ── FIRE-AND-FORGET ──
     loadTopSignals();
+    loadPipelineStatus();  // P5.1 — restored after confirming function exists at line 2255
     loadPipelineStatus();
     loadPaperTrades();
     loadPerformance();
@@ -2951,11 +2952,7 @@ async function runBacktest() {
     }
     if (!Array.isArray(data)) {
       var msg = data && (data.Error || data.Message || data.result);
-      if (msg) {
-        document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">' + msg + '</div>';
-      } else {
-        document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">Backtest returned invalid format</div>';
-      }
+      document.getElementById('btStats').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">' + (msg || 'Backtest returned invalid format') + '</div>';
       return;
     }
     if (data.length === 0) {
@@ -3700,7 +3697,16 @@ async function loadRiskDesk() {
 }
 
 function destroyChart(name) {
-  if (charts[name]) { charts[name].destroy(); delete charts[name]; }
+  // P5.3 — also clean orphaned Chart.js instances attached to the canvas
+  // (Chart.js v3+ tracks canvases internally; our `charts` dict may miss them)
+  if (charts[name]) { try { charts[name].destroy(); } catch(_) {} delete charts[name]; }
+  try {
+    const canvas = document.getElementById(name);
+    if (canvas && typeof Chart !== 'undefined' && Chart.getChart) {
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+    }
+  } catch(_) {}
 }
 
 async function runMonteCarlo() {

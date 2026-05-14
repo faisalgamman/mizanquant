@@ -333,19 +333,20 @@ def backtest_reversion(df: pd.DataFrame, symbol: str) -> BacktestResult:
     dist_ema20 = (ema20 - close).abs() / atr_val
     dist_cond = dist_ema20 > 2
     weekly_up = weekly_close_aligned > weekly_ema50_aligned
-    not_panic = vol <= vol.rolling(20).mean() * 3
-
-    # Core: 3 hard conditions. Soft: require >= 2 of (weekly_up, not_panic, green_candle)
-    green_candle = close > df["open"] if "open" in df.columns else pd.Series(True, index=df.index)
-    soft_count = weekly_up.astype(int) + not_panic.astype(int) + green_candle.astype(int)
-    entry_signal = below_bb_low & rsi_oversold & dist_cond & (soft_count >= 2)
+    # P1.4 — sync with live MeanReversionStrategy: ALL 6 conditions required (not soft_count)
+    # Live rules: BB Lower + RSI<35 + dist>2*ATR + above weekly EMA50 + above daily EMA200 + volume>70%
+    ema200 = ema(close, 200)
+    above_ema200 = close > ema200
+    vol_ok = vol > vol.rolling(20).mean() * 0.7
+    entry_signal = below_bb_low & rsi_oversold & dist_cond & weekly_up & above_ema200 & vol_ok
 
     trades = []
     in_trade = False
     for i in range(200, len(df) - 30):
         if not in_trade and entry_signal.iloc[i]:
             price = float(close.iloc[i])
-            stop = float(bb_low.iloc[i] - atr_val.iloc[i])
+            # P1.4 — live strategy uses entry - 1.5*ATR (not bb_low - atr)
+            stop = float(price - 1.5 * atr_val.iloc[i])
             tp1 = float(ema20.iloc[i])
             tp2 = float(bb_mid.iloc[i])
             tp3 = float(bb_up.iloc[i])
