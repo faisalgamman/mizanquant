@@ -218,7 +218,7 @@ async def _get_top_signals(limit: int = 3):
         def _fetch():
             db = SyncSessionLocal()
             try:
-                return db.query(ConsensusLog).order_by(ConsensusLog.ts.desc()).limit(limit).all()
+                return db.query(ConsensusLog).order_by(ConsensusLog.created_at.desc()).limit(limit).all()
             finally:
                 db.close()
 
@@ -226,9 +226,9 @@ async def _get_top_signals(limit: int = 3):
         return [
             {
                 "symbol": row.symbol,
-                "consensus": row.consensus,
-                "score_avg": row.score_avg,
-                "ts": row.ts.isoformat() if row.ts else None,
+                "consensus": row.verdict,
+                "score_avg": row.confidence,
+                "ts": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
         ]
