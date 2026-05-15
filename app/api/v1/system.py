@@ -25,7 +25,16 @@ def _fetch_universe() -> list[str]:
         db.close()
 
 
+_health_cache: tuple[float, dict] | None = None
+_HEALTH_CACHE_TTL = 60  # seconds
+
+
 async def _dashboard_health():
+    global _health_cache
+    now = asyncio.get_event_loop().time()
+    if _health_cache and (now - _health_cache[0]) < _HEALTH_CACHE_TTL:
+        return _health_cache[1]
+
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
         import openbb_forecast
@@ -88,7 +97,7 @@ async def _dashboard_health():
         status = "degraded"
     else:
         status = "down"
-    return {
+    result = {
         "status": status,
         "broker": checks["broker"],
         "broker_type": checks["broker_type"],
@@ -99,6 +108,8 @@ async def _dashboard_health():
         "auto_trading": "enabled" if settings.AUTO_TRADE_ENABLED else "disabled",
         "uptime_seconds": metrics.get("uptime", 0),
     }
+    _health_cache = (now, result)
+    return result
 
 
 @router.get("/system/status")

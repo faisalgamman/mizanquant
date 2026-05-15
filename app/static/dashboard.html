@@ -1699,11 +1699,11 @@ function toggleSidebar() {
 }
 
 // ===== API HELPER =====
-async function apiGet(path, timeoutMs = 30000, retries = 1) {
+async function apiGet(path, timeoutMs = 90000, retries = 1) {
   var lastErr;
   for (var attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const t = setTimeout(() => ctrl.abort(new DOMException('Request timed out after ' + timeoutMs + 'ms')), timeoutMs);
     try {
       const r = await fetch(API + path, { signal: ctrl.signal });
       if (!r.ok) {
@@ -1725,9 +1725,9 @@ async function apiGet(path, timeoutMs = 30000, retries = 1) {
   throw lastErr;
 }
 
-async function apiPut(path, body, timeoutMs = 15000) {
+async function apiPut(path, body, timeoutMs = 30000) {
   const ctrl = new AbortController();
-  const t = setTimeout(function() { ctrl.abort(); }, timeoutMs);
+  const t = setTimeout(function() { ctrl.abort(new DOMException('Request timed out after ' + timeoutMs + 'ms')); }, timeoutMs);
   try {
     const r = await fetch(API + path, {
       method: 'PUT',
@@ -1745,9 +1745,9 @@ async function apiPut(path, body, timeoutMs = 15000) {
   }
 }
 
-async function apiPost(path, body, timeoutMs = 15000) {
+async function apiPost(path, body, timeoutMs = 30000) {
   const ctrl = new AbortController();
-  const t = setTimeout(function() { ctrl.abort(); }, timeoutMs);
+  const t = setTimeout(function() { ctrl.abort(new DOMException('Request timed out after ' + timeoutMs + 'ms')); }, timeoutMs);
   try {
     const r = await fetch(API + path, {
       method: 'POST',
