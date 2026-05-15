@@ -56,42 +56,37 @@ _StopOrder = None  # type: ignore[assignment]
 _Order = None  # type: ignore[assignment]
 
 
-def _start_ib_loop():
-    """Ensure asyncio event loop exists and IS running (daemon thread).
+import concurrent.futures
 
-    Replaces ``ib_insync.util.startLoop()`` which may not be available
-    depending on the installed ib_insync version.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-        return
-    except RuntimeError:
-        pass
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    if not loop.is_running():
-        t = threading.Thread(target=loop.run_forever, daemon=True)
-        t.start()
+# ── Dedicated single-worker thread for ALL ib_insync operations ──
+# ib_insync must always run on the SAME thread where its event loop lives.
+_ib_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="ibkr",
+)
 
 
 def _load_ib_insync():
-    """Import ib_insync on first use; cache the module references."""
+    """Import ib_insync on first use; cache the module references.
+
+    The import itself must happen on the ib_insync worker thread (Python 3.14+
+    triggers module-level event-loop access in eventkit).
+    """
     global _ib_insync, _IB, _Stock, _MarketOrder, _LimitOrder, _StopOrder, _Order
     if _ib_insync is not None:
         return _ib_insync
-    _start_ib_loop()
-    import ib_insync  # type: ignore
 
-    _ib_insync = ib_insync
-    _IB = ib_insync.IB
-    _Stock = ib_insync.Stock
-    _MarketOrder = ib_insync.MarketOrder
-    _LimitOrder = ib_insync.LimitOrder
-    _StopOrder = ib_insync.StopOrder
-    _Order = ib_insync.Order
+    def _do_import():
+        import ib_insync  # type: ignore
+        return ib_insync
+
+    ib_insync_mod = _ib_executor.submit(_do_import).result(timeout=30)
+    _ib_insync = ib_insync_mod
+    _IB = ib_insync_mod.IB
+    _Stock = ib_insync_mod.Stock
+    _MarketOrder = ib_insync_mod.MarketOrder
+    _LimitOrder = ib_insync_mod.LimitOrder
+    _StopOrder = ib_insync_mod.StopOrder
+    _Order = ib_insync_mod.Order
     return _ib_insync
 
 
@@ -118,6 +113,17 @@ def _client_id_for(strategy_id: str | None) -> int:
         return 1
 
 
+def _run_ib(fn, timeout=30.0):
+    """Run a callable on the dedicated ib_insync worker thread and return the result."""
+    return _ib_executor.submit(fn).result(timeout=timeout)
+
+
+def _call_ib(ib, method, *args, timeout=15.0, **kwargs):
+    """Call *method* on the ib_insync worker thread so its event loop is not polluted."""
+    fn = getattr(ib, method)
+    return _run_ib(lambda: fn(*args, **kwargs), timeout=timeout)
+
+
 def _connect(strategy_id: str | None):
     """Return a connected IB() instance for this strategy, reconnecting
     lazily if the existing one has dropped. Returns None when the
@@ -126,10 +132,14 @@ def _connect(strategy_id: str | None):
     key = strategy_id or "_default"
     with _connect_lock:
         ib = _connections.get(key)
-        if ib is not None and ib.isConnected():
-            return ib
+        if ib is not None:
+            try:
+                ok = _run_ib(lambda: ib.isConnected(), timeout=5)
+                if ok:
+                    return ib
+            except Exception:
+                pass
 
-        ib = _IB()
         host = os.environ.get("IBKR_HOST", "127.0.0.1")
         try:
             port = int(os.environ.get("IBKR_PORT", "4002"))
@@ -137,9 +147,13 @@ def _connect(strategy_id: str | None):
             port = 4002
         client_id = _client_id_for(strategy_id)
 
+        def _connect_worker():
+            new_ib = _IB()
+            new_ib.connect(host, port, clientId=client_id, timeout=15.0)
+            return new_ib
+
         try:
-            _start_ib_loop()
-            ib.connect(host, port, clientId=client_id, timeout=15.0)
+            ib = _run_ib(_connect_worker, timeout=30)
         except Exception as exc:
             logger.error(
                 "IBKR connect failed (host=%s port=%s client_id=%s strategy=%s): %s",
@@ -310,8 +324,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            _start_ib_loop()
-            values = ib.accountValues()
+            values = _call_ib(ib, "accountValues", timeout=10)
             return _account_to_dict(values)
         except Exception as exc:
             logger.error("IBKR get_account failed: %s", exc)
@@ -322,8 +335,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            _start_ib_loop()
-            positions = ib.positions()
+            positions = _call_ib(ib, "positions", timeout=15)
             return [_position_to_dict(p) for p in positions if float(getattr(p, "position", 0) or 0) != 0]
         except Exception as exc:
             logger.error("IBKR get_positions failed: %s", exc)
@@ -339,8 +351,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            _start_ib_loop()
-            trades = ib.trades()
+            trades = _call_ib(ib, "trades", timeout=10)
         except Exception as exc:
             logger.error("IBKR get_orders failed: %s", exc)
             return []
@@ -361,8 +372,8 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            _start_ib_loop()
-            for t in ib.trades():
+            trades = _call_ib(ib, "trades", timeout=10)
+            for t in trades:
                 order = getattr(t, "order", None)
                 pid = str(getattr(order, "permId", ""))
                 oid = str(getattr(order, "orderId", ""))
@@ -382,22 +393,21 @@ class IBBroker:
         if not symbol:
             return None
         try:
-            _start_ib_loop()
             contract = _stock(symbol)
-            ib.qualifyContracts(contract)
+            _call_ib(ib, "qualifyContracts", contract, timeout=10)
             orders = _build_orders(payload)
             if len(orders) == 3:
-                parent_trade = ib.placeOrder(contract, orders[0])
+                parent_trade = _call_ib(ib, "placeOrder", contract, orders[0], timeout=15)
                 parent_id = parent_trade.order.orderId
                 orders[1].parentId = parent_id
                 orders[2].parentId = parent_id
-                ib.placeOrder(contract, orders[1])
-                last_trade = ib.placeOrder(contract, orders[2])
-                ib.sleep(0.5)
+                _call_ib(ib, "placeOrder", contract, orders[1], timeout=15)
+                last_trade = _call_ib(ib, "placeOrder", contract, orders[2], timeout=15)
+                _call_ib(ib, "sleep", 0.5, timeout=5)
                 return _trade_to_dict(parent_trade)
             else:
-                trade = ib.placeOrder(contract, orders[0])
-                ib.sleep(0.5)
+                trade = _call_ib(ib, "placeOrder", contract, orders[0], timeout=15)
+                _call_ib(ib, "sleep", 0.5, timeout=5)
                 return _trade_to_dict(trade)
         except Exception as exc:
             logger.error("IBKR submit_order failed for %s: %s", symbol, exc)
@@ -408,14 +418,14 @@ class IBBroker:
         if ib is None:
             return False
         try:
-            _start_ib_loop()
-            for t in ib.trades():
+            trades = _call_ib(ib, "trades", timeout=10)
+            for t in trades:
                 order = getattr(t, "order", None)
                 if not order:
                     continue
                 if str(getattr(order, "orderId", "")) == str(order_id) or \
                    str(getattr(order, "permId", "")) == str(order_id):
-                    ib.cancelOrder(order)
+                    _call_ib(ib, "cancelOrder", order, timeout=10)
                     return True
         except Exception as exc:
             logger.error("IBKR cancel_order failed: %s", exc)
@@ -426,8 +436,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            _start_ib_loop()
-            positions = ib.positions()
+            positions = _call_ib(ib, "positions", timeout=15)
             pos = next((p for p in positions if getattr(p.contract, "symbol", "") == symbol), None)
             if not pos:
                 return None
@@ -438,9 +447,9 @@ class IBBroker:
             order = _MarketOrder(action, abs(qty))
             order.tif = "DAY"
             contract = _stock(symbol)
-            ib.qualifyContracts(contract)
-            trade = ib.placeOrder(contract, order)
-            ib.sleep(0.5)
+            _call_ib(ib, "qualifyContracts", contract, timeout=10)
+            trade = _call_ib(ib, "placeOrder", contract, order, timeout=15)
+            _call_ib(ib, "sleep", 0.5, timeout=5)
             return _trade_to_dict(trade)
         except Exception as exc:
             logger.error("IBKR close_position failed for %s: %s", symbol, exc)
@@ -452,8 +461,7 @@ def disconnect_all() -> None:
     with _connect_lock:
         for key, ib in list(_connections.items()):
             try:
-                if ib.isConnected():
-                    ib.disconnect()
+                _run_ib(lambda: ib.disconnect() if ib.isConnected() else None, timeout=10)
             except Exception:
                 pass
             _connections.pop(key, None)
