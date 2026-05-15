@@ -256,7 +256,7 @@ def _check_ibkr_reachable() -> list[str]:
         sock = socket.create_connection((cfg["host"], cfg["port"]), timeout=8)
         sock.close()
         logger.info(
-            "IBKR reachable: %s:%d (%s)", cfg["host"], cfg["port"], cfg["mode"],
+            "IBKR gateway socket reachable: %s:%d (%s)", cfg["host"], cfg["port"], cfg["mode"],
         )
         return []
     except Exception as exc:

@@ -4369,10 +4369,11 @@ async def ws_overview(websocket: WebSocket):
                 # ── Portfolio check ──
                 try:
                     from app.config import STRATEGY_CONFIGS
-                    from app.services.alpaca_client import get_account, get_positions as gp
+                    from app.services.broker.factory import get_broker
                     sid = next(iter(STRATEGY_CONFIGS), None)
-                    acct = get_account(strategy_id=sid) if sid else None
-                    pos_list = gp(strategy_id=sid) if sid else []
+                    broker = get_broker(strategy_id=sid) if sid else None
+                    acct = broker.get_account(strategy_id=sid) if broker else None
+                    pos_list = broker.get_positions(strategy_id=sid) if broker else []
                     pf = {"equity": float(acct.get("equity", 0)) if acct else 0,
                           "open_positions": len(pos_list)}
                     h = hashlib.md5(str(pf).encode()).hexdigest()
