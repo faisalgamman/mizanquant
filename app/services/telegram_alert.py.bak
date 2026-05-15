@@ -38,9 +38,6 @@ def _utc_day() -> str:
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 _TELEGRAM_PHOTO_API = "https://api.telegram.org/bot{token}/sendPhoto"
 
-# Brand footer — included on every alert message.
-_BRAND_LINE = "ميزان كوانت · mizanquant"
-
 # Rate limit: max 30 messages/second per bot (Telegram limit)
 _last_send = 0.0
 _send_lock = threading.Lock()
@@ -141,7 +138,7 @@ def alert_strong_signal(symbol: str, signal_type: str, score: float,
     )
     if details:
         text += f"\n{details}"
-    text += f"\n\n{_BRAND_LINE}\n{_utc_label()} UTC"
+    text += f"\n\n{_utc_label()} UTC"
     return send_message(text)
 
 
@@ -171,7 +168,7 @@ def alert_consensus(symbol: str, verdict: str, confidence: float,
         f"Votes: BUY {votes_buy} | SELL {votes_sell} | HOLD {votes_hold}\n"
         f"SL: ${stop_loss:.2f} | TP: ${tp1:.2f}\n"
         f"\n"
-        f"{_BRAND_LINE}\n{_utc_label()} UTC"
+        f"{_utc_label()} UTC"
     )
     return send_message(text)
 
@@ -257,7 +254,7 @@ def alert_signal_with_chart(
             f"Confidence: {confidence:.0f}%\n"
             f"Votes: BUY {votes_buy} | SELL {votes_sell} | HOLD {votes_hold}\n"
             f"\n"
-            f"{_BRAND_LINE}\n{_utc_label()} UTC"
+            f"{_utc_label()} UTC"
         )
 
         # Generate chart if we have data
@@ -346,7 +343,7 @@ def alert_strategy_comparison():
 
     total_sign = "+" if total_pnl >= 0 else ""
     lines.append(f"TOTAL: ${total_equity:,.2f} | Net P&L: {total_sign}${total_pnl:,.2f}")
-    lines.append(f"\n{_BRAND_LINE}\n{_utc_label()} UTC")
+    lines.append(f"\n{_utc_label()} UTC")
 
     return send_message("\n".join(lines))
 
@@ -358,7 +355,7 @@ def alert_system_health(issue: str, severity: str = "WARNING"):
         f"\n"
         f"{issue}\n"
         f"\n"
-        f"{_BRAND_LINE}\n{_utc_label()} UTC"
+        f"{_utc_label()} UTC"
     )
     return send_message(text)
 
@@ -415,7 +412,7 @@ def alert_qualified_signal(
         text += f"\nTop Indicators:\n{indicators_str}\n"
     text += (
         f"\n"
-        f"{_BRAND_LINE}\n🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
     )
     return send_message(text)
 
@@ -447,7 +444,7 @@ def alert_market_block(
         f"\nAction: No new signals will be generated\n"
         f"Open positions: remain with existing stops\n"
         f"\n"
-        f"{_BRAND_LINE}\n🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
+        f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
     )
     return send_message(text)
 
@@ -505,6 +502,6 @@ def alert_end_of_day_report(
     if pipeline_runtime is not None:
         text += f"\n  Pipeline Runtime: {pipeline_runtime:.1f}s\n"
     text += f"  System: {system_status}\n"
-    text += f"\n{_BRAND_LINE}\n🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
+    text += f"\n🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M ET')}"
 
     return send_message(text)
