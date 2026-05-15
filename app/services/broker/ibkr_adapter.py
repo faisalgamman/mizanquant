@@ -56,20 +56,50 @@ _StopOrder = None  # type: ignore[assignment]
 _Order = None  # type: ignore[assignment]
 
 
-import concurrent.futures
+import concurrent.futures as _futures
+import queue
 
 # ── Dedicated single-worker thread for ALL ib_insync operations ──
 # ib_insync must always run on the SAME thread where its event loop lives.
-_ib_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=1, thread_name_prefix="ibkr",
-)
+_ib_req_queue: queue.Queue[tuple] = queue.Queue()
+
+
+def _ib_worker():
+    """Dedicated thread that runs every ib_insync call sent via _run_ib()."""
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    while True:
+        fn, fut = _ib_req_queue.get()
+        try:
+            result = fn()
+        except BaseException as exc:
+            fut.set_exception(exc)
+            continue
+        fut.set_result(result)
+
+
+_ib_worker_thread = threading.Thread(target=_ib_worker, daemon=True, name="ibkr-worker")
+_ib_worker_thread.start()
+
+
+def _run_ib(fn, timeout=30.0):
+    """Run a callable on the dedicated ib_insync worker thread and return the result."""
+    fut: _futures.Future = _futures.Future()
+    _ib_req_queue.put((fn, fut))
+    return fut.result(timeout=timeout)
+
+
+def _call_ib(ib, method, *args, timeout=15.0, **kwargs):
+    """Call *method* on the ib_insync worker thread so its event loop is not polluted."""
+    fn = getattr(ib, method)
+    return _run_ib(lambda: fn(*args, **kwargs), timeout=timeout)
 
 
 def _load_ib_insync():
     """Import ib_insync on first use; cache the module references.
 
-    The import itself must happen on the ib_insync worker thread (Python 3.14+
-    triggers module-level event-loop access in eventkit).
+    ib_insync (via eventkit) calls ``asyncio.get_event_loop()`` at module
+    level, so the import MUST happen on a thread that already has an event
+    loop set.
     """
     global _ib_insync, _IB, _Stock, _MarketOrder, _LimitOrder, _StopOrder, _Order
     if _ib_insync is not None:
@@ -79,7 +109,7 @@ def _load_ib_insync():
         import ib_insync  # type: ignore
         return ib_insync
 
-    ib_insync_mod = _ib_executor.submit(_do_import).result(timeout=30)
+    ib_insync_mod = _run_ib(_do_import, timeout=30)
     _ib_insync = ib_insync_mod
     _IB = ib_insync_mod.IB
     _Stock = ib_insync_mod.Stock
@@ -111,17 +141,6 @@ def _client_id_for(strategy_id: str | None) -> int:
         return int(os.environ.get("IBKR_CLIENT_ID", "1"))
     except ValueError:
         return 1
-
-
-def _run_ib(fn, timeout=30.0):
-    """Run a callable on the dedicated ib_insync worker thread and return the result."""
-    return _ib_executor.submit(fn).result(timeout=timeout)
-
-
-def _call_ib(ib, method, *args, timeout=15.0, **kwargs):
-    """Call *method* on the ib_insync worker thread so its event loop is not polluted."""
-    fn = getattr(ib, method)
-    return _run_ib(lambda: fn(*args, **kwargs), timeout=timeout)
 
 
 def _connect(strategy_id: str | None):
