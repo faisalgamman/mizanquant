@@ -39,9 +39,17 @@ def _get_async_engine():
         connect_args = {"check_same_thread": False}
 
     logger.info("Creating async engine for %s", db_url.split("://")[0] + "://...")
-    return create_async_engine(db_url, pool_pre_ping=True, connect_args=connect_args)
+    return create_async_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_size=20,
+        max_overflow=40,
+        pool_timeout=60,
+        connect_args=connect_args,
+    )
 
 
+@lru_cache(maxsize=1)
 def _get_async_session_factory():
     return async_sessionmaker(
         autocommit=False,
@@ -51,10 +59,12 @@ def _get_async_session_factory():
     )
 
 
+_factory = _get_async_session_factory()
+
+
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency — yields an async DB session, closes on finish."""
-    factory = _get_async_session_factory()
-    async with factory() as session:
+    async with _factory() as session:
         try:
             yield session
         finally:

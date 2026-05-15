@@ -56,16 +56,33 @@ _StopOrder = None  # type: ignore[assignment]
 _Order = None  # type: ignore[assignment]
 
 
+def _start_ib_loop():
+    """Ensure asyncio event loop exists and IS running (daemon thread).
+
+    Replaces ``ib_insync.util.startLoop()`` which may not be available
+    depending on the installed ib_insync version.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        return
+    except RuntimeError:
+        pass
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    if not loop.is_running():
+        t = threading.Thread(target=loop.run_forever, daemon=True)
+        t.start()
+
+
 def _load_ib_insync():
     """Import ib_insync on first use; cache the module references."""
     global _ib_insync, _IB, _Stock, _MarketOrder, _LimitOrder, _StopOrder, _Order
     if _ib_insync is not None:
         return _ib_insync
-    import asyncio
-    try:
-        asyncio.get_event_loop_policy().get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+    _start_ib_loop()
     import ib_insync  # type: ignore
 
     _ib_insync = ib_insync
@@ -121,7 +138,7 @@ def _connect(strategy_id: str | None):
         client_id = _client_id_for(strategy_id)
 
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             ib.connect(host, port, clientId=client_id, timeout=15.0)
         except Exception as exc:
             logger.error(
@@ -293,7 +310,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             values = ib.accountValues()
             return _account_to_dict(values)
         except Exception as exc:
@@ -305,7 +322,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             positions = ib.positions()
             return [_position_to_dict(p) for p in positions if float(getattr(p, "position", 0) or 0) != 0]
         except Exception as exc:
@@ -322,7 +339,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             trades = ib.trades()
         except Exception as exc:
             logger.error("IBKR get_orders failed: %s", exc)
@@ -344,7 +361,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             for t in ib.trades():
                 order = getattr(t, "order", None)
                 pid = str(getattr(order, "permId", ""))
@@ -365,7 +382,7 @@ class IBBroker:
         if not symbol:
             return None
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             contract = _stock(symbol)
             ib.qualifyContracts(contract)
             orders = _build_orders(payload)
@@ -391,7 +408,7 @@ class IBBroker:
         if ib is None:
             return False
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             for t in ib.trades():
                 order = getattr(t, "order", None)
                 if not order:
@@ -409,7 +426,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            _ib_insync.util.startLoop()
+            _start_ib_loop()
             positions = ib.positions()
             pos = next((p for p in positions if getattr(p.contract, "symbol", "") == symbol), None)
             if not pos:
