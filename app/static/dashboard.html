@@ -6789,7 +6789,7 @@ function renderStrategyCards(data) {
   const container = document.getElementById('strategyCards');
   const strategies = data.strategies || {};
   let html = '';
-  const colors = {Momentum:'#3b82f6','Mean Reversion':'#f59e0b',Breakout:'#a855f7',Swing:'#22c55e'};
+  const colors = {Momentum:'#3b82f6','Mean Reversion':'#f59e0b',Breakout:'#a855f7',Swing:'#22c55e','Momentum Burst':'#ec4899'};
   for (const [name, s] of Object.entries(strategies)) {
     const color = colors[name] || '#3b82f6';
     const wrOk = s.pass_win_rate ? '✅' : '⚠️';
@@ -6833,7 +6833,8 @@ function renderBestPerStrategy(data) {
     const c = colors[r.strategy] || '#3b82f6';
     html += '<tr style="border-top:1px solid var(--border);"><td style="padding:6px 12px;font-weight:600;">' + r.symbol + '</td>';
     html += '<td style="padding:6px 12px;"><span style="background:' + c + '20;color:' + c + ';padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">' + r.strategy + '</span></td>';
-    html += '<td style="padding:6px 12px;text-align:right;font-weight:600;">' + (r.sharpe > 0 ? '<span style="color:var(--green);">' : '<span style="color:var(--red);">') + r.sharpe.toFixed(2) + '</span></td>';
+    var sh = r.sharpe != null ? r.sharpe : 0;
+    html += '<td style="padding:6px 12px;text-align:right;font-weight:600;">' + (sh > 0 ? '<span style="color:var(--green);">' : '<span style="color:var(--red);">') + sh.toFixed(2) + '</span></td>';
     html += '<td style="padding:6px 12px;text-align:right;">' + (r.wr || 0).toFixed(1) + '%</td>';
     html += '<td style="padding:6px 12px;text-align:right;color:var(--text-muted);">' + r.trades + '</td></tr>';
   }
@@ -6869,15 +6870,21 @@ function renderFullTable(data) {
     const qBg = qualityColors[r.quality] || '#f3f4f6';
     const qTxt = qualityText[r.quality] || '#374151';
     html += '<tr style="border-top:1px solid var(--border);">';
+    var pf = r.profit_factor != null ? r.profit_factor : 0;
+    var wr = r.win_rate != null ? r.win_rate : 0;
+    var sh = r.sharpe != null ? r.sharpe : 0;
+    var dd = r.max_dd != null ? r.max_dd : 0;
+    var ar = r.avg_return != null ? r.avg_return : 0;
+    var ah = r.avg_hold != null ? r.avg_hold : 0;
     html += '<td style="padding:4px 8px;font-weight:600;">' + r.symbol + '</td>';
     html += '<td style="padding:4px 8px;"><span style="background:' + c + '20;color:' + c + ';padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;">' + r.strategy + '</span></td>';
     html += '<td style="padding:4px 8px;text-align:right;">' + r.trades + '</td>';
-    html += '<td style="padding:4px 8px;text-align:right;' + (wrOk ? 'color:var(--green);' : 'color:var(--red);') + 'font-weight:600;">' + r.win_rate.toFixed(1) + '%</td>';
-    html += '<td style="padding:4px 8px;text-align:right;' + (sharpeOk ? 'color:var(--green);' : 'color:var(--red);') + 'font-weight:600;">' + r.sharpe.toFixed(2) + '</td>';
-    html += '<td style="padding:4px 8px;text-align:right;">' + r.max_dd.toFixed(1) + '%</td>';
-    html += '<td style="padding:4px 8px;text-align:right;">' + (r.avg_return > 0 ? '+' : '') + r.avg_return.toFixed(2) + '%</td>';
-    html += '<td style="padding:4px 8px;text-align:right;">' + r.profit_factor.toFixed(2) + '</td>';
-    html += '<td style="padding:4px 8px;text-align:right;color:var(--text-muted);">' + r.avg_hold.toFixed(1) + '</td>';
+    html += '<td style="padding:4px 8px;text-align:right;' + (wrOk ? 'color:var(--green);' : 'color:var(--red);') + 'font-weight:600;">' + wr.toFixed(1) + '%</td>';
+    html += '<td style="padding:4px 8px;text-align:right;' + (sharpeOk ? 'color:var(--green);' : 'color:var(--red);') + 'font-weight:600;">' + sh.toFixed(2) + '</td>';
+    html += '<td style="padding:4px 8px;text-align:right;">' + dd.toFixed(1) + '%</td>';
+    html += '<td style="padding:4px 8px;text-align:right;">' + (ar > 0 ? '+' : '') + ar.toFixed(2) + '%</td>';
+    html += '<td style="padding:4px 8px;text-align:right;">' + pf.toFixed(2) + '</td>';
+    html += '<td style="padding:4px 8px;text-align:right;color:var(--text-muted);">' + ah.toFixed(1) + '</td>';
     html += '<td style="padding:4px 8px;text-align:center;"><span style="display:inline-block;padding:1px 8px;border-radius:4px;font-size:9px;font-weight:700;background:' + qBg + ';color:' + qTxt + ';">' + r.quality + '</span></td>';
     html += '</tr>';
   }
