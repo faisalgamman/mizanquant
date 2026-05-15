@@ -42,9 +42,9 @@ def _get_async_engine():
     return create_async_engine(
         db_url,
         pool_pre_ping=True,
-        pool_size=20,
-        max_overflow=40,
-        pool_timeout=60,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
         connect_args=connect_args,
     )
 

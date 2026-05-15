@@ -32,9 +32,9 @@ if _db_url.startswith("sqlite"):
 engine = create_engine(
     _db_url,
     pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=40,
-    pool_timeout=60,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
     connect_args=_connect_args,
 )
 

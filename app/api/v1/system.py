@@ -35,6 +35,37 @@ async def _dashboard_health():
     if _health_cache and (now - _health_cache[0]) < _HEALTH_CACHE_TTL:
         return _health_cache[1]
 
+    def _check_market_data():
+        import yfinance as yf
+        ticker = yf.Ticker("AAPL")
+        return bool((ticker.info or {}).get("regularMarketPrice") or (ticker.info or {}).get("currentPrice"))
+    def _check_market_data_fallback():
+        from app.services.yfinance_utils import fetch_yf
+        df = fetch_yf("AAPL", period="1mo")
+        return df is not None and len(df) > 0
+    def _check_db():
+        from app.db.database import engine
+        engine.connect().close()
+        return True
+    def _check_broker():
+        import os
+        bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
+        if bt == "ibkr":
+            import socket
+            host = os.environ.get("IBKR_HOST", "127.0.0.1")
+            port = int(os.environ.get("IBKR_PORT", "7497"))
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.close()
+            return "connected"
+        from app.services.broker.factory import get_broker
+        from app.config import STRATEGY_CONFIGS
+        sid = next(iter(STRATEGY_CONFIGS), None)
+        broker = get_broker(strategy_id=sid)
+        if broker:
+            acct = broker.get_account(strategy_id=sid)
+            return "connected" if acct and acct.get("status") == "ACTIVE" else "error"
+        return "not_configured"
+
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
         import openbb_forecast
@@ -42,21 +73,14 @@ async def _dashboard_health():
     except Exception:
         pass
     try:
-        import yfinance as yf
-        ticker = yf.Ticker("AAPL")
-        info = ticker.info or {}
-        checks["market_data"] = bool(info.get("regularMarketPrice") or info.get("currentPrice"))
+        checks["market_data"] = await asyncio.to_thread(_check_market_data)
     except Exception:
         try:
-            from app.services.yfinance_utils import fetch_yf
-            df = fetch_yf("AAPL", period="1mo")
-            checks["market_data"] = df is not None and len(df) > 0
+            checks["market_data"] = await asyncio.to_thread(_check_market_data_fallback)
         except Exception:
             pass
     try:
-        from app.db.database import engine
-        engine.connect().close()
-        checks["database"] = True
+        checks["database"] = await asyncio.to_thread(_check_db)
     except Exception:
         pass
 
@@ -64,23 +88,7 @@ async def _dashboard_health():
     checks["broker_type"] = broker_type
 
     try:
-        if broker_type == "ibkr":
-            import socket
-            host = os.environ.get("IBKR_HOST", "127.0.0.1")
-            port = int(os.environ.get("IBKR_PORT", "7497"))
-            sock = socket.create_connection((host, port), timeout=5)
-            sock.close()
-            checks["broker"] = "connected"
-        else:
-            from app.services.broker.factory import get_broker
-            from app.config import STRATEGY_CONFIGS
-            sid = next(iter(STRATEGY_CONFIGS), None)
-            broker = get_broker(strategy_id=sid)
-            if broker:
-                acct = broker.get_account(strategy_id=sid)
-                checks["broker"] = "connected" if acct and acct.get("status") == "ACTIVE" else "error"
-            else:
-                checks["broker"] = "not_configured"
+        checks["broker"] = await asyncio.to_thread(_check_broker)
     except Exception:
         checks["broker"] = "error" if broker_type == "ibkr" else "not_configured"
 
