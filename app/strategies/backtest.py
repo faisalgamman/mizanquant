@@ -129,7 +129,7 @@ class BacktestResult:
 
 def fetch_data(symbol: str) -> Optional[pd.DataFrame]:
     try:
-        df = yf.download(symbol, start=START, end=END, progress=False)
+        df = yf.download(symbol, start=START, end=END, progress=False, auto_adjust=True)
         if df is None or df.empty or len(df) < 100:
             return None
         if isinstance(df.columns, pd.MultiIndex):

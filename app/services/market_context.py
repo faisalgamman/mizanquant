@@ -167,6 +167,11 @@ def get_market_breadth() -> dict:
 
     def _download():
         import yfinance as yf
+        try:
+            from app.services.market_data import _configure_yfinance_cache
+            _configure_yfinance_cache(yf)
+        except Exception:
+            pass
         return yf.download(
             tickers=" ".join(safe_tickers),
             period="3mo",
@@ -175,6 +180,7 @@ def get_market_breadth() -> dict:
             threads=True,
             group_by="ticker",
             timeout=8,
+            auto_adjust=True,
         )
 
     data = _run_with_timeout(_download, timeout=8.0, fallback=None)

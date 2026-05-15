@@ -81,6 +81,11 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
     """Fallback: fetch fundamental data from yfinance when FMP fails (premium block)."""
     try:
         import yfinance as yf
+        try:
+            from app.services.market_data import _configure_yfinance_cache
+            _configure_yfinance_cache(yf)
+        except Exception:
+            pass
         ticker = yf.Ticker(symbol)
         info = ticker.info or {}
 
