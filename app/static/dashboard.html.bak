@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>mizanquant — Halal Trading Suite</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo-favicon.svg">
+<title>OpenBB Forecast — Trading Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/fontawesome/all.min.css">
@@ -932,8 +931,8 @@ select:focus,input:focus { border-color:var(--accent); }
 <!-- ═══ SIDEBAR (56px icon-only, hover expand) ═══ -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
-    <div class="logo"><svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true"><circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"/><path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="54" cy="22" r="3" fill="currentColor"/></svg></div>
-    <div class="sidebar-brand-text"><h2>mizanquant</h2><span>Halal Trading Suite</span></div>
+    <div class="logo"><i class="fas fa-chart-line"></i></div>
+    <div class="sidebar-brand-text"><h2>USX PRO</h2><span>Trading Suite</span></div>
   </div>
   <nav class="sidebar-nav">
     <div class="nav-section">General</div>
