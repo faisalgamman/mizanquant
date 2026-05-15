@@ -541,7 +541,7 @@ def fetch_ibkr(symbol, period="2y", start=None, end=None):
         from app.services.broker.ibkr_adapter import _connect, _stock, _call_ib, _load_ib_insync
 
         _load_ib_insync()
-        ib = _connect(strategy_id=None)
+        ib = _connect(strategy_id="market_data")
         if ib is None:
             _ibkr_breaker.record_failure()
             return None
