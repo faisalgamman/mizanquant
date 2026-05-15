@@ -190,7 +190,7 @@ def _fetch_data(symbol: str, period: str = "1y") -> tuple[list[dict], pd.DataFra
     # Direct yfinance download as last resort (with timeout)
     try:
         data = _run_with_timeout(
-            lambda: yf.download(symbol, period=period, progress=False),
+            lambda: yf.download(symbol, period=period, progress=False, auto_adjust=True),
             timeout=30.0,
             fallback=None,
         )
@@ -1261,7 +1261,7 @@ async def stock_chart(
     period = period_map.get(range, "1mo")
 
     async def compute():
-        df = await asyncio.to_thread(lambda: yf.download(symbol, period=period, progress=False))
+        df = await asyncio.to_thread(lambda: yf.download(symbol, period=period, progress=False, auto_adjust=True))
         if df is None or df.empty:
             return {"symbol": symbol, "range": range, "bars": []}
         bars = []

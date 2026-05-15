@@ -198,4 +198,52 @@ def paper_trade_status(
     return evaluate_graduation(pnls, times, syms, **thresholds)
 
 
+async def paper_trade_status_async(
+    strategy_id: str | None = None,
+    lookback_trades: int = 200,
+    **thresholds,
+) -> GraduationStatus:
+    """Async version: uses the async DB session so it doesn't block
+    or compete with the sync connection pool."""
+    try:
+        from app.db.async_database import _get_async_session_factory
+        from app.db.models import TradeHistory
+        from sqlalchemy import select
+
+        factory = _get_async_session_factory()
+        async with factory() as db:
+            query = select(TradeHistory).filter(TradeHistory.pnl_pct.isnot(None))
+            if strategy_id:
+                query = query.filter(TradeHistory.strategy_id == strategy_id)
+            query = query.order_by(TradeHistory.created_at.desc()).limit(lookback_trades)
+            result = await db.execute(query)
+            trades = result.scalars().all()
+    except Exception:
+        return GraduationStatus(
+            graduated=False,
+            reason="DB unavailable",
+            n_trades=0,
+            calendar_days=0.0,
+            unique_symbols=0,
+            mean_return=0.0,
+            sharpe=0.0,
+            dsr=0.0,
+        )
+
+    pnls: list[float] = []
+    times: list[datetime] = []
+    syms: list[str] = []
+    for t in trades:
+        if t.pnl_pct is None:
+            continue
+        try:
+            pnls.append(float(t.pnl_pct) / 100.0)
+        except (TypeError, ValueError):
+            continue
+        times.append(t.created_at)
+        syms.append(t.symbol or "")
+
+    return evaluate_graduation(pnls, times, syms, **thresholds)
+
+
 __all__ = ["GraduationStatus", "evaluate_graduation", "paper_trade_status"]

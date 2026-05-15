@@ -95,9 +95,9 @@ async def v1_paper_trades(limit: int = Query(default=50, le=200), db: AsyncSessi
 
 @router.get("/paper/status")
 async def v1_paper_status(strategy_id: str | None = Query(default=None)):
-    from app.services.paper_trade_gate import paper_trade_status
+    from app.services.paper_trade_gate import paper_trade_status_async
 
-    result = await asyncio.to_thread(paper_trade_status, strategy_id=strategy_id)
+    result = await paper_trade_status_async(strategy_id=strategy_id)
     return result.as_dict()
 
 

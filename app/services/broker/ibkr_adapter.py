@@ -174,7 +174,7 @@ def _connect(strategy_id: str | None):
         try:
             ib = _run_ib(_connect_worker, timeout=30)
         except Exception as exc:
-            logger.error(
+            logger.warning(
                 "IBKR connect failed (host=%s port=%s client_id=%s strategy=%s): %s",
                 host, port, client_id, strategy_id, exc,
             )

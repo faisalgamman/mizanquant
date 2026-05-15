@@ -31,6 +31,7 @@ _DATA_CACHE_TTL_MARKET_OPEN = 60     # 1 minute — frequent intraday updates
 _DATA_CACHE_TTL_MARKET_CLOSED = 1800  # 30 minutes — bars are final
 _DATA_CACHE_TTL = _DATA_CACHE_TTL_MARKET_CLOSED  # backward-compat for old callers
 _YF_CACHE_CONFIGURED = False
+_YF_SESSION_INITIALIZED = False
 
 
 def _utc_now() -> datetime:
@@ -57,6 +58,46 @@ def _cache_ttl_seconds() -> int:
         return _DATA_CACHE_TTL_MARKET_CLOSED
 
 
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+]
+_ua_index = 0
+
+
+def _rotate_user_agent() -> str:
+    global _ua_index
+    _ua_index = (_ua_index + 1) % len(_USER_AGENTS)
+    return _USER_AGENTS[_ua_index]
+
+
+def _init_yfinance_session(yf_module) -> None:
+    global _YF_SESSION_INITIALIZED
+    if _YF_SESSION_INITIALIZED:
+        return
+    import requests as _requests
+    from http.cookiejar import MozillaCookieJar
+
+    session = _requests.Session()
+    session.headers.update({"User-Agent": _USER_AGENTS[0]})
+    jar_path = Path("data") / "yfinance_cookies.txt"
+    jar_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cj = MozillaCookieJar(str(jar_path))
+        if jar_path.exists():
+            cj.load(ignore_discard=True, ignore_expires=True)
+        session.cookies = cj
+    except Exception:
+        pass
+    try:
+        yf_module.shared._session = session
+    except Exception:
+        pass
+    _YF_SESSION_INITIALIZED = True
+
+
 def _configure_yfinance_cache(yf_module) -> None:
     global _YF_CACHE_CONFIGURED
     if _YF_CACHE_CONFIGURED:
@@ -67,6 +108,7 @@ def _configure_yfinance_cache(yf_module) -> None:
         yf_module.set_tz_cache_location(str(cache_dir))
     except Exception:
         logger.debug("Could not set yfinance timezone cache location", exc_info=True)
+    _init_yfinance_session(yf_module)
     _YF_CACHE_CONFIGURED = True
 
 
@@ -377,33 +419,55 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
     if not symbol:
         return None
 
-    try:
-        import yfinance as yf
-        _configure_yfinance_cache(yf)
-        t = yf.Ticker(symbol)
-        if start and end:
-            df = t.history(start=start, end=end, auto_adjust=True)
-        else:
-            df = t.history(period=period, auto_adjust=True)
-        if df.empty:
+    import yfinance as yf
+    _configure_yfinance_cache(yf)
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            t = yf.Ticker(symbol)
+            if start and end:
+                df = t.history(start=start, end=end, auto_adjust=True)
+            else:
+                df = t.history(period=period, auto_adjust=True)
+            if df.empty:
+                if attempt < max_retries - 1:
+                    _yfinance_breaker.record_failure()
+                    continue
+                _yfinance_breaker.record_failure()
+                return None
+
+            df.columns = [c.lower() for c in df.columns]
+            df = df.reset_index()
+            df.columns = [c.lower() for c in df.columns]
+            for col in ["dividends", "stock splits", "capital gains"]:
+                df.drop(columns=[col], errors="ignore", inplace=True)
+            min_rows = 40
+            result = df if len(df) >= min_rows else None
+            if result is not None:
+                _yfinance_breaker.record_success()
+            else:
+                _yfinance_breaker.record_failure()
+            return result
+        except Exception as e:
+            estr = str(e)
+            is_auth = "401" in estr or "Unauthorized" in estr or "Invalid Crumb" in estr
+            if is_auth and attempt < max_retries - 1:
+                ua = _rotate_user_agent()
+                logger.warning("yfinance %s: %s — rotating UA to %s (attempt %d/%d)",
+                               symbol, estr, ua[:60], attempt + 2, max_retries)
+                try:
+                    yf.shared._session.headers.update({"User-Agent": ua})
+                except Exception:
+                    pass
+                _backoff_next(attempt)
+                continue
+            logger.error(f"yfinance {symbol}: {e}")
             _yfinance_breaker.record_failure()
             return None
-        df.columns = [c.lower() for c in df.columns]
-        df = df.reset_index()
-        df.columns = [c.lower() for c in df.columns]
-        for col in ["dividends", "stock splits", "capital gains"]:
-            df.drop(columns=[col], errors="ignore", inplace=True)
-        min_rows = 40
-        result = df if len(df) >= min_rows else None
-        if result is not None:
-            _yfinance_breaker.record_success()
-        else:
-            _yfinance_breaker.record_failure()
-        return result
-    except Exception as e:
-        logger.error(f"yfinance {symbol}: {e}")
-        _yfinance_breaker.record_failure()
-        return None
+
+    _yfinance_breaker.record_failure()
+    return None
 
 
 # ---------------------------------------------------------------------------
