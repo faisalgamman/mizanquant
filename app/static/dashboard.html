@@ -61,8 +61,7 @@ body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg-primary
 .sidebar-brand .logo i { color:var(--accent); }
 .sidebar-brand-text { overflow:hidden; white-space:nowrap; opacity:0; transition:opacity 0.15s; }
 .sidebar:hover .sidebar-brand-text { opacity:1; }
-.sidebar-brand-text h2 { font-size:13px; font-weight:700; letter-spacing:-0.2px; }
-.sidebar-brand-text span { font-size:9px; color:var(--text-muted); display:block; }
+.sidebar-brand-text img { width:100%; height:auto; display:block; }
 .sidebar-nav { flex:1; padding:6px; overflow-y:auto; }
 .nav-item {
   display:flex; align-items:center; gap:8px; padding:7px 8px;
@@ -932,8 +931,8 @@ select:focus,input:focus { border-color:var(--accent); }
 <!-- ═══ SIDEBAR (56px icon-only, hover expand) ═══ -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
-    <div class="logo"><svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true"><circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"/><path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="54" cy="22" r="3" fill="currentColor"/></svg></div>
-    <div class="sidebar-brand-text"><h2>mizanquant</h2><span>Halal Trading Suite</span></div>
+    <div class="logo"><img src="/static/logo-monogram.svg" alt="mizanquant" width="20" height="20"></div>
+    <div class="sidebar-brand-text"><img src="/static/logo-wordmark.svg" alt="mizanquant — Halal Trading Suite"></div>
   </div>
   <nav class="sidebar-nav">
     <div class="nav-section">General</div>
