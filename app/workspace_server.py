@@ -2828,12 +2828,23 @@ def _start_scheduler():
         sched.add_job(_run_pipeline_data_collection, "cron", day_of_week="mon-fri", hour=12, minute=0)   # 08:00 ET
         sched.add_job(_run_pipeline_filter,          "cron", day_of_week="mon-fri", hour=12, minute=30)  # 08:30 ET
         sched.add_job(_run_pipeline_full,            "cron", day_of_week="mon-fri", hour=13, minute=0)   # 09:00 ET
+        # ── Intraday pipeline full runs every 60 min (10:00-16:00 ET) ──
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=14, minute=0)               # 10:00 ET
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=15, minute=0)               # 11:00 ET
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=16, minute=0)               # 12:00 ET
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=17, minute=0)               # 13:00 ET
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=18, minute=0)               # 14:00 ET
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=19, minute=0)               # 15:00 ET
+        sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=19, minute=30)              # 15:30 ET (late-close check)
         # ── Existing scans (offset to avoid pipeline contention) ──
         sched.add_job(_run_scheduled_scan, "cron", day_of_week="mon-fri", hour=13, minute=30)              # 09:30 ET
         sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="mon-fri", hour=12, minute=45)       # 08:45 ET
         sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="sun", hour=12, minute=30)           # Sunday 08:30 ET
         sched.start()
-        logger.info("Scheduler started: pipeline at 08:00/08:30/09:00 ET, smart-screener at 08:45 ET, daily-scan at 09:30 ET")
+        logger.info(
+            "Scheduler started: pipeline at 08:00/08:30/09:00 ET + intraday 10:00-15:30 ET hourly, "
+            "smart-screener at 08:45 ET, daily-scan at 09:30 ET"
+        )
     except ImportError:
         logger.warning("APScheduler not installed. Install: pip install apscheduler")
     except Exception as e:

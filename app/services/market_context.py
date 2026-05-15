@@ -317,12 +317,19 @@ def get_market_status(force_refresh: bool = False) -> dict:
     # Classification rules
     if vix_val > 70:
         status = "EXTREME FEAR"
-    elif vix_val > 50 or (vix_pct > 70 and credit_cls == "stress"):
+    elif vix_val > 50 or (vix_pct > 85 and credit_cls == "stress"):
+        # P-Debug.1 — raised pctile threshold 70→85: VIX=17 + pctile=85 = relatively calm
         status = "CREDIT STRESS"
-    elif vix_val > 30 or vix_pct > 50:
+    elif vix_val > 30 or vix_pct > 65:
+        # Raised CAUTION threshold 50→65: avoid false CAUTION in normal markets
         status = "CAUTION"
     else:
         status = "RISK ON"
+
+    logger.info(
+        "Market status classified: %s (VIX=%.1f, pctile=%.0f%%, credit=%s)",
+        status, vix_val, vix_pct, credit_cls,
+    )
 
     # Gate levels tied to market status
     gate_map = {

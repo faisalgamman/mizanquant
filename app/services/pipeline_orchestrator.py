@@ -576,24 +576,38 @@ class UnifiedPipeline:
             try:
                 from app.services.trading_engine import execute_buy
 
+                signal_details = {
+                    "symbol": sig.symbol,
+                    "price": sig.price,
+                    "stop_loss": sig.stop_loss,
+                    "take_profit": sig.take_profit,
+                    "confidence": sig.confidence,
+                    "votes_buy": sig.votes_buy,
+                    "votes_total": sig.votes_total,
+                    "profile": sig.profile,
+                    "verdict": sig.verdict,
+                    "kelly_fraction": sig.kelly_fraction,
+                    "position_value": sig.position_value,
+                    "risk_amount": sig.risk_amount,
+                    "guardian_rejected": sig.guardian_rejected,
+                    "guardian_reason": sig.guardian_reason,
+                }
                 result = execute_buy(
                     strategy_id=sig.strategy_id,
                     symbol=sig.symbol,
-                    qty=sig.position_size_qty,
                     price=sig.price,
                     stop_loss=sig.stop_loss,
                     take_profit=sig.take_profit,
                     confidence=sig.confidence,
-                    votes_buy=sig.votes_buy,
-                    votes_total=sig.votes_total,
+                    signal_details=signal_details,
                 )
-                if result and result.get("id"):
+                if result and result.get("executed") and result.get("order_id"):
                     sig.executed = True
-                    sig.execution_order_id = str(result["id"])
+                    sig.execution_order_id = str(result["order_id"])
                     executed += 1
                 else:
                     sig.executed = False
-                    sig.execution_error = "No order ID returned"
+                    sig.execution_error = result.get("reason", "No order ID returned")
                     errors += 1
             except Exception as exc:
                 sig.execution_error = str(exc)

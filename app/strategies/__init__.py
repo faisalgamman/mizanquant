@@ -203,12 +203,21 @@ class StrategySelector:
 
         # Step 1: Market Context gate
         if status == "BEAR":
+            logger.warning(
+                "All strategies DISABLED — market_status=%s "
+                "(this blocks ALL signal execution)", status,
+            )
             return []
 
         market_preferred: list[StrategyType] = []
         if status in ("BULL", "RISK ON") and vix < 20:
             market_preferred = [StrategyType.MOMENTUM, StrategyType.BREAKOUT]
         elif status in ("CREDIT STRESS", "VIX", "EXTREME FEAR"):
+            if status in ("EXTREME FEAR",):
+                logger.warning(
+                    "All market-preferred strategies DISABLED — "
+                    "market_status=%s vix=%.1f", status, vix,
+                )
             market_preferred = []  # REVERSION DISABLED — A-Pre.1
         else:
             market_preferred = [StrategyType.SWING]  # REVERSION DISABLED — A-Pre.1

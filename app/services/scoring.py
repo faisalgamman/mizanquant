@@ -397,20 +397,26 @@ def weighted_score_raw(
     # ── 1. RS vs SPY — 25 pts (precise 20-day calculation) ──
     rs_raw = _calc_rs_vs_spy(close, spy_df)
     rs_pct = rs_raw["rs_pct"]
-    if rs_pct > 5.0:
-        rs_score = 25  # LEADER
+    if rs_pct > 8.0:
+        rs_score = 25
+        rs_label = "SUPER_LEADER"
+    elif rs_pct > 5.0:
+        rs_score = 22
         rs_label = "LEADER"
-    elif rs_pct > 2.0:
-        rs_score = 18  # ABOVE
+    elif rs_pct > 3.0:
+        rs_score = 18
+        rs_label = "STRONG"
+    elif rs_pct > 1.5:
+        rs_score = 14
         rs_label = "ABOVE"
     elif rs_pct > 0.0:
-        rs_score = 10  # NEUTRAL
+        rs_score = 10
         rs_label = "NEUTRAL"
-    elif rs_pct > -2.0:
-        rs_score = 0   # LAG (hard gate should catch this)
+    elif rs_pct > -1.5:
+        rs_score = 5
         rs_label = "LAG"
     else:
-        rs_score = 0   # LAGGARD
+        rs_score = 0
         rs_label = "LAGGARD"
     scores["rs"] = rs_score
     details["rs"] = {"value": rs_pct, "label": rs_label, "max": 25}
@@ -418,18 +424,23 @@ def weighted_score_raw(
     # ── 2. Daily Trend (EMA) — 15 pts ──
     ema_20 = float(ema(close, 20).iloc[-1])
     ema_50 = float(ema(close, 50).iloc[-1]) if len(close) >= 50 else latest_close
+    ema_200 = float(ema(close, 200).iloc[-1]) if len(close) >= 200 else 0
 
     trend_score = 0
     if latest_close > ema_20 > ema_50:
         trend_score = 15
-    elif latest_close > ema_20:
+    elif latest_close > ema_20 and latest_close > ema_200:
         trend_score = 12
-    elif latest_close > ema_50:
+    elif latest_close > ema_20:
+        trend_score = 10
+    elif latest_close > ema_50 and latest_close > ema_200:
         trend_score = 8
+    elif latest_close > ema_50:
+        trend_score = 5
     elif latest_close < ema_50 and latest_close < ema_20:
         trend_score = 0
     else:
-        trend_score = 4
+        trend_score = 3
     scores["trend"] = trend_score
     details["trend"] = {"value": trend_score, "max": 15}
 
@@ -474,14 +485,16 @@ def weighted_score_raw(
     # ── 5. Volume — 10 pts (ratio-based) ──
     if "volume" in df.columns and len(df) >= 20:
         vol_ratio = calc_volume_ratio(df)
-        if vol_ratio >= 2.0:
+        if vol_ratio >= 3.0:
             vol_score = 10
-        elif vol_ratio >= 1.2:
+        elif vol_ratio >= 2.0:
             vol_score = 8
-        elif vol_ratio >= 0.8:
+        elif vol_ratio >= 1.5:
             vol_score = 6
+        elif vol_ratio >= 1.0:
+            vol_score = 4
         elif vol_ratio >= 0.5:
-            vol_score = 3
+            vol_score = 2
         else:
             vol_score = 0
         details["volume"] = {"ratio": vol_ratio, "value": vol_score, "max": 10}
@@ -490,31 +503,35 @@ def weighted_score_raw(
         details["volume"] = {"ratio": 0, "value": 0, "max": 10}
     scores["volume"] = vol_score
 
-    # ── 6. RSI Zone — 8 pts (unchanged) ──
+    # ── 6. RSI Zone — 8 pts (sweet spot: 45-55) ──
     rsi_val = float(calc_rsi(close, 14).iloc[-1])
-    if 40 <= rsi_val <= 60:
+    if 45 <= rsi_val <= 55:
         rsi_score = 8
+    elif 40 <= rsi_val <= 60:
+        rsi_score = 6
     elif 30 <= rsi_val <= 70:
-        rsi_score = 5
+        rsi_score = 4
     elif rsi_val < 30:
-        rsi_score = 3
+        rsi_score = 2
     else:
         rsi_score = 1
     scores["rsi"] = rsi_score
     details["rsi"] = {"value": rsi_val, "score": rsi_score, "max": 8}
 
-    # ── 7. ADX Trend — 7 pts (unchanged) ──
+    # ── 7. ADX Trend — 7 pts ──
     if all(c in df.columns for c in ("high", "low")):
         adx_val, plus_di, minus_di = calc_adx(df, 14)
         latest_adx = float(adx_val.iloc[-1])
         latest_pdi = float(plus_di.iloc[-1])
         latest_mdi = float(minus_di.iloc[-1])
-        if latest_adx > 25 and latest_pdi > latest_mdi:
+        if latest_adx > 30 and latest_pdi > latest_mdi:
             adx_score = 7
+        elif latest_adx > 25 and latest_pdi > latest_mdi:
+            adx_score = 6
         elif latest_adx > 25:
-            adx_score = 5
+            adx_score = 4
         elif latest_adx >= 20:
-            adx_score = 3
+            adx_score = 2
         else:
             adx_score = 0
     else:
@@ -699,13 +716,17 @@ def _calc_rs_vs_spy(
         rs_ratio = sym_ret / spy_ret if spy_ret != 0 else 1.0
         rs_pct = (rs_ratio - 1.0) * 100.0
 
-        if rs_pct > 5.0:
+        if rs_pct > 8.0:
+            label = "SUPER_LEADER"
+        elif rs_pct > 5.0:
             label = "LEADER"
-        elif rs_pct > 2.0:
+        elif rs_pct > 3.0:
+            label = "STRONG"
+        elif rs_pct > 1.5:
             label = "ABOVE"
         elif rs_pct > 0.0:
             label = "NEUTRAL"
-        elif rs_pct > -2.0:
+        elif rs_pct > -1.5:
             label = "LAG"
         else:
             label = "LAGGARD"
