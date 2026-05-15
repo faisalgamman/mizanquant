@@ -10,6 +10,7 @@ Rate limiting strategy:
 - After 3 retries, falls back to yfinance
 """
 
+import os
 import time
 import logging
 import threading
@@ -512,10 +513,97 @@ class CircuitBreaker:
 # Global circuit breakers
 _yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=10, reset_timeout=120.0)
 _alpaca_breaker = CircuitBreaker("alpaca", failure_threshold=10, reset_timeout=60.0)
+_ibkr_breaker = CircuitBreaker("ibkr", failure_threshold=5, reset_timeout=120.0)
+
+
+def fetch_ibkr(symbol, period="2y", start=None, end=None):
+    """Fetch historical bars from Interactive Brokers via ib_insync.
+
+    Uses delayed market data (reqMarketDataType(3)) — data may be 15-20 min
+    delayed, which is acceptable for screening/analysis. Returns None when
+    IBKR is not the active broker, circuit breaker is open, connection
+    fails, or any error occurs — so callers degrade gracefully to Alpaca
+    or yfinance fallback.
+    """
+    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    if broker_type != "ibkr":
+        return None
+
+    if _ibkr_breaker.is_open():
+        logger.warning("IBKR circuit breaker OPEN — skipping %s", symbol)
+        return None
+
+    symbol = _validate_symbol(symbol)
+    if not symbol:
+        return None
+
+    try:
+        from app.services.broker.ibkr_adapter import _connect, _stock, _call_ib, _load_ib_insync
+
+        _load_ib_insync()
+        ib = _connect(strategy_id=None)
+        if ib is None:
+            _ibkr_breaker.record_failure()
+            return None
+
+        contract = _stock(symbol)
+
+        # Delayed market data (no subscription needed)
+        _call_ib(ib, "reqMarketDataType", 3, timeout=10)
+
+        # Map period / start+end to IBKR durationStr
+        if start and end:
+            days = (pd.Timestamp(end) - pd.Timestamp(start)).days
+            duration_str = f"{max(days, 1)} D"
+        else:
+            period_map = {"1y": "1 Y", "2y": "2 Y", "5y": "5 Y"}
+            duration_str = period_map.get(period, "2 Y")
+
+        bars = _call_ib(
+            ib, "reqHistoricalData",
+            contract,
+            endDateTime="",
+            durationStr=duration_str,
+            barSizeSetting="1 day",
+            whatToShow="TRADES",
+            useRTH=True,
+            formatDate=1,
+            timeout=30,
+        )
+
+        if not bars:
+            _ibkr_breaker.record_failure()
+            return None
+
+        rows = [{
+            "date": b.date,
+            "open": b.open,
+            "high": b.high,
+            "low": b.low,
+            "close": b.close,
+            "volume": b.volume,
+        } for b in bars]
+
+        df = pd.DataFrame(rows)
+        df["date"] = pd.to_datetime(df["date"], utc=True)
+        df = df.sort_values("date").reset_index(drop=True)
+
+        min_rows = 40 if start and end else 200
+        if len(df) < min_rows:
+            _ibkr_breaker.record_failure()
+            return None
+
+        _ibkr_breaker.record_success()
+        return df
+
+    except Exception as e:
+        logger.error("IBKR %s: %s", symbol, e)
+        _ibkr_breaker.record_failure()
+        return None
 
 
 def fetch(symbol, period="2y", start=None, end=None):
-    """Fetch market data. Tries Alpaca first, falls back to yfinance. Caches results."""
+    """Fetch market data. Tries IBKR first, then Alpaca, then yfinance. Caches results."""
     try:
         from app.services.metrics import metrics as _m
     except Exception:
@@ -533,19 +621,25 @@ def fetch(symbol, period="2y", start=None, end=None):
     if _m:
         _m.cache_miss("market_data_cache")
 
-    # Try Alpaca first (rate-limited with retry)
+    # Try IBKR first (only if BROKER_TYPE=ibkr, otherwise returns None)
     if _m:
-        _m.incr("api_calls_total", provider="alpaca")
-    df = fetch_alpaca(symbol, period=period, start=start, end=end)
+        _m.incr("api_calls_total", provider="ibkr")
+    df = fetch_ibkr(symbol, period=period, start=start, end=end)
 
-    # Fallback to yfinance
+    # Fallback to Alpaca
+    if df is None:
+        if _m:
+            _m.incr("api_calls_total", provider="alpaca")
+        df = fetch_alpaca(symbol, period=period, start=start, end=end)
+
+    # Final fallback to yfinance
     if df is None:
         if _m:
             _m.incr("api_calls_total", provider="yfinance")
-            _m.incr("api_errors_total", provider="alpaca")
+            _m.incr("api_errors_total", provider="ibkr")
         df = fetch_yf(symbol, period=period, start=start, end=end)
     elif _m:
-        _m.incr("api_success_total", provider="alpaca")
+        _m.incr("api_success_total", provider="ibkr")
 
     if df is not None:
         _data_cache_set(cache_key, df)

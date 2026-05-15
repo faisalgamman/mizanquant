@@ -16,10 +16,15 @@ import os
 
 logger = logging.getLogger("screener")
 
-# The ONLY valid IBKR socket ports.
+# Valid IBKR socket ports.
+# 4001/4002 — direct Gateway (local container only)
+# 4003/4004 — socat relay (gnzsnz/ib-gateway image exposes API on these)
+# 7496/7497 — TWS Desktop
 VALID_IBKR_PORTS = {
-    4001: "IB Gateway — Live",
-    4002: "IB Gateway — Paper",
+    4001: "IB Gateway — Live (direct)",
+    4002: "IB Gateway — Paper (direct)",
+    4003: "IB Gateway — Live (socat relay)",
+    4004: "IB Gateway — Paper (socat relay)",
     7496: "TWS Desktop — Live",
     7497: "TWS Desktop — Paper",
 }
