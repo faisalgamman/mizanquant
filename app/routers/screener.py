@@ -247,9 +247,9 @@ async def health():
     if broker_type == "ibkr":
         try:
             import socket
-            host = os.environ.get("IBKR_HOST", "127.0.0.1")
-            port = int(os.environ.get("IBKR_PORT", "7497"))
-            sock = socket.create_connection((host, port), timeout=5)
+            from app.services.broker.ibkr_config import get_ibkr_config
+            _cfg = get_ibkr_config()
+            sock = socket.create_connection((_cfg["host"], _cfg["port"]), timeout=5)
             sock.close()
             broker_connected = True
             checks["broker"] = True

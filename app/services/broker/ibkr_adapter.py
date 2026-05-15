@@ -45,6 +45,10 @@ from typing import Optional
 
 logger = logging.getLogger("screener")
 
+# Throttle for IBKR-down Telegram alerts (one per 30 min per host:port).
+_last_ibkr_alert: dict[str, float] = {}
+_IBKR_ALERT_THROTTLE_S = 1800
+
 # Lazy import: ib_insync is a heavy dependency we only want to load
 # when an IB adapter is actually instantiated.
 _ib_insync = None
@@ -159,11 +163,11 @@ def _connect(strategy_id: str | None):
             except Exception:
                 pass
 
-        host = os.environ.get("IBKR_HOST", "127.0.0.1")
-        try:
-            port = int(os.environ.get("IBKR_PORT", "4002"))
-        except ValueError:
-            port = 4002
+        # Use the validated central config (rejects invalid ports like 4004).
+        from app.services.broker.ibkr_config import get_ibkr_config
+        _cfg = get_ibkr_config()
+        host = _cfg["host"]
+        port = _cfg["port"]
         client_id = _client_id_for(strategy_id)
 
         def _connect_worker():
@@ -178,6 +182,23 @@ def _connect(strategy_id: str | None):
                 "IBKR connect failed (host=%s port=%s client_id=%s strategy=%s): %s",
                 host, port, client_id, strategy_id, exc,
             )
+            # Alert via Telegram (throttled — one per 30 min per host:port).
+            try:
+                alert_key = f"{host}:{port}"
+                now = time.time()
+                if now - _last_ibkr_alert.get(alert_key, 0) > _IBKR_ALERT_THROTTLE_S:
+                    _last_ibkr_alert[alert_key] = now
+                    from app.services.telegram_alert import alert_system_health
+                    alert_system_health(
+                        f"IBKR connection failed\n"
+                        f"Host: {host}:{port} ({_cfg.get('mode', 'unknown')})\n"
+                        f"Strategy: {strategy_id or 'default'}\n"
+                        f"Error: {str(exc)[:120]}\n"
+                        f"Action: check Railway 'ibgateway' service + IBKR_HOST/IBKR_PORT",
+                        severity="CRITICAL",
+                    )
+            except Exception:
+                pass  # never let alerting break the adapter
             return None
 
         _connections[key] = ib

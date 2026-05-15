@@ -185,6 +185,10 @@ body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg-primary
 .wf-scan { min-width:0; }
 .wf-analyze { min-width:0; position:sticky; top:12px; }
 .wf-trade { min-width:0; }
+.portfolio-compact { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+.pc-row { display:flex; justify-content:space-between; padding:4px 8px; background:var(--bg-tertiary); border:1px solid var(--border-light); border-radius:var(--radius); font-size:11px; }
+.pc-row span:first-child { color:var(--text-muted); }
+.pc-row span:last-child { font-weight:700; font-family:var(--mono); }
 .wf-section { margin-bottom:8px; }
 .wf-section-header {
   display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;
@@ -194,25 +198,9 @@ body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg-primary
 .wf-section-title { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); }
 .wf-section-subtitle { font-size:9px; color:var(--text-muted); }
 .wf-section-body { padding:0 4px; }
+.wf-section-body.collapsed { display:none; }
 
 /* ═══ PORTFOLIO BAR (compact) ═══ */
-.portfolio-bar {
-  display:flex; align-items:center; gap:12px; padding:8px 12px;
-  background:var(--bg-tertiary); border:1px solid var(--border-light); border-radius:var(--radius);
-}
-.pb-equity { display:flex; flex-direction:column; gap:1px; min-width:0; }
-.pb-label { font-size:8px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.3px; }
-.pb-value { font-size:20px; font-weight:800; letter-spacing:-0.5px; font-family:var(--mono); }
-.pb-change { font-size:11px; font-weight:600; margin-left:4px; }
-.pb-change.pos { color:var(--green); }
-.pb-change.neg { color:var(--red); }
-.pb-stats { display:flex; gap:10px; }
-.pb-stats > div { text-align:center; min-width:40px; }
-.pb-stat-label { font-size:8px; color:var(--text-muted); text-transform:uppercase; }
-.pb-stat-value { font-size:13px; font-weight:700; font-family:var(--mono); }
-.pb-chart { width:100px; height:32px; margin-left:auto; }
-.pb-chart canvas { width:100%!important; height:100%!important; }
-
 /* ═══ MARKET CONTEXT STRIP ═══ */
 .mc-strip { display:flex; gap:6px; }
 .mc-strip .mc-card {
@@ -580,8 +568,6 @@ select:focus,input:focus { border-color:var(--accent); }
   .signals-featured { grid-template-columns:1fr; }
   .mc-strip { flex-wrap:wrap; }
   .mc-strip .mc-card { min-width:80px; }
-  .pb-chart { display:none; }
-  .pb-stats { gap:6px; }
 }
 @media(max-width:480px){
   .cmd-center { display:none; }
@@ -817,55 +803,6 @@ select:focus,input:focus { border-color:var(--accent); }
 .breadth-above { background:var(--green); }
 .breadth-below { background:var(--red); }
 
-/* ===== SYSTEM STATUS FOOTER ===== */
-.status-footer {
-  position:fixed; bottom:0; left:var(--sidebar-width); right:0;
-  height:36px; background:rgba(15,23,42,0.95);
-  border-top:1px solid var(--border); backdrop-filter:blur(12px);
-  display:flex; align-items:center; justify-content:space-between;
-  padding:0 20px; z-index:80; font-size:11px;
-}
-.status-footer .sf-left { display:flex; align-items:center; gap:16px; }
-.status-footer .sf-left .sf-dot { width:7px; height:7px; border-radius:50%; }
-.status-footer .sf-left .sf-dot.green { background:var(--green); }
-.status-footer .sf-left .sf-dot.red { background:var(--red); }
-.status-footer .sf-left .sf-dot.yellow { background:var(--orange); }
-.status-footer .sf-right { display:flex; align-items:center; gap:12px; color:var(--text-muted); }
-.status-footer .sf-right .sf-item { display:flex; align-items:center; gap:4px; }
-.status-footer .sf-right .sf-item .sf-dot-sm { width:5px; height:5px; border-radius:50%; }
-.status-footer .sf-link { cursor:pointer; color:var(--text-muted); text-decoration:underline dotted; }
-.status-footer .sf-link:hover { color:var(--text-primary); }
-
-/* ===== LAYOUT GRID ===== */
-.overview-layout { display:grid; grid-template-columns:3fr 2fr; gap:20px; align-items:start; }
-.overview-layout .ol-main { min-width:0; }
-.overview-layout .ol-sidebar-right { min-width:0; }
-@media(max-width:1199px){ .overview-layout{grid-template-columns:1fr;} }
-/* Collapse icon-only sidebar */
-.sidebar.collapsed { width:60px; }
-.sidebar.collapsed .sidebar-brand h2,
-.sidebar.collapsed .sidebar-brand span,
-.sidebar.collapsed .nav-item span,
-.sidebar.collapsed .nav-item .badge,
-.sidebar.collapsed .sidebar-footer span,
-.sidebar.collapsed .sidebar-footer div { display:none; }
-.sidebar.collapsed .sidebar-brand { padding:12px; justify-content:center; }
-.sidebar.collapsed .sidebar-brand .logo { margin:0; }
-.sidebar.collapsed .nav-item { justify-content:center; padding:10px 0; }
-.sidebar.collapsed .nav-section { text-align:center; padding:12px 0 4px; font-size:8px; overflow:hidden; }
-.sidebar.collapsed ~ .main { margin-left:60px; }
-.sidebar.collapsed ~ .header { left:60px; }
-.sidebar.collapsed ~ .status-footer { left:60px; }
-
-/* Collapse toggle button */
-.collapse-toggle {
-  position:absolute; bottom:56px; right:-12px; width:24px; height:24px;
-  background:var(--bg-secondary); border:1px solid var(--border); border-radius:50%;
-  cursor:pointer; display:flex; align-items:center; justify-content:center;
-  color:var(--text-muted); font-size:10px; z-index:10; transition:all 0.2s;
-}
-.collapse-toggle:hover { background:var(--bg-card); color:var(--text-primary); }
-
 /* ===== COUNTER ANIMATION ===== */
 @keyframes countUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 .count-anim { animation:countUp 0.5s ease; }
@@ -932,27 +869,33 @@ select:focus,input:focus { border-color:var(--accent); }
 @media(max-width:767px){ .mc-grid{grid-template-columns:repeat(2,1fr)!important;} }
 
 /* ===== RESPONSIVE — TABLET (768-1280) ===== */
-@media(min-width:768px) and (max-width:1280px) {
-  .overview-layout { grid-template-columns:1fr 1fr; gap:16px; }
-  .portfolio-hero { grid-template-columns:1fr auto; padding:20px; }
-  .portfolio-hero .ph-equity { font-size:32px; }
-  .portfolio-hero .ph-equity .ph-change { font-size:14px; }
-  .portfolio-hero .ph-mini-chart { width:160px; height:52px; }
-  .signals-featured { grid-template-columns:1fr 1fr; }
+@media(min-width:901px) and (max-width:1280px) {
+  .workflow-layout { grid-template-columns:1fr 1fr; }
+  .wf-analyze { display:none; }
+  .signals-featured { grid-template-columns:1fr; }
   .mc-card { padding:10px 8px; }
   .pflow-container { gap:1px; }
   .pflow-label { font-size:6px; }
+  .sidebar { width:56px; }
+  .sidebar:hover { width:180px; }
+  .cmd-search { max-width:200px; }
 }
 
-/* ===== RESPONSIVE — MOBILE (<768px) ===== */
-@media(max-width:767px) {
-  .overview-layout { grid-template-columns:1fr; gap:12px; }
-  .main { padding:12px 8px; }
-  .portfolio-hero { grid-template-columns:1fr; padding:16px; gap:12px; }
-  .portfolio-hero .ph-equity { font-size:28px; letter-spacing:-1px; }
-  .portfolio-hero .ph-equity .ph-change { font-size:13px; margin-left:8px; }
-  .portfolio-hero .ph-mini-chart { width:100%; height:48px; }
-  .portfolio-hero .ph-strip { gap:12px; flex-wrap:wrap; }
+/* ===== RESPONSIVE — MOBILE (<901px) ===== */
+@media(max-width:900px) {
+  .workflow-layout { grid-template-columns:1fr; }
+  .wf-analyze { display:block; }
+  .sidebar { position:fixed; left:-200px; width:200px; z-index:200; }
+  .sidebar.open { left:0; }
+  .sidebar:hover { width:200px; }
+  .sidebar .sidebar-brand-text,
+  .sidebar .nav-item span { opacity:1; }
+  .sidebar .nav-section { text-align:left; padding-left:8px; }
+  .main { margin-left:0; padding:10px; }
+  .cmd-bar { left:0; }
+  .status-bar { left:0; }
+  .market-bar { left:0; }
+  .mobile-toggle { display:flex; }
   .signals-featured { grid-template-columns:1fr; }
   .signal-filter-bar { flex-wrap:wrap; gap:6px; }
   .sf-select { width:100%; }
@@ -964,15 +907,13 @@ select:focus,input:focus { border-color:var(--accent); }
   .pflow-dot { width:20px; height:20px; font-size:9px; }
   .pflow-label { font-size:6px; }
   .pflow-connector { width:8px; }
-  .collapsible-header { font-size:12px; padding:10px 12px; }
-  .collapsible-body { padding:0 12px 12px; }
   .ptt-row { font-size:10px; gap:4px; padding:6px 0; }
   .perf-toggle { flex-wrap:wrap; }
   .perf-stats { grid-template-columns:1fr 1fr; }
   .rtl-bar { height:20px; }
-  .hb-metrics { gap:8px; }
-  .hb-metric .hb-metric-val { font-size:11px; }
-  .hb-metric .hb-metric-label { font-size:7px; }
+  .cmd-search { max-width:160px; }
+  .cmd-center { margin:0 4px; }
+  #globalSymbol { width:60px; font-size:9px; }
   .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
   .signal-table { font-size:10px; }
   .signal-table th, .signal-table td { padding:4px 6px; }
@@ -1075,28 +1016,6 @@ select:focus,input:focus { border-color:var(--accent); }
     <!-- ═══ COLUMN 1: SCAN ═══ -->
     <div class="wf-scan">
 
-      <!-- Portfolio Bar -->
-      <div class="wf-section" data-section="portfolio">
-        <div class="wf-section-header" onclick="toggleCollapsible(this)">
-          <span class="wf-section-title">Portfolio</span>
-          <span class="wf-section-subtitle" id="phSubtitle">0 positions</span>
-        </div>
-        <div class="wf-section-body">
-          <div class="portfolio-bar" id="portfolioHero">
-            <div class="pb-equity">
-              <span class="pb-label">Equity</span>
-              <div class="pb-value" id="phEquity">$0 <span class="pb-change" id="phChange"></span></div>
-            </div>
-            <div class="pb-stats">
-              <div><span class="pb-stat-label">Positions</span><span class="pb-stat-value" id="phPositions">0</span></div>
-              <div><span class="pb-stat-label">Guards</span><span class="pb-stat-value" id="phGuards">0</span></div>
-              <div><span class="pb-stat-label">Auto</span><span class="pb-stat-value" id="phAutoTrade">—</span></div>
-            </div>
-            <div class="pb-chart"><canvas id="equityMiniChart"></canvas></div>
-          </div>
-        </div>
-      </div>
-
       <!-- Market Context Strip -->
       <div class="wf-section" data-section="market">
         <div class="wf-section-header" onclick="toggleCollapsible(this)">
@@ -1105,6 +1024,17 @@ select:focus,input:focus { border-color:var(--accent); }
         </div>
         <div class="wf-section-body">
           <div class="mc-strip" id="mcGrid"></div>
+        </div>
+      </div>
+
+      <!-- Regime Timeline -->
+      <div class="wf-section" data-section="regime">
+        <div class="wf-section-header" onclick="toggleCollapsible(this)">
+          <span class="wf-section-title">Regime</span>
+          <span class="wf-section-subtitle" id="rtlSubtitle">Loading...</span>
+        </div>
+        <div class="wf-section-body">
+          <div id="regimeTimeline"></div>
         </div>
       </div>
 
@@ -1164,6 +1094,22 @@ select:focus,input:focus { border-color:var(--accent); }
 
     <!-- ═══ COLUMN 3: TRADE ═══ -->
     <div class="wf-trade">
+
+      <!-- Compact Portfolio Bar -->
+      <div class="wf-section" data-section="portfolio">
+        <div class="wf-section-header" onclick="toggleCollapsible(this)">
+          <span class="wf-section-title">Portfolio</span>
+          <span class="wf-section-subtitle">Equity · P&amp;L</span>
+        </div>
+        <div class="wf-section-body">
+          <div class="portfolio-compact" id="portfolioCompact">
+            <div class="pc-row"><span>Equity</span><span id="pcEquity">—</span></div>
+            <div class="pc-row"><span>Positions</span><span id="pcPositions">—</span></div>
+            <div class="pc-row"><span>P&amp;L</span><span id="pcPnl">—</span></div>
+            <div class="pc-row"><span>Guards</span><span id="pcGuards">—</span></div>
+          </div>
+        </div>
+      </div>
 
       <!-- Open Positions -->
       <div class="wf-section" data-section="positions">
@@ -2067,8 +2013,10 @@ function showSignalDetail(symbol) {
       '<button class="sdp-action-btn" onclick="closeSignalDetail();showTradePlan(\''+r.symbol+'\');showQuickTrade(\''+r.symbol+'\')"><i class="fas fa-file-invoice"></i> View Trade Plan</button>' +
       '<button class="sdp-action-btn" onclick="addToWatchlist(\''+r.symbol+'\');this.innerHTML=\'<i class=\\\'fas fa-check\\\'></i> Added\';this.style.borderColor=\'var(--green)\';this.style.color=\'var(--green)\'"><i class="fas fa-star"></i> Watchlist</button>' +
     '</div>';
-  // Only open slide-out on narrow screens
-  if (window.innerWidth <= 900) {
+  // Only open slide-out when analyze column is hidden (tablet/mobile)
+  var analyzeCol = document.querySelector('.wf-analyze');
+  var analyzeHidden = !analyzeCol || analyzeCol.offsetParent === null || window.innerWidth <= 900;
+  if (analyzeHidden) {
     overlay.classList.add('open');
     panel.classList.add('open');
   }
