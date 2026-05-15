@@ -2,8 +2,9 @@
 
 Connects to a running IB Gateway (or TWS) over the standard TWS API
 socket using `ib_insync`. The gateway runs as a separate Railway
-service via the `ghcr.io/unusualalpha/ib-gateway` Docker image with IBC handling
-auto-login; this adapter only speaks to the socket.
+service (`gway`) via the `ghcr.io/gnzsnz/ib-gateway:10.46.1g` Docker
+image (IBC 3.23.0, Java 17) with IBC handling auto-login; this adapter
+only speaks to the socket.
 
 Translation layer:
 
@@ -25,8 +26,10 @@ collections — matching the alpaca_client pattern — so the engine
 degrades gracefully rather than crashing.
 
 Environment:
-    IBKR_HOST       — gateway hostname (e.g. ib-gateway.railway.internal)
-    IBKR_PORT       — 4002 for paper, 4001 for live (default: 4002)
+    IBKR_HOST       — gateway hostname (e.g. gway.railway.internal)
+    IBKR_PORT       — 4004 for paper (socat), 4003 for live (socat),
+                      4002 for paper (direct), 4001 for live (direct)
+                      (default: 4002)
     IBKR_CLIENT_ID  — int per-strategy (default: 1)
 
 Per-strategy isolation:

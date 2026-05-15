@@ -1,4 +1,4 @@
-"""Tests for market-data retry and dedupe behavior."""
+"""Tests for market-data retry, dedupe, and IBKR fetch behavior."""
 
 from __future__ import annotations
 
@@ -125,3 +125,247 @@ def test_fetch_yf_configures_local_cache(monkeypatch):
 
     assert calls["cache_path"].endswith("data\\yfinance_cache") or calls["cache_path"].endswith("data/yfinance_cache")
     assert len(df) == 50
+
+
+# ---- fetch_ibkr tests ----
+
+
+def _make_fake_bar(date_str, open_=100.0, high=101.0, low=99.0, close=100.5, volume=10000):
+    """Build a SimpleNamespace mimicking ib_insync BarData."""
+    import pandas as pd
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        date=pd.Timestamp(date_str, tz="UTC"),
+        open=open_, high=high, low=low, close=close, volume=volume,
+    )
+
+
+def test_fetch_ibkr_skip_when_alpaca(monkeypatch):
+    """Returns None when BROKER_TYPE is not ibkr."""
+    monkeypatch.setenv("BROKER_TYPE", "alpaca")
+    from app.services import market_data as md
+    md.clear_market_data_cache()
+    assert md.fetch_ibkr("AAPL") is None
+
+
+def test_fetch_ibkr_breaker_open(monkeypatch):
+    """Returns None when the IBKR circuit breaker is open."""
+    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    from app.services import market_data as md
+    md._ibkr_breaker.failures = md._ibkr_breaker.failure_threshold
+    md._ibkr_breaker.state = "open"
+    md.clear_market_data_cache()
+    try:
+        assert md.fetch_ibkr("AAPL") is None
+    finally:
+        md._ibkr_breaker.failures = 0
+        md._ibkr_breaker.state = "closed"
+
+
+def test_fetch_ibkr_connect_failure(monkeypatch):
+    """Returns None when _connect returns None (gateway unreachable)."""
+    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    import pandas as pd
+    from types import SimpleNamespace
+    calls = {}
+    fake_ib = SimpleNamespace(reqMarketDataType=lambda *a, **kw: None)
+
+    def fake_connect(strategy_id=None):
+        calls["connect"] = True
+        return None
+
+    def fake_stock(symbol):
+        calls["stock_sym"] = symbol
+        return SimpleNamespace(symbol=symbol, currency="USD", exchange="SMART")
+
+    def fake_call_ib(ib, method, *args, timeout=15, **kwargs):
+        calls[f"call_{method}"] = (args, kwargs)
+        if method == "reqMarketDataType":
+            return None
+        if method == "reqHistoricalData":
+            bar = _make_fake_bar("2024-01-01")
+            return [bar]
+        return None
+
+    def fake_load():
+        calls["load"] = True
+
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._connect", fake_connect)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._stock", fake_stock)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
+
+    from app.services import market_data as md
+    md.clear_market_data_cache()
+    md._ibkr_breaker.failures = 0
+    md._ibkr_breaker.state = "closed"
+
+    result = md.fetch_ibkr("AAPL")
+    assert result is None
+    assert calls.get("connect") is True
+
+
+def test_fetch_ibkr_empty_bars(monkeypatch):
+    """Returns None when reqHistoricalData returns empty list."""
+    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    import pandas as pd
+    from types import SimpleNamespace
+    calls = {}
+    fake_ib = SimpleNamespace(reqMarketDataType=lambda *a, **kw: None)
+
+    def fake_connect(strategy_id=None):
+        calls["connect"] = True
+        return fake_ib
+
+    def fake_stock(symbol):
+        calls["stock_sym"] = symbol
+        return SimpleNamespace(symbol=symbol, currency="USD", exchange="SMART")
+
+    def fake_call_ib(ib, method, *args, timeout=15, **kwargs):
+        calls[f"call_{method}"] = (args, kwargs)
+        return []
+
+    def fake_load():
+        calls["load"] = True
+
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._connect", fake_connect)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._stock", fake_stock)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
+
+    from app.services import market_data as md
+    md.clear_market_data_cache()
+    md._ibkr_breaker.failures = 0
+    md._ibkr_breaker.state = "closed"
+
+    assert md.fetch_ibkr("AAPL") is None
+
+
+def test_fetch_ibkr_success(monkeypatch):
+    """Returns DataFrame on successful ib_insync historical data."""
+    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    import pandas as pd
+    from types import SimpleNamespace
+    calls = {}
+    fake_ib = SimpleNamespace(reqMarketDataType=lambda *a, **kw: None)
+
+    # Generate 250 fake bars (1 year of trading days)
+    fake_bars = []
+    for i in range(250):
+        d = pd.Timestamp("2024-01-01", tz="UTC") + pd.Timedelta(days=i)
+        fake_bars.append(_make_fake_bar(
+            str(d),
+            open_=100.0 + i * 0.1,
+            high=101.0 + i * 0.1,
+            low=99.0 + i * 0.1,
+            close=100.5 + i * 0.1,
+            volume=10000 + i * 10,
+        ))
+
+    def fake_connect(strategy_id=None):
+        calls["connect"] = True
+        return fake_ib
+
+    def fake_stock(symbol):
+        calls["stock_sym"] = symbol
+        return SimpleNamespace(symbol=symbol, currency="USD", exchange="SMART")
+
+    def fake_call_ib(ib, method, *args, timeout=15, **kwargs):
+        calls[f"call_{method}"] = (args, kwargs)
+        if method == "reqMarketDataType":
+            return None
+        if method == "reqHistoricalData":
+            return fake_bars
+        return None
+
+    def fake_load():
+        calls["load"] = True
+
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._connect", fake_connect)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._stock", fake_stock)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
+
+    from app.services import market_data as md
+    md.clear_market_data_cache()
+    md._ibkr_breaker.failures = 0
+    md._ibkr_breaker.state = "closed"
+
+    df = md.fetch_ibkr("AAPL")
+    assert df is not None
+    assert len(df) == 250
+    assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"]
+    assert df["date"].is_monotonic_increasing
+    assert df.iloc[0]["close"] == 100.5
+    assert df.iloc[-1]["close"] == 100.5 + 249 * 0.1
+    assert calls.get("load") is True
+    assert calls.get("stock_sym") == "AAPL"
+
+
+def test_fetch_ibkr_bad_symbol(monkeypatch):
+    """Returns None for invalid symbols."""
+    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    from app.services import market_data as md
+    md.clear_market_data_cache()
+    assert md.fetch_ibkr("") is None
+    assert md.fetch_ibkr("LIY") is None
+
+
+def test_fetch_priority_ibkr_integration(monkeypatch):
+    """fetch() tries IBKR first when BROKER_TYPE=ibkr, even without real connection."""
+    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    import pandas as pd
+    from types import SimpleNamespace
+
+    # Mock ib_insync to return data
+    import datetime
+    base = datetime.date(2024, 1, 1)
+    fake_bars = [_make_fake_bar(str(base + datetime.timedelta(days=i))) for i in range(249)]
+    fake_ib = SimpleNamespace(reqMarketDataType=lambda *a, **kw: None)
+
+    def fake_connect(strategy_id=None):
+        return fake_ib
+
+    def fake_stock(symbol):
+        return SimpleNamespace(symbol=symbol, currency="USD", exchange="SMART")
+
+    def fake_call_ib(ib, method, *args, timeout=15, **kwargs):
+        if method == "reqMarketDataType":
+            return None
+        if method == "reqHistoricalData":
+            return fake_bars
+        return None
+
+    def fake_load():
+        pass
+
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._connect", fake_connect)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._stock", fake_stock)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
+    monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
+
+    # Need Alpaca settings to be present (but won't be called)
+    from app.config import settings
+    monkeypatch.setattr(settings, "ALPACA_API_KEY", "key")
+    monkeypatch.setattr(settings, "ALPACA_SECRET_KEY", "secret")
+
+    import app.services.market_data as md
+    monkeypatch.setattr(md, "_alpaca_rate_limit", lambda: None)
+    monkeypatch.setattr(md.time, "sleep", lambda *a: None)
+    md.clear_market_data_cache()
+    md._ibkr_breaker.failures = 0
+    md._ibkr_breaker.state = "closed"
+
+    # Mock httpx too so alpaca doesn't interfere
+    fake_httpx = SimpleNamespace(Client=lambda timeout=30: SimpleNamespace(
+        __enter__=lambda s: SimpleNamespace(get=lambda *a, **kw: SimpleNamespace(
+            status_code=200, json=lambda: {"bars": {}, "next_page_token": None},
+            raise_for_status=lambda: None,
+        )),
+        __exit__=lambda *a: False,
+    ))
+    monkeypatch.setitem(__import__("sys").modules, "httpx", fake_httpx)
+
+    df = md.fetch("AAPL")
+    assert df is not None
+    assert len(df) == 249
