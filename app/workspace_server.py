@@ -260,6 +260,7 @@ def _cache_clear():
 
 # ── Screener Progress Tracker ──
 _screener_progress = {"current": 0, "total": 0, "status": "idle", "batch": 0}
+_yf_semaphore = threading.Semaphore(2)  # max 2 concurrent yfinance calls
 
 
 def _reset_progress(total: int):
@@ -647,11 +648,13 @@ _HARAM_INDUSTRIES = {
 }
 
 
-def _screen_halal(symbol: str) -> dict:
+def _screen_halal(symbol: str, info: dict | None = None) -> dict:
     """AAOIFI 4-screen halal compliance check using yfinance."""
     import yfinance as yf
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
+    with _yf_semaphore:
+        ticker = yf.Ticker(symbol)
+        if info is None:
+            info = ticker.info or {}
 
     market_cap = _safe_float(info.get("marketCap"))
     sector = (info.get("sector") or "").lower().strip()
@@ -1953,15 +1956,16 @@ def _score_forecast_consensus(symbol: str) -> dict:
     return {"score": min(score, 30), "details": details}
 
 
-def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None:
+def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.DataFrame | None = None) -> dict | None:
     """Full analysis: halal + fundamental (40) + technical momentum (30).
 
     Smart Score = fundamental(0-40) + forecast_consensus(0-30) + momentum(0-30).
     Forecast consensus is added in post-processing by the smart_screener endpoint.
     """
     try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info or {}
+        with _yf_semaphore:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info or {}
         price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
         if not price or price <= 0:
             return None
@@ -1971,8 +1975,8 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
         industry_val = (info.get("industry") or "").lower().strip()
         name = info.get("shortName") or info.get("longName") or symbol
 
-        # Halal check
-        halal = _screen_halal(symbol)
+        # Halal check (pass pre-fetched info to avoid duplicate yfinance call)
+        halal = _screen_halal(symbol, info=info)
         is_halal = halal.get("is_halal", False)
         halal_screens = halal.get("screens_passed", 0)
         in_watchlist = bool(watchlist_set and symbol.upper() in watchlist_set)
@@ -1990,9 +1994,8 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
             _, hist_df = _fetch_data(symbol, period="1y")
             if hist_df is not None and len(hist_df) > 20:
                 # Roadmap 1.1 — Hard Gates: must-pass or score = 0
-                _, spy_df_hard = _fetch_data("SPY", period="2mo")
                 from app.services.scoring import check_hard_gates
-                gates = check_hard_gates(hist_df, spy_df=spy_df_hard)
+                gates = check_hard_gates(hist_df, spy_df=spy_df)
                 if not gates.passed:
                     return {
                         "symbol": symbol, "company": name,
@@ -2078,7 +2081,6 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
 
             # RS vs SPY: 20-day relative performance
             try:
-                _, spy_df = _fetch_data("SPY", period="2mo")
                 if spy_df is not None and len(spy_df) >= 20:
                     spy_closes = spy_df["close"].values.astype(float)
                     sym_ret_20d = (closes[-1] - closes[-20]) / closes[-20] * 100 if len(closes) >= 20 else 0
@@ -2268,12 +2270,18 @@ def _run_screener_bg(scan_symbols: list):
     from app.services.watchlist_service import get_watchlist_set
     watchlist_set = get_watchlist_set()
 
+    # Fetch SPY data once per batch (reused for all symbols)
+    try:
+        _, spy_df_shared = _fetch_data("SPY", period="2mo")
+    except Exception:
+        spy_df_shared = None
+
     batch_size = SCREENER_BATCH_SIZE
     batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]
     for batch_idx, batch in enumerate(batches):
         _update_progress(batch_idx * batch_size + len(batch), batch_idx + 1)
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {pool.submit(_analyze_smart, sym, watchlist_set): sym for sym in batch}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {pool.submit(_analyze_smart, sym, watchlist_set, spy_df_shared): sym for sym in batch}
             for f in as_completed(futures):
                 r = f.result()
                 if r:
@@ -2838,8 +2846,8 @@ def _start_scheduler():
         sched.add_job(_run_pipeline_full, "cron", day_of_week="mon-fri", hour=19, minute=30)              # 15:30 ET (late-close check)
         # ── Existing scans (offset to avoid pipeline contention) ──
         sched.add_job(_run_scheduled_scan, "cron", day_of_week="mon-fri", hour=13, minute=30)              # 09:30 ET
-        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="mon-fri", hour=12, minute=45)       # 08:45 ET
-        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="sun", hour=12, minute=30)           # Sunday 08:30 ET
+        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="mon-fri", hour=12, minute=45, misfire_grace_time=1, coalesce=True)       # 08:45 ET
+        sched.add_job(_run_scheduled_smart_scan, "cron", day_of_week="sun", hour=12, minute=30, misfire_grace_time=1, coalesce=True)           # Sunday 08:30 ET
         sched.start()
         logger.info(
             "Scheduler started: pipeline at 08:00/08:30/09:00 ET + intraday 10:00-15:30 ET hourly, "
