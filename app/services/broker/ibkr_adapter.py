@@ -121,7 +121,7 @@ def _connect(strategy_id: str | None):
         client_id = _client_id_for(strategy_id)
 
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             ib.connect(host, port, clientId=client_id, timeout=15.0)
         except Exception as exc:
             logger.error(
@@ -293,7 +293,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             values = ib.accountValues()
             return _account_to_dict(values)
         except Exception as exc:
@@ -305,7 +305,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             positions = ib.positions()
             return [_position_to_dict(p) for p in positions if float(getattr(p, "position", 0) or 0) != 0]
         except Exception as exc:
@@ -322,7 +322,7 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             trades = ib.trades()
         except Exception as exc:
             logger.error("IBKR get_orders failed: %s", exc)
@@ -344,7 +344,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             for t in ib.trades():
                 order = getattr(t, "order", None)
                 pid = str(getattr(order, "permId", ""))
@@ -365,7 +365,7 @@ class IBBroker:
         if not symbol:
             return None
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             contract = _stock(symbol)
             ib.qualifyContracts(contract)
             orders = _build_orders(payload)
@@ -391,7 +391,7 @@ class IBBroker:
         if ib is None:
             return False
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             for t in ib.trades():
                 order = getattr(t, "order", None)
                 if not order:
@@ -409,7 +409,7 @@ class IBBroker:
         if ib is None:
             return None
         try:
-            ib.util.startLoop()
+            _ib_insync.util.startLoop()
             positions = ib.positions()
             pos = next((p for p in positions if getattr(p.contract, "symbol", "") == symbol), None)
             if not pos:
