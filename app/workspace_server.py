@@ -2047,7 +2047,7 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None) -> dict | None
             ext_pct = round((price - high_20) / high_20 * 100, 2) if high_20 > 0 else 0
 
             # ATR%: ATR(14) / price
-            tr = np.maximum(highs[1:] - lows[1:], np.abs(highs[1:] - closes[:-1]), np.abs(lows[1:] - closes[:-1]))
+            tr = np.maximum.reduce([highs[1:] - lows[1:], np.abs(highs[1:] - closes[:-1]), np.abs(lows[1:] - closes[:-1])])
             atr = float(np.mean(tr[-14:])) if len(tr) >= 14 else 0
             atr_pct = round(atr / price * 100, 2) if price > 0 else 0
 
@@ -2846,9 +2846,21 @@ def _start_scheduler():
             "smart-screener at 08:45 ET, daily-scan at 09:30 ET"
         )
     except ImportError:
-        logger.warning("APScheduler not installed. Install: pip install apscheduler")
+        logger.warning("APScheduler not installed — falling back to thread-based scheduler")
+        _start_thread_scheduler()
     except Exception as e:
-        logger.error(f"Scheduler error: {e}")
+        logger.error(f"APScheduler error: {e} — falling back to thread-based scheduler")
+        _start_thread_scheduler()
+
+
+def _start_thread_scheduler():
+    """Fallback scheduler using thread-based polling (no APScheduler needed)."""
+    try:
+        from app.services.scheduler import start_scheduler
+        start_scheduler()
+        logger.info("Thread-based scheduler started (polling every 60s)")
+    except Exception as e:
+        logger.error(f"Thread scheduler also failed: {e}")
 
 
 # ---------------------------------------------------------------------------
