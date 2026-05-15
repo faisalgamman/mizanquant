@@ -50,21 +50,14 @@ async def _dashboard_health():
     def _check_broker():
         import os
         bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
-        if bt == "ibkr":
-            import socket
-            from app.services.broker.ibkr_config import get_ibkr_config
-            _cfg = get_ibkr_config()
-            sock = socket.create_connection((_cfg["host"], _cfg["port"]), timeout=5)
-            sock.close()
-            return "connected"
         from app.services.broker.factory import get_broker
         from app.config import STRATEGY_CONFIGS
         sid = next(iter(STRATEGY_CONFIGS), None)
         broker = get_broker(strategy_id=sid)
-        if broker:
-            acct = broker.get_account(strategy_id=sid)
-            return "connected" if acct and acct.get("status") == "ACTIVE" else "error"
-        return "not_configured"
+        if not broker:
+            return "not_configured"
+        acct = broker.get_account(strategy_id=sid)
+        return "connected" if acct and acct.get("status") == "ACTIVE" else "error"
 
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
