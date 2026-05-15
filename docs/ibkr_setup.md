@@ -47,23 +47,42 @@ In the openbb-trading project on Railway:
    | `AUTO_LOGOFF_MINUTES` | `0` | Disable auto-logoff |
 
 5. **No public domain needed** — leave the service private. The
-    private networking hostname will be something like
-    `ib-gateway.railway.internal`.  
-    **ملاحظة:** بسبب وجود مسافة في اسم الخدمة (` ib-gateway`)، الاستضافة الفعلية هي
-    `content-miracle.railway.internal`.
+    private networking hostname is derived from the service name.
+
+> ⚠️ **CRITICAL — host & port must match the RUNNING gateway service.**
+> The active gateway service is named **`ibgateway`**, so the host is
+> **`ibgateway.railway.internal`**. Do NOT point to stopped services
+> like `ibgateway2` or `ib-gateway`.
+>
+> **Valid IBKR ports — only these four are accepted by the code:**
+> | Port | Meaning |
+> |------|---------|
+> | `4002` | IB Gateway — Paper *(use this)* |
+> | `4001` | IB Gateway — Live |
+> | `7497` | TWS Desktop — Paper |
+> | `7496` | TWS Desktop — Live |
+>
+> Any other value (e.g. `4004`) is rejected at runtime by
+> `app/services/broker/ibkr_config.py` and replaced with `4002`,
+> with an error logged to `logs/screener.log`.
 
 ### 2. Wire the main bot to the gateway
 
-In the openbb-trading main service, add these variables:
+In the main service, add these variables:
 
 | Variable | Value |
 |----------|-------|
-| `IBKR_HOST` | `content-miracle.railway.internal` |
+| `IBKR_HOST` | `ibgateway.railway.internal` |
 | `IBKR_PORT` | `4002` |
 | `IBKR_CLIENT_ID` | `1` |
 | `IBKR_CLIENT_ID_A` | `11` |
 | `IBKR_CLIENT_ID_B` | `12` |
 | `IBKR_CLIENT_ID_C` | `13` |
+
+> If `AUTO_TRADE_ENABLED=true` and a strategy uses IBKR, the app now
+> performs a **boot-time reachability check** (`_check_ibkr_reachable()`
+> in `app/config.py`). A misconfigured host/port makes the app **refuse
+> to start** with a clear error — no more silent failures.
 
 Per-strategy client IDs prevent collision if more than one strategy
 talks to the gateway at the same time.

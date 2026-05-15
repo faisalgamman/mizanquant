@@ -102,8 +102,10 @@ class Settings(BaseSettings):
     TRAILING_STOP_PCT: float = 2.5       # trailing stop distance (% from peak)
 
     # --- Interactive Brokers (TWS/IB Gateway) ---
+    # Default port unified to 4002 (IB Gateway paper). Previously 7497 here but
+    # 4002 in the adapter — the mismatch let a bad Railway config go unnoticed.
     IBKR_HOST: str = "127.0.0.1"
-    IBKR_PORT: int = 7497
+    IBKR_PORT: int = 4002
     IBKR_CLIENT_ID: int = 1
 
     # --- Live whitelist (SF-3) ---
@@ -229,6 +231,41 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def _check_ibkr_reachable() -> list[str]:
+    """Return a list of errors if IBKR is the selected broker but unreachable.
+
+    Only runs when IBKR is actually used (BROKER_TYPE=ibkr or any
+    STRATEGY_BROKER_*=ibkr). Catches misconfigured host/port at boot rather
+    than letting it fail silently on the first trade.
+    """
+    import os
+
+    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
+    strategy_brokers = [
+        os.environ.get(f"STRATEGY_BROKER_{s}", "").lower()
+        for s in ("A", "B", "C")
+    ]
+    if broker_type != "ibkr" and "ibkr" not in strategy_brokers:
+        return []  # IBKR not used — skip
+
+    import socket
+    from app.services.broker.ibkr_config import get_ibkr_config
+
+    cfg = get_ibkr_config()
+    try:
+        sock = socket.create_connection((cfg["host"], cfg["port"]), timeout=8)
+        sock.close()
+        logger.info(
+            "IBKR reachable: %s:%d (%s)", cfg["host"], cfg["port"], cfg["mode"],
+        )
+        return []
+    except Exception as exc:
+        return [
+            f"IBKR unreachable at {cfg['host']}:{cfg['port']} ({cfg['mode']}): {exc}. "
+            f"Check the Railway 'ibgateway' service and IBKR_HOST/IBKR_PORT vars."
+        ]
+
+
 def assert_ready_for_auto_trade() -> None:
     """Fail-fast guard — call at boot if AUTO_TRADE_ENABLED=True.
 
@@ -237,6 +274,7 @@ def assert_ready_for_auto_trade() -> None:
     if not settings.AUTO_TRADE_ENABLED:
         return
     errors = settings.validate_for_live()
+    errors += _check_ibkr_reachable()
     if errors:
         bullet = "\n  - ".join(errors)
         raise ConfigurationError(

@@ -55,10 +55,11 @@ async def health():
 async def ibkr_ping():
     """Test TWS/IB Gateway connectivity via socket."""
     import socket
-    import os
-    host = os.environ.get("IBKR_HOST", "127.0.0.1")
-    port = int(os.environ.get("IBKR_PORT", "7497"))
-    client_id = int(os.environ.get("IBKR_CLIENT_ID", "1"))
+    from app.services.broker.ibkr_config import get_ibkr_config
+    _cfg = get_ibkr_config()
+    host = _cfg["host"]
+    port = _cfg["port"]
+    client_id = _cfg["client_id"]
     try:
         sock = socket.create_connection((host, port), timeout=5)
         sock.close()

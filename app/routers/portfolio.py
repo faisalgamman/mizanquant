@@ -388,11 +388,13 @@ async def trading_disable(x_api_key: OperatorAPIKey = None):
 @router.get("/api/ibkr/ping")
 async def ibkr_ping(x_api_key: OperatorAPIKey = None):
     import socket
-    from halal_screener import _require_api_key, settings
+    from halal_screener import _require_api_key
+    from app.services.broker.ibkr_config import get_ibkr_config
     _require_api_key(x_api_key)
-    host = settings.IBKR_HOST
-    port = settings.IBKR_PORT
-    client_id = settings.IBKR_CLIENT_ID
+    _cfg = get_ibkr_config()
+    host = _cfg["host"]
+    port = _cfg["port"]
+    client_id = _cfg["client_id"]
     try:
         sock = socket.create_connection((host, port), timeout=5)
         sock.close()

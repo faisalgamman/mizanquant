@@ -52,9 +52,9 @@ async def _dashboard_health():
         bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
         if bt == "ibkr":
             import socket
-            host = os.environ.get("IBKR_HOST", "127.0.0.1")
-            port = int(os.environ.get("IBKR_PORT", "7497"))
-            sock = socket.create_connection((host, port), timeout=5)
+            from app.services.broker.ibkr_config import get_ibkr_config
+            _cfg = get_ibkr_config()
+            sock = socket.create_connection((_cfg["host"], _cfg["port"]), timeout=5)
             sock.close()
             return "connected"
         from app.services.broker.factory import get_broker
@@ -194,12 +194,11 @@ async def v1_broker_diagnose():
     result = {"broker_type": bt, "checks": {}}
 
     import socket
-    host = os.environ.get("IBKR_HOST", "127.0.0.1")
-    try:
-        port = int(os.environ.get("IBKR_PORT", "4002"))
-    except ValueError:
-        port = 4002
-    result["config"] = {"host": host, "port": port}
+    from app.services.broker.ibkr_config import get_ibkr_config
+    _cfg = get_ibkr_config()
+    host = _cfg["host"]
+    port = _cfg["port"]
+    result["config"] = {"host": host, "port": port, "mode": _cfg["mode"]}
 
     try:
         sock = socket.create_connection((host, port), timeout=5)
