@@ -4285,6 +4285,19 @@ async def get_apps():
 from app.api.v1 import v1_router
 app.include_router(v1_router)
 
+# Include sharing routers from halal_screener (screener, consensus, etc.)
+# These provide endpoints consumed by the new Overview dashboard.
+try:
+    from app.routers.screener import router as screener_router
+    app.include_router(screener_router)
+except Exception:
+    logger.warning("screener router not available — skipped")
+try:
+    from app.routers.consensus import router as consensus_router
+    app.include_router(consensus_router)
+except Exception:
+    logger.warning("consensus router not available — skipped")
+
 # ---------------------------------------------------------------------------
 # Professional Dashboard — serves the standalone HTML SPA at /
 # ---------------------------------------------------------------------------
