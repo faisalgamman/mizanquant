@@ -1,6 +1,10 @@
 """Consensus, Pipeline, Ready-to-Trade endpoints"""
+from __future__ import annotations
+from typing import TYPE_CHECKING
 from fastapi import APIRouter
-from halal_screener import OperatorAPIKey
+
+if TYPE_CHECKING:
+    from halal_screener import OperatorAPIKey
 
 router = APIRouter(tags=["Consensus"])
 
