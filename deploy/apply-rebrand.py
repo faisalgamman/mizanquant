@@ -5,15 +5,20 @@ mizanquant rebrand — applies the new identity across the whole product.
 Run from the root of the mizanquant repo:
     python deploy/apply-rebrand.py
 
-Patches three files:
-  • app/static/dashboard.html       — page title, favicon, sidebar logo + wordmark
-  • app/services/telegram_alert.py  — brand footer on every alert (5+ call sites)
-  • app/ai_agent.py                 — AI analyst introduces itself as ميزان كوانت
+Patches:
+  • app/static/dashboard.html          — page title, favicon, sidebar logo + wordmark
+  • app/services/telegram_alert.py     — brand footer on every alert (9 call sites)
+  • app/ai_agent.py                    — AI analyst introduces itself as ميزان كوانت
+  • app/static/dashboard-legacy.html   — renamed copy of original dashboard
+  • app/static/dashboard.html          — REPLACED with new mizanquant Overview
+  • app/static/overview-v2.js          — JS that wires the new Overview to APIs
+  • app/static/logo-*.svg              — mīm-trace mark in three sizes
 
-Also copies logo SVGs into app/static/.
+The new dashboard.html keeps the sidebar nav to the legacy tabs (Forecast Lab,
+Trading Lab, etc.) via /static/dashboard-legacy.html#tab-* links — nothing
+is lost, you just get a redesigned Overview that uses the real APIs.
 
-Idempotent — each file carries a marker (`mizanquant` / `_BRAND_LINE` / `ميزان`);
-if present, that file is skipped silently. Safe to re-run.
+Idempotent — each text-patch carries a marker so re-runs are safe.
 """
 from __future__ import annotations
 
@@ -187,23 +192,50 @@ def main() -> int:
         total += patch_file(spec["path"], spec["marker"], spec["replacements"])
         print()
 
-    # Copy SVGs into app/static/
+    # ────────────────────────────────────────────────────────────
+    # DASHBOARD REPLACEMENT — preserve original as -legacy, install new
+    # ────────────────────────────────────────────────────────────
+    print("→ app/static/dashboard.html  (replace with new Overview)")
+    legacy = STATIC_DIR / "dashboard-legacy.html"
+    current = STATIC_DIR / "dashboard.html"
+    new_overview = ASSETS_SRC / "overview-v2.html"
+    if current.exists() and new_overview.exists():
+        if not legacy.exists():
+            # First-time: preserve the existing (already-rebranded) dashboard as legacy
+            shutil.copy(current, legacy)
+            print(f"  ✓ Preserved original as dashboard-legacy.html")
+        shutil.copy(new_overview, current)
+        print(f"  ✓ Installed new mizanquant Overview as dashboard.html")
+        total += 1
+    elif not new_overview.exists():
+        print(f"  ⚠ overview-v2.html not found in deploy/static/ — skipping", file=sys.stderr)
+
+    # ────────────────────────────────────────────────────────────
+    # Copy SVGs and the overview JS
+    # ────────────────────────────────────────────────────────────
     if ASSETS_SRC.exists() and STATIC_DIR.exists():
-        print("→ app/static/  (logo SVGs)")
-        for svg in ASSETS_SRC.glob("*.svg"):
-            dest = STATIC_DIR / svg.name
-            shutil.copy(svg, dest)
-            print(f"  ✓ {svg.name}")
+        print("\n→ app/static/  (logo SVGs + overview-v2.js)")
+        for asset in ASSETS_SRC.glob("*.svg"):
+            dest = STATIC_DIR / asset.name
+            shutil.copy(asset, dest)
+            print(f"  ✓ {asset.name}")
+        js_src = ASSETS_SRC / "overview-v2.js"
+        if js_src.exists():
+            shutil.copy(js_src, STATIC_DIR / "overview-v2.js")
+            print(f"  ✓ overview-v2.js")
     elif not STATIC_DIR.exists():
-        print(f"⚠ {STATIC_DIR} missing — skipped SVG copy", file=sys.stderr)
+        print(f"⚠ {STATIC_DIR} missing — skipped asset copy", file=sys.stderr)
 
     print(f"\n=== Done · {total} patch(es) applied ===")
     if total:
         print("\nNext:")
-        print("  python -c \"from halal_screener import app\"   # smoke-test imports")
+        print('  python -c "from halal_screener import app"   # smoke-test imports')
         print("  git add app/ deploy/")
-        print('  git commit -m "rebrand: mizanquant identity"')
+        print('  git commit -m "rebrand: mizanquant identity + new Overview"')
         print("  git push                                       # Railway auto-deploys")
+        print("\nAfter deploy:")
+        print("  • / and /static/dashboard.html  →  new Overview")
+        print("  • /static/dashboard-legacy.html  →  full legacy app (all tabs)")
     return 0
 
 
