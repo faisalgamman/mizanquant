@@ -156,6 +156,7 @@ def test_fetch_ibkr_breaker_open(monkeypatch):
     """Returns None when the IBKR circuit breaker is open."""
     monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     from app.services import market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     md._ibkr_breaker.failures = md._ibkr_breaker.failure_threshold
     md._ibkr_breaker.state = "open"
     md.clear_market_data_cache()
@@ -164,6 +165,7 @@ def test_fetch_ibkr_breaker_open(monkeypatch):
     finally:
         md._ibkr_breaker.failures = 0
         md._ibkr_breaker.state = "closed"
+        md._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_fetch_ibkr_connect_failure(monkeypatch):
@@ -204,13 +206,17 @@ def test_fetch_ibkr_connect_failure(monkeypatch):
     monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
 
     from app.services import market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
     md._ibkr_breaker.state = "closed"
 
-    result = md.fetch_ibkr("AAPL")
-    assert result is None
-    assert calls.get("connect") is True
+    try:
+        result = md.fetch_ibkr("AAPL")
+        assert result is None
+        assert calls.get("connect") is True
+    finally:
+        md._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_fetch_ibkr_empty_bars(monkeypatch):
@@ -246,11 +252,15 @@ def test_fetch_ibkr_empty_bars(monkeypatch):
     monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
 
     from app.services import market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
     md._ibkr_breaker.state = "closed"
 
-    assert md.fetch_ibkr("AAPL") is None
+    try:
+        assert md.fetch_ibkr("AAPL") is None
+    finally:
+        md._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_fetch_ibkr_success(monkeypatch):
@@ -303,28 +313,36 @@ def test_fetch_ibkr_success(monkeypatch):
     monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
 
     from app.services import market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
     md._ibkr_breaker.state = "closed"
 
-    df = md.fetch_ibkr("AAPL")
-    assert df is not None
-    assert len(df) == 250
-    assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"]
-    assert df["date"].is_monotonic_increasing
-    assert df.iloc[0]["close"] == 100.5
-    assert df.iloc[-1]["close"] == 100.5 + 249 * 0.1
-    assert calls.get("load") is True
-    assert calls.get("stock_sym") == "AAPL"
+    try:
+        df = md.fetch_ibkr("AAPL")
+        assert df is not None
+        assert len(df) == 250
+        assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"]
+        assert df["date"].is_monotonic_increasing
+        assert df.iloc[0]["close"] == 100.5
+        assert df.iloc[-1]["close"] == 100.5 + 249 * 0.1
+        assert calls.get("load") is True
+        assert calls.get("stock_sym") == "AAPL"
+    finally:
+        md._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_fetch_ibkr_bad_symbol(monkeypatch):
     """Returns None for invalid symbols."""
     monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     from app.services import market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     md.clear_market_data_cache()
-    assert md.fetch_ibkr("") is None
-    assert md.fetch_ibkr("LIY") is None
+    try:
+        assert md.fetch_ibkr("") is None
+        assert md.fetch_ibkr("LIY") is None
+    finally:
+        md._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_fetch_priority_ibkr_integration(monkeypatch):
@@ -370,6 +388,7 @@ def test_fetch_priority_ibkr_integration(monkeypatch):
     monkeypatch.setattr(settings, "ALPACA_SECRET_KEY", "secret")
 
     import app.services.market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     monkeypatch.setattr(md, "_alpaca_rate_limit", lambda: None)
     monkeypatch.setattr(md.time, "sleep", lambda *a: None)
     md.clear_market_data_cache()
@@ -386,9 +405,12 @@ def test_fetch_priority_ibkr_integration(monkeypatch):
     ))
     monkeypatch.setitem(__import__("sys").modules, "httpx", fake_httpx)
 
-    df = md.fetch("AAPL")
-    assert df is not None
-    assert len(df) == 249
+    try:
+        df = md.fetch("AAPL")
+        assert df is not None
+        assert len(df) == 249
+    finally:
+        md._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_fetch_ibkr_socket_timeout(monkeypatch):
@@ -402,14 +424,16 @@ def test_fetch_ibkr_socket_timeout(monkeypatch):
     monkeypatch.setattr("socket.create_connection", fake_socket_timeout)
 
     from app.services import market_data as md
+    md._OVERRIDE_IBKR_ENABLED = True
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
     md._ibkr_breaker.state = "closed"
 
-    result = md.fetch_ibkr("AAPL")
-    assert result is None
-    assert md._ibkr_breaker.failures == 1
-
-    # Cleanup
-    md._ibkr_breaker.failures = 0
-    md._ibkr_breaker.state = "closed"
+    try:
+        result = md.fetch_ibkr("AAPL")
+        assert result is None
+        assert md._ibkr_breaker.failures == 1
+    finally:
+        md._OVERRIDE_IBKR_ENABLED = False
+        md._ibkr_breaker.failures = 0
+        md._ibkr_breaker.state = "closed"

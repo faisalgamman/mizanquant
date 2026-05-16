@@ -9,11 +9,14 @@ PostgreSQL → asyncpg (Railway/production)
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from functools import lru_cache
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 
@@ -39,14 +42,17 @@ def _get_async_engine():
         connect_args = {"check_same_thread": False}
 
     logger.info("Creating async engine for %s", db_url.split("://")[0] + "://...")
-    return create_async_engine(
-        db_url,
+    engine_kwargs = dict(
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
         pool_timeout=30,
         connect_args=connect_args,
     )
+    # connect_timeout is only valid for PostgreSQL/asyncpg, not SQLite/aiosqlite
+    if db_url.startswith("postgresql+asyncpg"):
+        engine_kwargs["connect_timeout"] = 10
+    return create_async_engine(db_url, **engine_kwargs)
 
 
 @lru_cache(maxsize=1)
@@ -62,10 +68,18 @@ def _get_async_session_factory():
 _factory = _get_async_session_factory()
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency — yields an async DB session, closes on finish."""
-    async with _factory() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+async def get_async_db() -> AsyncGenerator[Optional[AsyncSession], None]:
+    """FastAPI dependency — yields an async DB session, closes on finish.
+
+    Returns None when the database is unreachable (connection timeout, auth
+    failure, etc.) so callers can respond with 503 instead of crashing.
+    """
+    try:
+        async with _factory() as session:
+            try:
+                yield session
+            finally:
+                await session.close()
+    except (SQLAlchemyError, asyncio.TimeoutError, OSError) as exc:
+        logger.error("Async database unavailable: %s", exc)
+        yield None

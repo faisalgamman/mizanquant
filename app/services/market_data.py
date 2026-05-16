@@ -515,6 +515,10 @@ _yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=10, reset_timeo
 _alpaca_breaker = CircuitBreaker("alpaca", failure_threshold=10, reset_timeout=60.0)
 _ibkr_breaker = CircuitBreaker("ibkr", failure_threshold=3, reset_timeout=600.0)
 
+# Hard override: IBKR data is DISABLED until the gateway is healthy.
+# Flip to True (and ensure IBKR_DATA_ENABLED=true) to re-enable.
+_OVERRIDE_IBKR_ENABLED = False
+
 
 def fetch_ibkr(symbol, period="2y", start=None, end=None):
     """Fetch historical bars from Interactive Brokers via ib_insync.
@@ -528,7 +532,15 @@ def fetch_ibkr(symbol, period="2y", start=None, end=None):
     IBKR as a DATA source is independent of IBKR as a TRADING broker.
     Set IBKR_DATA_ENABLED=true to enable; default OFF to avoid 15-30s
     timeouts when the gateway is unreachable.
+
+    NOTE: Hard-disabled via module-level ``_OVERRIDE_IBKR_ENABLED`` because
+    the IBKR gateway on Railway (gway.railway.internal:4004) is persistently
+    unreachable. Set ``_OVERRIDE_IBKR_ENABLED = True`` (and ensure the gateway
+    is healthy) before flipping the env var back on.
     """
+    if not _OVERRIDE_IBKR_ENABLED:
+        logger.warning("IBKR data DISABLED by _OVERRIDE_IBKR_ENABLED=False")
+        return None
     if os.environ.get("IBKR_DATA_ENABLED", "false").lower() not in ("true", "1", "yes"):
         return None
 
