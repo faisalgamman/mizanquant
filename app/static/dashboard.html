@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/fontawesome/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/chart.umd.min.js"></script>
 <style>
 :root {
   --bg-primary: oklch(0.03 0.006 60);
@@ -987,7 +987,7 @@ select:focus,input:focus { border-color:var(--accent); }
     <div class="nav-item" data-tab="forecast" onclick="switchTab('forecast')" title="Forecast Lab"><i class="fas fa-brain"></i><span>Forecast Lab</span><span class="badge">19</span></div>
     <div class="nav-item" data-tab="trading" onclick="switchTab('trading')" title="Trading Lab"><i class="fas fa-robot"></i><span>Trading Lab</span><span class="badge">19</span></div>
     <div class="nav-item" data-tab="backtest" onclick="switchTab('backtest')" title="Backtest"><i class="fas fa-history"></i><span>Backtest</span></div>
-    <div class="nav-item" data-tab="strategies" onclick="switchTab('strategies');loadStrategies()" title="Strategies"><i class="fas fa-chess-board"></i><span>Strategies</span><span class="badge" id="stratBadge">4</span></div>
+    <div class="nav-item" data-tab="strategies" onclick="switchTab('strategies')" title="Strategies"><i class="fas fa-chess-board"></i><span>Strategies</span><span class="badge" id="stratBadge">4</span></div>
     <div class="nav-section">Analytics</div>
     <div class="nav-item" data-tab="risk" onclick="switchTab('risk')" title="Risk Desk"><i class="fas fa-shield-alt"></i><span>Risk Desk</span></div>
     <div class="nav-item" data-tab="workflow" onclick="switchTab('workflow')" title="Daily Workflow"><i class="fas fa-play-circle"></i><span>Daily Workflow</span></div>
@@ -1767,7 +1767,7 @@ function toggleSidebar() {
 }
 
 // ===== API HELPER =====
-async function apiGet(path, timeoutMs = 90000, retries = 1) {
+async function apiGet(path, timeoutMs = 15000, retries = 1) {
   var lastErr;
   for (var attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
