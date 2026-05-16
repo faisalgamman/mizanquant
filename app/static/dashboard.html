@@ -5371,7 +5371,8 @@ async function loadAITab() {
   `;
   // Check if LLM is available
   try {
-    const r = await fetch('/api/ai/report?min_score=70&max_results=1&use_cache=true');
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 10000);
+    const r = await fetch('/api/ai/report?min_score=70&max_results=1&use_cache=true', { signal: ac.signal }); clearTimeout(t);
     if (r.ok) {
       const d = await r.json();
       if (d.llm_used) {
@@ -6820,8 +6821,7 @@ async function loadStrategies() {
   const cards = document.getElementById('strategyCards');
   cards.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);grid-column:1/-1;"><i class="fas fa-spinner fa-spin fa-2x"></i><br>Loading strategy data...</div>';
   try {
-    const resp = await fetch('/api/strategies/backtest-data?force_refresh=' + (new URLSearchParams(window.location.search).get('refresh') === '1'));
-    const data = await resp.json();
+    const data = await apiGet('/api/strategies/backtest-data?force_refresh=' + (new URLSearchParams(window.location.search).get('refresh') === '1'), 20000);
     if (data.error) { cards.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red);">' + data.error + '</div>'; return; }
     renderStrategyCards(data);
     renderBestPerStrategy(data);

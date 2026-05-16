@@ -650,82 +650,75 @@ _HARAM_INDUSTRIES = {
 
 
 def _screen_halal(symbol: str, info: dict | None = None) -> dict:
-    """AAOIFI 4-screen halal compliance check using yfinance."""
-    import yfinance as yf
-    with _yf_semaphore:
-        ticker = yf.Ticker(symbol)
-        if info is None:
-            info = ticker.info or {}
+    """AAOIFI 4-screen halal compliance check using yfinance (with timeout)."""
+    from app.services.market_context import _run_with_timeout
 
-    market_cap = _safe_float(info.get("marketCap"))
-    sector = (info.get("sector") or "").lower().strip()
-    industry = (info.get("industry") or "").lower().strip()
-    company_name = info.get("shortName") or info.get("longName") or symbol
+    def _compute():
+        import yfinance as yf
+        with _yf_semaphore:
+            ticker = yf.Ticker(symbol)
+            info_local = info if info is not None else (ticker.info or {})
 
-    # Balance sheet
-    total_debt = _safe_float(info.get("totalDebt"))
-    cash_eq = _safe_float(info.get("totalCash"))
-    short_inv = 0.0
+        market_cap = _safe_float(info_local.get("marketCap"))
+        sector = (info_local.get("sector") or "").lower().strip()
+        industry = (info_local.get("industry") or "").lower().strip()
+        company_name = info_local.get("shortName") or info_local.get("longName") or symbol
 
-    try:
-        bs = ticker.balance_sheet
-        if bs is not None and not bs.empty:
-            latest = bs.iloc[:, 0]
-            total_debt = _safe_float(latest.get("Total Debt"), total_debt)
-            cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
-            short_inv = _safe_float(latest.get("Other Short Term Investments"))
-    except Exception:
-        pass
+        total_debt = _safe_float(info_local.get("totalDebt"))
+        cash_eq = _safe_float(info_local.get("totalCash"))
+        short_inv = 0.0
 
-    # Income statement
-    revenue = _safe_float(info.get("totalRevenue"))
-    interest_income = 0.0
+        try:
+            bs = ticker.balance_sheet
+            if bs is not None and not bs.empty:
+                latest = bs.iloc[:, 0]
+                total_debt = _safe_float(latest.get("Total Debt"), total_debt)
+                cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
+                short_inv = _safe_float(latest.get("Other Short Term Investments"))
+        except Exception:
+            pass
 
-    try:
-        inc = ticker.income_stmt
-        if inc is not None and not inc.empty:
-            latest_inc = inc.iloc[:, 0]
-            revenue = _safe_float(latest_inc.get("Total Revenue"), revenue)
-            interest_income = _safe_float(latest_inc.get("Interest Income"))
-    except Exception:
-        pass
+        revenue = _safe_float(info_local.get("totalRevenue"))
+        interest_income = 0.0
 
-    if market_cap <= 0:
-        return {"symbol": symbol, "is_halal": False, "error": "No market cap data"}
+        try:
+            inc = ticker.income_stmt
+            if inc is not None and not inc.empty:
+                latest_inc = inc.iloc[:, 0]
+                revenue = _safe_float(latest_inc.get("Total Revenue"), revenue)
+                interest_income = _safe_float(latest_inc.get("Interest Income"))
+        except Exception:
+            pass
 
-    # AAOIFI Screens
-    debt_ratio = (total_debt / market_cap * 100) if market_cap > 0 else 999
-    debt_pass = debt_ratio < 33.0
+        if market_cap <= 0:
+            return {"symbol": symbol, "is_halal": False, "error": "No market cap data"}
 
-    interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0
-    interest_pass = interest_ratio < 5.0
+        debt_ratio = (total_debt / market_cap * 100) if market_cap > 0 else 999
+        debt_pass = debt_ratio < 33.0
+        interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0
+        interest_pass = interest_ratio < 5.0
+        haram_pass = not (sector in _HARAM_SECTORS or industry in _HARAM_INDUSTRIES)
+        liquid_assets = cash_eq + short_inv
+        liquidity_ratio = (liquid_assets / market_cap * 100) if market_cap > 0 else 999
+        liquidity_pass = liquidity_ratio < 33.0
+        is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass
 
-    haram_pass = not (sector in _HARAM_SECTORS or industry in _HARAM_INDUSTRIES)
+        return {
+            "symbol": symbol, "company_name": company_name, "sector": sector,
+            "industry": industry, "market_cap": market_cap, "is_halal": is_halal,
+            "status": "HALAL - Compliant" if is_halal else "NON-COMPLIANT",
+            "debt_ratio": round(debt_ratio, 2), "debt_pass": debt_pass,
+            "interest_ratio": round(interest_ratio, 2), "interest_pass": interest_pass,
+            "haram_pass": haram_pass, "liquidity_ratio": round(liquidity_ratio, 2),
+            "liquidity_pass": liquidity_pass,
+            "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass]),
+            "screens_total": 4,
+        }
 
-    liquid_assets = cash_eq + short_inv
-    liquidity_ratio = (liquid_assets / market_cap * 100) if market_cap > 0 else 999
-    liquidity_pass = liquidity_ratio < 33.0
-
-    is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass
-
-    return {
-        "symbol": symbol,
-        "company_name": company_name,
-        "sector": sector,
-        "industry": industry,
-        "market_cap": market_cap,
-        "is_halal": is_halal,
-        "status": "HALAL - Compliant" if is_halal else "NON-COMPLIANT",
-        "debt_ratio": round(debt_ratio, 2),
-        "debt_pass": debt_pass,
-        "interest_ratio": round(interest_ratio, 2),
-        "interest_pass": interest_pass,
-        "haram_pass": haram_pass,
-        "liquidity_ratio": round(liquidity_ratio, 2),
-        "liquidity_pass": liquidity_pass,
-        "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass]),
-        "screens_total": 4,
-    }
+    result = _run_with_timeout(_compute, timeout=45, fallback=None)
+    if result is None:
+        return {"symbol": symbol, "is_halal": False, "error": "Halal check timed out"}
+    return result
 
 
 @app.get("/api/halal-status")
