@@ -822,7 +822,7 @@ def _notify_trade(trade_result: dict):
 
         tg_send(msg)
     except Exception as e:
-        logger.debug(f"Trade notification failed: {e}")
+        logger.warning("Trade notification failed: %s", e)
 
 
 # ---------------------------------------------------------------------------

@@ -104,7 +104,7 @@ class UnifiedPipeline:
 
     def run(
         self,
-        strategy_ids: tuple[str, ...] = ("A", "B", "C"),
+        strategy_ids: tuple[str, ...] = ("A", "C"),
         dry_run: bool = False,
         skip_stages: set[str] | None = None,
     ) -> PipelineReport:
@@ -342,7 +342,6 @@ class UnifiedPipeline:
         profiles: list[tuple[str, str, Any]] = []
         runners = {
             "A": (hs.run_consensus_momentum, "momentum"),
-            # "B" Mean-Reversion DISABLED — A-Pre.1 (Sharpe -1.93, WR 26.3%)
             "C": (hs.run_consensus_ml, "ml"),
         }
         for sid in strategy_ids:
