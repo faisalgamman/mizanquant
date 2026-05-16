@@ -52,3 +52,65 @@ async def v1_sector_performance(force_refresh: bool = False):
     return await memory_cache.get_or_compute(
         "sectors:performance", 600, compute, force_refresh=force_refresh
     )
+
+
+# Map a registered model name → display name + design-system family class.
+_MODEL_FAMILY = {
+    "turtle":                  ("Turtle Trend",    "classic"),
+    "moving_average":          ("Moving Average",  "classic"),
+    "evolution_strategy":      ("Evolution Strat", "deep-rl"),
+    "neuro_evolution_novelty": ("Neuro-Evolution", "deep-rl"),
+    "transformer":             ("Transformer",     "transformer"),
+    "ensemble":                ("Ensemble",        "ensemble"),
+    "gru":                     ("GRU-Seq2Seq",     "gru"),
+    "lstm_vae":                ("LSTM-VAE",        "lstm"),
+    "dilated_cnn":             ("Dilated CNN",     "cnn"),
+    "arima":                   ("ARIMA",           "statistical"),
+}
+
+
+@router.get("/models/leaderboard")
+async def v1_models_leaderboard(force_refresh: bool = False):
+    """Model leaderboard — real Sharpe / win-rate from the model registry.
+
+    Reads model_registry/<name>/{production,staging}.json. Returns rows
+    sorted by Sharpe desc, shaped for the Overview Models panel.
+    """
+    def _compute():
+        from app.services import model_registry as mr
+
+        rows = []
+        reg_dir = mr._MODEL_REGISTRY_DIR
+        if not reg_dir.exists():
+            return []
+        for entry in sorted(reg_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+            name = entry.name
+            prod = mr.resolve(name, "production")
+            staging = mr.resolve(name, "staging")
+            chosen = prod or staging
+            if not chosen:
+                continue
+            metrics = chosen.get("metrics", {}) or {}
+            display, fam = _MODEL_FAMILY.get(name, (name.replace("_", " ").title(), "classic"))
+            rows.append({
+                "name": display,
+                "fam": fam,
+                "status": "production" if prod else "staging",
+                "sharpe": round(float(metrics.get("sharpe", 0) or 0), 2),
+                "win": round(float(metrics["win_rate"]), 1) if metrics.get("win_rate") is not None else None,
+                "trades": metrics.get("trades"),
+                "avg_return": metrics.get("avg_return"),
+                "version": chosen.get("version"),
+                "spark": [],
+            })
+        rows.sort(key=lambda r: r["sharpe"], reverse=True)
+        return rows
+
+    async def compute():
+        return await asyncio.to_thread(_compute)
+
+    return await memory_cache.get_or_compute(
+        "models:leaderboard", 300, compute, force_refresh=force_refresh
+    )
