@@ -79,7 +79,9 @@ HARAM_INDUSTRIES = {
 
 def _yf_fallback(symbol: str) -> Optional[dict]:
     """Fallback: fetch fundamental data from yfinance when FMP fails (premium block)."""
-    try:
+    from app.services.market_context import _run_with_timeout
+
+    def _do_yf():
         import yfinance as yf
         try:
             from app.services.market_data import _configure_yfinance_cache
@@ -94,12 +96,10 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
             logger.warning(f"yfinance: no market cap for {symbol}")
             return None
 
-        # Balance sheet fields
         total_debt = _safe_float(info.get("totalDebt"))
         cash_eq = _safe_float(info.get("totalCash"))
         short_inv = 0.0
 
-        # Try balance_sheet DataFrame for more detail
         try:
             bs = ticker.balance_sheet
             if bs is not None and not bs.empty:
@@ -110,7 +110,6 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
         except Exception as e:
             logger.error(f"{symbol}: balance_sheet fallback failed, using info-based values: {e}")
 
-        # Income statement fields
         revenue = _safe_float(info.get("totalRevenue"))
         interest_income = 0.0
         interest_expense = 0.0
@@ -145,9 +144,8 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 "interestExpense": interest_expense,
             },
         }
-    except Exception as e:
-        logger.error(f"yfinance fallback failed for {symbol}: {e}")
-        return None
+
+    return _run_with_timeout(_do_yf, timeout=30, fallback=None)
 
 
 def screen_symbol(symbol: str) -> Optional[dict]:
