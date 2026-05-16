@@ -96,149 +96,174 @@ def test_connect_failure_returns_none(monkeypatch):
 def test_account_translation_pulls_alpaca_keys(monkeypatch):
     from app.services.broker import ibkr_adapter
 
-    fake = _make_fake_ib()
-    fake.accountValues.return_value = [
-        SimpleNamespace(tag="TotalCashValue", value="123.45"),
-        SimpleNamespace(tag="NetLiquidation", value="678.90"),
-        SimpleNamespace(tag="BuyingPower", value="1357.80"),
-        SimpleNamespace(tag="AccountType", value="INDIVIDUAL"),
-        SimpleNamespace(tag="UnrelatedTag", value="ignore me"),
-    ]
-    monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
+    ibkr_adapter._load_ib_insync()
+    ibkr_adapter._OVERRIDE_IBKR_ENABLED = True
+    try:
+        fake = _make_fake_ib()
+        fake.accountValues.return_value = [
+            SimpleNamespace(tag="TotalCashValue", value="123.45"),
+            SimpleNamespace(tag="NetLiquidation", value="678.90"),
+            SimpleNamespace(tag="BuyingPower", value="1357.80"),
+            SimpleNamespace(tag="AccountType", value="INDIVIDUAL"),
+            SimpleNamespace(tag="UnrelatedTag", value="ignore me"),
+        ]
+        monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
 
-    acct = ibkr_adapter.IBBroker().get_account()
-    assert acct is not None
-    assert acct["cash"] == "123.45"
-    assert acct["equity"] == "678.90"
-    assert acct["portfolio_value"] == "678.90"
-    assert acct["buying_power"] == "1357.80"
-    assert acct["status"] == "ACTIVE"
+        acct = ibkr_adapter.IBBroker().get_account()
+        assert acct is not None
+        assert acct["cash"] == "123.45"
+        assert acct["equity"] == "678.90"
+        assert acct["portfolio_value"] == "678.90"
+        assert acct["buying_power"] == "1357.80"
+        assert acct["status"] == "ACTIVE"
+    finally:
+        ibkr_adapter._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_position_translation_computes_unrealized_pl(monkeypatch):
     from app.services.broker import ibkr_adapter
 
-    contract = SimpleNamespace(symbol="AAPL")
-    pos = SimpleNamespace(
-        contract=contract,
-        position=10,
-        avgCost=100.0,
-        marketPrice=110.0,
-        marketValue=1100.0,
-    )
-    fake = _make_fake_ib()
-    fake.positions.return_value = [pos]
-    monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
+    ibkr_adapter._load_ib_insync()
+    ibkr_adapter._OVERRIDE_IBKR_ENABLED = True
+    try:
+        contract = SimpleNamespace(symbol="AAPL")
+        pos = SimpleNamespace(
+            contract=contract,
+            position=10,
+            avgCost=100.0,
+            marketPrice=110.0,
+            marketValue=1100.0,
+        )
+        fake = _make_fake_ib()
+        fake.positions.return_value = [pos]
+        monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
 
-    out = ibkr_adapter.IBBroker().get_positions()
-    assert len(out) == 1
-    p = out[0]
-    assert p["symbol"] == "AAPL"
-    assert p["qty"] == "10"
-    assert p["avg_entry_price"] == "100.0"
-    # 10 * (110 - 100) = 100 unrealized
-    assert float(p["unrealized_pl"]) == pytest.approx(100.0)
-    assert float(p["unrealized_plpc"]) == pytest.approx(0.10)
+        out = ibkr_adapter.IBBroker().get_positions()
+        assert len(out) == 1
+        p = out[0]
+        assert p["symbol"] == "AAPL"
+        assert p["qty"] == "10"
+        assert p["avg_entry_price"] == "100.0"
+        # 10 * (110 - 100) = 100 unrealized
+        assert float(p["unrealized_pl"]) == pytest.approx(100.0)
+        assert float(p["unrealized_plpc"]) == pytest.approx(0.10)
+    finally:
+        ibkr_adapter._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_zero_position_filtered(monkeypatch):
     from app.services.broker import ibkr_adapter
 
-    contract = SimpleNamespace(symbol="GHOST")
-    pos = SimpleNamespace(contract=contract, position=0, avgCost=0.0, marketPrice=0.0, marketValue=0.0)
-    fake = _make_fake_ib()
-    fake.positions.return_value = [pos]
-    monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
+    ibkr_adapter._load_ib_insync()
+    ibkr_adapter._OVERRIDE_IBKR_ENABLED = True
+    try:
+        contract = SimpleNamespace(symbol="GHOST")
+        pos = SimpleNamespace(contract=contract, position=0, avgCost=0.0, marketPrice=0.0, marketValue=0.0)
+        fake = _make_fake_ib()
+        fake.positions.return_value = [pos]
+        monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
 
-    assert ibkr_adapter.IBBroker().get_positions() == []
+        assert ibkr_adapter.IBBroker().get_positions() == []
+    finally:
+        ibkr_adapter._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_simple_market_order_translation(monkeypatch):
     from app.services.broker import ibkr_adapter
 
-    fake = _make_fake_ib()
-    placed_orders: list = []
+    ibkr_adapter._load_ib_insync()
+    ibkr_adapter._OVERRIDE_IBKR_ENABLED = True
+    try:
+        fake = _make_fake_ib()
+        placed_orders: list = []
 
-    def fake_place(_contract, order):
-        placed_orders.append(order)
-        return SimpleNamespace(
-            contract=_contract,
-            order=order,
-            orderStatus=SimpleNamespace(status="Submitted", filled=0, avgFillPrice=0),
-        )
+        def fake_place(_contract, order):
+            placed_orders.append(order)
+            return SimpleNamespace(
+                contract=_contract,
+                order=order,
+                orderStatus=SimpleNamespace(status="Submitted", filled=0, avgFillPrice=0),
+            )
 
-    fake.placeOrder.side_effect = fake_place
-    monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
+        fake.placeOrder.side_effect = fake_place
+        monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
 
-    payload = {
-        "symbol": "AAPL",
-        "qty": "5",
-        "side": "buy",
-        "type": "market",
-        "time_in_force": "gtc",
-        "client_order_id": "abc-123",
-    }
-    out = ibkr_adapter.IBBroker().submit_order(payload)
-    assert out is not None
-    assert len(placed_orders) == 1
-    o = placed_orders[0]
-    assert o.action == "BUY"
-    assert float(o.totalQuantity) == 5.0
-    assert o.tif == "GTC"
-    assert o.orderRef == "abc-123"
+        payload = {
+            "symbol": "AAPL",
+            "qty": "5",
+            "side": "buy",
+            "type": "market",
+            "time_in_force": "gtc",
+            "client_order_id": "abc-123",
+        }
+        out = ibkr_adapter.IBBroker().submit_order(payload)
+        assert out is not None
+        assert len(placed_orders) == 1
+        o = placed_orders[0]
+        assert o.action == "BUY"
+        assert float(o.totalQuantity) == 5.0
+        assert o.tif == "GTC"
+        assert o.orderRef == "abc-123"
+    finally:
+        ibkr_adapter._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_bracket_order_emits_three_orders_with_correct_transmit(monkeypatch):
     from app.services.broker import ibkr_adapter
 
-    fake = _make_fake_ib()
-    placed_orders: list = []
-    next_order_id = [42]
+    ibkr_adapter._load_ib_insync()
+    ibkr_adapter._OVERRIDE_IBKR_ENABLED = True
+    try:
+        fake = _make_fake_ib()
+        placed_orders: list = []
+        next_order_id = [42]
 
-    def fake_place(_contract, order):
-        # Simulate IB assigning an orderId to the parent
-        if not getattr(order, "orderId", 0):
-            order.orderId = next_order_id[0]
-            next_order_id[0] += 1
-        placed_orders.append(order)
-        return SimpleNamespace(
-            contract=_contract,
-            order=order,
-            orderStatus=SimpleNamespace(status="Submitted", filled=0, avgFillPrice=0),
-        )
+        def fake_place(_contract, order):
+            # Simulate IB assigning an orderId to the parent
+            if not getattr(order, "orderId", 0):
+                order.orderId = next_order_id[0]
+                next_order_id[0] += 1
+            placed_orders.append(order)
+            return SimpleNamespace(
+                contract=_contract,
+                order=order,
+                orderStatus=SimpleNamespace(status="Submitted", filled=0, avgFillPrice=0),
+            )
 
-    fake.placeOrder.side_effect = fake_place
-    monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
+        fake.placeOrder.side_effect = fake_place
+        monkeypatch.setattr(ibkr_adapter, "_IB", lambda: fake)
 
-    payload = {
-        "symbol": "MSFT",
-        "qty": "3",
-        "side": "buy",
-        "type": "market",
-        "time_in_force": "gtc",
-        "order_class": "bracket",
-        "take_profit": {"limit_price": "200.00"},
-        "stop_loss": {"stop_price": "180.00"},
-        "client_order_id": "bracket-tag",
-    }
-    out = ibkr_adapter.IBBroker().submit_order(payload)
-    assert out is not None
-    assert len(placed_orders) == 3
-    parent, tp, sl = placed_orders
-    # Parent: market BUY, transmit False, orderRef carries the client tag
-    assert parent.action == "BUY"
-    assert parent.transmit is False
-    assert parent.orderRef == "bracket-tag"
-    # TP: limit SELL, transmit False, parentId set
-    assert tp.action == "SELL"
-    assert tp.lmtPrice == 200.0
-    assert tp.transmit is False
-    assert tp.parentId == parent.orderId
-    # SL: stop SELL, transmit True (arms the bracket atomically)
-    assert sl.action == "SELL"
-    assert sl.auxPrice == 180.0
-    assert sl.transmit is True
-    assert sl.parentId == parent.orderId
+        payload = {
+            "symbol": "MSFT",
+            "qty": "3",
+            "side": "buy",
+            "type": "market",
+            "time_in_force": "gtc",
+            "order_class": "bracket",
+            "take_profit": {"limit_price": "200.00"},
+            "stop_loss": {"stop_price": "180.00"},
+            "client_order_id": "bracket-tag",
+        }
+        out = ibkr_adapter.IBBroker().submit_order(payload)
+        assert out is not None
+        assert len(placed_orders) == 3
+        parent, tp, sl = placed_orders
+        # Parent: market BUY, transmit False, orderRef carries the client tag
+        assert parent.action == "BUY"
+        assert parent.transmit is False
+        assert parent.orderRef == "bracket-tag"
+        # TP: limit SELL, transmit False, parentId set
+        assert tp.action == "SELL"
+        assert tp.lmtPrice == 200.0
+        assert tp.transmit is False
+        assert tp.parentId == parent.orderId
+        # SL: stop SELL, transmit True (arms the bracket atomically)
+        assert sl.action == "SELL"
+        assert sl.auxPrice == 180.0
+        assert sl.transmit is True
+        assert sl.parentId == parent.orderId
+    finally:
+        ibkr_adapter._OVERRIDE_IBKR_ENABLED = False
 
 
 def test_bracket_without_prices_raises():

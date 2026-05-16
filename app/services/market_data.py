@@ -517,7 +517,8 @@ _ibkr_breaker = CircuitBreaker("ibkr", failure_threshold=3, reset_timeout=600.0)
 
 # Hard override: IBKR data is DISABLED until the gateway is healthy.
 # Flip to True (and ensure IBKR_DATA_ENABLED=true) to re-enable.
-_OVERRIDE_IBKR_ENABLED = False
+# Imported from ibkr_adapter so one flag blocks ALL ib_insync connections.
+from app.services.broker.ibkr_adapter import _OVERRIDE_IBKR_ENABLED  # noqa: F811
 
 
 def fetch_ibkr(symbol, period="2y", start=None, end=None):
