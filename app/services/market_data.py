@@ -513,7 +513,7 @@ class CircuitBreaker:
 # Global circuit breakers
 _yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=10, reset_timeout=120.0)
 _alpaca_breaker = CircuitBreaker("alpaca", failure_threshold=10, reset_timeout=60.0)
-_ibkr_breaker = CircuitBreaker("ibkr", failure_threshold=5, reset_timeout=120.0)
+_ibkr_breaker = CircuitBreaker("ibkr", failure_threshold=3, reset_timeout=600.0)
 
 
 def fetch_ibkr(symbol, period="2y", start=None, end=None):
@@ -521,12 +521,15 @@ def fetch_ibkr(symbol, period="2y", start=None, end=None):
 
     Uses delayed market data (reqMarketDataType(3)) — data may be 15-20 min
     delayed, which is acceptable for screening/analysis. Returns None when
-    IBKR is not the active broker, circuit breaker is open, connection
+    IBKR data source is disabled, circuit breaker is open, connection
     fails, or any error occurs — so callers degrade gracefully to Alpaca
     or yfinance fallback.
+
+    IBKR as a DATA source is independent of IBKR as a TRADING broker.
+    Set IBKR_DATA_ENABLED=true to enable; default OFF to avoid 15-30s
+    timeouts when the gateway is unreachable.
     """
-    broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
-    if broker_type != "ibkr":
+    if os.environ.get("IBKR_DATA_ENABLED", "false").lower() not in ("true", "1", "yes"):
         return None
 
     if _ibkr_breaker.is_open():
@@ -535,6 +538,19 @@ def fetch_ibkr(symbol, period="2y", start=None, end=None):
 
     symbol = _validate_symbol(symbol)
     if not symbol:
+        return None
+
+    # Fast socket pre-check — avoids 15-30s ib_insync timeout when gateway is down.
+    import socket as _socket
+    from app.services.broker.ibkr_config import get_ibkr_config as _get_ibkr_config
+    _ic = _get_ibkr_config()
+    try:
+        _s = _socket.create_connection((_ic["host"], _ic["port"]), timeout=3)
+        _s.close()
+    except Exception:
+        logger.warning("IBKR gateway %s:%d unreachable (pre-check) — skipping %s",
+                       _ic["host"], _ic["port"], symbol)
+        _ibkr_breaker.record_failure()
         return None
 
     try:
@@ -621,7 +637,7 @@ def fetch(symbol, period="2y", start=None, end=None):
     if _m:
         _m.cache_miss("market_data_cache")
 
-    # Try IBKR first (only if BROKER_TYPE=ibkr, otherwise returns None)
+    # Try IBKR first (only if IBKR_DATA_ENABLED=true, otherwise returns None instantly)
     if _m:
         _m.incr("api_calls_total", provider="ibkr")
     df = fetch_ibkr(symbol, period=period, start=start, end=end)

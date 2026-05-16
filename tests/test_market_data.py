@@ -140,17 +140,21 @@ def _make_fake_bar(date_str, open_=100.0, high=101.0, low=99.0, close=100.5, vol
     )
 
 
-def test_fetch_ibkr_skip_when_alpaca(monkeypatch):
-    """Returns None when BROKER_TYPE is not ibkr."""
-    monkeypatch.setenv("BROKER_TYPE", "alpaca")
+def test_fetch_ibkr_skip_when_disabled(monkeypatch):
+    """Returns None when IBKR_DATA_ENABLED is not 'true'."""
+    monkeypatch.delenv("IBKR_DATA_ENABLED", raising=False)
     from app.services import market_data as md
     md.clear_market_data_cache()
+    assert md.fetch_ibkr("AAPL") is None
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "false")
+    assert md.fetch_ibkr("AAPL") is None
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "0")
     assert md.fetch_ibkr("AAPL") is None
 
 
 def test_fetch_ibkr_breaker_open(monkeypatch):
     """Returns None when the IBKR circuit breaker is open."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     from app.services import market_data as md
     md._ibkr_breaker.failures = md._ibkr_breaker.failure_threshold
     md._ibkr_breaker.state = "open"
@@ -164,7 +168,7 @@ def test_fetch_ibkr_breaker_open(monkeypatch):
 
 def test_fetch_ibkr_connect_failure(monkeypatch):
     """Returns None when _connect returns None (gateway unreachable)."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     import pandas as pd
     from types import SimpleNamespace
     calls = {}
@@ -195,6 +199,10 @@ def test_fetch_ibkr_connect_failure(monkeypatch):
     monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
     monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
 
+    # Mock socket pre-check to pass (gateway reachable)
+    _fake_sock = SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
+
     from app.services import market_data as md
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
@@ -207,7 +215,7 @@ def test_fetch_ibkr_connect_failure(monkeypatch):
 
 def test_fetch_ibkr_empty_bars(monkeypatch):
     """Returns None when reqHistoricalData returns empty list."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     import pandas as pd
     from types import SimpleNamespace
     calls = {}
@@ -233,6 +241,10 @@ def test_fetch_ibkr_empty_bars(monkeypatch):
     monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
     monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
 
+    # Mock socket pre-check to pass (gateway reachable)
+    _fake_sock = SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
+
     from app.services import market_data as md
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
@@ -243,7 +255,7 @@ def test_fetch_ibkr_empty_bars(monkeypatch):
 
 def test_fetch_ibkr_success(monkeypatch):
     """Returns DataFrame on successful ib_insync historical data."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     import pandas as pd
     from types import SimpleNamespace
     calls = {}
@@ -286,6 +298,10 @@ def test_fetch_ibkr_success(monkeypatch):
     monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
     monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
 
+    # Mock socket pre-check to pass (gateway reachable)
+    _fake_sock = SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
+
     from app.services import market_data as md
     md.clear_market_data_cache()
     md._ibkr_breaker.failures = 0
@@ -304,7 +320,7 @@ def test_fetch_ibkr_success(monkeypatch):
 
 def test_fetch_ibkr_bad_symbol(monkeypatch):
     """Returns None for invalid symbols."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     from app.services import market_data as md
     md.clear_market_data_cache()
     assert md.fetch_ibkr("") is None
@@ -312,8 +328,8 @@ def test_fetch_ibkr_bad_symbol(monkeypatch):
 
 
 def test_fetch_priority_ibkr_integration(monkeypatch):
-    """fetch() tries IBKR first when BROKER_TYPE=ibkr, even without real connection."""
-    monkeypatch.setenv("BROKER_TYPE", "ibkr")
+    """fetch() tries IBKR first when IBKR_DATA_ENABLED=true, even without real connection."""
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
     import pandas as pd
     from types import SimpleNamespace
 
@@ -344,6 +360,10 @@ def test_fetch_priority_ibkr_integration(monkeypatch):
     monkeypatch.setattr("app.services.broker.ibkr_adapter._call_ib", fake_call_ib)
     monkeypatch.setattr("app.services.broker.ibkr_adapter._load_ib_insync", fake_load)
 
+    # Mock socket pre-check to pass (gateway reachable)
+    _fake_sock = SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr("socket.create_connection", lambda *a, **kw: _fake_sock)
+
     # Need Alpaca settings to be present (but won't be called)
     from app.config import settings
     monkeypatch.setattr(settings, "ALPACA_API_KEY", "key")
@@ -369,3 +389,27 @@ def test_fetch_priority_ibkr_integration(monkeypatch):
     df = md.fetch("AAPL")
     assert df is not None
     assert len(df) == 249
+
+
+def test_fetch_ibkr_socket_timeout(monkeypatch):
+    """Returns None and records breaker failure when socket pre-check fails."""
+    monkeypatch.setenv("IBKR_DATA_ENABLED", "true")
+    from types import SimpleNamespace
+
+    def fake_socket_timeout(*a, **kw):
+        raise OSError("Connection refused")
+
+    monkeypatch.setattr("socket.create_connection", fake_socket_timeout)
+
+    from app.services import market_data as md
+    md.clear_market_data_cache()
+    md._ibkr_breaker.failures = 0
+    md._ibkr_breaker.state = "closed"
+
+    result = md.fetch_ibkr("AAPL")
+    assert result is None
+    assert md._ibkr_breaker.failures == 1
+
+    # Cleanup
+    md._ibkr_breaker.failures = 0
+    md._ibkr_breaker.state = "closed"
