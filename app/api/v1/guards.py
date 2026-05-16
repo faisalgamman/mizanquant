@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +17,9 @@ router = APIRouter(tags=["v1-guards"])
 
 
 @router.get("/guards/recent")
-async def v1_guards_recent(limit: int = 50, db: AsyncSession = Depends(get_async_db)):
+async def v1_guards_recent(limit: int = 50, db: AsyncSession | None = Depends(get_async_db)):
+    if db is None:
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     stmt = (
         select(GuardLog)
         .order_by(GuardLog.ts.desc())
@@ -38,7 +41,9 @@ async def v1_guards_recent(limit: int = 50, db: AsyncSession = Depends(get_async
 
 
 @router.get("/guards/summary")
-async def v1_guards_summary(db: AsyncSession = Depends(get_async_db)):
+async def v1_guards_summary(db: AsyncSession | None = Depends(get_async_db)):
+    if db is None:
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     today = datetime.utcnow().date()
     stmt = (
         select(GuardLog.guard_name, func.count(GuardLog.id))

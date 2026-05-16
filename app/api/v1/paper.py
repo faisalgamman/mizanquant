@@ -5,6 +5,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,9 @@ class PaperExecuteRequest(BaseModel):
 
 
 @router.post("/paper/execute")
-async def v1_paper_execute(body: PaperExecuteRequest, db: AsyncSession = Depends(get_async_db)):
+async def v1_paper_execute(body: PaperExecuteRequest, db: AsyncSession | None = Depends(get_async_db)):
+    if db is None:
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     from app.db.models import TradeHistory
     from datetime import datetime, timezone
 
@@ -61,7 +64,9 @@ async def v1_paper_execute(body: PaperExecuteRequest, db: AsyncSession = Depends
 
 
 @router.get("/paper/trades")
-async def v1_paper_trades(limit: int = Query(default=50, le=200), db: AsyncSession = Depends(get_async_db)):
+async def v1_paper_trades(limit: int = Query(default=50, le=200), db: AsyncSession | None = Depends(get_async_db)):
+    if db is None:
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     from app.db.models import TradeHistory
 
     result = await db.execute(
@@ -102,7 +107,9 @@ async def v1_paper_status(strategy_id: str | None = Query(default=None)):
 
 
 @router.post("/paper/close/{trade_id}")
-async def v1_paper_close(trade_id: int, db: AsyncSession = Depends(get_async_db)):
+async def v1_paper_close(trade_id: int, db: AsyncSession | None = Depends(get_async_db)):
+    if db is None:
+        return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     from app.db.models import TradeHistory
     from datetime import datetime, timezone
 

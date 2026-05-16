@@ -15,8 +15,37 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
+from collections import defaultdict
 from typing import Callable
+
+# ---------------------------------------------------------------------------
+# Rate limiter: prevents log storms from exceeding Railway's 500 logs/sec cap
+# ---------------------------------------------------------------------------
+
+class RateLimitFilter(logging.Filter):
+    """Only emit one log record per *key* every *interval* seconds.
+
+    Keys are derived from ``(name, levelno, msg)`` so repeated error
+    messages (e.g. timeout storms) are collapsed into a single log line
+    per interval.
+    """
+
+    def __init__(self, interval: float = 5.0) -> None:
+        super().__init__()
+        self._interval = interval
+        self._history: dict[str, float] = {}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        key = f"{record.name}:{record.levelno}:{record.msg}"
+        now = time.monotonic()
+        last = self._history.get(key, 0.0)
+        if now - last < self._interval:
+            return False
+        self._history[key] = now
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Structured logging (structlog)
@@ -60,6 +89,10 @@ def setup_logging(log_level: str | None = None) -> None:
             force=True,
         )
 
+        # Attach rate limiter to the root logger (applies to all children)
+        for handler in logging.root.handlers:
+            handler.addFilter(RateLimitFilter(interval=5.0))
+
         logger = structlog.get_logger("app")
         logger.info("Structured logging initialized", log_level=level)
 
@@ -70,6 +103,8 @@ def setup_logging(log_level: str | None = None) -> None:
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             force=True,
         )
+        for handler in logging.root.handlers:
+            handler.addFilter(RateLimitFilter(interval=5.0))
         logging.getLogger("app").info("structlog not available — using plain logging")
 
 
