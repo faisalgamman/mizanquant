@@ -922,6 +922,50 @@ select:focus,input:focus { border-color:var(--accent); }
   .sk-row-3 { grid-template-columns:1fr 1fr; }
   .sk-row-2 { grid-template-columns:1fr 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   USX PRO Design System — component spec normalization layer
+   Enforces the exact component specs from the design system docs
+   (components-*.html). Appended last so it wins over earlier rules.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── Card ─── */
+.card { background:var(--bg-tertiary); border:1px solid var(--border-light); border-radius:var(--radius); padding:16px; }
+.card-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
+.card-title { font-size:13px; font-weight:600; color:var(--text-primary); letter-spacing:0; }
+.card-subtitle { font-size:10px; color:var(--text-muted); margin-top:2px; }
+.card-actions { display:flex; gap:6px; }
+
+/* ─── Stat block ─── */
+.stat-row { display:flex; gap:16px; }
+.stat { flex:1; }
+.stat-val { font-size:18px; font-weight:700; font-family:var(--mono); line-height:1; }
+.stat-lab { font-size:9px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.4px; margin-top:4px; }
+
+/* ─── Buttons ─── */
+.btn { padding:5px 14px; border-radius:var(--radius); border:none; cursor:pointer; font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:4px; transition:all 0.15s; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text-secondary); }
+.btn-sm { padding:3px 10px; font-size:10px; }
+.btn-icon { width:28px; height:28px; padding:0; justify-content:center; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border-light); border-radius:var(--radius); cursor:pointer; }
+
+/* ─── Pills / Badges ─── */
+.pill { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:var(--radius-xs,2px); font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap; }
+.pill.green, .pill.b   { background:var(--green-dim);  color:var(--green); }
+.pill.red, .pill.avoid { background:var(--red-dim);    color:var(--red); }
+.pill.amber, .pill.w   { background:var(--amber-dim);  color:var(--amber); }
+.pill.accent           { background:var(--accent-dim); color:var(--accent); }
+.pill.muted            { background:var(--bg-tertiary);color:var(--text-muted); }
+.pill .dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+
+/* ─── Status dots ─── */
+.status-group { display:flex; align-items:center; gap:6px; background:var(--bg-tertiary); border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:4px 8px; font-size:11px; }
+.status-dot-ds { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.status-dot-ds.pulse { animation:pulse 2s infinite; }
+
+/* ─── Micro-labels (section / nano / sidebar) ─── */
+.micro-section { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); }
+.micro-nano    { font-size:8px;  font-weight:600; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-muted); }
 </style>
 </head>
 <body>

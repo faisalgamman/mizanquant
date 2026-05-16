@@ -48,6 +48,10 @@ from typing import Optional
 
 logger = logging.getLogger("screener")
 
+# Hard override: IBKR is DISABLED until the gateway is healthy.
+# Imported by market_data.py so both data-fetch and broker paths are blocked.
+_OVERRIDE_IBKR_ENABLED = False
+
 # Throttle for IBKR-down Telegram alerts (one per 30 min per host:port).
 _last_ibkr_alert: dict[str, float] = {}
 _IBKR_ALERT_THROTTLE_S = 1800
@@ -154,6 +158,8 @@ def _connect(strategy_id: str | None):
     """Return a connected IB() instance for this strategy, reconnecting
     lazily if the existing one has dropped. Returns None when the
     gateway is unreachable; callers must tolerate this."""
+    if not _OVERRIDE_IBKR_ENABLED:
+        return None
     _load_ib_insync()
     key = strategy_id or "_default"
     with _connect_lock:
