@@ -50,13 +50,32 @@ def _save_backtest_cache(key: str, value: dict):
 @router.get("/trading/summary")
 async def v1_trading_summary():
     from app.config import STRATEGY_CONFIGS
-    from app.services.broker.factory import get_broker
+    from app.services.broker.factory import get_broker, _build
 
     sid = next(iter(STRATEGY_CONFIGS), None)
     broker = get_broker(strategy_id=sid)
 
     account = broker.get_account(strategy_id=sid) if broker else None
     positions = broker.get_positions(strategy_id=sid) if broker else []
+
+    # Resilience fallback — if the primary broker (e.g. IBKR with a downed
+    # gateway) returns no account, fall back to Alpaca so the dashboard
+    # still shows live equity/positions instead of blank "—".
+    served_by = broker.name if broker else "unknown"
+    if account is None and served_by != "alpaca":
+        try:
+            alpaca = _build("alpaca")
+            fb_account = alpaca.get_account(strategy_id=sid)
+            if fb_account:
+                logger.warning(
+                    "trading/summary: %s broker unavailable — served via Alpaca fallback",
+                    served_by,
+                )
+                account = fb_account
+                positions = alpaca.get_positions(strategy_id=sid) or []
+                served_by = "alpaca (fallback)"
+        except Exception as exc:
+            logger.error("trading/summary Alpaca fallback failed: %s", exc)
 
     if account:
         equity = float(account.get("equity", 0))
@@ -70,7 +89,7 @@ async def v1_trading_summary():
         equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
 
     return {
-        "broker_type": broker.name if broker else "unknown",
+        "broker_type": served_by,
         "equity": equity,
         "cash": cash,
         "buying_power": buying_power,
