@@ -504,30 +504,7 @@ def execute_buy(
             _notify_trade(result)
             return result
 
-        if app_cfg.execution.bracket_required and order_payload.get("order_class") == "bracket":
-            if not _arm_bracket(order, strategy_id=strategy_id):
-                result["order_id"] = order.get("id", "")
-                result["client_order_id"] = order.get("client_order_id", order_payload.get("client_order_id", ""))
-                result["status"] = "canceled_leg_missing"
-                result["reason"] = "Bracket legs failed to attach; parent order canceled"
-                _record_trade(result, signal_payload)
-                _notify_trade(result)
-                log_trade_event(
-                    "canceled_leg_missing",
-                    coid=result.get("client_order_id", ""),
-                    strategy=strategy_id,
-                    symbol=symbol,
-                    qty=qty,
-                    price=price,
-                    sl=stop_loss,
-                    tp=take_profit,
-                    regime=eligibility["sizing"].get("regime"),
-                    confidence=confidence,
-                    guards_passed=len(eligibility.get("guards", [])),
-                )
-                return result
-
-        # Success
+        # Build result inside the lock, record trade
         result["executed"] = True
         result["order_id"] = order.get("id", "")
         result["client_order_id"] = order.get("client_order_id", order_payload.get("client_order_id", ""))
@@ -545,32 +522,55 @@ def execute_buy(
         result["filled_qty"] = 0
         result["filled_avg_price"] = None
 
-        # Record trade in DB
         _record_trade(result, signal_payload)
 
-        # Notify via Telegram
-        _notify_trade(result)
-        log_trade_event(
-            "submitted",
-            coid=result.get("client_order_id", ""),
-            strategy=strategy_id,
-            symbol=symbol,
-            qty=qty,
-            price=price,
-            sl=stop_loss,
-            tp=take_profit,
-            regime=sizing.get("regime"),
-            confidence=confidence,
-            guards_passed=len(eligibility.get("guards", [])),
-        )
+    # ═══════════════ LOCK RELEASED ═══════════════
 
-        logger.info(
-            f"{label} BUY executed: {symbol} x{qty} @ ~${price:.2f} | "
-            f"SL=${stop_loss:.2f} TP=${take_profit:.2f} | "
-            f"Risk: ${sizing['risk_amount']:.2f} ({sizing['risk_pct']:.1f}%)"
-        )
+    # Verify bracket legs outside the lock — polling may take up to 10s
+    # and should not block other trades for this strategy.
+    if app_cfg.execution.bracket_required and order_payload.get("order_class") == "bracket":
+        if not _arm_bracket(order, strategy_id=strategy_id):
+            result["status"] = "canceled_leg_missing"
+            result["reason"] = "Bracket legs failed to attach; parent order canceled"
+            _notify_trade(result)
+            log_trade_event(
+                "canceled_leg_missing",
+                coid=result.get("client_order_id", ""),
+                strategy=strategy_id,
+                symbol=symbol,
+                qty=qty,
+                price=price,
+                sl=stop_loss,
+                tp=take_profit,
+                regime=sizing.get("regime"),
+                confidence=confidence,
+                guards_passed=len(eligibility.get("guards", [])),
+            )
+            return result
 
-        return result
+    # Notify + log outside lock
+    _notify_trade(result)
+    log_trade_event(
+        "submitted",
+        coid=result.get("client_order_id", ""),
+        strategy=strategy_id,
+        symbol=symbol,
+        qty=qty,
+        price=price,
+        sl=stop_loss,
+        tp=take_profit,
+        regime=sizing.get("regime"),
+        confidence=confidence,
+        guards_passed=len(eligibility.get("guards", [])),
+    )
+
+    logger.info(
+        f"{label} BUY executed: {symbol} x{qty} @ ~${price:.2f} | "
+        f"SL=${stop_loss:.2f} TP=${take_profit:.2f} | "
+        f"Risk: ${sizing['risk_amount']:.2f} ({sizing['risk_pct']:.1f}%)"
+    )
+
+    return result
 
 
 def execute_sell(symbol: str, price: float, confidence: float, strategy_id: str = None) -> dict:

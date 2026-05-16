@@ -440,6 +440,7 @@ class UnifiedPipeline:
         stage.count_in = len(signals)
 
         from app.services.kelly import kelly_from_db_pnls
+        from app.services.risk_manager import _pnls_pct_from_db
         from app.config import settings
 
         total_equity = 100000.0  # Will be updated from Alpaca account
@@ -460,7 +461,7 @@ class UnifiedPipeline:
                 # Use strategy-specific risk from config
                 risk_pct = settings.RISK_PCT / 100.0
                 kelly_risk, kelly_diag = kelly_from_db_pnls(
-                    pnls_pct=[],  # No trade history yet
+                    pnls_pct=_pnls_pct_from_db(strategy_id=sig.strategy_id, lookback_trades=50),
                     static_risk_pct=risk_pct,
                     fractional=0.5,
                 )
@@ -495,6 +496,8 @@ class UnifiedPipeline:
         stage = StageReport(stage="guardian")
 
         from app.services.risk_manager import check_trade_eligibility
+        from app.services.alpaca_client import get_account as alpaca_get_account
+        from app.services.alpaca_client import get_positions as alpaca_get_positions
         from app.db.database import SessionLocal
 
         allocated = getattr(self, "_cached_signals", [])
@@ -502,6 +505,19 @@ class UnifiedPipeline:
 
         rejected = 0
         passed_signals: list[Signal] = []
+
+        # Fetch real account + positions once before looping
+        live_account: dict[str, Any] = {"equity": 100000.0, "cash": 50000.0}
+        live_positions: list[dict] = []
+        try:
+            acct = alpaca_get_account()
+            if acct:
+                live_account = acct
+            pos = alpaca_get_positions()
+            if pos:
+                live_positions = pos
+        except Exception:
+            logger.warning("Stage 6: could not fetch live account data — using fallback")
 
         for sig in allocated:
             if sig.position_size_qty <= 0:
@@ -517,8 +533,8 @@ class UnifiedPipeline:
                     side="buy",
                     price=sig.price,
                     stop_loss=sig.stop_loss,
-                    account={"equity": 100000.0, "cash": 50000.0},
-                    open_positions=[],
+                    account=live_account,
+                    open_positions=live_positions,
                     strategy_id=sig.strategy_id,
                 )
 
