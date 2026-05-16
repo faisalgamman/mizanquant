@@ -926,46 +926,48 @@ select:focus,input:focus { border-color:var(--accent); }
 /* ═══════════════════════════════════════════════════════════════════
    USX PRO Design System — component spec normalization layer
    Enforces the exact component specs from the design system docs
-   (components-*.html). Appended last so it wins over earlier rules.
+   (components-card.html, components-buttons.html). Appended last so it
+   wins over earlier rules. Only selectors that exist in the dashboard
+   markup are included — no dead CSS.
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ─── Card ─── */
+/* ─── Card (39 uses) ─── */
 .card { background:var(--bg-tertiary); border:1px solid var(--border-light); border-radius:var(--radius); padding:16px; }
 .card-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
-.card-title { font-size:13px; font-weight:600; color:var(--text-primary); letter-spacing:0; }
+.card-title { font-size:13px; font-weight:600; color:var(--text-primary); }
 .card-subtitle { font-size:10px; color:var(--text-muted); margin-top:2px; }
 .card-actions { display:flex; gap:6px; }
 
-/* ─── Stat block ─── */
+/* ─── Stat block (23 uses) ─── */
 .stat-row { display:flex; gap:16px; }
-.stat { flex:1; }
 .stat-val { font-size:18px; font-weight:700; font-family:var(--mono); line-height:1; }
 .stat-lab { font-size:9px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.4px; margin-top:4px; }
 
-/* ─── Buttons ─── */
+/* ─── Buttons (btn-primary 20×, btn-sm 33×, btn-icon 8×) ─── */
 .btn { padding:5px 14px; border-radius:var(--radius); border:none; cursor:pointer; font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:4px; transition:all 0.15s; }
 .btn-primary { background:var(--accent); color:#fff; }
 .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text-secondary); }
 .btn-sm { padding:3px 10px; font-size:10px; }
 .btn-icon { width:28px; height:28px; padding:0; justify-content:center; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border-light); border-radius:var(--radius); cursor:pointer; }
 
-/* ─── Pills / Badges ─── */
-.pill { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:var(--radius-xs,2px); font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; white-space:nowrap; }
-.pill.green, .pill.b   { background:var(--green-dim);  color:var(--green); }
-.pill.red, .pill.avoid { background:var(--red-dim);    color:var(--red); }
-.pill.amber, .pill.w   { background:var(--amber-dim);  color:var(--amber); }
-.pill.accent           { background:var(--accent-dim); color:var(--accent); }
-.pill.muted            { background:var(--bg-tertiary);color:var(--text-muted); }
-.pill .dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+/* ─── Pills / Badges — design-system `.pill` spec applied to the
+       dashboard's real class names (.badge-tag is generated in JS,
+       so we style the existing class instead of renaming markup) ─── */
+.badge-tag {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:1px 8px; border-radius:2px;
+  font-size:9px; font-weight:600;
+  text-transform:uppercase; letter-spacing:0.3px;
+  white-space:nowrap;
+}
+.badge-tag .dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+/* colour variants already map to design-system tokens:
+   .badge-green → --green, .badge-red → --red, .badge-blue → --accent */
+.analyze-signal-badge { padding:2px 8px; border-radius:2px; font-size:10px; font-weight:600; display:inline-block; text-transform:uppercase; letter-spacing:0.3px; }
 
-/* ─── Status dots ─── */
-.status-group { display:flex; align-items:center; gap:6px; background:var(--bg-tertiary); border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:4px 8px; font-size:11px; }
-.status-dot-ds { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-.status-dot-ds.pulse { animation:pulse 2s infinite; }
-
-/* ─── Micro-labels (section / nano / sidebar) ─── */
-.micro-section { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); }
-.micro-nano    { font-size:8px;  font-weight:600; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-muted); }
+/* ─── Status dots — design-system sizes (6px status / 5px market-bar) ─── */
+.status-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.sb-dot, .ws-dot, .pulse-dot { width:5px; height:5px; border-radius:50%; }
 </style>
 </head>
 <body>

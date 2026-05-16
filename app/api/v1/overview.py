@@ -46,13 +46,27 @@ async def _get_system_status():
 
 async def _get_portfolio():
     from app.config import settings as cfg, STRATEGY_CONFIGS
-    from app.services.broker.factory import get_broker
+    from app.services.broker.factory import get_broker, _build
 
     sid = next(iter(STRATEGY_CONFIGS), None)
     broker = get_broker(strategy_id=sid)
 
     account = broker.get_account(strategy_id=sid) if broker else None
     positions = broker.get_positions(strategy_id=sid) if broker else []
+
+    # Resilience fallback — primary broker (e.g. IBKR gateway down) returns
+    # nothing → fall back to Alpaca so the portfolio panel shows live data.
+    broker_label = broker.name if broker else "unknown"
+    if account is None and broker_label != "alpaca":
+        try:
+            alpaca = _build("alpaca")
+            fb = alpaca.get_account(strategy_id=sid)
+            if fb:
+                account = fb
+                positions = alpaca.get_positions(strategy_id=sid) or []
+                broker_label = "alpaca (fallback)"
+        except Exception:
+            pass
 
     if account:
         equity = float(account.get("equity", 0))
@@ -78,7 +92,7 @@ async def _get_portfolio():
     ]
 
     return {
-        "broker_type": broker.name if broker else "unknown",
+        "broker_type": broker_label,
         "equity": equity, "cash": cash, "buying_power": buying_power,
         "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
         "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
