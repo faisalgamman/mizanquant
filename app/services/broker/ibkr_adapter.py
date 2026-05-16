@@ -50,7 +50,7 @@ logger = logging.getLogger("screener")
 
 # Hard override: IBKR is DISABLED until the gateway is healthy.
 # Imported by market_data.py so both data-fetch and broker paths are blocked.
-_OVERRIDE_IBKR_ENABLED = False
+_OVERRIDE_IBKR_ENABLED = True
 
 # Throttle for IBKR-down Telegram alerts (one per 30 min per host:port).
 _last_ibkr_alert: dict[str, float] = {}
