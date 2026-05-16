@@ -1,26 +1,34 @@
-# Deploying the mizanquant rebrand to Railway
+# Deploying the mizanquant rebrand + new Overview
 
-This kit applies the **mizanquant** brand identity to your trading dashboard, Telegram alerts, and the bilingual AI analyst — then ships to Railway.
+This kit does **two** things to your existing mizanquant repo:
+
+1. **Rebrand** — Telegram alerts and the AI agent now say *ميزان كوانت*, the sidebar shows the new mīm-trace logo, the page title and favicon are mizanquant.
+2. **Replace the Overview tab** — your current dashboard is preserved at `/static/dashboard-legacy.html` (all tabs intact), and `/static/dashboard.html` is now a redesigned Overview matching the UI Kit, wired to your real `/api/v1/*` endpoints.
 
 ## What's in here
 
 | File | Purpose |
 | ----- | ----- |
-| `apply-rebrand.py` | Idempotent Python script that patches three files in your repo. |
-| `static/logo-monogram.svg` | Mīm-trace mark, transparent background. 64×64. |
-| `static/logo-wordmark.svg` | Horizontal lockup: monogram + `mizanquant` wordmark. 280×80. |
-| `static/logo-favicon.svg` | Simplified favicon, 32×32, optimized for 16/32 px. |
+| `apply-rebrand.py` | One script does it all. Idempotent. |
+| `static/overview-v2.html` | The new Overview page (drop-in for dashboard.html). |
+| `static/overview-v2.js` | Vanilla JS that wires it to your `/api/v1/*` endpoints. |
+| `static/logo-monogram.svg` | Mīm-trace mark, transparent. 64×64. |
+| `static/logo-wordmark.svg` | Horizontal lockup. 280×80. |
+| `static/logo-favicon.svg` | Simplified favicon. 32×32. |
 
-## What the script touches
+## What the new Overview shows
 
-| File | Change |
-| ----- | ----- |
-| `app/static/dashboard.html` | Page `<title>` → *mizanquant — Halal Trading Suite*. Favicon link added. Sidebar logo → inline mīm-trace SVG. Sidebar wordmark → `mizanquant / Halal Trading Suite`. |
-| `app/services/telegram_alert.py` | Inserts `_BRAND_LINE = "ميزان كوانت · mizanquant"` constant. Prefixes every alert timestamp footer with it — so each notification ends with `ميزان كوانت · mizanquant\n2026-05-15 14:32 UTC`. |
-| `app/ai_agent.py` | Both Arabic system prompts now introduce the model as *المحلل المالي في منصة ميزان كوانت*. Template report footer + "hello" reply rebranded from *OpenBB Forecast* to *ميزان كوانت*. |
-| `app/static/logo-*.svg` | The three logo files copied in. |
+A faithful implementation of the design system:
 
-Each touched file gets a `.bak` backup the first time.
+- **3-column workflow** — Scan (Market strip · Regime · Signals table) · Analyze (sticky middle column) · Trade (Portfolio · Positions · Paper · Pipeline · Guards · Schedule)
+- **Lower row** — Models leaderboard · Sectors heatmap with halal flagging · AI Consensus
+- **Click any signal** → Analyze panel fetches `/api/v1/scoring/weighted`, `/api/v1/trade/plan`, `/api/v1/halal/check` in parallel and renders score breakdown + trade plan
+- **"Send to paper trade"** → POSTs to `/api/v1/paper/execute`
+- **"Run AI consensus"** → calls `/consensus` and renders the 14-tool vote
+- **"Run pipeline"** → calls `/api/v1/pipeline/run?dry_run=true&strategy=ABC`
+- **Auto-refreshes every 30s**
+
+The sidebar links to the other tabs (Forecast Lab, Trading Lab, Backtest, Risk Desk, etc.) point at `/static/dashboard-legacy.html#tab-…` — your existing app is **fully preserved**.
 
 ## How to apply
 
@@ -39,73 +47,70 @@ You'll see something like:
 === mizanquant rebrand ===
 
 → app/static/dashboard.html
-  ✓ <title>OpenBB Forecast — Trading Dashboard</title>…
-  ✓ <div class="logo"><i class="fas fa-chart-line"></i></div>…
-  ✓ <div class="sidebar-brand-text"><h2>USX PRO</h2>…
-✓ app/static/dashboard.html  (3 change(s), backup → dashboard.html.bak)
+  · already rebranded (marker present)
 
 → app/services/telegram_alert.py
-  ✓ _TELEGRAM_PHOTO_API = "…"…
-  ✓ {_utc_label()} UTC…
-  ✓ 🕐 {datetime.now(timezone.utc)…
-✓ app/services/telegram_alert.py  (3 change(s), backup → telegram_alert.py.bak)
+  ✓ _TELEGRAM_PHOTO_API = "https://…
+  ✓ {_utc_label()} UTC  ×5
+  ✓ 🕐 {datetime.now(timezone.utc).strftime…  ×3
+✓ app/services/telegram_alert.py  (9 changes, backup → telegram_alert.py.bak)
 
 → app/ai_agent.py
-  ✓ "أنت محلل مالي إسلامي خبير. مهمتك هي تحليل بيانات الفرص الاستثمارية "…
-  ✓ "أنت مستشار استثماري إسلامي خبير. أجب على أسئلة المستثمرين "…
-  ✓ 🤖 تم إعداد هذا التقرير بواسطة **المحلل الذكي** | OpenBB Forecast…
-  ✓ أنا **المحلل الذكي** لمنصة OpenBB Forecast.…
-✓ app/ai_agent.py  (4 change(s), backup → ai_agent.py.bak)
+  ✓ "أنت محلل مالي إسلامي خبير…
+  ✓ "أنت مستشار استثماري…
+  ✓ 🤖 تم إعداد هذا التقرير…
+  ✓ أنا **المحلل الذكي** لمنصة OpenBB Forecast.
+✓ app/ai_agent.py  (4 changes, backup → ai_agent.py.bak)
 
-→ app/static/  (logo SVGs)
+→ app/static/dashboard.html  (replace with new Overview)
+  ✓ Preserved original as dashboard-legacy.html
+  ✓ Installed new mizanquant Overview as dashboard.html
+
+→ app/static/  (logo SVGs + overview-v2.js)
   ✓ logo-favicon.svg
   ✓ logo-monogram.svg
   ✓ logo-wordmark.svg
+  ✓ overview-v2.js
 
-=== Done · 10 patch(es) applied ===
+=== Done · 14 patch(es) applied ===
 ```
 
 ## Verify locally
 
 ```bash
-# Smoke test — make sure imports still parse
 python -c "from halal_screener import app"
-
-# Run the app however you normally do
 uvicorn halal_screener:app --reload
 ```
 
-Visit `http://localhost:8000/static/dashboard.html` — sidebar should show the new mīm-trace mark and the `mizanquant / Halal Trading Suite` wordmark.
-
-If you have a Telegram test setup, fire a buy-signal alert and you should see the new footer.
+- `http://localhost:8000/static/dashboard.html` → new mizanquant Overview
+- `http://localhost:8000/static/dashboard-legacy.html` → full legacy app
 
 ## Ship to Railway
 
 ```bash
 git add app/ deploy/
-git commit -m "rebrand: mizanquant identity"
+git commit -m "rebrand: mizanquant identity + new Overview"
 git push
-```
-
-If your Railway project is connected to this branch, it auto-deploys. Otherwise:
-
-```bash
-# One-time: npm i -g @railway/cli && railway login
-railway up
 ```
 
 ## Rolling back
 
 ```bash
-mv app/static/dashboard.html.bak              app/static/dashboard.html
-mv app/services/telegram_alert.py.bak         app/services/telegram_alert.py
-mv app/ai_agent.py.bak                        app/ai_agent.py
+# Restore the original dashboard
+mv app/static/dashboard-legacy.html        app/static/dashboard.html
+rm app/static/overview-v2.js
+
+# Restore Telegram + AI from backups
+mv app/services/telegram_alert.py.bak      app/services/telegram_alert.py
+mv app/ai_agent.py.bak                     app/ai_agent.py
+
+# Remove logos (optional)
 rm app/static/logo-{monogram,wordmark,favicon}.svg
 ```
 
-## Optional next steps
+## Notes / caveats
 
-- **Rename the Telegram bot** — `@BotFather` → `/setname` → `mizanquant signals`.
-- **Rename the Railway project** — open the project on railway.app, settings, rename to `mizanquant`.
-- **Update the GitHub repo description** — *"Halal algorithmic trading suite — mizan (the scale of justice), quantified."*
-- **Set the AI agent's tagline in Telegram** — `@BotFather` → `/setdescription`.
+- **Models leaderboard** in the lower row tries `/api/v1/models/leaderboard` first; if that endpoint doesn't exist, it falls back to a static list of the model families your codebase ships (Sharpe shows "—" for unknown values). Add a backend endpoint with the same name when convenient and it'll pick up live data.
+- **AI Consensus** is a heavy endpoint (`/consensus`) — it loads only when you click "Run AI consensus" in the Analyze panel, never automatically.
+- **Top signals** come from `/api/v1/overview` (`top_signals` array from `ConsensusLog`) merged with `/screener` for the long table.
+- **Paper trade button** sends a $1k position by default — adjust in the JS (`Math.floor(1000 / entry)`) if you want a different sizing rule.
