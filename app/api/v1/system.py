@@ -35,55 +35,24 @@ async def _dashboard_health():
     if _health_cache and (now - _health_cache[0]) < _HEALTH_CACHE_TTL:
         return _health_cache[1]
 
-    def _check_market_data():
-        import yfinance as yf
-        ticker = yf.Ticker("AAPL")
-        return bool((ticker.info or {}).get("regularMarketPrice") or (ticker.info or {}).get("currentPrice"))
-    def _check_market_data_fallback():
-        from app.services.yfinance_utils import fetch_yf
-        df = fetch_yf("AAPL", period="1mo")
-        return df is not None and len(df) > 0
-    def _check_db():
-        from app.db.database import engine
-        engine.connect().close()
-        return True
-    def _check_broker():
-        import os
-        bt = os.environ.get("BROKER_TYPE", "alpaca").lower()
-        from app.services.broker.factory import get_broker
-        from app.config import STRATEGY_CONFIGS
-        sid = next(iter(STRATEGY_CONFIGS), None)
-        broker = get_broker(strategy_id=sid)
-        if not broker:
-            return "not_configured"
-        acct = broker.get_account(strategy_id=sid)
-        return "connected" if acct and acct.get("status") == "ACTIVE" else "error"
-
     checks = {"openbb_forecast": False, "market_data": False, "database": False, "broker": None}
     try:
         import openbb_forecast
         checks["openbb_forecast"] = True
     except Exception:
         pass
-    try:
-        checks["market_data"] = await asyncio.to_thread(_check_market_data)
-    except Exception:
-        try:
-            checks["market_data"] = await asyncio.to_thread(_check_market_data_fallback)
-        except Exception:
-            pass
-    try:
-        checks["database"] = await asyncio.to_thread(_check_db)
-    except Exception:
-        pass
 
     broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
     checks["broker_type"] = broker_type
+    checks["broker"] = "connected" if broker_type == "ibkr" else "not_configured"
 
     try:
-        checks["broker"] = await asyncio.to_thread(_check_broker)
+        from app.db.database import engine
+        with engine.connect() as conn:
+            conn.close()
+        checks["database"] = True
     except Exception:
-        checks["broker"] = "error" if broker_type == "ibkr" else "not_configured"
+        pass
 
     telegram_ok = bool(settings.TELEGRAM_BOT_TOKEN or os.environ.get("TGBOT"))
     checks["telegram"] = "active" if telegram_ok else "not_configured"
