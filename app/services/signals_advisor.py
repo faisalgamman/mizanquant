@@ -311,7 +311,7 @@ def _stage1_usx_filter(symbols: list[str], min_usx_score: float = 65.0,
 # ---------------------------------------------------------------------------
 
 def scan_and_notify_strong_buys(
-    strategy_ids: tuple[str, ...] = ("A", "B", "C"),
+    strategy_ids: tuple[str, ...] = ("A", "C"),
     symbols: list[str] | None = None,
     max_workers: int = 3,
     min_confidence: float = 70.0,

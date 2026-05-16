@@ -69,8 +69,9 @@ def calculate_position_size(
 ) -> dict:
     """Calculate position size based on risk.
 
-    Shares = Risk$ / (Entry - Stop)
-    Risk$ = min(Portfolio × RISK_PER_TRADE%, Portfolio × MAX_PORTFOLIO_PCT%)
+    Deprecated — use app.services.risk_manager.calculate_position_size instead.
+    This version lacks Kelly integration, regime awareness, and config system
+    integration that the risk_manager version provides.
 
     Args:
         entry: Entry price.
@@ -81,28 +82,26 @@ def calculate_position_size(
     Returns:
         Dict with shares, risk_amount, position_value, portfolio_pct.
     """
+    import warnings
+    warnings.warn(
+        "trade_plan.calculate_position_size is deprecated. "
+        "Use risk_manager.calculate_position_size for Kelly+regime aware sizing.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from app.services.risk_manager import calculate_position_size as _rm_cps
     price = current_price or entry
-    if stop <= 0 or price <= 0:
-        return {"shares": 0, "risk_amount": 0, "position_value": 0, "portfolio_pct": 0}
-    risk_per_share = entry - stop
-    if risk_per_share <= 0 or portfolio_equity <= 0:
-        return {"shares": 0, "risk_amount": 0, "position_value": 0, "portfolio_pct": 0}
-
-    risk_dollars = portfolio_equity * (RISK_PER_TRADE / 100)
-    max_position = portfolio_equity * (MAX_PORTFOLIO_PCT / 100)
-
-    shares = int(risk_dollars / risk_per_share)
-    position_value = shares * price
-
-    if position_value > max_position:
-        shares = int(max_position / price)
-        position_value = shares * price
-
+    result = _rm_cps(
+        price=price,
+        stop_loss=stop,
+        available_cash=portfolio_equity * 0.5,
+        total_equity=portfolio_equity,
+    )
     return {
-        "shares": max(shares, 0),
-        "risk_amount": round(shares * risk_per_share, 2),
-        "position_value": round(position_value, 2),
-        "portfolio_pct": round(position_value / portfolio_equity * 100 if portfolio_equity > 0 else 0, 2),
+        "shares": result.get("qty", 0),
+        "risk_amount": result.get("risk_amount", 0),
+        "position_value": result.get("position_value", 0),
+        "portfolio_pct": result.get("position_pct", 0),
     }
 
 

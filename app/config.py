@@ -325,23 +325,6 @@ def _build_strategy_configs() -> dict:
             daily_loss_limit_pct=3.0,
         )
 
-    # Strategy B: marem — diversified dip-buying
-    if settings.ALPACA_API_KEY_B:
-        configs["B"] = StrategyConfig(
-            strategy_id="B",
-            name="marem",
-            alpaca_api_key=settings.ALPACA_API_KEY_B,
-            alpaca_secret_key=settings.ALPACA_SECRET_KEY_B,
-            max_positions=5,
-            position_pct=20.0,
-            trailing_stop_enabled=False,
-            trailing_stop_pct=0,
-            static_sl_pct=2.0,
-            min_confidence=40.0,
-            trade_risk_pct=1.0,
-            daily_loss_limit_pct=3.0,
-        )
-
     # Strategy C: mazem — pure ML decision-making
     if settings.ALPACA_API_KEY_C:
         configs["C"] = StrategyConfig(
