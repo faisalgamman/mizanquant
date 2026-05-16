@@ -41,7 +41,7 @@ def _get_async_engine():
     if db_url.startswith("sqlite"):
         connect_args = {"check_same_thread": False}
     elif db_url.startswith("postgresql+asyncpg"):
-        connect_args["connect_timeout"] = 10
+        connect_args["timeout"] = 10
 
     logger.info("Creating async engine for %s", db_url.split("://")[0] + "://...")
     engine_kwargs = dict(
