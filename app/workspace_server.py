@@ -2181,22 +2181,16 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
         return None
 
 
-@app.get("/api/stock/smart-screener")
-async def smart_screener(
-    min_score: int = Query(0, description="Minimum smart score (0-100)"),
-    sector: str = Query("", description="Filter by sector"),
-    min_market_cap: float = Query(0, description="Minimum market cap"),
-    max_results: int = Query(25, description="Maximum results"),
-    use_cache: str = Query("true", description="Use cached results ('false' to force refresh)"),
-    add_forecast: str = Query("true", description="Add forecast consensus score (0-30) to top results"),
-    watchlist: str = Query("", description="Comma-separated symbols to scan (overrides default universe)"),
+async def _smart_screener_impl(
+    min_score: int = 0,
+    sector: str = "",
+    min_market_cap: float = 0,
+    max_results: int = 25,
+    use_cache: str = "true",
+    add_forecast: str = "true",
+    watchlist: str = "",
 ):
-    """Smart investment screener: halal + fundamentals (40) + momentum (30) + forecast consensus (30).
-
-    Three-part scoring:
-      1. Fundamentals (0-40): profitability, valuation, market quality
-      2. Technical Momentum (0-30): RSI, MACD, Bollinger Bands, VWAP
-      3. Forecast Consensus (0-30): model direction agreement + agent Sharpe (top stocks only)
+    """Smart investment screener implementation (callable directly, no Query objects).
     Returns ranked opportunities with detailed score breakdown + market status gates.
     """
     _use_cache = str(use_cache).lower() in ("true", "1", "yes")
@@ -2250,6 +2244,24 @@ async def smart_screener(
         "scan_pct": 0,
         "message": f"Scanning {len(scan_symbols)} symbols in background. Check /api/screener/progress for status."
     }
+
+
+@app.get("/api/stock/smart-screener")
+async def smart_screener(
+    min_score: int = Query(0, description="Minimum smart score (0-100)"),
+    sector: str = Query("", description="Filter by sector"),
+    min_market_cap: float = Query(0, description="Minimum market cap"),
+    max_results: int = Query(25, description="Maximum results"),
+    use_cache: str = Query("true", description="Use cached results ('false' to force refresh)"),
+    add_forecast: str = Query("true", description="Add forecast consensus score (0-30) to top results"),
+    watchlist: str = Query("", description="Comma-separated symbols to scan (overrides default universe)"),
+):
+    """Smart investment screener: FastAPI route that delegates to `_smart_screener_impl`."""
+    return await _smart_screener_impl(
+        min_score=min_score, sector=sector, min_market_cap=min_market_cap,
+        max_results=max_results, use_cache=use_cache,
+        add_forecast=add_forecast, watchlist=watchlist,
+    )
 
 
 def _run_screener_bg(scan_symbols: list):
@@ -2378,7 +2390,7 @@ async def ai_report(
     """
     _use_cache = str(use_cache).lower() in ("true", "1", "yes")
     try:
-        screener_data = await smart_screener(
+        screener_data = await _smart_screener_impl(
             min_score=min_score, max_results=max_results,
             use_cache="true" if _use_cache else "false",
         )
@@ -2411,7 +2423,7 @@ async def ai_ask(
 
     # Gather context from direct function calls (avoids HTTP deadlock)
     try:
-        screener_data = await smart_screener(
+        screener_data = await _smart_screener_impl(
             min_score=0, max_results=5, use_cache="true",
         )
         context["screener_data"] = screener_data
