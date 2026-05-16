@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ar" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mizanquant — Overview</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo-favicon.svg">
+<style>
+/* ═══ USX PRO Design System — tokens ═══ */
+:root{
+  --bg-primary:oklch(0.03 0.006 60);
+  --bg-secondary:oklch(0.06 0.008 60);
+  --bg-tertiary:oklch(0.09 0.010 60);
+  --border:oklch(0.15 0.008 60 / 0.35);
+  --border-light:oklch(0.15 0.008 60 / 0.15);
+  --text-primary:oklch(0.92 0.005 60);
+  --text-secondary:oklch(0.65 0.008 60);
+  --text-muted:oklch(0.45 0.010 60);
+  --green:oklch(0.68 0.16 150);
+  --green-dim:oklch(0.68 0.16 150 / 0.12);
+  --red:oklch(0.55 0.14 20);
+  --red-dim:oklch(0.55 0.14 20 / 0.12);
+  --amber:oklch(0.62 0.10 80);
+  --amber-dim:oklch(0.62 0.10 80 / 0.12);
+  --accent:oklch(0.68 0.16 150);
+  --accent-dim:oklch(0.68 0.16 150 / 0.15);
+  --radius:6px; --radius-sm:4px; --radius-xs:2px;
+  --mono:'JetBrains Mono','SF Mono','Fira Code',monospace;
+  --shadow-popover:0 8px 24px oklch(0 0 0 / 0.4);
+  --shadow-modal:0 0 40px oklch(0 0 0 / 0.4);
+  --shadow-panel:-4px 0 20px oklch(0 0 0 / 0.3);
+  --sidebar-w:56px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg-primary);color:var(--text-primary);font-size:11px;-webkit-font-smoothing:antialiased;padding-left:var(--sidebar-w);}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+::selection{background:var(--accent-dim);color:var(--accent);}
+
+/* ─── Sidebar (icon rail, design-system spec) ─── */
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--bg-secondary);border-right:1px solid var(--border);z-index:50;display:flex;flex-direction:column;padding:8px 0;transition:width .18s ease;overflow:hidden;}
+.sidebar:hover{width:200px;box-shadow:var(--shadow-panel);}
+.sidebar .sb-brand{display:flex;align-items:center;gap:8px;padding:6px 14px 10px;border-bottom:1px solid var(--border-light);margin-bottom:6px;}
+.sidebar .sb-logo{width:32px;height:32px;background:var(--accent-dim);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--accent);font-weight:800;font-size:14px;}
+.sidebar .sb-brand-text{white-space:nowrap;opacity:0;transition:opacity .15s;}
+.sidebar:hover .sb-brand-text{opacity:1;}
+.sidebar .sb-brand-text h2{font-size:13px;font-weight:700;letter-spacing:-0.2px;}
+.sidebar .sb-brand-text span{font-size:9px;color:var(--text-muted);}
+.sb-section{font-size:7px;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);padding:10px 18px 4px;font-weight:600;white-space:nowrap;opacity:0;transition:opacity .15s;}
+.sidebar:hover .sb-section{opacity:1;}
+.sb-item{display:flex;align-items:center;gap:10px;padding:8px 18px;font-size:12px;font-weight:500;color:var(--text-secondary);white-space:nowrap;cursor:pointer;}
+.sb-item:hover{background:var(--bg-tertiary);color:var(--text-primary);}
+.sb-item.active{background:var(--accent-dim);color:var(--accent);}
+.sb-item .ic{width:16px;text-align:center;font-size:14px;flex-shrink:0;}
+
+/* ─── Top bar ─── */
+.topbar{height:48px;background:var(--bg-secondary);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;padding:0 18px;}
+.topbar h1{font-size:15px;font-weight:700;letter-spacing:-0.2px;}
+.topbar .spacer{flex:1;}
+.search{flex:0 0 320px;background:var(--bg-tertiary);border:1px solid var(--border-light);border-radius:var(--radius);height:28px;display:flex;align-items:center;padding:0 10px;color:var(--text-muted);font-size:11px;gap:6px;}
+.live{display:flex;align-items:center;gap:4px;font-size:9px;font-weight:600;color:var(--green);}
+.live .pulse{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.clock{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:0.5px;}
+
+/* ─── Market strip ─── */
+.mstrip{height:34px;background:var(--bg-secondary);border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:22px;padding:0 18px;font-size:11px;}
+.mstrip .mi{display:flex;align-items:center;gap:5px;}
+.mstrip .ml{font-size:8px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);}
+.mstrip .mv{font-size:12px;font-weight:600;font-family:var(--mono);}
+
+/* ─── Layout ─── */
+.wrap{display:grid;grid-template-columns:1.35fr 1fr 0.78fr;gap:14px;padding:14px 18px;align-items:start;}
+@media(max-width:1280px){.wrap{grid-template-columns:1fr;}}
+
+/* ─── Card ─── */
+.card{background:var(--bg-tertiary);border:1px solid var(--border-light);border-radius:var(--radius);padding:14px;margin-bottom:14px;box-shadow:0 1px 3px oklch(0 0 0 / 0.25);}
+.card-h{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}
+.card-t{font-size:13px;font-weight:600;}
+.card-s{font-size:9px;color:var(--text-muted);margin-top:2px;}
+.sec-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary);margin-bottom:8px;}
+
+/* ─── Gauges ─── */
+.gauges{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+.gauge{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius);padding:10px 8px;text-align:center;}
+.gauge .gl{font-size:8px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:6px;}
+.gauge .gv{font-size:16px;font-weight:700;font-family:var(--mono);}
+.gauge .gs{font-size:8px;color:var(--text-muted);margin-top:3px;}
+
+/* ─── Regime bar ─── */
+.regime-bar{height:22px;border-radius:var(--radius-sm);display:flex;overflow:hidden;}
+.regime-bar > div{display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000;}
+
+/* ─── Signal cards ─── */
+.sig-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.sig-card{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius);padding:12px;cursor:pointer;transition:border-color .15s;}
+.sig-card:hover{border-color:var(--accent);}
+.sig-top{display:flex;align-items:center;gap:9px;margin-bottom:8px;}
+.sig-ring{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;font-family:var(--mono);background:var(--green-dim);color:var(--green);flex-shrink:0;}
+.sig-sym{font-size:15px;font-weight:700;line-height:1;}
+.sig-chg{font-size:10px;font-weight:600;font-family:var(--mono);margin-top:3px;}
+.sig-sector{font-size:8px;color:var(--text-muted);margin-top:2px;}
+
+/* ─── Table ─── */
+table{width:100%;border-collapse:collapse;font-size:11px;}
+th{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border-light);color:var(--text-muted);font-weight:500;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;}
+td{padding:5px 8px;border-bottom:1px solid var(--border-light);}
+tbody tr{cursor:pointer;}
+tbody tr:hover{background:var(--bg-primary);}
+.t-sym{font-weight:700;}
+.mono{font-family:var(--mono);}
+.green{color:var(--green);} .red{color:var(--red);} .amber{color:var(--amber);}
+.score-bar{height:4px;border-radius:2px;background:var(--bg-primary);overflow:hidden;min-width:46px;}
+.score-bar>div{height:100%;border-radius:2px;background:var(--green);}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:var(--radius-xs);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;}
+.pill.buy{background:var(--green-dim);color:var(--green);}
+.pill.wait{background:var(--amber-dim);color:var(--amber);}
+.pill.avoid{background:var(--red-dim);color:var(--red);}
+
+/* ─── Stat / pair rows ─── */
+.pair{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border-light);font-size:11px;}
+.pair:last-child{border-bottom:none;}
+.pair .pk{color:var(--text-secondary);}
+.pair .pv{font-weight:600;font-family:var(--mono);}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.stat-v{font-size:18px;font-weight:700;font-family:var(--mono);line-height:1;}
+.stat-l{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin-top:4px;}
+
+/* ─── Pipeline dots ─── */
+.pipe{display:flex;gap:6px;flex-wrap:wrap;}
+.pipe .pd{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--text-muted);color:var(--text-muted);display:flex;align-items:center;justify-content:center;font-size:9px;}
+.pipe .pd.done{border-color:var(--green);color:var(--green);}
+.pipe .pd.run{border-color:var(--accent);color:var(--accent);animation:pulse 1.5s infinite;}
+.pipe .pd.fail{border-color:var(--red);color:var(--red);}
+
+/* ─── Sectors grid ─── */
+.sectors-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+.sec-cell{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:7px 8px;}
+.sec-cell .sn{font-size:9px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sec-cell .sp{font-size:12px;font-weight:700;font-family:var(--mono);margin-top:3px;}
+
+/* ─── Schedule ─── */
+.sched-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border-light);font-size:11px;}
+.sched-row:last-child{border-bottom:none;}
+.sched-st{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;padding:1px 6px;border-radius:var(--radius-xs);}
+.sched-st.done{background:var(--green-dim);color:var(--green);}
+.sched-st.run{background:var(--accent-dim);color:var(--accent);}
+.sched-st.queued{background:var(--bg-tertiary);color:var(--text-muted);}
+
+/* ─── Trade plan ─── */
+.tradeplan{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;margin-top:6px;}
+
+/* ─── Consensus ─── */
+.consensus-hd{display:flex;align-items:center;justify-content:space-between;background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;}
+.consensus-verdict{font-size:14px;font-weight:800;}
+.consensus-pct{font-size:20px;font-weight:800;font-family:var(--mono);}
+.vote-tally{display:flex;gap:10px;font-size:10px;font-family:var(--mono);}
+
+.empty{text-align:center;padding:32px 12px;color:var(--text-muted);font-size:11px;}
+.btn{padding:6px 14px;border-radius:var(--radius);border:none;cursor:pointer;font-size:11px;font-weight:600;background:var(--accent);color:#fff;display:inline-flex;align-items:center;gap:5px;}
+.banner{background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);padding:7px 10px;font-size:10px;color:var(--red);margin-bottom:10px;}
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sb-brand">
+    <div class="sb-logo">M</div>
+    <div class="sb-brand-text"><h2>mizanquant</h2><span>Halal Trading Suite</span></div>
+  </div>
+  <div class="sb-section">General</div>
+  <div class="sb-item active"><span class="ic">▦</span>Overview</div>
+  <div class="sb-section">Forecasting</div>
+  <div class="sb-item"><span class="ic">◐</span>Forecast Lab</div>
+  <div class="sb-item"><span class="ic">⌗</span>Trading Lab</div>
+  <div class="sb-item"><span class="ic">↺</span>Backtest</div>
+  <div class="sb-item"><span class="ic">▤</span>Strategies</div>
+  <div class="sb-section">Analytics</div>
+  <div class="sb-item"><span class="ic">⊘</span>Risk Desk</div>
+  <div class="sb-item"><span class="ic">▶</span>Daily Workflow</div>
+  <div class="sb-item"><span class="ic">▥</span>Charts</div>
+  <div class="sb-section">Research</div>
+  <div class="sb-item"><span class="ic">⌕</span>Research Lab</div>
+  <div class="sb-item"><span class="ic">⚙</span>Smart Screener</div>
+  <div class="sb-item"><span class="ic">◔</span>AI Assistant</div>
+</nav>
+
+<div class="topbar">
+  <h1>Overview</h1>
+  <div class="search">⌕ Search symbol… ⌘K</div>
+  <div class="spacer"></div>
+  <span id="symCount" style="font-size:9px;color:var(--text-muted);"></span>
+  <span class="clock" id="clock">--:--:--</span>
+  <span class="live"><span class="pulse"></span>LIVE</span>
+</div>
+
+<div class="mstrip" id="mstrip"><span style="color:var(--text-muted)">Loading market…</span></div>
+
+<div class="wrap">
+  <!-- ═══ LEFT ═══ -->
+  <div class="col-left">
+    <div class="card">
+      <div class="sec-label">Market · VIX · SPY · Breadth · Credit · Liquidity</div>
+      <div class="gauges" id="gauges"></div>
+    </div>
+    <div class="card">
+      <div class="sec-label">Regime · 2-day history</div>
+      <div class="regime-bar" id="regimeBar"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div><div class="card-t">Signals</div><div class="card-s">High-conviction opportunities</div></div></div>
+      <div class="sig-cards" id="sigCards"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">All Signals</div><div class="card-s" id="sigCount"></div></div>
+      <table>
+        <thead><tr><th>Symbol</th><th>Score</th><th>Chg%</th><th>Signal</th><th>Sector</th><th>Strategy</th></tr></thead>
+        <tbody id="sigTable"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">Sectors</div><div class="card-s">11 sector ETFs · daily change</div></div>
+      <div class="sectors-grid" id="sectorsGrid"><div class="empty">Loading sectors…</div></div>
+    </div>
+  </div>
+
+  <!-- ═══ CENTER — ANALYZE ═══ -->
+  <div class="col-center">
+    <div class="card" id="analyzeCard">
+      <div class="empty">⌕<br><br>Select a signal to analyze</div>
+    </div>
+  </div>
+
+  <!-- ═══ RIGHT ═══ -->
+  <div class="col-right">
+    <div class="card">
+      <div class="card-h"><div class="card-t">Portfolio</div><div class="card-s">Equity · P&amp;L</div></div>
+      <div id="portfolio"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">Positions</div><div class="card-s" id="posCount"></div></div>
+      <div id="positions"><div class="empty">No open positions</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">Pipeline</div><div class="card-s" id="pipeMeta"></div></div>
+      <div class="pipe" id="pipeDots"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">Guards</div><div class="card-s">Rejections today</div></div>
+      <div id="guards"><div class="empty">No rejections</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="card-t">Schedule</div><div class="card-s">Daily cycle status</div></div>
+      <div id="schedule"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const fmtUSD = v => '$' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+const pct = v => (v>=0?'+':'') + Number(v||0).toFixed(2) + '%';
+const cls = v => Number(v)>=0 ? 'green' : 'red';
+const scoreColor = s => s>=75?'var(--green)':s>=60?'var(--amber)':'var(--red)';
+
+function clock(){
+  const d=new Date();
+  document.getElementById('clock').textContent=d.toTimeString().slice(0,8);
+}
+setInterval(clock,1000); clock();
+
+async function apiGet(path,timeout=12000){
+  const c=new AbortController();const t=setTimeout(()=>c.abort(),timeout);
+  try{const r=await fetch(path,{signal:c.signal});if(!r.ok)throw new Error(r.status);return await r.json();}
+  finally{clearTimeout(t);}
+}
+
+function renderMarket(mc){
+  const strip=document.getElementById('mstrip');
+  const items=[
+    ['SPY', (mc.spy_regime?.regime||'?').toUpperCase(), mc.spy_regime?.regime==='bull'?'green':mc.spy_regime?.regime==='bear'?'red':'amber'],
+    ['VIX', mc.vix?.vix ?? '—', (mc.vix?.vix||20)<20?'green':'amber'],
+    ['BREADTH', (mc.breadth?.breadth_pct ?? '—')+'%', (mc.breadth?.breadth_pct||50)>50?'green':'red'],
+    ['CREDIT', mc.credit?.ratio ?? '—', 'green'],
+    ['LIQUIDITY', (mc.liquidity?.liquidity_pct ?? '—')+'%', 'green'],
+  ];
+  strip.innerHTML=items.map(([l,v,c])=>
+    `<div class="mi"><span class="ml">${l}</span><span class="mv ${c}">${v}</span></div>`).join('');
+
+  const g=document.getElementById('gauges');
+  g.innerHTML=[
+    ['VIX', mc.vix?.vix ?? '—', mc.vix?.classification||''],
+    ['SPY REGIME', (mc.spy_regime?.regime||'?').toUpperCase(), mc.spy_regime?.regime||''],
+    ['BREADTH', (mc.breadth?.breadth_pct ?? '—')+'%', 'Above EMA20'],
+    ['CREDIT', mc.credit?.ratio ?? '—', mc.credit?.classification||''],
+    ['LIQUIDITY', (mc.liquidity?.liquidity_pct ?? '—')+'%', 'Market Liquidity'],
+  ].map(([l,v,s])=>`<div class="gauge"><div class="gl">${l}</div><div class="gv">${v}</div><div class="gs">${s}</div></div>`).join('');
+}
+
+function renderRegime(mc){
+  const r=(mc.spy_regime?.regime||'neutral').toLowerCase();
+  const map={bull:['var(--green)','BULL'],bear:['var(--red)','BEAR'],neutral:['var(--amber)','NEUTRAL']};
+  const [col,lab]=map[r]||map.neutral;
+  document.getElementById('regimeBar').innerHTML=`<div style="flex:1;background:${col}">${lab}</div>`;
+}
+
+function renderSignals(sigs){
+  const cards=document.getElementById('sigCards');
+  const top=(sigs||[]).slice(0,3);
+  cards.innerHTML=top.length?top.map(s=>{
+    const sc=s.score??s.smart_score??0;
+    return `<div class="sig-card" onclick="analyze('${s.symbol}')">
+      <div class="sig-top">
+        <div class="sig-ring" style="background:${scoreColor(sc)}1f;color:${scoreColor(sc)}">${sc}</div>
+        <div><div class="sig-sym">${s.symbol}</div>
+        <div class="sig-chg ${cls(s.change_pct)}">${pct(s.change_pct)}</div>
+        <div class="sig-sector">${s.sector||''}</div></div>
+      </div>
+      <span class="pill ${(s.signal||'').toLowerCase()==='buy'?'buy':(s.signal||'').toLowerCase()==='avoid'?'avoid':'wait'}">${s.signal||'WAIT'}</span>
+    </div>`;}).join(''):'<div class="empty" style="grid-column:1/-1">No featured signals</div>';
+
+  const tb=document.getElementById('sigTable');
+  document.getElementById('sigCount').textContent=(sigs||[]).length+' signals';
+  tb.innerHTML=(sigs||[]).slice(0,20).map(s=>{
+    const sc=s.score??s.smart_score??0;
+    const sig=(s.signal||'WAIT').toLowerCase();
+    return `<tr onclick="analyze('${s.symbol}')">
+      <td class="t-sym">${s.symbol}</td>
+      <td><div style="display:flex;align-items:center;gap:6px"><span class="mono" style="color:${scoreColor(sc)}">${sc}</span>
+        <div class="score-bar"><div style="width:${sc}%;background:${scoreColor(sc)}"></div></div></div></td>
+      <td class="mono ${cls(s.change_pct)}">${pct(s.change_pct)}</td>
+      <td><span class="pill ${sig==='buy'?'buy':sig==='avoid'?'avoid':'wait'}">${s.signal||'WAIT'}</span></td>
+      <td style="color:var(--text-secondary)">${s.sector||'—'}</td>
+      <td style="color:var(--text-muted)">${s.strategy||'WAIT'}</td>
+    </tr>`;}).join('')||'<tr><td colspan="6" class="empty">No signals</td></tr>';
+}
+
+function renderPortfolio(p){
+  const el=document.getElementById('portfolio');
+  const eq=p.equity||0, pnl=p.daily_pnl||0;
+  el.innerHTML=`
+    <div class="stat-grid">
+      <div><div class="stat-v">${eq?fmtUSD(eq):'—'}</div><div class="stat-l">Equity</div></div>
+      <div><div class="stat-v ${cls(pnl)}">${pnl?pct(p.daily_pnl_pct):'—'}</div><div class="stat-l">Daily P&amp;L</div></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="pair"><span class="pk">Buying Power</span><span class="pv">${fmtUSD(p.buying_power)}</span></div>
+      <div class="pair"><span class="pk">Cash</span><span class="pv">${fmtUSD(p.cash)}</span></div>
+      <div class="pair"><span class="pk">Broker</span><span class="pv" style="font-size:9px;color:var(--text-muted)">${p.broker_type||'—'}</span></div>
+    </div>`;
+  document.getElementById('posCount').textContent=(p.open_positions||0)+' open';
+  const pos=document.getElementById('positions');
+  pos.innerHTML=(p.positions&&p.positions.length)?p.positions.map(x=>`
+    <div class="pair"><span class="t-sym">${x.symbol}</span>
+    <span class="pv ${cls(x.unrealized_pl)}">${pct(x.unrealized_plpc)}</span></div>`).join(''):
+    '<div class="empty">No open positions</div>';
+}
+
+function renderPipeline(pl){
+  document.getElementById('pipeMeta').textContent=(pl.stages?.length||0)+' stages';
+  const dots=document.getElementById('pipeDots');
+  dots.innerHTML=(pl.stages||[]).map(s=>{
+    const st=s.status==='completed'?'done':s.status==='running'?'run':s.status==='failed'?'fail':'';
+    const ic=st==='done'?'✓':st==='fail'?'✕':st==='run'?'◉':'○';
+    return `<div class="pd ${st}" title="${s.label||''}: ${s.status||'idle'}">${ic}</div>`;
+  }).join('')||'<div class="empty">No pipeline run yet</div>';
+}
+
+function renderGuards(g){
+  const el=document.getElementById('guards');
+  const ent=Object.entries(g||{});
+  el.innerHTML=ent.length?ent.map(([k,v])=>`
+    <div class="pair"><span class="pk">${k}</span><span class="pv">${v}</span></div>`).join(''):
+    '<div class="empty">No rejections today</div>';
+}
+
+async function renderSchedule(){
+  const el=document.getElementById('schedule');
+  try{
+    const s=await apiGet('/api/scheduler/status');
+    const runs=s.runs||s.run_counts||{};
+    const ent=Object.entries(runs);
+    if(!ent.length){
+      el.innerHTML=`<div class="sched-row"><span class="pk">Scheduler</span>
+        <span class="sched-st ${s.running?'run':'queued'}">${s.running?'RUNNING':'IDLE'}</span></div>`;
+      return;
+    }
+    el.innerHTML=ent.map(([name,cnt])=>`
+      <div class="sched-row"><span style="color:var(--text-secondary)">${name}</span>
+      <span class="sched-st done">${cnt} runs</span></div>`).join('');
+  }catch(e){ el.innerHTML='<div class="empty">Schedule unavailable</div>'; }
+}
+
+async function renderSectors(){
+  const el=document.getElementById('sectorsGrid');
+  try{
+    const secs=await apiGet('/api/v1/sectors/performance');
+    const list=Array.isArray(secs)?secs:(secs.sectors||[]);
+    el.innerHTML=list.length?list.map(s=>{
+      const p=s.perf_1d??s.change??0;
+      return `<div class="sec-cell"><div class="sn">${s.name||s.ticker||'—'}</div>
+        <div class="sp ${cls(p)}">${pct(p)}</div></div>`;
+    }).join(''):'<div class="empty">No sector data</div>';
+  }catch(e){ el.innerHTML='<div class="empty">Sectors unavailable</div>'; }
+}
+
+function renderConsensus(c,sym){
+  if(!c||(!c.votes&&!c.consensus&&!c.verdict)) return '';
+  const verdict=c.verdict||c.consensus||c.signal||'—';
+  const conf=c.confidence??c.confidence_pct??c.score??0;
+  const votes=c.votes||c.model_votes||[];
+  let buy=0,hold=0,sell=0;
+  const rows=(Array.isArray(votes)?votes:Object.entries(votes).map(([k,v])=>({model:k,vote:v}))).map(v=>{
+    const vt=(v.vote||v.signal||v.action||'').toString().toUpperCase();
+    if(vt.includes('BUY'))buy++;else if(vt.includes('SELL'))sell++;else hold++;
+    const col=vt.includes('BUY')?'green':vt.includes('SELL')?'red':'amber';
+    return `<div class="pair"><span class="pk">${v.model||v.name||'model'}</span>
+      <span class="pv ${col}">${vt||'HOLD'}</span></div>`;
+  }).join('');
+  const vcol=verdict.toUpperCase().includes('BUY')?'var(--green)':verdict.toUpperCase().includes('SELL')?'var(--red)':'var(--amber)';
+  return `<div class="sec-label" style="margin-top:14px">Consensus</div>
+    <div class="consensus-hd">
+      <div><div class="consensus-verdict" style="color:${vcol}">${verdict}</div>
+      <div class="vote-tally"><span class="green">${buy} BUY</span><span class="amber">${hold} HOLD</span><span class="red">${sell} SELL</span></div></div>
+      <div class="consensus-pct" style="color:${vcol}">${Number(conf).toFixed(0)}%</div>
+    </div>
+    <div class="sec-label" style="margin-top:10px">Model Votes</div>
+    ${rows||'<div class="empty">No model votes</div>'}`;
+}
+
+async function analyze(sym){
+  const card=document.getElementById('analyzeCard');
+  card.innerHTML='<div class="empty">Loading '+sym+'…</div>';
+  try{
+    const d=await apiGet('/api/scoring/weighted?symbol='+encodeURIComponent(sym));
+    const sc=d.total??d.score??0;
+    const comps=d.components||{};
+    const sig=d.signal||'—';
+    card.innerHTML=`
+      <div class="card-h"><div><div class="card-t">${sym}</div>
+        <div class="card-s">${sig} · score ${sc}/100</div></div>
+        <span class="pill ${sig.toLowerCase().includes('buy')?'buy':sig==='AVOID'?'avoid':'wait'}">${sig}</span>
+      </div>
+      <div class="sec-label">Score Breakdown</div>
+      ${Object.entries(comps).slice(0,8).map(([k,v])=>`
+        <div class="pair"><span class="pk">${k}</span><span class="pv">${typeof v==='number'?v.toFixed(1):v}</span></div>`).join('')||'<div class="empty">No breakdown</div>'}
+      <div id="tradePlanSlot"></div>
+      <button class="btn" style="margin:12px 0;width:100%;justify-content:center" onclick="alert('Paper trade: ${sym}')">⚡ Send to paper trade</button>
+      <div id="consensusSlot"><div class="empty" style="padding:14px">Loading consensus…</div></div>`;
+    // trade plan (entry/stop/targets) — non-blocking
+    apiGet('/api/trade/plan?symbol='+encodeURIComponent(sym),20000)
+      .then(p=>{
+        if(p.error){document.getElementById('tradePlanSlot').innerHTML='';return;}
+        const entry=p.strategy_entry??p.entry??p.entry_price;
+        const stop=p.strategy_stop??p.stop??p.stop_loss;
+        const tp1=p.strategy_tp1??p.tp1??p.take_profit;
+        const tp2=p.strategy_tp2??p.tp2, tp3=p.strategy_tp3??p.tp3;
+        document.getElementById('tradePlanSlot').innerHTML=`
+          <div class="sec-label" style="margin-top:12px">Trade Plan</div>
+          <div class="tradeplan">
+            <div class="pair"><span class="pk">Entry</span><span class="pv">${entry?fmtUSD(entry):'—'}</span></div>
+            <div class="pair"><span class="pk">Stop</span><span class="pv red">${stop?fmtUSD(stop):'—'}</span></div>
+            <div class="pair"><span class="pk">Target 1</span><span class="pv green">${tp1?fmtUSD(tp1):'—'}</span></div>
+            ${tp2?`<div class="pair"><span class="pk">Target 2</span><span class="pv green">${fmtUSD(tp2)}</span></div>`:''}
+            ${tp3?`<div class="pair"><span class="pk">Target 3</span><span class="pv green">${fmtUSD(tp3)}</span></div>`:''}
+            <div class="pair"><span class="pk">Strategy</span><span class="pv" style="font-size:9px">${p.strategy||'WAIT'}</span></div>
+            ${p.hold_days_min?`<div class="pair"><span class="pk">Hold</span><span class="pv">${p.hold_days_min}-${p.hold_days_max||p.hold_days_min}d</span></div>`:''}
+          </div>`;
+      })
+      .catch(()=>{document.getElementById('tradePlanSlot').innerHTML='';});
+    // consensus + model votes — non-blocking
+    apiGet('/consensus?symbol='+encodeURIComponent(sym),25000)
+      .then(c=>{document.getElementById('consensusSlot').innerHTML=renderConsensus(c,sym)||'<div class="empty" style="padding:14px">No consensus data</div>';})
+      .catch(()=>{document.getElementById('consensusSlot').innerHTML='<div class="empty" style="padding:14px">Consensus unavailable</div>';});
+  }catch(e){
+    card.innerHTML='<div class="empty">Analyze failed for '+sym+'</div>';
+  }
+}
+
+async function load(){
+  try{
+    const d=await apiGet('/api/v1/overview');
+    renderMarket(d.market_context||{});
+    renderRegime(d.market_context||{});
+    renderSignals(d.top_signals||[]);
+    renderPortfolio(d.portfolio||{});
+    renderPipeline(d.pipeline||{});
+    renderGuards(d.guards_recent||{});
+    document.getElementById('symCount').textContent=(d.top_signals||[]).length+' signals · '+new Date().toTimeString().slice(0,5)+' ET';
+  }catch(e){
+    document.getElementById('mstrip').innerHTML='<span style="color:var(--red)">Overview unavailable — '+e.message+'</span>';
+  }
+}
+load();
+renderSectors();
+renderSchedule();
+setInterval(load,30000);
+setInterval(renderSectors,600000);
+setInterval(renderSchedule,60000);
+</script>
+</body>
+</html>
