@@ -4449,7 +4449,7 @@ if os.path.isdir(_static_dir):
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
     """Serve the professional trading dashboard."""
-    dashboard_path = Path(__file__).parent / "static" / "dashboard.html"
+    dashboard_path = Path(__file__).parent / "static" / "dashboard-v2.html"
     if dashboard_path.exists():
         return HTMLResponse(content=dashboard_path.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Dashboard not found</h1><p>Run the server from the project root.</p>", status_code=404)
@@ -4514,11 +4514,32 @@ async def ws_overview(websocket: WebSocket):
                 # ── Portfolio check ──
                 try:
                     from app.config import STRATEGY_CONFIGS
-                    from app.services.broker.factory import get_broker
+                    from app.services.broker.factory import get_broker, _build
                     sid = next(iter(STRATEGY_CONFIGS), None)
                     broker = get_broker(strategy_id=sid) if sid else None
-                    acct = broker.get_account(strategy_id=sid) if broker else None
-                    pos_list = broker.get_positions(strategy_id=sid) if broker else []
+                    broker_label = broker.name if broker else "unknown"
+
+                    def _get_broker_data():
+                        acct = broker.get_account(strategy_id=sid) if broker else None
+                        pos_list = broker.get_positions(strategy_id=sid) if broker else []
+                        served_by = broker_label
+                        # Fallback to Alpaca if primary broker returns nothing
+                        if acct is None and served_by != "alpaca":
+                            try:
+                                alpaca = _build("alpaca")
+                                fb = alpaca.get_account(strategy_id=sid)
+                                if fb:
+                                    acct = fb
+                                    pos_list = alpaca.get_positions(strategy_id=sid) or []
+                                    served_by = "alpaca (fallback)"
+                            except Exception:
+                                pass
+                        return acct, pos_list, served_by
+
+                    acct, pos_list, _broker = await asyncio.wait_for(
+                        asyncio.to_thread(_get_broker_data),
+                        timeout=8.0,
+                    )
                     pf = {"equity": float(acct.get("equity", 0)) if acct else 0,
                           "open_positions": len(pos_list)}
                     h = hashlib.md5(str(pf).encode()).hexdigest()

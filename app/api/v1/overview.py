@@ -50,20 +50,39 @@ async def _get_portfolio():
 
     sid = next(iter(STRATEGY_CONFIGS), None)
     broker = get_broker(strategy_id=sid)
+    broker_label = broker.name if broker else "unknown"
 
-    account = broker.get_account(strategy_id=sid) if broker else None
-    positions = broker.get_positions(strategy_id=sid) if broker else []
+    # Wrap blocking broker calls in asyncio.to_thread with a tight timeout
+    # so a down IBKR Gateway does not block the FastAPI event loop.
+    async def _call_broker(fn, *args, default=None, timeout=8.0):
+        if broker is None:
+            return default
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(fn, *args),
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, Exception):
+            return default
+
+    account = await _call_broker(broker.get_account, strategy_id=sid)
+    positions = await _call_broker(broker.get_positions, strategy_id=sid, default=[])
 
     # Resilience fallback — primary broker (e.g. IBKR gateway down) returns
     # nothing → fall back to Alpaca so the portfolio panel shows live data.
-    broker_label = broker.name if broker else "unknown"
     if account is None and broker_label != "alpaca":
         try:
             alpaca = _build("alpaca")
-            fb = alpaca.get_account(strategy_id=sid)
+            fb = await asyncio.wait_for(
+                asyncio.to_thread(alpaca.get_account, strategy_id=sid),
+                timeout=8.0,
+            )
             if fb:
                 account = fb
-                positions = alpaca.get_positions(strategy_id=sid) or []
+                positions = await asyncio.wait_for(
+                    asyncio.to_thread(alpaca.get_positions, strategy_id=sid),
+                    timeout=8.0,
+                ) or []
                 broker_label = "alpaca (fallback)"
         except Exception:
             pass
