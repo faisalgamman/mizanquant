@@ -1750,6 +1750,34 @@ select:focus,input:focus { border-color:var(--accent); }
 const API = '';
 let charts = {};
 
+// Guard Chart.js against internal font/scale errors (e.g. "Cannot read property 'direction'")
+// These happen when async renders fire after chart destruction (tab switches, rapid reloads).
+// We suppress them at the window level since Chart.js 3.x minified internals fire them asynchronously.
+(function() {
+  var _chartsInit = false;
+  window.addEventListener('error', function(e) {
+    var file = (e.filename || '');
+    if (file.indexOf('chart.umd') !== -1 || file.indexOf('chart.js') !== -1 || file.indexOf('Chart') !== -1) {
+      if (e.message && (e.message.indexOf('direction') !== -1 || e.message.indexOf('undefined') !== -1)) {
+        e.stopPropagation();
+        e.preventDefault();
+        return true;
+      }
+    }
+  }, true);
+  // Patch Chart constructor to add defensive font defaults (fixes the 'direction of undefined' bug)
+  var _origDef = function() {
+    if (window.Chart && window.Chart.defaults && !window.Chart.defaults._patched) {
+      try {
+        if (!window.Chart.defaults.font) window.Chart.defaults.font = {};
+        if (!window.Chart.defaults.font.direction) window.Chart.defaults.font.direction = 'ltr';
+        window.Chart.defaults._patched = true;
+      } catch(_) {}
+    } else { setTimeout(_origDef, 50); }
+  };
+  setTimeout(_origDef, 50);
+})();
+
 // ===== NAVIGATION =====
 function switchTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -3834,12 +3862,23 @@ async function loadRiskDesk() {
 function destroyChart(name) {
   // P5.3 — also clean orphaned Chart.js instances attached to the canvas
   // (Chart.js v3+ tracks canvases internally; our `charts` dict may miss them)
-  if (charts[name]) { try { charts[name].destroy(); } catch(_) {} delete charts[name]; }
+  if (charts[name]) {
+    try {
+      // Stop pending animations/renders before destroying to avoid
+      // "Cannot read properties of undefined (reading 'direction')" errors
+      if (charts[name].stop) charts[name].stop();
+      charts[name].destroy();
+    } catch(_) {}
+    delete charts[name];
+  }
   try {
     const canvas = document.getElementById(name);
     if (canvas && typeof Chart !== 'undefined' && Chart.getChart) {
       const existing = Chart.getChart(canvas);
-      if (existing) existing.destroy();
+      if (existing) {
+        try { if (existing.stop) existing.stop(); } catch(_) {}
+        existing.destroy();
+      }
     }
   } catch(_) {}
 }
@@ -4560,34 +4599,38 @@ async function loadChart(range) {
     html += '</tbody></table></div>';
     document.getElementById('chartTable').innerHTML = html;
 
-    // Try canvas chart via Chart.js
+    // Try canvas chart via Chart.js (with error guard)
     var canvas = document.getElementById('priceChart');
     if (canvas && window.Chart) {
       var ctx = canvas.getContext('2d');
-      if (window._priceChart) window._priceChart.destroy();
-      window._priceChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: bars.map(function(b) { return b.date; }),
-          datasets: [{
-            label: sym + ' Close',
-            data: bars.map(function(b) { return b.close; }),
-            borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59,130,246,0.1)',
-            fill: true,
-            tension: 0.2,
-            pointRadius: 0,
-          }]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
-          scales: {
-            x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 10 } },
-            y: { grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+      if (window._priceChart) { try { window._priceChart.destroy(); } catch(_) {} window._priceChart = null; }
+      try {
+        window._priceChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: bars.map(function(b) { return b.date; }),
+            datasets: [{
+              label: sym + ' Close',
+              data: bars.map(function(b) { return b.close; }),
+              borderColor: '#3b82f6',
+              backgroundColor: 'rgba(59,130,246,0.1)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 10 } },
+              y: { grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+            }
           }
-        }
-      });
+        });
+      } catch(e) {
+        // Chart.js may fail on hidden canvas (tab switch) — silently ignore
+      }
     }
   } catch(e) {
     document.getElementById('chartTable').innerHTML = '<div class="alert alert-warning">' + e.message + '</div>';

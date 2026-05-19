@@ -113,6 +113,10 @@ input, select { font-family: inherit; }
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
@@ -577,13 +581,13 @@ input, select { font-family: inherit; }
     <svg viewBox="0 0 64 64" fill="none"><circle cx="18" cy="34" r="9.5" stroke="currentColor" stroke-width="3.2"/><path d="M27 40L36 30L44 36L54 22" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="54" cy="22" r="3" fill="currentColor"/></svg>
     <span>mizanquant</span>
   </a>
-  <div class="topnav-nav">
-    <button class="topnav-link active">Overview</button>
-    <button class="topnav-link">Forecast</button>
-    <button class="topnav-link">Trading Lab</button>
-    <button class="topnav-link">Backtest</button>
-    <button class="topnav-link">Risk Desk</button>
-    <button class="topnav-link">Screener</button>
+  <div class="topnav-nav" id="topnavNav">
+    <button class="topnav-link active" data-route="overview">Overview</button>
+    <button class="topnav-link" data-route="forecast" onclick="navigate('forecast')">Forecast</button>
+    <button class="topnav-link" data-route="trading-lab" onclick="navigate('trading-lab')">Trading Lab</button>
+    <button class="topnav-link" data-route="backtest" onclick="navigate('backtest')">Backtest</button>
+    <button class="topnav-link" data-route="risk-desk" onclick="navigate('risk-desk')">Risk Desk</button>
+    <button class="topnav-link" data-route="screener" onclick="navigate('screener')">Screener</button>
   </div>
   <div class="topnav-cmd" onclick="openPalette()" title="Command palette">
     Quick search…
@@ -843,6 +847,22 @@ input, select { font-family: inherit; }
 
 // ─── STATE ──────────────────────────────────────────────────────
 const API = '/api/v1';
+
+// Route definitions
+const ROUTES = {
+  overview:  { title: 'Overview',    icon: 'chart-line', ready: true },
+  forecast:  { title: 'Forecast',    icon: 'chart-line', ready: false,
+    soon: 'ML forecast panel — calibration suite for ensemble, LSTM-CNN, and transformer models.' },
+  'trading-lab': { title: 'Trading Lab', icon: 'flask', ready: false,
+    soon: 'Backtest runner + interactive strategy sandbox. Deploy parameter sweeps.' },
+  backtest:  { title: 'Backtest',    icon: 'clock-rotate-left', ready: false,
+    soon: 'Historical backtest results, equity curves, and trade logs.' },
+  'risk-desk': { title: 'Risk Desk',  icon: 'shield-halved', ready: false,
+    soon: 'Live VaR, portfolio heat, correlation matrix, and drawdown monitors.' },
+  screener:  { title: 'Screener',    icon: 'magnifying-glass', ready: false,
+    soon: 'Real-time market scanner with halal filter, momentum, and volume.' },
+};
+
 let store = {
   overview: null,      // { system, portfolio, market_context, pipeline, top_signals, guards_recent }
   buys: [],            // [{ symbol, price, swing_score, swing_signal, chg_1w, halal, ... }]
@@ -879,6 +899,47 @@ const sigClass = (s) => {
 };
 const dotColor = (n) => n > 0 ? 'up' : n < 0 ? 'down' : '';
 const colorPnl = (n) => n > 0 ? 'positive' : n < 0 ? 'negative' : '';
+
+// ─── NAVIGATION ──────────────────────────────────────────────
+function navigate(route) {
+  const r = ROUTES[route];
+  if (!r) return;
+
+  // Update active tab styling
+  document.querySelectorAll('.topnav-link').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.route === route);
+  });
+
+  if (r.ready) {
+    // Route to ready page — reload or redirect
+    window.location.href = '/' + route;
+  } else if (r.soon) {
+    // Show coming-soon toast
+    showToast(r.title, r.soon);
+  }
+}
+
+function showToast(title, message) {
+  // Remove existing toast
+  const existing = document.getElementById('routeToast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'routeToast';
+  toast.style.cssText = `
+    position:fixed; top:80px; right:24px; background:var(--surface-raised);
+    border:1px solid var(--border-default); border-radius:8px;
+    padding:12px 16px; max-width:340px; z-index:9999;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4); animation:slideIn 0.25s ease;
+  `;
+  toast.innerHTML = `<strong style="color:var(--accent);">${title}</strong>
+    <div style="margin-top:4px;font-size:var(--text-xs);color:var(--text-secondary);">${message}</div>`;
+
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
 
 // ─── API CALLS ──────────────────────────────────────────────────
 async function fetchJSON(url, opts = {}) {
@@ -955,32 +1016,55 @@ function renderAll() {
 function renderMarketBar(mc, sys) {
   if (!mc) return;
 
-  // VIX
+  // VIX — API key: mc.vix.vix (not mc.vix.current)
   const vix = mc.vix || {};
+  const vixVal = vix.vix;
   const vixEl = document.getElementById('mktVix');
-  vixEl.textContent = vix.current != null ? vix.current.toFixed(1) : '---';
-  vixEl.className = 'market-value' + (vix.current >= 25 ? ' down' : vix.current > 18 ? '' : ' up');
+  vixEl.textContent = vixVal != null ? vixVal.toFixed(1) : '---';
+  vixEl.className = 'market-value' + (vixVal >= 25 ? ' down' : vixVal > 18 ? '' : ' up');
 
-  // SPY
+  // SPY — API key: mc.spy_regime.price (not spy_close)
   const spy = mc.spy_regime || {};
+  const spyPrice = spy.price;
+  const spyChange = spy.price_vs_ema200_pct;
   const spyEl = document.getElementById('mktSpy');
-  spyEl.textContent = spy.spy_close ? '$' + spy.spy_close.toFixed(2) : '---';
-  spyEl.className = 'market-value ' + (spy.spy_change_pct > 0 ? 'up' : spy.spy_change_pct < 0 ? 'down' : '');
+  spyEl.textContent = spyPrice ? '$' + spyPrice.toFixed(2) : '---';
+  spyEl.className = 'market-value ' + (spyChange > 0 ? 'up' : spyChange < 0 ? 'down' : '');
 
-  // Breadth
+  // QQQ — from separate data or show --- (populated if available)
+  const qqqEl = document.getElementById('mktQqq');
+  if (mc.qqq_price != null) {
+    qqqEl.textContent = '$' + mc.qqq_price.toFixed(2);
+    qqqEl.className = 'market-value ' + (mc.qqq_change_pct > 0 ? 'up' : mc.qqq_change_pct < 0 ? 'down' : '');
+  } else {
+    qqqEl.textContent = '---';
+    qqqEl.className = 'market-value';
+  }
+
+  // IWM — from separate data or show --- (populated if available)
+  const iwmEl = document.getElementById('mktIwm');
+  if (mc.iwm_price != null) {
+    iwmEl.textContent = '$' + mc.iwm_price.toFixed(2);
+    iwmEl.className = 'market-value ' + (mc.iwm_change_pct > 0 ? 'up' : mc.iwm_change_pct < 0 ? 'down' : '');
+  } else {
+    iwmEl.textContent = '---';
+    iwmEl.className = 'market-value';
+  }
+
+  // Breadth — API key: mc.breadth.breadth_pct (not pct_stocks_above_20)
   const breadth = mc.breadth || {};
   document.getElementById('mktBreadth').textContent =
-    breadth.pct_stocks_above_20 != null ? breadth.pct_stocks_above_20 + '%' : '---';
+    breadth.breadth_pct != null ? breadth.breadth_pct + '%' : '---';
 
-  // Credit
+  // Credit — API key: mc.credit.daily_change_pct (not hy_spread)
   const credit = mc.credit || {};
   document.getElementById('mktCredit').textContent =
-    credit.hy_spread != null ? '+' + credit.hy_spread + 'bp' : '---';
+    credit.daily_change_pct != null ? (credit.daily_change_pct >= 0 ? '+' : '') + credit.daily_change_pct + 'bp' : '---';
 
-  // Liquidity
+  // Liquidity — API key: mc.liquidity.liquidity_pct (not rrp)
   const liq = mc.liquidity || {};
   document.getElementById('mktLiquidity').textContent =
-    liq.rrp != null ? '$' + (liq.rrp / 1000).toFixed(1) + 'T' : '---';
+    liq.liquidity_pct != null ? liq.liquidity_pct + '%' : '---';
 
   // Market live / closed
   const liveLabel = document.getElementById('mktLiveLabel');
@@ -1004,18 +1088,20 @@ function renderMetricStrip(o) {
   const liq = mc.liquidity || {};
 
   const items = [
-    { label: 'VIX', value: vix.current != null ? vix.current.toFixed(2) : '---',
-      sub: vix.change != null ? fmtPct(vix.change) : '', clr: vix.current >= 25 ? 'var(--negative)' : 'var(--warning)' },
-    { label: 'SPY', value: spy.spy_close != null ? '$' + spy.spy_close.toFixed(1) : '---',
-      sub: spy.spy_change_pct != null ? fmtPct(spy.spy_change_pct) : '',
-      clr: (spy.spy_change_pct || 0) >= 0 ? 'var(--positive)' : 'var(--negative)' },
-    { label: 'QQQ', value: '---', sub: '', clr: 'inherit' },
-    { label: 'Breadth', value: breadth.pct_stocks_above_20 != null ? breadth.pct_stocks_above_20 + '%' : '---',
-      sub: 'Adv/Dec', clr: 'inherit' },
-    { label: 'Credit', value: credit.hy_spread != null ? '+' + credit.hy_spread + 'bp' : '---',
-      sub: 'HY Spread', clr: 'var(--positive)' },
-    { label: 'Liq', value: liq.rrp != null ? '$' + (liq.rrp / 1000).toFixed(1) + 'T' : '---',
-      sub: 'RRP', clr: 'var(--positive)' },
+    { label: 'VIX', value: vix.vix != null ? vix.vix.toFixed(2) : '---',
+      sub: vix.classification || '', clr: vix.vix >= 25 ? 'var(--negative)' : vix.vix > 18 ? 'var(--warning)' : 'var(--positive)' },
+    { label: 'SPY', value: spy.price != null ? '$' + spy.price.toFixed(1) : '---',
+      sub: spy.price_vs_ema200_pct != null ? fmtPct(spy.price_vs_ema200_pct) : '',
+      clr: (spy.price_vs_ema200_pct || 0) >= 0 ? 'var(--positive)' : 'var(--negative)' },
+    { label: 'QQQ', value: mc.qqq_price != null ? '$' + mc.qqq_price.toFixed(1) : '---',
+      sub: mc.qqq_change_pct != null ? fmtPct(mc.qqq_change_pct) : '',
+      clr: (mc.qqq_change_pct || 0) >= 0 ? 'var(--positive)' : 'var(--negative)' },
+    { label: 'Breadth', value: breadth.breadth_pct != null ? breadth.breadth_pct + '%' : '---',
+      sub: breadth.classification || 'Adv/Dec', clr: 'inherit' },
+    { label: 'Credit', value: credit.daily_change_pct != null ? (credit.daily_change_pct >= 0 ? '+' : '') + credit.daily_change_pct + 'bp' : '---',
+      sub: credit.classification || 'HY Spread', clr: credit.classification === 'stress' ? 'var(--negative)' : 'var(--positive)' },
+    { label: 'Liq', value: liq.liquidity_pct != null ? liq.liquidity_pct + '%' : '---',
+      sub: liq.classification || 'Volume', clr: liq.liquidity_pct >= 90 ? 'var(--positive)' : 'var(--warning)' },
   ];
 
   document.getElementById('metricStrip').innerHTML = items.map(i =>
@@ -1412,14 +1498,16 @@ function renderSectors() {
     return;
   }
   grid.innerHTML = store.sectors.map(s => {
-    const chg = s.change_pct || 0;
+    // API returns perf_1d (not change_pct) and ticker (not symbol)
+    const chg = s.perf_1d != null ? s.perf_1d : 0;
+    const label = s.ticker || s.name;
     let bg, color;
     if (chg >= 2) { bg = 'rgba(74,222,128,0.20)'; color = 'var(--positive)'; }
     else if (chg >= 0.5) { bg = 'rgba(74,222,128,0.12)'; color = 'var(--positive)'; }
     else if (chg >= 0) { bg = 'rgba(74,222,128,0.06)'; color = 'var(--text-muted)'; }
     else if (chg >= -1) { bg = 'rgba(248,113,113,0.08)'; color = 'var(--text-muted)'; }
     else { bg = 'rgba(248,113,113,0.16)'; color = 'var(--negative)'; }
-    return `<div class="sec-item" style="background:${bg};color:${color}">${s.symbol || s.name}<br>${fmtPct(chg)}</div>`;
+    return `<div class="sec-item" style="background:${bg};color:${color}">${label}<br>${fmtPct(chg)}</div>`;
   }).join('');
 }
 
