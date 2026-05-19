@@ -4424,6 +4424,11 @@ try:
     app.include_router(consensus_router)
 except Exception:
     logger.warning("consensus router not available — skipped")
+try:
+    from app.routers.forecast import router as forecast_router
+    app.include_router(forecast_router)
+except Exception:
+    logger.warning("forecast router not available — skipped")
 
 # ---------------------------------------------------------------------------
 # Professional Dashboard — serves the standalone HTML SPA at /
@@ -4460,6 +4465,15 @@ async def get_dashboard():
 async def get_dashboard_alt():
     """Alias for the dashboard."""
     return await get_dashboard()
+
+
+@app.get("/forecast", include_in_schema=False)
+async def get_forecast_panel():
+    """Serve the ForecastML calibration suite — Ensemble, LSTM-CNN, Transformer."""
+    forecast_path = Path(__file__).resolve().parent / "static" / "forecast-panel.html"
+    if forecast_path.exists():
+        return HTMLResponse(content=forecast_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Forecast Panel not found</h1>", status_code=404)
 
 
 # ---------------------------------------------------------------------------
