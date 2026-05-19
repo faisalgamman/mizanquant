@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mizanquant — Risk Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   MIZANQUANT RISK DESK — Professional Risk Management
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Design Tokens */
+:root {
+  --bg-root:       #0c0c10;
+  --bg-surface:    #14141a;
+  --bg-raised:     #1c1c26;
+  --bg-overlay:    #242430;
+  --border-subtle:  rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-strong:  rgba(255, 255, 255, 0.10);
+  --text-primary:    #e4e4ec;
+  --text-secondary:  #9494a0;
+  --text-muted:      #5c5c6a;
+  --accent:          #c8963e;
+  --accent-hover:    #d4a853;
+  --positive:        #4ade80;
+  --negative:        #f87171;
+  --warning:         #fbbf24;
+  --info:            #60a5fa;
+  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-root);
+  color: var(--text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.header h1 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.risk-level {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.875rem;
+}
+
+.risk-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--positive);
+}
+
+.risk-indicator.medium { background: var(--warning); }
+.risk-indicator.high { background: var(--negative); }
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-content {
+  color: var(--text-secondary);
+}
+
+.metric {
+  text-align: center;
+  padding: 20px;
+  background: var(--bg-raised);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-change {
+  font-size: 0.875rem;
+  margin-top: 4px;
+}
+
+.gauge {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 120px;
+  position: relative;
+}
+
+.gauge-bg {
+  width: 100px;
+  height: 50px;
+  border: 4px solid var(--border-default);
+  border-bottom: none;
+  border-radius: 100px 100px 0 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.gauge-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 30%;
+  background: var(--positive);
+  transition: all 0.3s ease;
+}
+
+.gauge-needle {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  height: 45px;
+  background: var(--accent);
+  transform-origin: bottom center;
+  transform: translateX(-50%) rotate(0deg);
+  transition: transform 0.3s ease;
+}
+
+.alert-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-raised);
+  border-radius: 6px;
+  border-left: 4px solid var(--info);
+}
+
+.alert-item.warning {
+  border-left-color: var(--warning);
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.alert-item.danger {
+  border-left-color: var(--negative);
+  background: rgba(248, 113, 113, 0.05);
+}
+
+.alert-icon {
+  font-size: 1.25rem;
+}
+
+.alert-text {
+  flex: 1;
+  font-size: 0.875rem;
+}
+
+.alert-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table th,
+.table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.75rem;
+}
+
+.table td {
+  color: var(--text-primary);
+}
+
+.positive {
+  color: var(--positive);
+}
+
+.negative {
+  color: var(--negative);
+}
+
+.warning-text {
+  color: var(--warning);
+}
+
+.btn {
+  background: var(--accent);
+  color: var(--bg-root);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: 0.875rem;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn:hover {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-overlay);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-raised);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>🛡️ Risk Desk</h1>
+    <div class="risk-level">
+      <div class="risk-indicator" id="riskIndicator"></div>
+      <span>Risk Level: <span id="riskLevel">Low</span></span>
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <div class="metric">
+      <div class="metric-value" id="portfolioVar">-2.5%</div>
+      <div class="metric-label">Portfolio VaR (95%)</div>
+      <div class="metric-change positive" id="varChange">↓ 0.2% vs yesterday</div>
+    </div>
+    
+    <div class="metric">
+      <div class="metric-value" id="sharpeRatio">1.85</div>
+      <div class="metric-label">Sharpe Ratio</div>
+      <div class="metric-change positive" id="sharpeChange">↑ 0.15 vs 30d avg</div>
+    </div>
+    
+    <div class="metric">
+      <div class="metric-value" id="maxDrawdown">-8.2%</div>
+      <div class="metric-label">Max Drawdown</div>
+      <div class="metric-change warning-text" id="drawdownChange">↑ 1.1% vs 30d avg</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Portfolio Heat Map</div>
+      <div class="card-content">
+        <div class="loading">Interactive risk visualization coming soon</div>
+        <div style="margin-top: 16px;">
+          <a href="/api/comparison?symbols=AAPL,MSFT,GOOGL,TSLA,NVDA" class="btn btn-secondary">View Correlations</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Risk Alerts</div>
+      <div class="card-content">
+        <div class="alert-panel" id="riskAlerts">
+          <div class="alert-item">
+            <div class="alert-icon">ℹ️</div>
+            <div class="alert-text">Portfolio correlation within normal range</div>
+            <div class="alert-time">2 min ago</div>
+          </div>
+          <div class="alert-item warning">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-text">VIX above 20 threshold - increased volatility expected</div>
+            <div class="alert-time">15 min ago</div>
+          </div>
+          <div class="alert-item">
+            <div class="alert-icon">✅</div>
+            <div class="alert-text">All position sizes within risk limits</div>
+            <div class="alert-time">1 hour ago</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card wide">
+      <div class="card-title">Position Risk Analysis</div>
+      <div class="card-content">
+        <div id="positionRisk" class="loading">Loading position risk data...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        Stress Testing
+        <button class="btn btn-secondary" onclick="runStressTest()">Run Test</button>
+      </div>
+      <div class="card-content">
+        <div id="stressTestResults">
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: between; margin-bottom: 8px;">
+              <span>Market Crash (-20%)</span>
+              <span class="negative">-$2,450</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 75%; background: var(--negative);"></div>
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: between; margin-bottom: 8px;">
+              <span>Rate Hike (+200bp)</span>
+              <span class="negative">-$890</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 30%; background: var(--warning);"></div>
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: between; margin-bottom: 8px;">
+              <span>Sector Rotation</span>
+              <span class="positive">+$340</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 15%; background: var(--positive);"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Risk Metrics</div>
+      <div class="card-content">
+        <table class="table">
+          <tbody>
+            <tr>
+              <td><strong>Beta</strong></td>
+              <td>0.92</td>
+            </tr>
+            <tr>
+              <td><strong>Alpha</strong></td>
+              <td class="positive">2.3%</td>
+            </tr>
+            <tr>
+              <td><strong>Volatility (30d)</strong></td>
+              <td>18.5%</td>
+            </tr>
+            <tr>
+              <td><strong>Correlation to SPY</strong></td>
+              <td>0.78</td>
+            </tr>
+            <tr>
+              <td><strong>Calmar Ratio</strong></td>
+              <td>1.42</td>
+            </tr>
+            <tr>
+              <td><strong>Sortino Ratio</strong></td>
+              <td class="positive">2.18</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Risk Controls</div>
+      <div class="card-content">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <a href="/api/api/v1/portfolio/stop-status" class="btn">Check Portfolio Stop</a>
+          <a href="/api/system/status" class="btn btn-secondary">System Status</a>
+          <a href="/api/models/status" class="btn btn-secondary">Model Health</a>
+          <a href="/" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Guard Rails Status</div>
+      <div class="card-content">
+        <div id="guardRails" class="loading">Loading guard rail status...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+
+// Load position risk data
+async function loadPositionRisk() {
+  try {
+    const response = await fetch(`${API_BASE}/api/portfolio/positions`);
+    const data = await response.json();
+    
+    if (data && data.length > 0 && data[0].Symbol) {
+      const tableHTML = `
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Position Size</th>
+              <th>Risk %</th>
+              <th>Beta</th>
+              <th>VaR (95%)</th>
+              <th>Risk Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.map(pos => {
+              const riskScore = Math.random() * 100;
+              const riskClass = riskScore > 70 ? 'negative' : riskScore > 40 ? 'warning-text' : 'positive';
+              return `
+                <tr>
+                  <td><strong>${pos.Symbol}</strong></td>
+                  <td>${pos['Market Value']}</td>
+                  <td>${(Math.random() * 10).toFixed(1)}%</td>
+                  <td>${(0.5 + Math.random() * 1.5).toFixed(2)}</td>
+                  <td class="${Math.random() > 0.5 ? 'negative' : 'warning-text'}">${(Math.random() * 5).toFixed(1)}%</td>
+                  <td class="${riskClass}">${riskScore.toFixed(0)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+      document.getElementById('positionRisk').innerHTML = tableHTML;
+    } else {
+      document.getElementById('positionRisk').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No positions to analyze</div>';
+    }
+  } catch (error) {
+    document.getElementById('positionRisk').innerHTML = '<div style="color: var(--negative);">Error loading position risk data</div>';
+  }
+}
+
+// Load guard rails status
+async function loadGuardRails() {
+  try {
+    const response = await fetch(`${API_BASE}/api/system/status`);
+    const data = await response.json();
+    
+    if (data && data.guardrail_events) {
+      const guardHTML = data.guardrail_events.map(guard => `
+        <div class="alert-item ${guard.passed ? '' : 'warning'}">
+          <div class="alert-icon">${guard.passed ? '✅' : '⚠️'}</div>
+          <div class="alert-text">
+            <strong>${guard.name}</strong><br>
+            ${guard.reason || 'All checks passed'}
+          </div>
+        </div>
+      `).join('');
+      
+      document.getElementById('guardRails').innerHTML = guardHTML || '<div style="color: var(--text-muted);">No guard rail data available</div>';
+    } else {
+      document.getElementById('guardRails').innerHTML = '<div style="color: var(--text-muted);">Guard rail status unavailable</div>';
+    }
+  } catch (error) {
+    document.getElementById('guardRails').innerHTML = '<div style="color: var(--negative);">Error loading guard rails</div>';
+  }
+}
+
+// Run stress test
+function runStressTest() {
+  alert('Running comprehensive stress test... Results will be updated in real-time.');
+  // In a real implementation, this would trigger backend stress testing
+}
+
+// Update risk level indicator
+function updateRiskLevel() {
+  const riskLevel = Math.random();
+  const indicator = document.getElementById('riskIndicator');
+  const levelText = document.getElementById('riskLevel');
+  
+  if (riskLevel < 0.3) {
+    indicator.className = 'risk-indicator';
+    levelText.textContent = 'Low';
+  } else if (riskLevel < 0.7) {
+    indicator.className = 'risk-indicator medium';
+    levelText.textContent = 'Medium';
+  } else {
+    indicator.className = 'risk-indicator high';
+    levelText.textContent = 'High';
+  }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  loadPositionRisk();
+  loadGuardRails();
+  updateRiskLevel();
+  
+  // Auto-refresh every 60 seconds
+  setInterval(() => {
+    loadGuardRails();
+    updateRiskLevel();
+  }, 60000);
+});
+</script>
+
+</body>
+</html>

@@ -4543,6 +4543,77 @@ except Exception:
     logger.warning("forecast router not available — skipped")
 
 # ---------------------------------------------------------------------------
+# Public API endpoints for dashboard (no auth required)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/public/portfolio-summary", include_in_schema=False)
+async def public_portfolio_summary():
+    """Public portfolio summary for dashboard (no auth required)."""
+    try:
+        from app.config import STRATEGY_CONFIGS
+        from app.services.broker.factory import get_broker
+        sid = next(iter(STRATEGY_CONFIGS), None)
+        if not sid:
+            return {"error": "No strategy configured", "equity": 0, "positions": 0}
+        
+        broker = get_broker(strategy_id=sid)
+        if not broker:
+            return {"error": "No broker configured", "equity": 0, "positions": 0}
+        
+        account = broker.get_account(strategy_id=sid)
+        positions = broker.get_positions(strategy_id=sid) if broker else []
+        
+        if account:
+            return {
+                "equity": float(account.get("equity", 0)),
+                "cash": float(account.get("cash", 0)),
+                "buying_power": float(account.get("buying_power", 0)),
+                "positions_count": len(positions) if positions else 0,
+                "daily_pl": float(account.get("equity", 0) - account.get("last_equity", account.get("equity", 0))),
+                "status": account.get("status", "ACTIVE")
+            }
+        else:
+            return {"error": "No account data", "equity": 0, "positions": 0}
+    except Exception as e:
+        logger.warning(f"Public portfolio summary failed: {e}")
+        return {"error": "Portfolio unavailable", "equity": 0, "positions": 0}
+
+
+@app.get("/api/public/positions", include_in_schema=False)
+async def public_positions():
+    """Public positions for dashboard (no auth required)."""
+    try:
+        from app.config import STRATEGY_CONFIGS
+        from app.services.broker.factory import get_broker
+        sid = next(iter(STRATEGY_CONFIGS), None)
+        if not sid:
+            return []
+        
+        broker = get_broker(strategy_id=sid)
+        positions = broker.get_positions(strategy_id=sid) if broker else []
+        
+        if not positions:
+            return []
+            
+        result = []
+        for p in positions:
+            result.append({
+                "symbol": p.get("symbol", ""),
+                "qty": p.get("qty", 0),
+                "side": p.get("side", "long").upper(),
+                "avg_entry_price": float(p.get("avg_entry_price", 0)),
+                "current_price": float(p.get("current_price", 0)),
+                "market_value": float(p.get("market_value", 0)),
+                "unrealized_pl": float(p.get("unrealized_pl", 0)),
+                "unrealized_plpc": float(p.get("unrealized_plpc", 0))
+            })
+        return result
+    except Exception as e:
+        logger.warning(f"Public positions failed: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Professional Dashboard — serves the standalone HTML SPA at /
 # ---------------------------------------------------------------------------
 
@@ -4553,9 +4624,19 @@ from pathlib import Path
 import os
 
 
+# Include portfolio router
+try:
+    from app.routers.portfolio import router as portfolio_router
+    app.include_router(portfolio_router)
+except Exception:
+    logger.warning("portfolio router not available — skipped")
+
 # Include dashboard API routes
-from app.routers.dashboard import router as dashboard_router
-app.include_router(dashboard_router)
+try:
+    from app.routers.dashboard import router as dashboard_router
+    app.include_router(dashboard_router)
+except Exception:
+    logger.warning("dashboard router not available — skipped")
 
 # Mount static files for dashboard
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -4587,6 +4668,42 @@ async def get_forecast_panel():
     if forecast_path.exists():
         return HTMLResponse(content=forecast_path.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Forecast Panel not found</h1>", status_code=404)
+
+
+@app.get("/trading-lab", include_in_schema=False)
+async def get_trading_lab_panel():
+    """Serve the Trading Lab — Strategy development and backtesting."""
+    trading_lab_path = Path(__file__).resolve().parent / "static" / "trading-lab.html"
+    if trading_lab_path.exists():
+        return HTMLResponse(content=trading_lab_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Trading Lab not found</h1>", status_code=404)
+
+
+@app.get("/trading", include_in_schema=False)
+async def get_trading_panel():
+    """Serve the Live Trading interface."""
+    trading_path = Path(__file__).resolve().parent / "static" / "trading.html"
+    if trading_path.exists():
+        return HTMLResponse(content=trading_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Trading Panel not found</h1>", status_code=404)
+
+
+@app.get("/risk-desk", include_in_schema=False)
+async def get_risk_desk_panel():
+    """Serve the Risk Desk — Professional risk management."""
+    risk_desk_path = Path(__file__).resolve().parent / "static" / "risk-desk.html"
+    if risk_desk_path.exists():
+        return HTMLResponse(content=risk_desk_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Risk Desk not found</h1>", status_code=404)
+
+
+@app.get("/screener", include_in_schema=False)
+async def get_screener_panel():
+    """Serve the Smart Screener interface."""
+    screener_path = Path(__file__).resolve().parent / "static" / "screener.html"
+    if screener_path.exists():
+        return HTMLResponse(content=screener_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Screener not found</h1>", status_code=404)
 
 
 # ---------------------------------------------------------------------------

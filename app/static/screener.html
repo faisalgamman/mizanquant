@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mizanquant — Screener</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   MIZANQUANT SCREENER — Smart Stock Scanner
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Design Tokens */
+:root {
+  --bg-root:       #0c0c10;
+  --bg-surface:    #14141a;
+  --bg-raised:     #1c1c26;
+  --bg-overlay:    #242430;
+  --border-subtle:  rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-strong:  rgba(255, 255, 255, 0.10);
+  --text-primary:    #e4e4ec;
+  --text-secondary:  #9494a0;
+  --text-muted:      #5c5c6a;
+  --accent:          #c8963e;
+  --accent-hover:    #d4a853;
+  --positive:        #4ade80;
+  --negative:        #f87171;
+  --warning:         #fbbf24;
+  --info:            #60a5fa;
+  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-root);
+  color: var(--text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.header h1 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.scan-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.875rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--positive);
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  background: var(--accent);
+  color: var(--bg-root);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: 0.875rem;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn:hover {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-overlay);
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 30px;
+  padding: 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.filter-input {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.results-header {
+  display: flex;
+  justify-content: between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.results-count {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  margin: 20px 0;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.results-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.result-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 20px;
+  transition: border-color 0.2s ease;
+  cursor: pointer;
+}
+
+.result-card:hover {
+  border-color: var(--border-strong);
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.result-symbol {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.result-score {
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--bg-root);
+}
+
+.result-score.strong-buy {
+  background: var(--positive);
+}
+
+.result-score.strong-sell {
+  background: var(--negative);
+}
+
+.result-name {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.result-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 12px;
+}
+
+.metric {
+  text-align: center;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.metric-label {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.positive {
+  color: var(--positive);
+}
+
+.negative {
+  color: var(--negative);
+}
+
+.loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state h3 {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 30px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.tab {
+  padding: 12px 20px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>🔍 Smart Screener</h1>
+    <div class="scan-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="scanStatus">Ready</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="runScan">Run Smart Scan</button>
+    <button class="btn btn-secondary" id="halalOnly">Halal Stocks Only</button>
+    <button class="btn btn-secondary" id="exportResults">Export Results</button>
+    <a href="/api/screener/progress" class="btn btn-secondary">View Progress</a>
+    <a href="/" class="btn btn-secondary">Back to Dashboard</a>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="smart">Smart Scan</button>
+    <button class="tab" data-tab="technical">Technical</button>
+    <button class="tab" data-tab="fundamental">Fundamental</button>
+    <button class="tab" data-tab="sentiment">Sentiment</button>
+  </div>
+
+  <div class="filters" id="smartFilters">
+    <div class="filter-group">
+      <label class="filter-label">Market Cap</label>
+      <select class="filter-input" id="marketCap">
+        <option value="">All</option>
+        <option value="large">Large Cap (>$10B)</option>
+        <option value="mid">Mid Cap ($2B-$10B)</option>
+        <option value="small">Small Cap (<$2B)</option>
+      </select>
+    </div>
+    
+    <div class="filter-group">
+      <label class="filter-label">Sector</label>
+      <select class="filter-input" id="sector">
+        <option value="">All Sectors</option>
+        <option value="technology">Technology</option>
+        <option value="healthcare">Healthcare</option>
+        <option value="financials">Financials</option>
+        <option value="consumer">Consumer</option>
+        <option value="industrials">Industrials</option>
+      </select>
+    </div>
+    
+    <div class="filter-group">
+      <label class="filter-label">Min Confidence</label>
+      <input type="range" class="filter-input" id="minConfidence" min="0" max="100" value="70">
+      <span id="confidenceValue">70%</span>
+    </div>
+    
+    <div class="filter-group">
+      <label class="filter-label">Signal Type</label>
+      <select class="filter-input" id="signalType">
+        <option value="">All Signals</option>
+        <option value="strong_buy">Strong Buy</option>
+        <option value="buy">Buy</option>
+        <option value="hold">Hold</option>
+        <option value="sell">Sell</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="progress-bar" id="progressBar" style="display: none;">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+
+  <div class="results-header">
+    <div class="results-count" id="resultsCount">No results</div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-secondary" onclick="sortResults('confidence')">Sort by Confidence</button>
+      <button class="btn btn-secondary" onclick="sortResults('price')">Sort by Price</button>
+    </div>
+  </div>
+
+  <div class="results-grid" id="resultsGrid">
+    <div class="loading">
+      <h3>Ready to scan</h3>
+      <p>Click "Run Smart Scan" to find high-confidence trading opportunities</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let currentResults = [];
+
+// Update confidence value display
+document.getElementById('minConfidence').addEventListener('input', function() {
+  document.getElementById('confidenceValue').textContent = this.value + '%';
+});
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', function() {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+    
+    const tabType = this.dataset.tab;
+    updateFiltersForTab(tabType);
+  });
+});
+
+function updateFiltersForTab(tabType) {
+  // In a full implementation, this would update the filter options based on the tab
+  console.log('Switching to tab:', tabType);
+}
+
+// Run smart scan
+document.getElementById('runScan').addEventListener('click', async function() {
+  const statusDot = document.getElementById('statusDot');
+  const scanStatus = document.getElementById('scanStatus');
+  const progressBar = document.getElementById('progressBar');
+  const progressFill = document.getElementById('progressFill');
+  const resultsGrid = document.getElementById('resultsGrid');
+  
+  // Update status
+  statusDot.style.background = 'var(--warning)';
+  scanStatus.textContent = 'Scanning...';
+  progressBar.style.display = 'block';
+  
+  // Show loading state
+  resultsGrid.innerHTML = '<div class="loading">Scanning halal stocks...</div>';
+  
+  try {
+    // Simulate progress
+    for (let i = 0; i <= 100; i += 10) {
+      progressFill.style.width = i + '%';
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // Fetch results
+    const response = await fetch(`${API_BASE}/api/stock/smart-screener`);
+    const data = await response.json();
+    
+    if (data && data.length > 0) {
+      currentResults = data;
+      displayResults(data);
+      document.getElementById('resultsCount').textContent = `${data.length} stocks found`;
+    } else {
+      resultsGrid.innerHTML = `
+        <div class="empty-state">
+          <h3>No results found</h3>
+          <p>Try adjusting your filters or running the scan again later</p>
+        </div>
+      `;
+      document.getElementById('resultsCount').textContent = '0 results';
+    }
+    
+    // Update status
+    statusDot.style.background = 'var(--positive)';
+    scanStatus.textContent = 'Scan Complete';
+    progressBar.style.display = 'none';
+    
+  } catch (error) {
+    console.error('Scan failed:', error);
+    statusDot.style.background = 'var(--negative)';
+    scanStatus.textContent = 'Scan Failed';
+    progressBar.style.display = 'none';
+    resultsGrid.innerHTML = '<div style="color: var(--negative); text-align: center; padding: 40px;">Failed to load results</div>';
+  }
+});
+
+function displayResults(results) {
+  const grid = document.getElementById('resultsGrid');
+  
+  const html = results.map(stock => {
+    const signal = stock.Signal || 'HOLD';
+    const confidence = stock.Confidence || 0;
+    const scoreClass = signal === 'STRONG BUY' ? 'strong-buy' : signal === 'STRONG SELL' ? 'strong-sell' : '';
+    
+    return `
+      <div class="result-card" onclick="viewStock('${stock.Symbol}')">
+        <div class="result-header">
+          <div>
+            <div class="result-symbol">${stock.Symbol}</div>
+            <div class="result-name">${stock.Name || stock.Symbol}</div>
+          </div>
+          <div class="result-score ${scoreClass}">${confidence.toFixed(0)}%</div>
+        </div>
+        
+        <div class="result-metrics">
+          <div class="metric">
+            <div class="metric-value">${signal}</div>
+            <div class="metric-label">Signal</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value">$${stock.Price || '0.00'}</div>
+            <div class="metric-label">Price</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value ${(stock.Change || 0) >= 0 ? 'positive' : 'negative'}">
+              ${(stock.Change || 0).toFixed(1)}%
+            </div>
+            <div class="metric-label">Change</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value">${stock.Volume || 'N/A'}</div>
+            <div class="metric-label">Volume</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value">${stock.RSI || 'N/A'}</div>
+            <div class="metric-label">RSI</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value">${stock.PE || 'N/A'}</div>
+            <div class="metric-label">P/E</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  grid.innerHTML = html;
+}
+
+function viewStock(symbol) {
+  window.open(`/api/stock/summary?symbol=${symbol}`, '_blank');
+}
+
+function sortResults(by) {
+  if (!currentResults.length) return;
+  
+  const sorted = [...currentResults].sort((a, b) => {
+    if (by === 'confidence') {
+      return (b.Confidence || 0) - (a.Confidence || 0);
+    } else if (by === 'price') {
+      return (b.Price || 0) - (a.Price || 0);
+    }
+    return 0;
+  });
+  
+  displayResults(sorted);
+}
+
+// Halal only filter
+document.getElementById('halalOnly').addEventListener('click', async function() {
+  try {
+    const response = await fetch(`${API_BASE}/api/halal-status`);
+    const halalData = await response.json();
+    
+    if (halalData && currentResults.length > 0) {
+      const halalSymbols = halalData.map(item => item.symbol);
+      const filtered = currentResults.filter(stock => 
+        halalSymbols.includes(stock.Symbol)
+      );
+      
+      displayResults(filtered);
+      document.getElementById('resultsCount').textContent = `${filtered.length} halal stocks found`;
+    }
+  } catch (error) {
+    console.error('Failed to filter halal stocks:', error);
+  }
+});
+
+// Export results
+document.getElementById('exportResults').addEventListener('click', function() {
+  if (!currentResults.length) {
+    alert('No results to export. Run a scan first.');
+    return;
+  }
+  
+  const csv = convertToCSV(currentResults);
+  downloadCSV(csv, 'screener_results.csv');
+});
+
+function convertToCSV(data) {
+  const headers = Object.keys(data[0] || {});
+  const csvContent = [
+    headers.join(','),
+    ...data.map(row => headers.map(header => row[header] || '').join(','))
+  ].join('\n');
+  
+  return csvContent;
+}
+
+function downloadCSV(content, filename) {
+  const blob = new Blob([content], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+</script>
+
+</body>
+</html>
