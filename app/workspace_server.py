@@ -76,7 +76,17 @@ async def readyz():
     # DB check — fast socket probe to avoid blocking on pool timeout
     try:
         import socket
-        ...[truncated]
+        from urllib.parse import urlparse
+        db_url = os.environ.get("DATABASE_URL", "")
+        if db_url:
+            parsed = urlparse(db_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 5432
+            sock = socket.create_connection((host, port), timeout=5.0)
+            sock.close()
+            checks["db"] = "connected"
+        else:
+            checks["db"] = "unconfigured"
     except Exception as e:
         checks["db"] = f"error: {str(e)[:80]}"
         healthy = False
