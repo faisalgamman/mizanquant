@@ -34,7 +34,7 @@ class BaseAgent(ABC):
         """
 
     @abstractmethod
-    def train(self, env: TradingEnvironment, episodes: int) -> list[float]:
+    def train(self, env: TradingEnvironment, episodes: int) -> dict:
         """Train the agent on the given environment.
 
         Args:
@@ -42,7 +42,8 @@ class BaseAgent(ABC):
             episodes: Number of training episodes.
 
         Returns:
-            List of total rewards per episode (for tracking convergence).
+            Dict with episode_rewards, best_epoch, best_reward,
+            early_stopped, sharpe_stopped, checkpoint_path, training_history.
         """
 
     @abstractmethod
@@ -136,7 +137,8 @@ class BaseAgent(ABC):
         )
 
         self.reset()
-        training_rewards = self.train(train_env, episodes=episodes)
+        train_result = self.train(train_env, episodes=episodes)
+        training_rewards = train_result if isinstance(train_result, dict) else train_result
 
         # Test (fresh risk manager, same cost model)
         test_risk = RiskManager(

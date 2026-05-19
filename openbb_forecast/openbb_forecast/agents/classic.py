@@ -112,8 +112,10 @@ class RLAgentBase:
 
         return {
             "backtest_summary": {
+                "total_return_pct": round(total_return * 100, 2),
                 "total_return": round(total_return, 4),
                 "sharpe_ratio": round(sharpe, 4),
+                "sharpe": round(sharpe, 4),
                 "max_drawdown": round(max_dd, 4),
                 "n_trades": result["num_trades"],
                 "win_rate": round(win_rate, 4),

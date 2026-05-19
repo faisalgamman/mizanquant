@@ -844,41 +844,66 @@ def run_dqn(symbol, episodes, df=None):
 def _run_dqn_inner(symbol, episodes, df=None):
     try:
         from openbb_forecast.agents.double_dqn import DoubleDQNAgent
-        from openbb_forecast.agents.environment import TradingEnvironment
-        from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
-        from openbb_forecast.risk.manager import RiskManager
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
-        split = int(len(prices) * 0.8)
-        train_prices = prices[:split]
-        cost_model = TransactionCostModel(commission_bps=10)
-        try:
-            risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"RiskManager init failed: {e}")
-            risk_mgr = None
-        train_env = TradingEnvironment(prices=train_prices, window_size=30,
-                                       initial_capital=10000, cost_model=cost_model,
-                                       risk_manager=risk_mgr)
-        agent = DoubleDQNAgent(state_size=train_env.state_size, action_size=train_env.action_size)
-        rewards = agent.train(train_env, episodes=episodes)
-        state = train_env.reset()
-        action = agent.select_action(state)
-        action_map = {0: "HOLD", 1: "BUY", 2: "SELL"}
-        signal = action_map.get(int(action), "HOLD")
+
+        agent = DoubleDQNAgent(
+            state_size=30, action_size=3,
+            early_stop_patience=10,
+            checkpoint_dir="model_checkpoints",
+            checkpoint_name=f"dqn_{symbol.upper()}",
+        )
+        # Walk-forward evaluation: auto-split 70/30, train on first, test on second
+        result = agent.walk_forward_evaluate(
+            prices=prices,
+            train_ratio=0.7,
+            window_size=30,
+            episodes=episodes,
+            initial_capital=10_000.0,
+            commission_bps=10.0,
+            slippage_bps=5.0,
+            max_position=5,
+            stop_loss_pct=0.02,
+            max_drawdown_pct=0.10,
+        )
+        backtest = result.get("backtest_summary", {})
+        rewards = (result.get("training_rewards", []) or [])
+        if isinstance(rewards, dict):
+            rewards = rewards.get("episode_rewards", [])
+        train_rewards = rewards
+
+        # Get final signal from test evaluation
+        test_results = result.get("test_results", {})
+        actions_log = test_results.get("actions_log", [["HOLD"]])
+        last_action = actions_log[-1] if actions_log else ["HOLD"]
+        signal = last_action[0] if isinstance(last_action, (list, tuple)) else str(last_action)
+
         last_price = float(prices[-1])
-        metrics = calc_metrics([r / 10000 for r in rewards])
+        metrics = {
+            "Sharpe Ratio": round(float(backtest.get("sharpe_ratio", 0)), 2),
+            "Max Drawdown %": round(float(backtest.get("max_drawdown", 0)), 2),
+            "Win Rate %": round(float(backtest.get("win_rate", 0)), 1),
+            "Total Return %": round(float(backtest.get("total_return_pct", 0)), 2),
+            "Best Reward": round(float(max(train_rewards)) if train_rewards else 0, 2),
+            "Avg Reward": round(float(np.mean(train_rewards)) if train_rewards else 0, 2),
+            "Early Stopped": bool(result.get("test_results", {}).get("early_stopped", False)),
+        }
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
-                    "Model": "Double DQN + Risk Manager", "Episodes": episodes,
-                    "Signal": signal, "Best Reward": round(float(max(rewards)), 2),
-                    "Avg Reward": round(float(np.mean(rewards)), 2),
-                    "Final Reward": round(float(rewards[-1]), 2),
-                    **metrics}]
+                    "Model": "Double DQN (Walk-Forward)", "Episodes": episodes,
+                    "Signal": signal, **metrics}]
         episode_results = [{"Episode": i+1, "Reward": round(float(r), 2),
-                            "Status": "Good" if r > 0 else "Bad"} for i, r in enumerate(rewards)]
+                            "Status": "Good" if r > 0 else "Bad"}
+                           for i, r in enumerate(train_rewards)]
+        # Also include backtest details
+        if backtest:
+            for key in ["total_trades", "benchmark_return_pct", "alpha_vs_benchmark"]:
+                val = backtest.get(key, "N/A")
+                if isinstance(val, float):
+                    val = round(val, 2)
+                summary[0][key] = val
         return summary + episode_results
     except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
@@ -894,37 +919,64 @@ def run_policy_gradient(symbol, episodes, df=None):
 def _run_policy_gradient_inner(symbol, episodes, df=None):
     try:
         from openbb_forecast.agents.policy_gradient import PolicyGradientAgent
-        from openbb_forecast.agents.environment import TradingEnvironment
-        from openbb_forecast.backtesting.transaction_costs import TransactionCostModel
-        from openbb_forecast.risk.manager import RiskManager
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
-        split = int(len(prices) * 0.8)
-        cost_model = TransactionCostModel(commission_bps=10)
-        try:
-            risk_mgr = RiskManager(max_position_size=0.2, stop_loss_pct=0.05, max_drawdown_pct=0.15)
-        except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.debug(f"RiskManager init failed: {e}")
-            risk_mgr = None
-        env = TradingEnvironment(prices=prices[:split], window_size=30,
-                                  initial_capital=10000, cost_model=cost_model,
-                                  risk_manager=risk_mgr)
-        agent = PolicyGradientAgent(state_size=env.state_size, action_size=env.action_size)
-        rewards = agent.train(env, episodes=episodes)
-        state = env.reset()
-        action = agent.select_action(state)
-        action_map = {0: "HOLD", 1: "BUY", 2: "SELL"}
-        signal = action_map.get(int(action), "HOLD")
+
+        agent = PolicyGradientAgent(
+            state_size=30, action_size=3,
+            early_stop_patience=10,
+            checkpoint_dir="model_checkpoints",
+            checkpoint_name=f"pg_{symbol.upper()}",
+        )
+        # Walk-forward evaluation
+        result = agent.walk_forward_evaluate(
+            prices=prices,
+            train_ratio=0.7,
+            window_size=30,
+            episodes=episodes,
+            initial_capital=10_000.0,
+            commission_bps=10.0,
+            slippage_bps=5.0,
+            max_position=5,
+            stop_loss_pct=0.02,
+            max_drawdown_pct=0.10,
+        )
+        backtest = result.get("backtest_summary", {})
+        rewards = (result.get("training_rewards", []) or [])
+        if isinstance(rewards, dict):
+            rewards = rewards.get("episode_rewards", [])
+        train_rewards = rewards
+
+        test_results = result.get("test_results", {})
+        actions_log = test_results.get("actions_log", [["HOLD"]])
+        last_action = actions_log[-1] if actions_log else ["HOLD"]
+        signal = last_action[0] if isinstance(last_action, (list, tuple)) else str(last_action)
+
         last_price = float(prices[-1])
+        metrics = {
+            "Sharpe Ratio": round(float(backtest.get("sharpe_ratio", 0)), 2),
+            "Max Drawdown %": round(float(backtest.get("max_drawdown", 0)), 2),
+            "Win Rate %": round(float(backtest.get("win_rate", 0)), 1),
+            "Total Return %": round(float(backtest.get("total_return_pct", 0)), 2),
+            "Best Reward": round(float(max(train_rewards)) if train_rewards else 0, 2),
+            "Avg Reward": round(float(np.mean(train_rewards)) if train_rewards else 0, 2),
+        }
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
-                    "Model": "Policy Gradient (REINFORCE)", "Episodes": episodes,
-                    "Signal": signal, "Best Reward": round(float(max(rewards)), 2),
-                    "Avg Reward": round(float(np.mean(rewards)), 2)}]
-        return summary + [{"Episode": i+1, "Reward": round(float(r), 2),
-                           "Status": "Good" if r > 0 else "Bad"} for i, r in enumerate(rewards)]
+                    "Model": "Policy Gradient (REINFORCE, Walk-Forward)", "Episodes": episodes,
+                    "Signal": signal, **metrics}]
+        episode_results = [{"Episode": i+1, "Reward": round(float(r), 2),
+                            "Status": "Good" if r > 0 else "Bad"}
+                           for i, r in enumerate(train_rewards)]
+        if backtest:
+            for key in ["total_trades", "benchmark_return_pct", "alpha_vs_benchmark"]:
+                val = backtest.get(key, "N/A")
+                if isinstance(val, float):
+                    val = round(val, 2)
+                summary[0][key] = val
+        return summary + episode_results
     except NON_FATAL_ANALYSIS_ERROR as e:
         return [{"Error": str(e)}]
 
@@ -2248,7 +2300,8 @@ def _run_consensus_agent(agent_name, symbol, episodes, df):
         )
 
         agent = _create_rl_agent(agent_name, state_size=env.state_size, action_size=env.action_size)
-        rewards = agent.train(env, episodes=episodes)
+        train_result = agent.train(env, episodes=episodes)
+        rewards = train_result["episode_rewards"] if isinstance(train_result, dict) else train_result
         state = env.reset()
         action = agent.select_action(state)
         action_map = {0: "HOLD", 1: "BUY", 2: "SELL"}

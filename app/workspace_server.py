@@ -3678,6 +3678,118 @@ async def api_model_status():
 
 
 # ---------------------------------------------------------------------------
+# Model Registry & Quality Gates API (v2.0 — per Quality-Gate Roadmap)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/model-registry")
+async def api_model_registry(alias: str = "production"):
+    """List all models in the registry, with quality metrics."""
+    try:
+        from app.services.model_registry import list_models
+        models = list_models(alias)
+        return {
+            "alias": alias,
+            "count": len(models),
+            "models": models,
+        }
+    except ImportError as e:
+        return JSONResponse(
+            {"error": f"model_registry module not available: {e}"},
+            status_code=503,
+        )
+
+
+@app.post("/api/model-registry/promote")
+async def api_model_registry_promote(
+    name: str = Query(...),
+    version: str = Query(...),
+    artifact_path: str = Query(...),
+    sharpe: float = Query(None),
+    win_rate: float = Query(None),
+    max_drawdown: float = Query(None),
+    test_accuracy: float = Query(None),
+):
+    """Promote a model from staging to production (with quality gate enforcement)."""
+    try:
+        from app.services.model_registry import promote_to_production
+        metrics = {}
+        if sharpe is not None:
+            metrics["sharpe"] = sharpe
+        if win_rate is not None:
+            metrics["win_rate"] = win_rate
+        if max_drawdown is not None:
+            metrics["max_drawdown"] = max_drawdown
+        if test_accuracy is not None:
+            metrics["test_accuracy"] = test_accuracy
+
+        result = promote_to_production(
+            name=name, version=version,
+            artifact_path=artifact_path, metrics=metrics,
+        )
+        return result
+    except ValueError as e:
+        return JSONResponse(
+            {"error": str(e), "name": name, "version": version,
+             "reason": "quality_gate_failed"},
+            status_code=400,
+        )
+    except ImportError as e:
+        return JSONResponse(
+            {"error": f"model_registry module not available: {e}"},
+            status_code=503,
+        )
+
+
+@app.get("/api/smart-ensemble/weights")
+async def api_smart_ensemble_weights():
+    """Return current model weights from smart ensemble."""
+    try:
+        from app.services.smart_ensemble import get_model_weights, get_top_models
+        weights = get_model_weights()
+        top = get_top_models()
+        return {
+            "weights": weights,
+            "top_models": [
+                {"name": m["name"], "weight": m["weight"],
+                 "sharpe": m.get("sharpe", 0),
+                 "win_rate": m.get("win_rate", 0),
+                 "max_drawdown": m.get("max_drawdown", 0),
+                 "quality_passed": m.get("quality_passed", True)}
+                for m in top
+            ],
+        }
+    except ImportError as e:
+        return JSONResponse(
+            {"error": f"smart_ensemble module not available: {e}"},
+            status_code=503,
+        )
+
+
+@app.post("/api/model-registry/retrain")
+async def api_retrain_models(
+    models: str = Query(None, description="Comma-separated model names or 'all'"),
+    symbol: str = Query("AAPL"),
+    episodes: int = Query(200),
+):
+    """Trigger rolling retraining of specified models (or all production models)."""
+    try:
+        from openbb_forecast.training.retrainer import rolling_retrain
+        target_models = None if not models or models == "all" else [m.strip() for m in models.split(",")]
+        result = rolling_retrain(
+            symbol=symbol,
+            models=target_models,
+            episodes=episodes,
+            register_after=True,
+        )
+        return result
+    except ImportError as e:
+        return JSONResponse(
+            {"error": f"retrainer module not available: {e}"},
+            status_code=503,
+        )
+
+
+# ---------------------------------------------------------------------------
 # OpenBB Workspace Widget Configuration
 # ---------------------------------------------------------------------------
 

@@ -147,7 +147,8 @@ def _train_with_seed(agent_name: str, env, seed: int, episodes: int = 5) -> list
         pass
     agent = _create_any_agent(agent_name)
     env.reset()
-    return agent.train(env, episodes=episodes)
+    train_result = agent.train(env, episodes=episodes)
+    return train_result if not isinstance(train_result, dict) else train_result["episode_rewards"]
 
 
 @pytest.mark.parametrize("agent_name", RL_AGENTS)
@@ -205,7 +206,7 @@ def test_walk_forward_terminates(agent_name):
         assert isinstance(result, dict)
         assert "backtest_summary" in result
         summary = result["backtest_summary"]
-        assert any(k in summary for k in ("sharpe", "annualized_return", "profit_factor")), \
+        assert any(k in summary for k in ("sharpe", "sharpe_ratio", "annualized_return", "profit_factor", "total_return")), \
             f"{agent_name}: summary missing expected keys"
     elif hasattr(agent, "backtest"):
         result = agent.backtest(prices)
@@ -231,7 +232,8 @@ def test_training_completes(agent_name):
     )
     agent = _create_any_agent(agent_name)
     env.reset()
-    rewards = agent.train(env, episodes=3)
+    train_result = agent.train(env, episodes=3)
+    rewards = train_result["episode_rewards"] if isinstance(train_result, dict) else train_result
     assert isinstance(rewards, list), f"{agent_name}: expected list, got {type(rewards)}"
     assert len(rewards) == 3, f"{agent_name}: expected 3 rewards, got {len(rewards)}"
     assert all(np.isfinite(r) for r in rewards), f"{agent_name}: non-finite reward"

@@ -1,6 +1,7 @@
-"""Smart Ensemble — weighted consensus with top-k models.
+"""Smart Ensemble — weighted consensus with top-k models and quality gates.
 
-Each model gets weight = Sharpe × (Win Rate / 100).
+Weights: Sharpe × WinRate × (1 - |MaxDD|/100).
+Models failing quality gates (sharpe<1, acc<0.55, maxDD>15%) are excluded.
 Top 5 models by weight drive the final verdict.
 """
 
@@ -11,15 +12,22 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 logger = logging.getLogger("screener")
 
 _MODEL_REGISTRY_DIR = Path("model_registry")
 _TOP_K = 5
 _STRONG_THRESHOLD = 0.65
 
+# Quality gate thresholds for ensemble inclusion
+_MIN_SHARPE = 0.5       # softer than promotion gate (1.0)
+_MIN_WIN_RATE = 40.0     # %
+_MAX_DRAWDOWN = 25.0     # %
+
 
 def _load_all_models() -> dict[str, dict[str, Any]]:
-    """Load all production models from registry."""
+    """Load all production models from registry, with enhanced weights."""
     models = {}
     reg_dir = _MODEL_REGISTRY_DIR
     if not reg_dir.exists():
@@ -33,10 +41,33 @@ def _load_all_models() -> dict[str, dict[str, Any]]:
         try:
             data = json.loads(prod_file.read_text())
             metrics = data.get("metrics", {})
+
+            sharpe = float(metrics.get("sharpe", metrics.get("Sharpe Ratio", 0)))
+            win_rate = float(metrics.get("win_rate", metrics.get("Win Rate %", 50.0)))
+            max_dd = float(metrics.get("max_drawdown", metrics.get("Max Drawdown %", 15.0)))
+
+            # Filter by quality gates
+            if sharpe < _MIN_SHARPE:
+                logger.debug("Excluding %s: Sharpe %.2f < %.2f", model_dir.name, sharpe, _MIN_SHARPE)
+                continue
+            if win_rate < _MIN_WIN_RATE:
+                logger.debug("Excluding %s: WinRate %.0f%% < %.0f%%", model_dir.name, win_rate, _MIN_WIN_RATE)
+                continue
+            if max_dd > _MAX_DRAWDOWN:
+                logger.debug("Excluding %s: MaxDD %.1f%% > %.1f%%", model_dir.name, max_dd, _MAX_DRAWDOWN)
+                continue
+
+            # Enhanced weight: Sharpe × WinRate × drawdown penalty
+            dd_penalty = max(0.1, 1.0 - abs(max_dd) / 100.0)
+            win_rate_norm = max(0.3, win_rate / 100.0)
+            weight = round(sharpe * win_rate_norm * dd_penalty, 4)
+
             data["name"] = model_dir.name
-            data["sharpe"] = float(metrics.get("sharpe", 0))
-            data["win_rate"] = float(metrics.get("win_rate", 50))
-            data["weight"] = round(data["sharpe"] * (data["win_rate"] / 100), 4)
+            data["sharpe"] = sharpe
+            data["win_rate"] = win_rate
+            data["max_drawdown"] = max_dd
+            data["weight"] = max(weight, 0.001)  # floor
+            data["quality_passed"] = True
             models[model_dir.name] = data
         except Exception as exc:
             logger.debug("Failed to load model %s: %s", model_dir.name, exc)

@@ -1,12 +1,18 @@
-"""Model registry — staging / production aliases.
+"""Model registry — staging / production aliases with quality gates.
 
 The trading engine loads models only from the **production** alias.
 Champion/challenger shadow scoring runs on **staging** before promotion.
+
+Quality gates (enforced on promote_to_production):
+  - test_sharpe >= 1.0
+  - test_acc >= 0.55
+  - max_drawdown <= 15%
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -16,6 +22,14 @@ _MODEL_REGISTRY_DIR = Path(
 )
 
 _STAGE_ALIASES = {"staging", "production"}
+
+logger = logging.getLogger("model_registry")
+
+# ── Quality Gate Thresholds ──
+
+QUALITY_GATE_MIN_SHARPE = float(os.environ.get("QUALITY_GATE_MIN_SHARPE", "1.0"))
+QUALITY_GATE_MIN_ACC = float(os.environ.get("QUALITY_GATE_MIN_ACC", "0.55"))
+QUALITY_GATE_MAX_DRAWDOWN_PCT = float(os.environ.get("QUALITY_GATE_MAX_DD_PCT", "15.0"))
 
 
 def _registry_path(name: str, alias: str) -> Path:
@@ -84,8 +98,48 @@ def register(
 
 
 def promote_to_production(name: str, version: str, artifact_path: str, metrics=None):
-    """Promote a staging model to production."""
+    """Promote a staging model to production — with quality gate enforcement.
+
+    Quality gate checks:
+        - test_sharpe >= QUALITY_GATE_MIN_SHARPE
+        - test_acc >= QUALITY_GATE_MIN_ACC
+        - max_drawdown <= QUALITY_GATE_MAX_DRAWDOWN_PCT
+
+    Raises ValueError if quality gates are not met.
+    """
+    failures = _check_quality_gates(metrics or {})
+    if failures:
+        msg = f"Quality gate failed for {name}/{version}: " + "; ".join(failures)
+        logger.warning(msg)
+        raise ValueError(msg)
     register(name, "production", artifact_path, version, metrics=metrics)
+    logger.info("Promoted %s/%s to production ✓", name, version)
+
+
+def _check_quality_gates(metrics: dict[str, Any]) -> list[str]:
+    """Check model metrics against quality gates. Returns list of failure messages."""
+    failures = []
+    sharpe = float(metrics.get("test_sharpe",
+                    metrics.get("Sharpe Ratio",
+                    metrics.get("sharpe", 0))))
+    if sharpe < QUALITY_GATE_MIN_SHARPE:
+        failures.append(f"Sharpe {sharpe:.2f} < {QUALITY_GATE_MIN_SHARPE}")
+    acc = float(metrics.get("test_acc",
+               metrics.get("directional_acc",
+               metrics.get("Win Rate %", 0)) / 100.0))
+    if acc < QUALITY_GATE_MIN_ACC:
+        failures.append(f"Acc {acc:.3f} < {QUALITY_GATE_MIN_ACC}")
+    max_dd = float(metrics.get("max_drawdown",
+                   metrics.get("Max Drawdown %", 0)))
+    if max_dd > QUALITY_GATE_MAX_DRAWDOWN_PCT:
+        failures.append(f"MaxDD {max_dd:.1f}% > {QUALITY_GATE_MAX_DRAWDOWN_PCT}%")
+    return failures
+
+
+def validate_quality(metrics: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Public quality gate check. Returns (passed, failures)."""
+    failures = _check_quality_gates(metrics)
+    return len(failures) == 0, failures
 
 
 def demote(name: str, alias: str = "production"):
