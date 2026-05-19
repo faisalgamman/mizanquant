@@ -69,12 +69,19 @@ async def v1_paper_trades(limit: int = Query(default=50, le=200), db: AsyncSessi
         return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     from app.db.models import TradeHistory
 
-    result = await db.execute(
-        select(TradeHistory)
-        .order_by(TradeHistory.created_at.desc())
-        .limit(limit)
-    )
-    trades = result.scalars().all()
+    try:
+        result = await db.execute(
+            select(TradeHistory)
+            .order_by(TradeHistory.created_at.desc())
+            .limit(limit)
+        )
+        trades = result.scalars().all()
+    except Exception as exc:
+        logger.error("paper/trades DB query failed: %s", exc)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Database query failed: {exc}"},
+        )
 
     return [
         {

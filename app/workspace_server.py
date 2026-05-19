@@ -128,10 +128,13 @@ async def api_system_status():
         "ibkr_port": settings.IBKR_PORT,
     }
 
-    # Open positions (non-fatal if broker unreachable)
+    # Open positions (non-fatal if broker unreachable) — with 10s timeout
     try:
-        from app.services.alpaca_client import get_positions
-        positions = get_positions()
+        from app.services.alpaca_client import get_positions as _get_positions
+        positions = await asyncio.wait_for(
+            asyncio.to_thread(_get_positions),
+            timeout=10.0,
+        )
         status["open_positions"] = len(positions) if positions else 0
         status["positions"] = [
             {
@@ -143,21 +146,24 @@ async def api_system_status():
             }
             for p in (positions or [])
         ]
-    except Exception as e:
+    except (asyncio.TimeoutError, Exception) as e:
         status["open_positions"] = "unavailable"
-        status["positions_error"] = str(e)
+        status["positions_error"] = f"timeout" if isinstance(e, asyncio.TimeoutError) else str(e)
 
-    # Recent guardrail checks
+    # Recent guardrail checks — with 5s timeout
     try:
-        from app.services.guards import run_all
+        from app.services.guards import run_all as _run_all
         from app.services.guards.base import GuardContext
         ctx = GuardContext(symbol="__system__", side="buy", price=0.0, qty=1, confidence=0.0)
-        results = run_all(ctx)
+        results = await asyncio.wait_for(
+            asyncio.to_thread(_run_all, ctx),
+            timeout=5.0,
+        )
         status["guardrail_events"] = [
             {"name": r.name, "passed": r.passed, "reason": r.reason}
             for r in results[:5]
         ]
-    except Exception:
+    except (asyncio.TimeoutError, Exception):
         status["guardrail_events"] = []
 
     # Strategy config summary
@@ -194,7 +200,7 @@ async def ibkr_ping():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://pro.openbb.co", "https://openbb.co", "http://localhost:4200"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

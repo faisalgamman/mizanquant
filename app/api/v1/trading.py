@@ -55,26 +55,49 @@ async def v1_trading_summary():
     sid = next(iter(STRATEGY_CONFIGS), None)
     broker = get_broker(strategy_id=sid)
 
-    account = broker.get_account(strategy_id=sid) if broker else None
-    positions = broker.get_positions(strategy_id=sid) if broker else []
+    account = None
+    positions = []
+    served_by = broker.name if broker else "unknown"
+
+    # Run broker calls in thread with 10s timeout to avoid event-loop blockage
+    def _fetch_sync():
+        acc = broker.get_account(strategy_id=sid) if broker else None
+        pos = broker.get_positions(strategy_id=sid) if broker else []
+        return acc, pos
+
+    try:
+        account, positions = await asyncio.wait_for(
+            asyncio.to_thread(_fetch_sync),
+            timeout=10.0,
+        )
+    except (asyncio.TimeoutError, Exception):
+        account = None
+        positions = []
 
     # Resilience fallback — if the primary broker (e.g. IBKR with a downed
     # gateway) returns no account, fall back to Alpaca so the dashboard
     # still shows live equity/positions instead of blank "—".
-    served_by = broker.name if broker else "unknown"
     if account is None and served_by != "alpaca":
         try:
-            alpaca = _build("alpaca")
-            fb_account = alpaca.get_account(strategy_id=sid)
+            def _alpaca_fetch():
+                alpaca = _build("alpaca")
+                fb_account = alpaca.get_account(strategy_id=sid)
+                fb_positions = alpaca.get_positions(strategy_id=sid) or []
+                return fb_account, fb_positions
+
+            fb_account, fb_positions = await asyncio.wait_for(
+                asyncio.to_thread(_alpaca_fetch),
+                timeout=8.0,
+            )
             if fb_account:
                 logger.warning(
                     "trading/summary: %s broker unavailable — served via Alpaca fallback",
                     served_by,
                 )
                 account = fb_account
-                positions = alpaca.get_positions(strategy_id=sid) or []
+                positions = fb_positions
                 served_by = "alpaca (fallback)"
-        except Exception as exc:
+        except (asyncio.TimeoutError, Exception) as exc:
             logger.error("trading/summary Alpaca fallback failed: %s", exc)
 
     if account:
