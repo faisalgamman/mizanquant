@@ -4353,6 +4353,16 @@ async def dashboard_page():
         return FileResponse(_dash)
     return {"error": "Dashboard not found"}
 
+
+@app.get("/forecast", include_in_schema=False)
+async def forecast_panel():
+    """Serve the ForecastML calibration suite — Ensemble, LSTM-CNN, Transformer."""
+    from fastapi.responses import FileResponse
+    _f = os.path.join(os.path.dirname(__file__), "app", "static", "forecast-panel.html")
+    if os.path.isfile(_f):
+        return FileResponse(_f)
+    return {"error": "Forecast panel not found"}
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
