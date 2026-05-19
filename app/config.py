@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     TRAILING_STOP_ENABLED: bool = True   # use trailing stops instead of static SL
     TRAILING_STOP_PCT: float = 2.5       # trailing stop distance (% from peak)
 
+    # --- Emergency Kill Switch ---
+    # Set to True to halt ALL trading immediately (order submission blocked).
+    # Can be toggled at runtime via Railway dashboard env var without redeploy.
+    KILL_SWITCH: bool = False
+
     # --- Interactive Brokers (TWS/IB Gateway) ---
     # Default port unified to 4002 (IB Gateway paper). Previously 7497 here but
     # 4002 in the adapter — the mismatch let a bad Railway config go unnoticed.

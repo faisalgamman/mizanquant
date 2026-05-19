@@ -373,6 +373,13 @@ def execute_buy(
             result["reason"] = "Auto-trading is disabled (AUTO_TRADE_ENABLED=false)"
             return result
 
+        # ── Emergency Kill Switch ──
+        if settings.KILL_SWITCH:
+            result["reason"] = "BLOCKED: KILL_SWITCH=active — all trading halted"
+            logger.warning(f"{label} KILL_SWITCH blocked BUY {symbol}")
+            _notify_trade(result)
+            return result
+
         # Input validation — fail-fast before any broker/DB contact (M1 #9)
         validation = validate_entry(
             symbol=symbol,
@@ -592,6 +599,13 @@ def execute_sell(symbol: str, price: float, confidence: float, strategy_id: str 
 
         if not settings.AUTO_TRADE_ENABLED:
             result["reason"] = "Auto-trading is disabled"
+            return result
+
+        # ── Emergency Kill Switch ──
+        if settings.KILL_SWITCH:
+            result["reason"] = "BLOCKED: KILL_SWITCH=active — all trading halted"
+            logger.warning(f"{label} KILL_SWITCH blocked SELL {symbol}")
+            _notify_trade(result)
             return result
 
         # Check if we hold this position IN THIS STRATEGY'S ACCOUNT

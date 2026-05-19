@@ -51,7 +51,120 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/api/ibkr/ping")
+# ---------------------------------------------------------------------------
+# Kubernetes-style health probes + system status
+# ---------------------------------------------------------------------------
+
+_start_time = time.time()
+
+
+@app.get("/livez")
+async def livez():
+    """Liveness probe — is the process alive?"""
+    return {"status": "alive", "uptime_seconds": round(time.time() - _start_time, 1)}
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness probe — is the app ready to serve traffic?
+
+    Checks: DB connectivity. Returns 503 if any critical dependency is down.
+    """
+    checks = {"db": "unknown", "broker": "unknown"}
+    healthy = True
+
+    # DB check: verify engine connectivity
+    try:
+        from app.db.database import engine
+        with engine.connect() as conn:
+            pass  # just verify we can connect
+        checks["db"] = "connected"
+    except Exception as e:
+        checks["db"] = f"error: {str(e)[:80]}"
+        healthy = False
+
+    # Broker check (non-blocking)
+    try:
+        broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
+        checks["broker"] = broker_type
+    except Exception:
+        checks["broker"] = "unconfigured"
+
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        content={"status": "ready" if healthy else "not_ready", "checks": checks},
+        status_code=status_code,
+    )
+
+
+@app.get("/api/system/status")
+async def api_system_status():
+    """Comprehensive system status for operations dashboard.
+
+    Returns KILL_SWITCH state, trading flags, broker connectivity,
+    open positions, and recent guardrail events.
+    """
+    from app.config import settings
+
+    status = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "uptime_seconds": round(time.time() - _start_time, 1),
+        "environment": os.environ.get("ENVIRONMENT", "production"),
+        # Emergency controls
+        "kill_switch": settings.KILL_SWITCH,
+        "auto_trade_enabled": settings.AUTO_TRADE_ENABLED,
+        "live_confirmed": settings.LIVE_CONFIRMED,
+        # Broker
+        "broker_type": os.environ.get("BROKER_TYPE", "alpaca"),
+        "ibkr_host": settings.IBKR_HOST,
+        "ibkr_port": settings.IBKR_PORT,
+    }
+
+    # Open positions (non-fatal if broker unreachable)
+    try:
+        from app.services.alpaca_client import get_positions
+        positions = get_positions()
+        status["open_positions"] = len(positions) if positions else 0
+        status["positions"] = [
+            {
+                "symbol": p.get("symbol", ""),
+                "qty": p.get("qty", "0"),
+                "market_value": p.get("market_value", "0"),
+                "unrealized_pl": p.get("unrealized_pl", "0"),
+                "current_price": p.get("current_price", "0"),
+            }
+            for p in (positions or [])
+        ]
+    except Exception as e:
+        status["open_positions"] = "unavailable"
+        status["positions_error"] = str(e)
+
+    # Recent guardrail checks
+    try:
+        from app.services.guards import run_all
+        from app.services.guards.base import GuardContext
+        ctx = GuardContext(symbol="__system__", side="buy", price=0.0, qty=1, confidence=0.0)
+        results = run_all(ctx)
+        status["guardrail_events"] = [
+            {"name": r.name, "passed": r.passed, "reason": r.reason}
+            for r in results[:5]
+        ]
+    except Exception:
+        status["guardrail_events"] = []
+
+    # Strategy config summary
+    from app.config import STRATEGY_CONFIGS
+    status["strategies"] = {
+        sid: {"name": cfg.name, "max_positions": cfg.max_positions}
+        for sid, cfg in STRATEGY_CONFIGS.items()
+    }
+
+    return status
+
+
+# ---------------------------------------------------------------------------
+# IBKR ping
+# ---------------------------------------------------------------------------
 async def ibkr_ping():
     """Test TWS/IB Gateway connectivity via socket."""
     import socket
