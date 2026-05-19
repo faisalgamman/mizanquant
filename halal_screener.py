@@ -732,7 +732,7 @@ def _run_lstm_inner(symbol, horizon, df=None):
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
-        SEQ_LEN = 20
+        SEQ_LEN = 30
         X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
 
         preds = _predict_persisted_model("lstm", X_test)
@@ -768,7 +768,7 @@ def _run_transformer_inner(symbol, horizon, df=None):
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
-        SEQ_LEN = 20
+        SEQ_LEN = 30
         X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
 
         preds = _predict_persisted_model("transformer", X_test)
@@ -804,7 +804,7 @@ def _run_ensemble_inner(symbol, horizon, df=None):
         if df is None: return [{"Error": f"No data for {symbol}"}]
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
-        SEQ_LEN = 20
+        SEQ_LEN = 30
         X, y = [], []
         mean_p = prices.mean(); std_p = prices.std() + 1e-9
         norm = (prices - mean_p) / std_p
@@ -2160,9 +2160,9 @@ def _run_consensus_forecast_model(model_name, symbol, horizon, df, price):
     try:
         prices = np.array(df["close"].values, dtype=np.float64).flatten()
         prices = prices[~np.isnan(prices)]
-        SEQ_LEN = 20
+        SEQ_LEN = 30
 
-        from openbb_forecast.data.preprocessing import prepare_sequences
+        from app.services.technical import prepare_sequences
         _, _, X_test, _, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
 
         preds = _predict_persisted_model(model_name, X_test)
