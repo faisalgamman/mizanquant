@@ -364,16 +364,57 @@ def get_market_status(force_refresh: bool = False) -> dict:
     return result
 
 
+# ── QQQ / IWM Snapshots ──
+
+def _etf_snapshot(symbol: str, period: str = "5d") -> dict:
+    """Return {price, change_pct} for a single ETF ticker."""
+    import yfinance as yf
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=period, interval="1d", auto_adjust=True)
+        if hist is None or hist.empty or len(hist) < 2:
+            # Fallback: just get current price
+            info = ticker.info or {}
+            price = info.get("regularMarketPreviousClose") or info.get("previousClose")
+            if price is None:
+                return {"price": None, "change_pct": None}
+            return {"price": round(float(price), 2), "change_pct": None}
+
+        closes = hist["Close"].astype(float).values
+        price = float(closes[-1])
+        prev = float(closes[-2])
+        change_pct = round((price / prev - 1) * 100, 2)
+        return {"price": round(price, 2), "change_pct": change_pct}
+    except Exception:
+        return {"price": None, "change_pct": None}
+
+
+def get_qqq_snapshot() -> dict:
+    """QQQ current price + daily change percent."""
+    return _etf_snapshot("QQQ")
+
+
+def get_iwm_snapshot() -> dict:
+    """IWM current price + daily change percent."""
+    return _etf_snapshot("IWM")
+
+
 # ── Combined Context ──
 
 
 def _compute_market_context() -> dict:
+    qqq = get_qqq_snapshot()
+    iwm = get_iwm_snapshot()
     return {
         "vix": get_vix_context(),
         "spy_regime": get_spy_regime(),
         "breadth": get_market_breadth(),
         "credit": get_credit_ratio(),
         "liquidity": get_liquidity_index(),
+        "qqq_price": qqq.get("price"),
+        "qqq_change_pct": qqq.get("change_pct"),
+        "iwm_price": iwm.get("price"),
+        "iwm_change_pct": iwm.get("change_pct"),
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
 
