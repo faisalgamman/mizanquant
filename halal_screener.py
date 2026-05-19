@@ -4403,13 +4403,47 @@ def _render_ops_fragment(api_key: str | None) -> str:
 
 
 # --- Include routers ---
-from app.routers.screener import router as screener_router
-from app.routers.forecast import router as forecast_router
-from app.routers.consensus import router as consensus_router
-from app.routers.portfolio import router as portfolio_router
-from app.routers.admin import router as admin_router
-from app.routers.dashboard import router as dashboard_router
-from app.api.v1 import v1_router
+try:
+    from app.routers.screener import router as screener_router
+    app.include_router(screener_router)
+except ImportError as e:
+    logger.warning(f"Screener router not available: {e}")
+
+try:
+    from app.routers.forecast import router as forecast_router
+    app.include_router(forecast_router)
+except ImportError as e:
+    logger.warning(f"Forecast router not available: {e}")
+
+try:
+    from app.routers.consensus import router as consensus_router
+    app.include_router(consensus_router)
+except ImportError as e:
+    logger.warning(f"Consensus router not available: {e}")
+
+try:
+    from app.routers.portfolio import router as portfolio_router
+    app.include_router(portfolio_router)
+except ImportError as e:
+    logger.warning(f"Portfolio router not available: {e}")
+
+try:
+    from app.routers.admin import router as admin_router
+    app.include_router(admin_router)
+except ImportError as e:
+    logger.warning(f"Admin router not available: {e}")
+
+try:
+    from app.routers.dashboard import router as dashboard_router
+    app.include_router(dashboard_router)
+except ImportError as e:
+    logger.warning(f"Dashboard router not available: {e}")
+
+try:
+    from app.api.v1 import v1_router
+    app.include_router(v1_router)
+except ImportError as e:
+    logger.warning(f"V1 router not available: {e}")
 
 # Mount static files for dashboard
 from fastapi.staticfiles import StaticFiles
@@ -4417,16 +4451,6 @@ import os
 _static_dir = os.path.join(os.path.dirname(__file__), "app", "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
-
-
-# Include routers
-app.include_router(screener_router)
-app.include_router(forecast_router)
-app.include_router(consensus_router)
-app.include_router(portfolio_router)
-app.include_router(admin_router)
-app.include_router(dashboard_router)
-app.include_router(v1_router)
 
 
 @app.get("/api/info", include_in_schema=False)

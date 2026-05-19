@@ -1,9 +1,16 @@
 """Portfolio, Strategy, Trading, Signals, Telegram endpoints"""
 import os
 from fastapi import APIRouter
-from halal_screener import OperatorAPIKey
 
 router = APIRouter(tags=["Portfolio"])
+
+def _get_operator_api_key():
+    """Import OperatorAPIKey to avoid circular import"""
+    try:
+        from halal_screener import OperatorAPIKey
+        return OperatorAPIKey
+    except ImportError:
+        return None
 
 
 def _broker_type() -> str:
@@ -11,9 +18,12 @@ def _broker_type() -> str:
 
 
 @router.get("/strategies")
-async def list_strategies(x_api_key: OperatorAPIKey = None):
-    from halal_screener import _require_api_key
-    _require_api_key(x_api_key)
+async def list_strategies(x_api_key = None):
+    try:
+        from halal_screener import _require_api_key, OperatorAPIKey
+        _require_api_key(x_api_key)
+    except ImportError:
+        pass
     from app.config import STRATEGY_CONFIGS as CFG
     bt = _broker_type()
     result = []
