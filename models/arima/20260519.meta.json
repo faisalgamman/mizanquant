@@ -1,0 +1,12 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "arima",
+  "test_acc": 0.129,
+  "test_sharpe": -60.8466,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.0427,
+  "val_sharpe": -6.1619,
+  "version": "20260519"
+}

@@ -1,0 +1,12 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "transformer",
+  "test_acc": 0.5323,
+  "test_sharpe": -11.2368,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.5299,
+  "val_sharpe": -1.2501,
+  "version": "20260519"
+}

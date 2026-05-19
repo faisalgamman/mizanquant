@@ -1,0 +1,13 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "cnn",
+  "test_acc": 0.5,
+  "test_sharpe": -65.7557,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.4915,
+  "val_sharpe": -21.8602,
+  "variant": "cnn_seq2seq",
+  "version": "20260519"
+}

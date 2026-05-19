@@ -1,0 +1,2 @@
+[openbb_core_extension]
+forecast = openbb_forecast.router:router

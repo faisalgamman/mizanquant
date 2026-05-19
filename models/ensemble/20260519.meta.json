@@ -1,0 +1,12 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "ensemble",
+  "test_acc": 0.5645,
+  "test_sharpe": 12.9944,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.5085,
+  "val_sharpe": 28.6856,
+  "version": "20260519"
+}

@@ -1,0 +1,12 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "lstm",
+  "test_acc": 0.4516,
+  "test_sharpe": -83.4847,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.5,
+  "val_sharpe": -22.2809,
+  "version": "v1"
+}

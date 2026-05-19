@@ -1,0 +1,13 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "gru",
+  "test_acc": 0.5,
+  "test_sharpe": -52.6064,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.4915,
+  "val_sharpe": -16.5806,
+  "variant": "gru_seq2seq",
+  "version": "20260519"
+}

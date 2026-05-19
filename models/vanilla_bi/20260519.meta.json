@@ -1,0 +1,13 @@
+{
+  "feature_list_hash": "multi_feature_v2",
+  "n_features": 14,
+  "name": "rnn_variant",
+  "test_acc": 0.4355,
+  "test_sharpe": -56.4092,
+  "test_window_days": 63,
+  "trained_on": "AAPL",
+  "val_acc": 0.4829,
+  "val_sharpe": -14.702,
+  "variant": "vanilla_bi",
+  "version": "20260519"
+}
