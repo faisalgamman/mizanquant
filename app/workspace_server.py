@@ -73,12 +73,10 @@ async def readyz():
     checks = {"db": "unknown", "broker": "unknown"}
     healthy = True
 
-    # DB check: verify engine connectivity
+    # DB check — fast socket probe to avoid blocking on pool timeout
     try:
-        from app.db.database import engine
-        with engine.connect() as conn:
-            pass  # just verify we can connect
-        checks["db"] = "connected"
+        import socket
+        ...[truncated]
     except Exception as e:
         checks["db"] = f"error: {str(e)[:80]}"
         healthy = False
