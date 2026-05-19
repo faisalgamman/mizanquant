@@ -62,11 +62,26 @@ class _TTLCache:
 
 
 class MemoryCacheService:
-    """High-level cache service that tries Redis first, falls back to in-memory."""
+    """High-level cache service that tries Redis first, falls back to in-memory.
+
+    Uses per-key compute locks (stale-while-revalidate): when the cache is
+    expired, the FIRST caller recomputes while ALL concurrent callers receive
+    the slightly-stale cached value instead of blocking.
+    """
 
     def __init__(self) -> None:
         self._local = _TTLCache()
         self._redis_available: Optional[bool] = None
+        self._compute_locks: Dict[str, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()
+
+    async def _get_compute_lock(self, key: str) -> asyncio.Lock:
+        async with self._locks_lock:
+            lock = self._compute_locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._compute_locks[key] = lock
+            return lock
 
     async def _try_redis(self) -> Optional[Any]:
         try:
@@ -84,6 +99,7 @@ class MemoryCacheService:
         force_refresh: bool = False,
         json_encoder: Optional[Callable] = None,
     ) -> Any:
+        # Fast path — return fresh cache immediately
         if not force_refresh:
             redis = await self._try_redis()
             if redis is not None:
@@ -98,18 +114,59 @@ class MemoryCacheService:
                 if local_val is not None:
                     return local_val
 
-        data = await compute_func()
+        # Cache miss or force_refresh — only ONE caller computes,
+        # others get stale data (or wait briefly for in-flight compute)
+        lock = await self._get_compute_lock(key)
+        if lock.locked():
+            # Another request is already computing — return stale if available
+            if not force_refresh:
+                async with self._local._lock:
+                    if key in self._local._store:
+                        return self._local._store[key][0]
+                # No stale local either — wait for the compute to finish
+                async with lock:
+                    pass
+                # After lock released, try the cache again
+                local_val = await self._local.get(key)
+                if local_val is not None:
+                    return local_val
+                # If still nothing, fall through to compute ourselves
+            else:
+                # force_refresh with lock held — wait for in-flight compute
+                async with lock:
+                    pass
+                local_val = await self._local.get(key)
+                if local_val is not None:
+                    return local_val
 
-        redis = await self._try_redis()
-        if redis is not None:
-            try:
-                await redis.setex(key, ttl_seconds, json.dumps(data, default=json_encoder or str))
-            except Exception:
-                pass
-        else:
-            await self._local.set(key, data, ttl_seconds)
+        async with lock:
+            # Double-check: another waiter might have populated the cache
+            if not force_refresh:
+                redis = await self._try_redis()
+                if redis is not None:
+                    try:
+                        cached = await redis.get(key)
+                        if cached is not None:
+                            return json.loads(cached)
+                    except Exception:
+                        pass
+                else:
+                    local_val = await self._local.get(key)
+                    if local_val is not None:
+                        return local_val
 
-        return data
+            data = await compute_func()
+
+            redis = await self._try_redis()
+            if redis is not None:
+                try:
+                    await redis.setex(key, ttl_seconds, json.dumps(data, default=json_encoder or str))
+                except Exception:
+                    pass
+            else:
+                await self._local.set(key, data, ttl_seconds)
+
+            return data
 
     async def invalidate(self, key: str) -> None:
         redis = await self._try_redis()

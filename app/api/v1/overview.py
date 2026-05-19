@@ -65,24 +65,30 @@ async def _get_portfolio():
         except (asyncio.TimeoutError, Exception):
             return default
 
-    account = await _call_broker(broker.get_account, strategy_id=sid)
-    positions = await _call_broker(broker.get_positions, strategy_id=sid, default=[])
+    # Run account + positions in parallel (not sequential) so max wait is 8s not 16s
+    account, positions = await asyncio.gather(
+        _call_broker(broker.get_account, strategy_id=sid),
+        _call_broker(broker.get_positions, strategy_id=sid, default=[]),
+    )
 
     # Resilience fallback — primary broker (e.g. IBKR gateway down) returns
     # nothing → fall back to Alpaca so the portfolio panel shows live data.
     if account is None and broker_label != "alpaca":
         try:
             alpaca = _build("alpaca")
-            fb = await asyncio.wait_for(
-                asyncio.to_thread(alpaca.get_account, strategy_id=sid),
-                timeout=8.0,
-            )
-            if fb:
-                account = fb
-                positions = await asyncio.wait_for(
+            fb_account, fb_positions = await asyncio.gather(
+                asyncio.wait_for(
+                    asyncio.to_thread(alpaca.get_account, strategy_id=sid),
+                    timeout=8.0,
+                ),
+                asyncio.wait_for(
                     asyncio.to_thread(alpaca.get_positions, strategy_id=sid),
                     timeout=8.0,
-                ) or []
+                ),
+            )
+            if fb_account:
+                account = fb_account
+                positions = fb_positions or []
                 broker_label = "alpaca (fallback)"
         except Exception:
             pass
