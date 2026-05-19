@@ -4468,6 +4468,7 @@ async def get_dashboard_alt():
 
 
 @app.get("/forecast", include_in_schema=False)
+@app.options("/forecast", include_in_schema=False)
 async def get_forecast_panel():
     """Serve the ForecastML calibration suite — Ensemble, LSTM-CNN, Transformer."""
     forecast_path = Path(__file__).resolve().parent / "static" / "forecast-panel.html"
