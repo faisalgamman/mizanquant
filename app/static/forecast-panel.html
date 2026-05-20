@@ -213,7 +213,7 @@ const results = {};  // { ensemble: {data, error}, lstm: {...}, transformer: {..
 
 // ═══ API ═══
 async function fetchModel(model, symbol, horizon) {
-  const url = `/${model}?symbol=${encodeURIComponent(symbol)}&horizon=${horizon}`;
+  const url = `/api/forecast/${model}?symbol=${encodeURIComponent(symbol)}&horizon=${horizon}`;
   const resp = await fetch(url);
   if (!resp.ok) {
     const txt = await resp.text();
@@ -396,7 +396,7 @@ function renderSummary() {
 // ═══ INIT — show global warning if backend is unavailable ═══
 (async function checkHealth() {
   try {
-    const r = await fetch('/ensemble?symbol=AAPL&horizon=1');
+    const r = await fetch('/api/forecast/ensemble?symbol=AAPL&horizon=1');
     if (!r.ok) throw new Error('Backend unavailable');
   } catch (e) {
     document.getElementById('globalWarnings').innerHTML =

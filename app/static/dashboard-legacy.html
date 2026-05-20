@@ -2849,6 +2849,12 @@ async function loadOverview(showLoading = true) {
     if (overviewData) {
       info       = overviewData.system || {};
       trading    = overviewData.portfolio || {};
+      // Fallback: if overview portfolio is empty, fetch from trading summary
+      if (!trading.equity && Object.keys(trading).length <= 1) {
+        try {
+          trading = await apiGet('/api/trading/summary');
+        } catch (_) { /* keep empty */ }
+      }
       guards     = overviewData.guards_recent || [];
       history    = overviewData.top_signals || [];
       sched      = overviewData.pipeline?.schedule || {};
