@@ -428,6 +428,8 @@ except Exception:
     create_model = None
     MODEL_NAMES = []
 
+_MODELS_DIR = Path(__file__).parent.parent / "models"
+
 # AI Agent — LLM-powered investment analyst with template fallback
 from app.ai_agent import AIAgent
 ai_agent = AIAgent()
@@ -440,8 +442,8 @@ async def forecast_model(
     target_column: str = Query("close", description="Target column"),
     forecast_horizon: int = Query(5, description="Steps to forecast"),
     sequence_length: int = Query(30, description="Lookback window"),
-    epochs: int = Query(20, description="Training epochs"),
-    n_splits: int = Query(3, description="Walk-forward splits"),
+    epochs: int = Query(5, description="Training epochs"),
+    n_splits: int = Query(1, description="Walk-forward splits"),
     hidden_size: int = Query(64, description="Hidden size (NN models)"),
     num_layers: int = Query(2, description="Num layers (NN models)"),
     learning_rate: float = Query(0.001, description="Learning rate"),
@@ -473,7 +475,35 @@ async def forecast_model(
             "learning_rate": learning_rate,
         }
 
-    model = create_model(model_name, **model_kwargs)
+    # Try loading pre-trained weights first (faster: ~2s vs ~30s re-training)
+    _ckpt_pt = _MODELS_DIR / model_name / "20260519.pt"
+    _ckpt_pkl = _MODELS_DIR / model_name / "20260519.pkl"
+    _pretrained_loaded = False
+
+    if _ckpt_pt.exists() and model_name not in ("arima", "ensemble"):
+        try:
+            from openbb_forecast.models.factory import MODEL_REGISTRY as _MR
+            _cls = _MR.get(model_name)
+            if _cls and hasattr(_cls, "load"):
+                model = _cls.load(_ckpt_pt)
+                n_splits = 1  # inference only — no re-training needed
+                _pretrained_loaded = True
+        except Exception as _e:
+            logger.warning(f"Pre-trained load failed for {model_name}: {_e} — falling back to training")
+
+    if not _pretrained_loaded and _ckpt_pkl.exists():
+        try:
+            from openbb_forecast.models.factory import MODEL_REGISTRY as _MR
+            _cls = _MR.get(model_name)
+            if _cls and hasattr(_cls, "load"):
+                model = _cls.load(_ckpt_pkl)
+                n_splits = 1
+                _pretrained_loaded = True
+        except Exception as _e:
+            logger.warning(f"Pickle load failed for {model_name}: {_e} — falling back to training")
+
+    if not _pretrained_loaded:
+        model = create_model(model_name, **model_kwargs)
 
     fold_results = model.walk_forward_predict(
         data=prices,
@@ -2604,28 +2634,62 @@ async def consensus(
     votes = []
     errors = []
 
+    def _run_one_model(model_name: str):
+        """Run a single model for consensus — uses pre-trained weights when available."""
+        _ckpt_pt = _MODELS_DIR / model_name / "20260519.pt"
+        _ckpt_pkl = _MODELS_DIR / model_name / "20260519.pkl"
+        _n_splits = 1
+
+        if _ckpt_pt.exists() and model_name not in ("arima", "ensemble"):
+            try:
+                from openbb_forecast.models.factory import MODEL_REGISTRY as _MR
+                _cls = _MR.get(model_name)
+                if _cls and hasattr(_cls, "load"):
+                    model = _cls.load(_ckpt_pt)
+                else:
+                    raise ValueError("no load method")
+            except Exception:
+                model_kwargs = {"epochs": 3, "hidden_size": 32, "num_layers": 1, "learning_rate": 0.001}
+                if model_name in ("cnn_seq2seq", "dilated_cnn"):
+                    model_kwargs = {"epochs": 3, "learning_rate": 0.001, "filters": 32}
+                model = create_model(model_name, **model_kwargs)
+        elif _ckpt_pkl.exists():
+            import pickle as _pkl
+            with open(_ckpt_pkl, "rb") as _f:
+                model = _pkl.load(_f)
+        else:
+            model_kwargs = {"epochs": 3, "hidden_size": 32, "num_layers": 1, "learning_rate": 0.001}
+            if model_name in ("cnn_seq2seq", "dilated_cnn"):
+                model_kwargs = {"epochs": 3, "learning_rate": 0.001, "filters": 32}
+            model = create_model(model_name, **model_kwargs)
+
+        fold_results = model.walk_forward_predict(
+            data=prices, sequence_length=sequence_length,
+            forecast_horizon=forecast_horizon, n_splits=_n_splits,
+        )
+        return fold_results
+
+    import asyncio as _asyncio
+    import concurrent.futures as _cf
+
     for model_name in MODEL_NAMES:
         try:
-            model_kwargs = {}
-            if model_name not in ("arima", "ensemble"):
-                model_kwargs = {"epochs": 10, "hidden_size": 32, "num_layers": 1, "learning_rate": 0.001}
-            if model_name in ("cnn_seq2seq", "dilated_cnn"):
-                model_kwargs = {"epochs": 10, "learning_rate": 0.001, "filters": 32}
-
-            model = create_model(model_name, **model_kwargs)
-            fold_results = model.walk_forward_predict(
-                data=prices, sequence_length=sequence_length,
-                forecast_horizon=forecast_horizon, n_splits=2,
-            )
+            loop = _asyncio.get_event_loop()
+            try:
+                fold_results = await _asyncio.wait_for(
+                    loop.run_in_executor(None, _run_one_model, model_name),
+                    timeout=45.0,
+                )
+            except _asyncio.TimeoutError:
+                errors.append({"model": model_name, "error": "timeout after 45s"})
+                continue
 
             metrics = compute_forecast_metrics(fold_results)
             r2 = metrics.get("r2_score", 0)
             mape = metrics.get("mape", 100)
-            # Accuracy proxy: R2 > 0 → better than mean, also check MAPE
             accuracy_pct = max(0, r2 * 100) if r2 > 0 else 0
             accuracy_pct = accuracy_pct * (1 - min(mape / 100, 0.5))
 
-            # Direction vote from last prediction vs last actual
             last_pred = float(fold_results[-1].predictions[-1, 0]) if fold_results[-1].predictions.ndim > 1 else float(fold_results[-1].predictions[-1])
             last_actual = float(fold_results[-1].actuals[-1, 0]) if fold_results[-1].actuals.ndim > 1 else float(fold_results[-1].actuals[-1])
             direction = "up" if last_pred > last_actual else "down"

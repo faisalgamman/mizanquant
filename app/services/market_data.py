@@ -374,6 +374,9 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
                         )
                         time.sleep(wait_time)
                         page_retry += 1
+                        if page_retry >= 5:
+                            logger.error(f"Intraday max retries reached for {symbol}, aborting")
+                            break
                         continue
 
                     page_retry = 0

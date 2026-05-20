@@ -65,16 +65,19 @@ HARAM_INDUSTRIES = {
     "tobacco",
     # Gambling
     "gambling", "casinos & gaming", "resorts & casinos",
-    # Weapons (conventional arms dealers — defense contractors evaluated case-by-case)
-    # Pork processing
-    "packaged foods",  # flagged for manual review, not auto-disqualified
-    # Adult entertainment
-    "entertainment",  # flagged, not auto-disqualified
     # Interest-based financial institutions
     "banks—regional", "banks—diversified", "credit services",
     "insurance—diversified", "insurance—life", "insurance—property & casualty",
     "insurance—specialty", "insurance—reinsurance",
     "mortgage finance", "capital markets",
+}
+
+# Industries that require manual review per AAOIFI — not auto-disqualified.
+# packaged_foods: may contain pork products (needs label check)
+# entertainment: may contain adult content (needs content check)
+_REVIEW_INDUSTRIES = {
+    "packaged foods",
+    "entertainment",
 }
 
 def _yf_fallback(symbol: str) -> Optional[dict]:
@@ -176,9 +179,10 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         logger.warning(f"No market cap for {symbol}")
         return None
 
-    # 2. Haram sector check (instant disqualification)
+    # 2. Haram sector/industry check
     haram_sector_flag = sector in HARAM_SECTORS
     haram_industry_flag = industry in HARAM_INDUSTRIES
+    needs_manual_review = industry in _REVIEW_INDUSTRIES
 
     # 3. Fetch balance sheet (skip if already from yfinance)
     if not used_fallback:
@@ -226,7 +230,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0
     interest_pass = interest_ratio < 5.0
 
-    # Screen 3: Haram revenue — sector/industry based
+    # Screen 3: Haram revenue — sector/industry based (review-only industries don't auto-fail)
     haram_pass = not (haram_sector_flag or haram_industry_flag)
 
     # Screen 4: Liquidity — (Cash + Interest-Bearing Securities) / Market Cap < 33%
@@ -245,6 +249,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         "industry": profile.get("industry", ""),
         "market_cap": market_cap,
         "is_halal": is_halal,
+        "needs_manual_review": needs_manual_review,
         # Ratios
         "debt_ratio": round(debt_ratio, 2),
         "debt_pass": debt_pass,

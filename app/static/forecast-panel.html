@@ -213,13 +213,22 @@ const results = {};  // { ensemble: {data, error}, lstm: {...}, transformer: {..
 
 // ═══ API ═══
 async function fetchModel(model, symbol, horizon) {
-  const url = `/api/forecast/${model}?symbol=${encodeURIComponent(symbol)}&horizon=${horizon}`;
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  const url = `/api/forecast/${model}?symbol=${encodeURIComponent(symbol)}&horizon=${horizon}&epochs=3&n_splits=1`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000); // 60s
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+    return resp.json();
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') throw new Error('Request timed out after 60s');
+    throw e;
   }
-  return resp.json();
 }
 
 // ═══ RUN ALL ═══

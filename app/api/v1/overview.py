@@ -54,12 +54,12 @@ async def _get_portfolio():
 
     # Wrap blocking broker calls in asyncio.to_thread with a tight timeout
     # so a down IBKR Gateway does not block the FastAPI event loop.
-    async def _call_broker(fn, *args, default=None, timeout=8.0):
+    async def _call_broker(fn, *args, default=None, timeout=8.0, **kwargs):
         if broker is None:
             return default
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(fn, *args),
+                asyncio.to_thread(fn, *args, **kwargs),
                 timeout=timeout,
             )
         except (asyncio.TimeoutError, Exception):

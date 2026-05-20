@@ -44,7 +44,15 @@ async def _dashboard_health():
 
     broker_type = os.environ.get("BROKER_TYPE", "alpaca").lower()
     checks["broker_type"] = broker_type
-    checks["broker"] = "connected" if broker_type == "ibkr" else "not_configured"
+    # Check if the broker's API keys are configured
+    if broker_type == "alpaca":
+        has_key = bool(os.environ.get("ALPACA_API_KEY") or getattr(settings, "ALPACA_API_KEY", None))
+        has_secret = bool(os.environ.get("ALPACA_SECRET_KEY") or getattr(settings, "ALPACA_SECRET_KEY", None))
+        checks["broker"] = "connected" if (has_key and has_secret) else "not_configured"
+    elif broker_type == "ibkr":
+        checks["broker"] = "connected"  # IBKR doesn't need API keys, uses gateway
+    else:
+        checks["broker"] = "not_configured"
 
     try:
         from app.db.database import engine
