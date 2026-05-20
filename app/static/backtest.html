@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mizanquant — Backtest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-root:       #0c0c10;
+  --bg-surface:    #14141a;
+  --bg-raised:     #1c1c26;
+  --bg-overlay:    #242430;
+  --border-subtle:  rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-strong:  rgba(255, 255, 255, 0.10);
+  --text-primary:    #e4e4ec;
+  --text-secondary:  #9494a0;
+  --text-muted:      #5c5c6a;
+  --accent:          #c8963e;
+  --accent-hover:    #d4a853;
+  --positive:        #4ade80;
+  --negative:        #f87171;
+  --warning:         #fbbf24;
+  --info:            #60a5fa;
+  --font-display: 'DM Sans', system-ui, sans-serif;
+  --font-body:    system-ui, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-root);
+  color: var(--text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.header h1 {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.header a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  padding: 8px 16px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+.header a:hover { background: var(--bg-overlay); color: var(--text-primary); }
+
+.controls-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-group label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.control-group input,
+.control-group select {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  transition: border-color 0.2s;
+}
+
+.control-group input:focus,
+.control-group select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.btn {
+  background: var(--accent);
+  color: var(--bg-root);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background-color 0.2s, opacity 0.2s;
+  white-space: nowrap;
+}
+
+.btn:hover { background: var(--accent-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.metric-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.positive { color: var(--positive); }
+.negative { color: var(--negative); }
+.warning-text { color: var(--warning); }
+
+.trades-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+th, td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.7rem;
+  background: var(--bg-raised);
+  position: sticky;
+  top: 0;
+}
+
+td { color: var(--text-primary); font-family: var(--font-mono); font-size: 0.8rem; }
+
+tr:hover td { background: rgba(200, 150, 62, 0.03); }
+
+.badge-win { color: var(--positive); }
+.badge-loss { color: var(--negative); }
+
+.loading {
+  text-align: center;
+  padding: 60px;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.presets {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.preset-btn {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.preset-btn:hover, .preset-btn.active {
+  background: var(--bg-overlay);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+#status { margin-top: 12px; font-size: 0.8rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>📊 Backtest Lab</h1>
+    <a href="/">← Dashboard</a>
+  </div>
+
+  <div class="controls-card">
+    <div class="presets">
+      <button class="preset-btn" onclick="setPreset('3m')">3 Months</button>
+      <button class="preset-btn active" onclick="setPreset('1y')">1 Year</button>
+      <button class="preset-btn" onclick="setPreset('2y')">2 Years</button>
+      <button class="preset-btn" onclick="setPreset('5y')">5 Years</button>
+    </div>
+    <div class="controls-grid">
+      <div class="control-group">
+        <label>Symbol</label>
+        <input type="text" id="symbol" value="AAPL" placeholder="AAPL">
+      </div>
+      <div class="control-group">
+        <label>Start Date</label>
+        <input type="date" id="startDate" value="2025-01-01">
+      </div>
+      <div class="control-group">
+        <label>End Date</label>
+        <input type="date" id="endDate" value="2025-12-31">
+      </div>
+      <div class="control-group">
+        <label>Portfolio ($)</label>
+        <input type="number" id="portfolio" value="10000" min="1000">
+      </div>
+      <div class="control-group">
+        <label>Risk % per Trade</label>
+        <input type="number" id="riskPct" value="5" min="1" max="25" step="1">
+      </div>
+      <div class="control-group">
+        <label>Hold Days</label>
+        <input type="number" id="holdDays" value="5" min="1" max="30">
+      </div>
+      <div class="control-group" style="justify-content: flex-end;">
+        <button class="btn" id="runBtn" onclick="runBacktest()">▶ Run Backtest</button>
+      </div>
+    </div>
+    <div id="status"></div>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<script>
+const API = window.location.origin;
+
+function setPreset(p) {
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  const today = new Date();
+  const end = today.toISOString().split('T')[0];
+  let start;
+  if (p === '3m') { start = new Date(today.setMonth(today.getMonth() - 3)).toISOString().split('T')[0]; }
+  else if (p === '1y') { start = new Date(today.setFullYear(today.getFullYear() - 1)).toISOString().split('T')[0]; }
+  else if (p === '2y') { start = new Date(today.setFullYear(today.getFullYear() - 2)).toISOString().split('T')[0]; }
+  else if (p === '5y') { start = new Date(today.setFullYear(today.getFullYear() - 5)).toISOString().split('T')[0]; }
+  document.getElementById('startDate').value = start;
+  document.getElementById('endDate').value = end;
+}
+
+async function runBacktest() {
+  const btn = document.getElementById('runBtn');
+  const status = document.getElementById('status');
+  const results = document.getElementById('results');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Running...';
+  status.textContent = 'Running walk-forward backtest with transaction costs...';
+  results.innerHTML = '<div class="loading">Calculating…</div>';
+
+  const params = new URLSearchParams({
+    symbol: document.getElementById('symbol').value.toUpperCase(),
+    start_date: document.getElementById('startDate').value,
+    end_date: document.getElementById('endDate').value,
+    portfolio: document.getElementById('portfolio').value,
+    risk_pct: document.getElementById('riskPct').value,
+    hold_days: document.getElementById('holdDays').value,
+  });
+
+  try {
+    const resp = await fetch(`${API}/api/v1/backtest?${params}`);
+    const data = await resp.json();
+    renderResults(data);
+    status.textContent = '✅ Backtest complete';
+  } catch (err) {
+    status.textContent = '❌ Error: ' + err.message;
+    results.innerHTML = `<div style="padding:40px;text-align:center;color:var(--negative)">Backtest failed — ${err.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Backtest';
+  }
+}
+
+function renderResults(data) {
+  if (!data || data.error) {
+    document.getElementById('results').innerHTML = `<div style="padding:40px;text-align:center;color:var(--negative)">${data?.error || 'No data returned'}</div>`;
+    return;
+  }
+
+  // data is [{summary}, {trade1}, {trade2}, ...]
+  const summary = data[0];
+  const trades = data.slice(1).filter(t => t['Entry Date']);
+
+  const pnlClass = parseFloat(summary['Return %']) >= 0 ? 'positive' : 'negative';
+
+  let html = `
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-value">${summary['Total Trades']}</div>
+      <div class="metric-label">Total Trades</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Win Rate %']}%</div>
+      <div class="metric-label">Win Rate</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value ${pnlClass}">${summary['Return %']}%</div>
+      <div class="metric-label">Total Return</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Sharpe Ratio']}</div>
+      <div class="metric-label">Sharpe Ratio</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value negative">${summary['Max Drawdown %']}%</div>
+      <div class="metric-label">Max Drawdown</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Profit Factor']}</div>
+      <div class="metric-label">Profit Factor</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Deflated Sharpe']}</div>
+      <div class="metric-label">Deflated Sharpe</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Sortino Ratio']}</div>
+      <div class="metric-label">Sortino Ratio</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['VaR 95%']}%</div>
+      <div class="metric-label">VaR 95%</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['CVaR 95%']}%</div>
+      <div class="metric-label">CVaR 95%</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Calmar Ratio']}</div>
+      <div class="metric-label">Calmar Ratio</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Avg Win']}</div>
+      <div class="metric-label">Avg Win ($)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Avg Loss']}</div>
+      <div class="metric-label">Avg Loss ($)</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">${summary['Permutation p-value']}</div>
+      <div class="metric-label">P-Value</div>
+    </div>
+  </div>`;
+
+  if (trades.length > 0) {
+    html += `
+    <div class="trades-card">
+      <div class="card-title">📋 Trade Log (${trades.length} trades)</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Entry Date</th>
+              <th>Exit Date</th>
+              <th>Entry $</th>
+              <th>Exit $</th>
+              <th>Result</th>
+              <th>PnL</th>
+              <th>Portfolio</th>
+              <th>Days</th>
+              <th>Score</th>
+              <th>Class</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+    trades.forEach(t => {
+      const pnlClass = t.Classification === 'WIN' ? 'badge-win' : 'badge-loss';
+      html += `
+            <tr>
+              <td>${t['Entry Date'] || '-'}</td>
+              <td>${t['Exit Date'] || '-'}</td>
+              <td>$${t['Entry']}</td>
+              <td>$${t['Exit']}</td>
+              <td>${t['Result'] || '-'}</td>
+              <td class="${pnlClass}">$${t['PnL']?.toFixed(2)}</td>
+              <td>$${t['Portfolio']?.toFixed(2)}</td>
+              <td>${t['Days']}</td>
+              <td>${t['Score']}</td>
+              <td class="${pnlClass}">${t['Classification']}</td>
+            </tr>`;
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('results').innerHTML = html;
+}
+</script>
+
+</body>
+</html>

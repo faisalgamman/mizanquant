@@ -4706,6 +4706,15 @@ async def get_screener_panel():
     return HTMLResponse("<h1>Screener not found</h1>", status_code=404)
 
 
+@app.get("/backtest", include_in_schema=False)
+async def get_backtest_panel():
+    """Serve the Backtest Lab interface."""
+    backtest_path = Path(__file__).resolve().parent / "static" / "backtest.html"
+    if backtest_path.exists():
+        return HTMLResponse(content=backtest_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Backtest not found</h1>", status_code=404)
+
+
 # ---------------------------------------------------------------------------
 # WebSocket — Real-time overview updates
 # ---------------------------------------------------------------------------

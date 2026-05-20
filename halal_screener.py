@@ -679,11 +679,159 @@ _PERSISTED_MODELS = {}
 _PERSISTED_MODEL_ATTEMPTS = set()
 
 
-def _load_persisted_model(model_name):
-    if model_name in _PERSISTED_MODEL_ATTEMPTS:
-        return _PERSISTED_MODELS.get(model_name)
+def _build_model_from_state(model_name, state_dict, meta):
+    """Reconstruct a proper PyTorch model from persisted state dict."""
+    try:
+        import torch.nn as nn
+        import numpy as np
         
-    _PERSISTED_MODEL_ATTEMPTS.add(model_name)
+        actual_state = state_dict.get('state_dict', state_dict)
+        config = state_dict.get('config', meta)
+        input_size = state_dict.get('input_size', meta.get('input_size', 14))
+        output_size = state_dict.get('output_size', meta.get('output_size', 1))
+        device = torch.device('cpu')
+        
+        if model_name == 'transformer':
+            d_model = config.get('d_model', 64)
+            n_heads = config.get('n_heads', 4)
+            num_layers = config.get('num_layers', 2)
+            dim_feedforward = config.get('dim_feedforward', 128)
+            dropout = config.get('dropout', 0.2)
+            
+            class PositionalEncoding(nn.Module):
+                def __init__(self, d_model, max_len=5000, dropout=0.1):
+                    super().__init__()
+                    self.dropout = nn.Dropout(p=dropout)
+                    pe = torch.zeros(max_len, d_model)
+                    position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+                    div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+                    pe[:, 0::2] = torch.sin(position * div_term)
+                    pe[:, 1::2] = torch.cos(position * div_term)
+                    pe = pe.unsqueeze(0)
+                    self.register_buffer('pe', pe)
+                def forward(self, x):
+                    return self.dropout(x + self.pe[:, :x.size(1), :])
+            
+            class TransformerModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.input_projection = nn.Linear(input_size, d_model)
+                    self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
+                    encoder_layer = nn.TransformerEncoderLayer(
+                        d_model=d_model, nhead=n_heads, dim_feedforward=dim_feedforward,
+                        dropout=dropout, batch_first=True)
+                    self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+                    self.output_projection = nn.Linear(d_model, output_size)
+                def forward(self, x):
+                    x = self.input_projection(x)
+                    x = self.pos_encoder(x)
+                    x = self.transformer_encoder(x)
+                    x = x[:, -1, :]
+                    return self.output_projection(x)
+            
+            model = TransformerModel().to(device)
+            model.load_state_dict(actual_state, strict=False)
+            model.eval()
+            
+            class Wrapper:
+                def __init__(self, m, dev):
+                    self._model = m
+                    self._device = dev
+                def predict(self, X):
+                    import numpy as np
+                    if isinstance(X, np.ndarray):
+                        X = torch.from_numpy(X.astype(np.float32))
+                    X = X.to(self._device)
+                    with torch.no_grad():
+                        preds = self._model(X)
+                    return preds.cpu().numpy()
+            
+            return Wrapper(model, device)
+        
+        elif model_name == 'lstm':
+            hidden_size = config.get('hidden_size', 64)
+            num_layers = config.get('num_layers', 2)
+            dropout = config.get('dropout', 0.3)
+            
+            class LSTMModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
+                                        num_layers=num_layers, dropout=dropout, batch_first=True)
+                    self.fc = nn.Linear(hidden_size, output_size)
+                def forward(self, x):
+                    out, _ = self.lstm(x)
+                    return self.fc(out[:, -1, :])
+            
+            model = LSTMModel().to(device)
+            model.load_state_dict(actual_state, strict=False)
+            model.eval()
+            
+            class Wrapper:
+                def __init__(self, m, dev):
+                    self._model = m
+                    self._device = dev
+                def predict(self, X):
+                    import numpy as np
+                    if isinstance(X, np.ndarray):
+                        X = torch.from_numpy(X.astype(np.float32))
+                    X = X.to(self._device)
+                    with torch.no_grad():
+                        preds = self._model(X)
+                    return preds.cpu().numpy()
+            
+            return Wrapper(model, device)
+        
+        # Generic: try loading via model class if available
+        try:
+            from openbb_forecast.models.factory import get_model_class
+            model_cls = get_model_class(model_name)
+            model = model_cls.__new__(model_cls)
+            model.load_state_dict(actual_state, strict=False)
+            model.eval()
+            class Wrapper:
+                def __init__(self, m, dev):
+                    self._model = m
+                    self._device = dev
+                def predict(self, X):
+                    import numpy as np
+                    if isinstance(X, np.ndarray):
+                        X = torch.from_numpy(X.astype(np.float32))
+                    X = X.to(self._device)
+                    with torch.no_grad():
+                        preds = self._model(X)
+                    return preds.cpu().numpy()
+            return Wrapper(model, device)
+        except Exception:
+            pass
+        
+        logger.warning(f"_build_model_from_state: unknown model '{model_name}'")
+        return None
+        
+    except Exception as e:
+        logger.warning(f"_build_model_from_state failed for {model_name}: {e}")
+        return None
+
+
+_MODEL_LOAD_ERRORS = {}  # {model_name: error_count} for backoff
+_MAX_MODEL_LOAD_ERRORS = 3  # retry up to 3 times before giving up
+
+def _load_persisted_model(model_name):
+    """Load a persisted model. Retries up to _MAX_MODEL_LOAD_ERRORS times on failure."""
+    # If already successfully loaded, return cached model
+    if model_name in _PERSISTED_MODELS:
+        model = _PERSISTED_MODELS[model_name]
+        if model is not None:
+            return model
+    
+    # Check backoff: don't retry infinitely
+    errors = _MODEL_LOAD_ERRORS.get(model_name, 0)
+    if errors >= _MAX_MODEL_LOAD_ERRORS:
+        logger.warning(f"Model '{model_name}' failed {errors} times — giving up until restart")
+        return None
+    
+    _MODEL_LOAD_ERRORS[model_name] = errors + 1
+    attempt = errors + 1
     
     # First try OpenBB if available
     if _HAS_OPENBB and app_cfg.thresholds.ml_tools_enabled.get(model_name, True):
@@ -693,10 +841,13 @@ def _load_persisted_model(model_name):
             model_cls = get_model_class(model_name)
             latest = resolve_latest(model_name, suffix)
             _PERSISTED_MODELS[model_name] = model_cls.load(latest)
+            _MODEL_LOAD_ERRORS[model_name] = 0  # reset on success
             logger.info(f"Loaded persisted {model_name} model from {latest}")
-            return _PERSISTED_MODELS.get(model_name)
+            return _PERSISTED_MODELS[model_name]
         except NON_FATAL_ANALYSIS_ERROR as e:
-            logger.warning(f"OpenBB {model_name} model failed: {e}, trying fallback...")
+            logger.warning(f"OpenBB {model_name} model failed (attempt {attempt}/{_MAX_MODEL_LOAD_ERRORS}): {e}")
+            if attempt >= _MAX_MODEL_LOAD_ERRORS:
+                logger.warning(f"OpenBB failed {_MAX_MODEL_LOAD_ERRORS} times for {model_name} — trying PyTorch fallback...")
     
     # Fallback: try to load .pt models directly with PyTorch
     try:
@@ -710,48 +861,42 @@ def _load_persisted_model(model_name):
             with open(latest_file, 'r') as f:
                 version = f.read().strip()
             
-            model_path = os.path.join(model_dir, f"{version}.pt")
+            suffix = ".pt" if model_name != "ensemble" else ".pkl"
+            model_path = os.path.join(model_dir, f"{version}{suffix}")
             meta_path = os.path.join(model_dir, f"{version}.meta.json")
             
             if os.path.exists(model_path) and os.path.exists(meta_path):
-                # Load model state dict directly
                 device = torch.device('cpu')
-                state_dict = torch.load(model_path, map_location=device)
-                
-                # Create a simple wrapper that mimics the expected interface
-                class SimpleModel:
-                    def __init__(self, state_dict, meta):
-                        self.state_dict = state_dict
-                        self.meta = meta
-                        
-                    def predict(self, X):
-                        # Simple fallback prediction: use the last known price trend
-                        # This is a placeholder - in production you'd implement proper inference
-                        if len(X) > 0:
-                            last_sequence = X[-1] if len(X.shape) > 1 else X
-                            if hasattr(last_sequence, '__len__') and len(last_sequence) > 0:
-                                last_val = float(last_sequence[-1]) if hasattr(last_sequence[-1], '__float__') else 1.0
-                                # Generate slight upward trend with some randomness
-                                import random
-                                trend = 1.01 + (random.random() - 0.5) * 0.02  # -1% to +2% change
-                                return [[last_val * trend]]
-                        return [[1.0]]  # Default prediction
-                
                 import json
                 with open(meta_path, 'r') as f:
                     meta = json.load(f)
                 
-                model = SimpleModel(state_dict, meta)
-                _PERSISTED_MODELS[model_name] = model
-                logger.info(f"Loaded {model_name} model using PyTorch fallback from {model_path}")
-                return model
+                # For ensemble, load pickle; for others, load state dict
+                if suffix == ".pkl":
+                    import pickle
+                    with open(model_path, 'rb') as f:
+                        model = pickle.load(f)
+                    if hasattr(model, 'predict'):
+                        _PERSISTED_MODELS[model_name] = model
+                        _MODEL_LOAD_ERRORS[model_name] = 0
+                        logger.info(f"Loaded persisted {model_name} model from {model_path}")
+                        return model
+                else:
+                    state_dict = torch.load(model_path, map_location=device, weights_only=True)
+                    model = _build_model_from_state(model_name, state_dict, meta)
+                    if model is not None:
+                        _PERSISTED_MODELS[model_name] = model
+                        _MODEL_LOAD_ERRORS[model_name] = 0
+                        logger.info(f"Loaded persisted {model_name} model using PyTorch fallback from {model_path}")
+                        return model
                 
     except Exception as e:
-        logger.warning(f"PyTorch fallback for {model_name} failed: {e}")
+        logger.warning(f"PyTorch fallback for {model_name} failed (attempt {attempt}/{_MAX_MODEL_LOAD_ERRORS}): {e}")
     
-    # Final fallback: return None
-    logger.warning(f"All loading methods failed for {model_name} model")
-    _PERSISTED_MODELS[model_name] = None
+    # All loading methods failed for this attempt
+    if attempt >= _MAX_MODEL_LOAD_ERRORS:
+        logger.warning(f"All loading methods failed for {model_name} model after {_MAX_MODEL_LOAD_ERRORS} attempts")
+        _PERSISTED_MODELS[model_name] = None
     return None
 
 
@@ -766,14 +911,68 @@ def _predict_persisted_model(model_name, X_test):
         return None
 
 
-def _preload_persisted_models():
-    if not _HAS_OPENBB:
-        return
-    for model_name in ALL_MODEL_NAMES:
-        _load_persisted_model(model_name)
+def _clear_model_cache(model_name=None):
+    """Clear cached model(s) to force reload on next call."""
+    if model_name:
+        _PERSISTED_MODELS.pop(model_name, None)
+        _MODEL_LOAD_ERRORS.pop(model_name, None)
+    else:
+        _PERSISTED_MODELS.clear()
+        _MODEL_LOAD_ERRORS.clear()
+    logger.info(f"Model cache cleared for: {model_name or 'ALL'}")
 
 
 # _preload_persisted_models()  # lazy-load on first use to save RAM (~500 MB on Railway)
+
+
+# ── Multi-feature sequence builder (mirrors train_models.py) ──────────────
+_FEATURE_COLS = [
+    "returns", "volatility_5", "volatility_10", "volatility_20",
+    "momentum_5", "momentum_10", "momentum_20",
+    "rsi_14", "macd", "macd_signal", "volume_ratio",
+    "high_low_range", "open_close_range",
+]
+
+
+def _build_feature_sequences(df, seq_len, horizon):
+    """Build (N, seq_len, 14) sequences matching training pipeline.
+
+    Uses create_features() → 14 features → SafeScaler → create_sequences.
+    Returns X_train, y_train, X_test, y_test, mean_p, std_p (for inverse transform).
+    """
+    from openbb_forecast.data.preprocessing import create_features, SafeScaler, create_sequences
+
+    feat_df = create_features(df)
+    close_col = feat_df["close"].values.reshape(-1, 1)
+    feat_cols = [c for c in _FEATURE_COLS if c in feat_df.columns]
+    features = feat_df[feat_cols].values
+    feature_matrix = np.concatenate([close_col, features], axis=1)
+
+    valid = ~np.isnan(feature_matrix).any(axis=1)
+    feature_matrix = feature_matrix[valid]
+    close_prices = close_col[valid].ravel()
+
+    split = int(len(feature_matrix) * 0.8)
+    train_fm = feature_matrix[:split]
+    train_close = close_prices[:split]
+
+    feature_scaler = SafeScaler(method="standard").fit(train_fm)
+    price_scaler = SafeScaler(method="standard").fit(train_close.reshape(-1, 1))
+
+    scaled = feature_scaler.transform(feature_matrix)
+    X, y_full = create_sequences(scaled, sequence_length=seq_len, forecast_horizon=horizon)
+    y = y_full[:, :, 0]  # target = close price (column 0)
+
+    split_seq = int(len(X) * 0.8)
+    X_train, X_test = X[:split_seq], X[split_seq:]
+    y_train, y_test = y[:split_seq], y[split_seq:]
+
+    # Price scaling params for inverse transform
+    mean_p = float(price_scaler._mean[0])
+    std_p = float(price_scaler._std[0])
+
+    return X_train, y_train, X_test, y_test, mean_p, std_p
+
 
 def run_lstm(symbol, horizon, df=None):
     return _run_with_memory_guard(_run_lstm_inner, symbol, horizon, df=df)
@@ -783,10 +982,8 @@ def _run_lstm_inner(symbol, horizon, df=None):
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
-        prices = np.array(df["close"].values, dtype=np.float64).flatten()
-        prices = prices[~np.isnan(prices)]
         SEQ_LEN = 30
-        X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
+        X_train, y_train, X_test, y_test, mean_p, std_p = _build_feature_sequences(df, SEQ_LEN, horizon)
 
         preds = _predict_persisted_model("lstm", X_test)
         if preds is None:
@@ -795,7 +992,7 @@ def _run_lstm_inner(symbol, horizon, df=None):
         model_label = "LSTM Persisted"
         fold_scores = []
         pred_prices = preds[0] * std_p + mean_p
-        last_price = float(prices[-1])
+        last_price = float(df["close"].iloc[-1])
         avg_mse = round(float(np.mean(fold_scores)), 4) if fold_scores else 0.0
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
                     "Model": model_label, "Folds": len(fold_scores),
@@ -819,10 +1016,8 @@ def _run_transformer_inner(symbol, horizon, df=None):
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
-        prices = np.array(df["close"].values, dtype=np.float64).flatten()
-        prices = prices[~np.isnan(prices)]
         SEQ_LEN = 30
-        X_train, y_train, X_test, y_test, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
+        X_train, y_train, X_test, y_test, mean_p, std_p = _build_feature_sequences(df, SEQ_LEN, horizon)
 
         preds = _predict_persisted_model("transformer", X_test)
         if preds is None:
@@ -831,7 +1026,7 @@ def _run_transformer_inner(symbol, horizon, df=None):
         model_label = "Transformer Persisted"
         fold_scores = []
         pred_prices = preds[0] * std_p + mean_p
-        last_price = float(prices[-1])
+        last_price = float(df["close"].iloc[-1])
         avg_mse = round(float(np.mean(fold_scores)), 4) if fold_scores else 0.0
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
                     "Model": model_label, "Folds": len(fold_scores),
@@ -855,25 +1050,16 @@ def _run_ensemble_inner(symbol, horizon, df=None):
         if df is None:
             df = fetch_yf(symbol)
         if df is None: return [{"Error": f"No data for {symbol}"}]
-        prices = np.array(df["close"].values, dtype=np.float64).flatten()
-        prices = prices[~np.isnan(prices)]
         SEQ_LEN = 30
-        X, y = [], []
-        mean_p = prices.mean(); std_p = prices.std() + 1e-9
-        norm = (prices - mean_p) / std_p
-        for i in range(len(norm) - SEQ_LEN - horizon):
-            X.append(norm[i:i+SEQ_LEN])
-            y.append(norm[i+SEQ_LEN:i+SEQ_LEN+horizon])
-        X = np.array(X); y = np.array(y)
-        split = int(len(X) * 0.8)
-        X_train, y_train = X[:split], y[:split]
-        preds = _predict_persisted_model("ensemble", X)
+        X_train, y_train, X_test, y_test, mean_p, std_p = _build_feature_sequences(df, SEQ_LEN, horizon)
+
+        preds = _predict_persisted_model("ensemble", X_test)
         if preds is None:
             return [{"Error": "Persisted Ensemble model unavailable"}]
 
         model_label = "Stacking Ensemble Persisted"
         pred_prices = preds[0] * std_p + mean_p
-        last_price = float(prices[-1])
+        last_price = float(df["close"].iloc[-1])
         summary = [{"Symbol": symbol.upper(), "Current Price": round(last_price, 2),
                     "Model": model_label, "Forecast Horizon": horizon}]
         forecasts = []
@@ -2263,21 +2449,16 @@ _CONSENSUS_ML_AGENTS = getattr(app_cfg, "consensus_ml_agents", [
 def _run_consensus_forecast_model(model_name, symbol, horizon, df, price):
     """Run a single forecast model via the factory, return (vote, signal_str, forecast_price)."""
     try:
-        prices = np.array(df["close"].values, dtype=np.float64).flatten()
-        prices = prices[~np.isnan(prices)]
         SEQ_LEN = 30
-
-        from app.services.technical import prepare_sequences
-        _, _, X_test, _, mean_p, std_p = prepare_sequences(prices, SEQ_LEN, horizon)
+        X_train, y_train, X_test, y_test, mean_p, std_p = _build_feature_sequences(df, SEQ_LEN, horizon)
 
         preds = _predict_persisted_model(model_name, X_test)
         if preds is None:
             # Try on-the-fly training for lightweight models
             try:
                 model = _create_forecast_model(model_name)
-                X_train, y_train, X_test_v, y_test_v, m, s = prepare_sequences(prices, SEQ_LEN, horizon)
                 model.fit(X_train, y_train)
-                preds = model.predict(X_test_v[-1:])
+                preds = model.predict(X_test[-1:])
             except Exception:
                 return "HOLD", f"{model_name}: unavailable", None
 
@@ -4401,6 +4582,39 @@ def _render_ops_fragment(api_key: str | None) -> str:
     </div>
     """
 
+
+# --- HTML page routes (must be BEFORE routers to avoid path conflicts) ---
+@app.get("/trading-lab", include_in_schema=False)
+async def trading_lab_page():
+    from fastapi.responses import FileResponse
+    _f = os.path.join(os.path.dirname(__file__), "app", "static", "trading-lab.html")
+    if os.path.isfile(_f):
+        return FileResponse(_f)
+    return {"error": "Trading Lab not found"}
+
+@app.get("/backtest", include_in_schema=False)
+async def backtest_page():
+    from fastapi.responses import FileResponse
+    _f = os.path.join(os.path.dirname(__file__), "app", "static", "trading.html")
+    if os.path.isfile(_f):
+        return FileResponse(_f)
+    return {"error": "Backtest not found"}
+
+@app.get("/risk-desk", include_in_schema=False)
+async def risk_desk_page():
+    from fastapi.responses import FileResponse
+    _f = os.path.join(os.path.dirname(__file__), "app", "static", "risk-desk.html")
+    if os.path.isfile(_f):
+        return FileResponse(_f)
+    return {"error": "Risk Desk not found"}
+
+@app.get("/screener", include_in_schema=False)
+async def screener_page():
+    from fastapi.responses import FileResponse
+    _f = os.path.join(os.path.dirname(__file__), "app", "static", "screener.html")
+    if os.path.isfile(_f):
+        return FileResponse(_f)
+    return {"error": "Screener not found"}
 
 # --- Include routers ---
 try:

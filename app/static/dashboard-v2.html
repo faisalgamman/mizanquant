@@ -852,14 +852,10 @@ const API = '/api/v1';
 const ROUTES = {
   overview:  { title: 'Overview',    icon: 'chart-line', ready: true },
   forecast:  { title: 'Forecast',    icon: 'chart-line', ready: true },
-  'trading-lab': { title: 'Trading Lab', icon: 'flask', ready: false,
-    soon: 'Backtest runner + interactive strategy sandbox. Deploy parameter sweeps.' },
-  backtest:  { title: 'Backtest',    icon: 'clock-rotate-left', ready: false,
-    soon: 'Historical backtest results, equity curves, and trade logs.' },
-  'risk-desk': { title: 'Risk Desk',  icon: 'shield-halved', ready: false,
-    soon: 'Live VaR, portfolio heat, correlation matrix, and drawdown monitors.' },
-  screener:  { title: 'Screener',    icon: 'magnifying-glass', ready: false,
-    soon: 'Real-time market scanner with halal filter, momentum, and volume.' },
+  'trading-lab': { title: 'Trading Lab', icon: 'flask', ready: true },
+  backtest:  { title: 'Backtest',    icon: 'clock-rotate-left', ready: true },
+  'risk-desk': { title: 'Risk Desk',  icon: 'shield-halved', ready: true },
+  screener:  { title: 'Screener',    icon: 'magnifying-glass', ready: true },
 };
 
 let store = {
