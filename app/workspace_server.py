@@ -4999,6 +4999,24 @@ def _get_rss_mb() -> float:
             return 0.0
 
 
+def _to_json_safe(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: _to_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_json_safe(i) for i in obj]
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return _to_json_safe(obj.tolist())
+    return obj
+
+
 def _run_strategies_backtest():
     global _strategies_backtest_cache, _strategies_backtest_running
     try:
@@ -5087,12 +5105,12 @@ def _run_strategies_backtest():
             }
 
         with _strategies_backtest_lock:
-            _strategies_backtest_cache = {
+            _strategies_backtest_cache = _to_json_safe({
                 "strategies": strategies_summary,
                 "symbols": symbols_data,
                 "timestamp": datetime.utcnow().isoformat(),
                 "cached": True,
-            }
+            })
         mem_after = _get_rss_mb()
         logger.info("Strategies backtest complete: %d symbols (RSS %.0f→%.0fMB)",
                     len(symbols_data), mem_before, mem_after)

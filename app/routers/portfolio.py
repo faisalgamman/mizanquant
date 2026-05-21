@@ -43,7 +43,7 @@ async def list_strategies(x_api_key = None):
 
 
 @router.get("/strategy/{strategy_id}/account")
-async def strategy_account(strategy_id: str, x_api_key: OperatorAPIKey = None):
+async def strategy_account(strategy_id: str, x_api_key = None):
     from halal_screener import _require_api_key
     from app.config import STRATEGY_CONFIGS
     from app.services.broker.factory import get_broker
