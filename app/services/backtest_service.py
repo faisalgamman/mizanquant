@@ -110,6 +110,70 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
                     "Deflated Sharpe": round(dsr, 3),
                     "Permutation p-value": round(pval, 3),
                     **metrics}]
+        # ── Equity Curve ──────────────────────────────────────────
+        equity_curve = [{"date": start_date, "portfolio": portfolio}]
+        for t in trades:
+            equity_curve.append({"date": t["Exit Date"], "portfolio": t["Portfolio"]})
+
+        # ── Monthly Returns ────────────────────────────────────────
+        from collections import defaultdict as _dd
+        monthly_pnl = _dd(float)
+        monthly_start = {}
+        running = portfolio
+        for t in trades:
+            mk = t["Exit Date"][:7]
+            if mk not in monthly_start:
+                monthly_start[mk] = running
+            monthly_pnl[mk] += t["PnL"]
+            running = t["Portfolio"]
+        monthly_returns = {
+            m: round(pnl / monthly_start[m] * 100, 2)
+            for m, pnl in sorted(monthly_pnl.items())
+            if monthly_start.get(m)
+        }
+
+        # ── Benchmark (SPY buy & hold) ─────────────────────────────
+        benchmark_return_pct = 0.0
+        benchmark_equity = []
+        try:
+            spy = fetch_market_data("SPY", start=start_date, end=end_date)
+            if spy is not None and len(spy) >= 2:
+                spy_ratio = float(spy["close"].iloc[-1]) / float(spy["close"].iloc[0])
+                benchmark_return_pct = round((spy_ratio - 1) * 100, 2)
+                benchmark_equity = [
+                    {"date": start_date, "portfolio": portfolio},
+                    {"date": end_date,   "portfolio": round(portfolio * spy_ratio, 2)},
+                ]
+        except Exception:
+            pass
+
+        # ── Extended Stats ─────────────────────────────────────────
+        max_cw = max_cl = cw = cl = 0
+        for t in trades:
+            if t["Classification"] == "WIN":
+                cw += 1; cl = 0
+            else:
+                cl += 1; cw = 0
+            max_cw = max(max_cw, cw); max_cl = max(max_cl, cl)
+
+        wr  = summary[0].get("Win Rate %", 0) / 100
+        awv = summary[0].get("Avg Win",  0) or 0
+        alv = summary[0].get("Avg Loss", 0) or 0
+        exp = round(wr * awv + (1 - wr) * alv, 2)
+        mdd = summary[0].get("Max Drawdown %", 0) or -0.001
+        rf  = round(summary[0].get("Return %", 0) / abs(mdd), 3) if mdd else 0
+
+        summary[0].update({
+            "Benchmark Return %": benchmark_return_pct,
+            "Max Consec Wins":    max_cw,
+            "Max Consec Losses":  max_cl,
+            "Expectancy ($)":     exp,
+            "Recovery Factor":    rf,
+            "equity_curve":       equity_curve,
+            "monthly_returns":    monthly_returns,
+            "benchmark_equity":   benchmark_equity,
+        })
+
         return summary + trades
     except Exception as e:
         return [{"Error": str(e)}]
