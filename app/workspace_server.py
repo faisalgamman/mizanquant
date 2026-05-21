@@ -4742,7 +4742,10 @@ async def get_dashboard():
     # Resolve relative to this file, not CWD, so it works in any deployment
     dashboard_path = Path(__file__).resolve().parent / "static" / "dashboard-legacy.html"
     if dashboard_path.exists():
-        return HTMLResponse(content=dashboard_path.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            content=dashboard_path.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
     return HTMLResponse("<h1>Dashboard not found</h1><p>Run the server from the project root.</p>", status_code=404)
 
 

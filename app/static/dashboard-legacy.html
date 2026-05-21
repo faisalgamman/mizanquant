@@ -5860,6 +5860,16 @@ function showKeyboardHelp() {
   document.body.appendChild(fab);
 })();
 
+// ===== HASH-BASED TAB NAVIGATION =====
+(function() {
+  function applyHash() {
+    var hash = location.hash.slice(1);
+    if (hash && document.getElementById('tab-' + hash)) switchTab(hash);
+  }
+  window.addEventListener('hashchange', applyHash);
+  window.addEventListener('load', applyHash);
+})();
+
 // ===== INIT =====
 (async function() {
   window._universeSymbols = await loadUniverse();
