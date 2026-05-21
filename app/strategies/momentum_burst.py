@@ -43,10 +43,14 @@ class MomentumBurstStrategy(BaseStrategy):
         if score < self.min_score:
             return None
 
+        details = self._burst_details(inp)
+        # Hard gate: day must be positive for Momentum Burst
+        if details.get("day_change_pct", 0) <= 0:
+            return None
+
         df = inp.df_daily
         close = df["close"].values.astype(float)
         price = float(close[-1])
-        details = self._burst_details(inp)
 
         atr_val = self._atr(df)
         risk = atr_val * 1.5

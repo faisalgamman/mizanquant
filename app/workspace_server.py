@@ -2274,8 +2274,11 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
         except Exception:
             momentum = {"score": 0, "details": {"error": "Momentum calc failed"}}
 
-        # ── Forecast Consensus (0-30) — placeholder until post-processing ──
-        forecast = {"score": 0, "details": {"note": "computed in post-process"}}
+        # ── Forecast Consensus (0-30) — placeholder with RSI-based proxy ──
+        _mom_d = momentum.get("details", {})
+        _mom_rsi = _mom_d.get("rsi", 50)
+        _forecast_proxy = max(0, min(30, int(30 - abs(_mom_rsi - 50) * 0.6)))
+        forecast = {"score": 0, "proxy": _forecast_proxy, "details": {"note": "computed in post-process"}}
 
         # ── USX PRO Extra Columns: Ext%, ATR%, ADV$M, Chg%, Signal, ADX, RSvsSPY ──
         ext_pct = None
@@ -2341,26 +2344,7 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
             except Exception:
                 rs_vs_spy = "N/A"
 
-            # Signal classification
-            mom = momentum.get("details", {})
-            rsi = mom.get("rsi", 50)
-            macd_label = mom.get("macd_label", "")
-            bb_label = mom.get("bb_label", "")
-            vwap_ratio = mom.get("vwap_ratio", 0)
-            if rsi and isinstance(rsi, (int, float)) and rsi > 70 and "Overbought" in str(bb_label):
-                signal = "AVOID"
-            elif rsi and isinstance(rsi, (int, float)) and rsi < 35 and "Oversold" in str(bb_label):
-                signal = "BUY"
-            elif "Bullish" in str(macd_label) and "Above VWAP" in str(mom.get("vwap_label", "")):
-                signal = "BUY"
-            elif "Squeeze" in str(bb_label) and "Mid" in str(bb_label):
-                signal = "BUY"
-            elif "Bearish" in str(macd_label) or "Below VWAP" in str(mom.get("vwap_label", "")):
-                signal = "AVOID"
-            else:
-                signal = "WAIT"
-
-        # Strategy selection (best of 4 strategies)
+        # Strategy selection (best of 4 strategies) — runs BEFORE signal
         strategy_label = "WAIT"
         strategy_score = 0
         strategy_reason = ""
@@ -2374,7 +2358,21 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
             except Exception:
                 pass
 
-        smart_score = fundamental + momentum["score"]  # + forecast added later
+        # Signal classification: strategy signal takes priority, else score-based
+        mom = momentum.get("details", {})
+        smart_score = fundamental + momentum["score"] + forecast.get("proxy", 0)  # + forecast in post-process
+        if strategy_label != "WAIT" and sel_sig:
+            signal = sel_sig.signal
+            # Override smart_score with strategy_score when a strategy is active
+            smart_score = max(smart_score, strategy_score)
+        else:
+            # Score-based thresholds when no strategy triggered
+            if smart_score >= 65:
+                signal = "BUY"
+            elif smart_score >= 40:
+                signal = "WAIT"
+            else:
+                signal = "AVOID"
 
         return {
             "symbol": symbol,
@@ -2406,6 +2404,7 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
             "momentum_details": momentum["details"],
             "forecast_score": forecast["score"],
             "forecast_details": forecast["details"],
+            "forecast_proxy": forecast.get("proxy", 0),
             "smart_score": smart_score,
             # USX PRO extra columns
             "ext_pct": ext_pct,
@@ -2565,9 +2564,10 @@ def _run_screener_bg(scan_symbols: list):
             try:
                 fc = ff.result()
                 if fc:
+                    proxy = r.get("forecast_proxy", 0)
                     r["forecast_score"] = fc.get("score", 0)
                     r["forecast_details"] = fc.get("details", {})
-                    r["smart_score"] = min(100, r.get("smart_score", 0) + fc.get("score", 0))
+                    r["smart_score"] = min(100, r.get("smart_score", 0) - proxy + fc.get("score", 0))
             except Exception:
                 pass
 
