@@ -1666,17 +1666,28 @@ select:focus,input:focus { border-color:var(--accent); }
 
 <!-- TAB: Strategies -->
 <div class="tab-content" id="tab-strategies" style="display:none">
-  <div class="card" style="margin-bottom:20px;">
+
+  <!-- DEBUG PROBE — remove after fix confirmed -->
+  <div id="stratDebugProbe" style="background:#c00;color:#fff;padding:16px 20px;font-size:14px;font-weight:700;border-radius:8px;margin-bottom:16px;">
+    ✅ TAB IS VISIBLE — JS inline style is working
+  </div>
+
+  <div class="card" style="margin-bottom:20px;background:#1a2535;border:1px solid #334;">
     <div class="card-header">
-      <div><div class="card-title">Strategy Backtest Comparison</div>
-      <div class="card-subtitle">4 strategies tested on 25 halal stocks (2015–2026) — vectorized simulation</div></div>
-      <button class="btn btn-sm" onclick="loadStrategies()" style="background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600;"><i class="fas fa-sync-alt"></i> Refresh</button>
+      <div>
+        <div class="card-title" style="color:#e2e8f0;font-size:14px;font-weight:700;">Strategy Backtest Comparison</div>
+        <div class="card-subtitle" style="color:#94a3b8;">4 strategies × 25 halal stocks (2015–2026)</div>
+      </div>
+      <button onclick="loadStrategies()" style="background:#3b82f6;color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;"><i class="fas fa-sync-alt"></i> Refresh</button>
     </div>
   </div>
 
   <!-- Strategy Cards -->
   <div id="strategyCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:24px;">
-    <div style="text-align:center;padding:40px;color:var(--text-muted);grid-column:1/-1;"><i class="fas fa-spinner fa-spin fa-2x"></i><br>Loading strategy data...</div>
+    <div style="background:#1e3a5f;color:#93c5fd;padding:40px;text-align:center;grid-column:1/-1;border-radius:8px;font-size:14px;font-weight:600;">
+      <i class="fas fa-spinner fa-spin fa-2x" style="margin-bottom:12px;display:block;"></i>
+      Loading strategy data…
+    </div>
   </div>
 
   <!-- Best per strategy -->
@@ -6881,8 +6892,9 @@ function closeModal() {
 // ── Strategies Tab ──
 var _stratRetryTimer = null;
 async function loadStrategies() {
+  console.log('[loadStrategies] called, tab active:', document.getElementById('tab-strategies')?.style?.display);
   var cards = document.getElementById('strategyCards');
-  if (!cards) { document.title = 'ERR: strategyCards null'; return; }
+  if (!cards) { document.title = 'ERR: strategyCards null'; console.error('[loadStrategies] strategyCards not found!'); return; }
   if (_stratRetryTimer) { clearTimeout(_stratRetryTimer); _stratRetryTimer = null; }
   cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:24px;text-align:center;font-size:15px;font-weight:600;grid-column:1/-1;border-radius:8px;">⏳ جاري تحميل بيانات الاستراتيجيات…</div>';
   try {
