@@ -14,6 +14,7 @@ Stages (run sequentially):
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -113,6 +114,7 @@ class UnifiedPipeline:
         from app.services.metrics import metrics as _m
 
         skip = skip_stages or set()
+        self.report = PipelineReport()  # ← reset state each run
         now = datetime.now(timezone.utc)
         self.report.date_utc = now.strftime("%Y-%m-%d")
         self.report.started_at = now.isoformat()
@@ -182,6 +184,8 @@ class UnifiedPipeline:
 
         self.report.finished_at = datetime.now(timezone.utc).isoformat()
         self.report.elapsed_s = time.perf_counter() - t0
+        # Strip NaN/Inf before JSON serialization — frontend crashes on these
+        self.report = _clean_nan_from_report(self.report)
         return self.report
 
     # ----------------------------------------------------------------
@@ -208,7 +212,12 @@ class UnifiedPipeline:
 
             def _fetch_one(sym: str) -> dict | None:
                 try:
-                    df = yf.download(sym, period="2d", progress=False, auto_adjust=True)
+                    from app.services.market_context import _run_with_timeout
+                    df = _run_with_timeout(
+                        lambda: yf.download(sym, period="2d", progress=False, auto_adjust=True),
+                        timeout=15.0,
+                        fallback=None,
+                    )
                     if df is None or df.empty:
                         return None
                     # Flatten MultiIndex columns from auto_adjust=True
@@ -274,7 +283,7 @@ class UnifiedPipeline:
             stage.count_in = len(results)
             stage.count_out = len(halal)
             stage.status = "ok"
-            stage.details["symbols"] = [r["symbol"] for r in halal[:5]]
+            stage.details["symbols"] = [r.get("symbol", "") for r in halal[:5]]
             logger.info("Pipeline stage 2: %d halal out of %d", len(halal), len(results))
 
             self._cached_halal_results = halal
@@ -301,7 +310,7 @@ class UnifiedPipeline:
 
             stage.count_out = len(candidates)
             stage.status = "ok"
-            stage.details["symbols"] = [r["symbol"] for r in candidates[:10]]
+            stage.details["symbols"] = [r.get("symbol", "") for r in candidates[:10]]
             logger.info("Pipeline stage 3: %d candidates pass score >= 65", len(candidates))
 
             self._cached_smart_candidates = candidates
@@ -397,7 +406,7 @@ class UnifiedPipeline:
         scan_workers = max(2, min(8, int(os.environ.get("PIPELINE_SCAN_WORKERS", "4"))))
 
         for sid, profile_name, runner in profiles:
-            symbols_to_scan = [r["symbol"] for r in candidates]
+            symbols_to_scan = [r.get("symbol", "?") for r in candidates]
             logger.info(
                 "Pipeline stage 4: scanning %d symbols for strategy %s (%s) with %d workers",
                 len(symbols_to_scan), sid, profile_name, scan_workers,
@@ -721,10 +730,34 @@ class UnifiedPipeline:
 
 
 # ---------------------------------------------------------------------------
+# NaN-safe serializer — prevents JSON crashes from bad market data
+# ---------------------------------------------------------------------------
+
+
+def _clean_nan_from_report(report: PipelineReport) -> PipelineReport:
+    """Replace NaN, Inf, -Inf with None in all numeric fields."""
+    if report.elapsed_s is not None and (math.isnan(report.elapsed_s) or math.isinf(report.elapsed_s)):
+        report.elapsed_s = None
+    for stage in getattr(report, "stages", []):
+        if stage.elapsed_s is not None and (math.isnan(stage.elapsed_s) or math.isinf(stage.elapsed_s)):
+            stage.elapsed_s = None
+        for k, v in getattr(stage, "details", {}).items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                stage.details[k] = None
+            elif isinstance(v, list):
+                stage.details[k] = [
+                    None if isinstance(x, float) and (math.isnan(x) or math.isinf(x)) else x
+                    for x in v
+                ]
+    return report
+
+
+# ---------------------------------------------------------------------------
 # Top-level convenience
 # ---------------------------------------------------------------------------
 
 _orchestrator: UnifiedPipeline | None = None
+_orchestrator_lock = threading.Lock()
 
 
 def run_pipeline(
@@ -734,10 +767,11 @@ def run_pipeline(
 ) -> PipelineReport:
     """Run the full pipeline. Returns a PipelineReport."""
     global _orchestrator
-    if _orchestrator is None:
-        _orchestrator = UnifiedPipeline()
-    return _orchestrator.run(
-        strategy_ids=strategy_ids,
-        dry_run=dry_run,
-        skip_stages=skip_stages,
-    )
+    with _orchestrator_lock:
+        if _orchestrator is None:
+            _orchestrator = UnifiedPipeline()
+        return _orchestrator.run(
+            strategy_ids=strategy_ids,
+            dry_run=dry_run,
+            skip_stages=skip_stages,
+        )
