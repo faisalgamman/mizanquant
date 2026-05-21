@@ -1301,24 +1301,13 @@ select:focus,input:focus { border-color:var(--accent); }
 
 <!-- TAB: Backtest -->
 <div class="tab-content" id="tab-backtest">
-  <div class="card">
-    <div class="card-header"><div><div class="card-title">Walk-Forward Backtest</div><div class="card-subtitle">EMA + RSI + MACD strategy with transaction costs</div></div></div>
-    <div class="form-group" style="display:flex;gap:12px;flex-wrap:wrap;padding:16px;align-items:end;">
-      <div><label>Symbol</label><input type="text" id="btSymbol" placeholder="AAPL" value="AAPL" style="width:80px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;font-weight:600;"></div>
-      <div><label>Start</label><input type="date" id="btStart" value="2022-01-01" style="font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
-      <div><label>End</label><input type="date" id="btEnd" value="2024-12-31" style="font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
-      <div><label>Portfolio ($)</label><input type="number" id="btPortfolio" value="100000" style="width:90px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
-      <div><label>Risk %</label><input type="number" id="btRisk" value="1.0" step="0.1" min="0.1" max="10" style="width:60px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
-      <div><label>Hold Days</label><input type="number" id="btHold" value="3" min="1" max="60" style="width:60px;font-size:11px;padding:5px 6px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);font-family:inherit;"></div>
-      <div><button class="btn btn-primary" onclick="runBacktest()"><i class="fas fa-play"></i> Run</button></div>
-    </div>
-  </div>
-  <div id="btResult" style="display:none;">
-    <div class="stats-grid" id="btStats"></div>
-    <div class="card"><div class="card-header"><div><div class="card-title">Trade Log</div></div></div>
-      <div style="overflow-x:auto;" id="btTrades"></div>
-    </div>
-  </div>
+  <iframe
+    id="backtestFrame"
+    src="/backtest"
+    style="width:100%;height:calc(100vh - var(--cmd-height) - var(--market-height) - var(--status-height) - 24px);border:none;border-radius:8px;display:block;"
+    loading="lazy"
+    title="Backtest Lab">
+  </iframe>
 </div>
 
 <!-- TAB: Risk Desk -->
