@@ -1,9 +1,9 @@
 """Weighted Score System — 100-point composite scoring for trading signals.
 
 USX PRO V5.0 Scoring Engine:
-  - Hard Gates (must-pass or Score = 0)
+  - Strict Hard Gates (trend + momentum + RS + volume + MACD)
   - Redistributed weights aligned with USX PRO methodology
-  - Penalty system for negative indicators
+  - Bonus system for exceptional signals (surge volume, leader RS)
   - USX Proxy Score for OpenBB/USX PRO convergence validation
 """
 
@@ -42,14 +42,12 @@ class HardGate(Enum):
     EMA20 = "ema20"  # Replaces VWAP (P1.1) — VWAP on daily cumsum was meaningless
 
 
-# P1.3 — Thresholds softened slightly to permit 3-7 QUALIFIED signals/week in BULL.
-# Previous values caused 0 QUALIFIED on 357 halal stocks.
 HARD_GATE_CONFIG = {
-    HardGate.RS_VS_SPY: {"threshold": -3.0, "desc": "RS vs SPY > -3%"},
-    HardGate.VOLUME: {"threshold": 0.4, "desc": "Volume > 40% 20d avg"},
-    HardGate.MACD: {"threshold": 0, "desc": "MACD Hist > 0 or recent positive crossover"},
-    HardGate.ADX: {"threshold": 12, "desc": "ADX > 12"},
-    HardGate.EMA20: {"threshold": 0, "desc": "Close > EMA20 daily"},
+    HardGate.RS_VS_SPY: {"threshold": -1.0, "desc": "RS vs SPY > -1%"},
+    HardGate.VOLUME: {"threshold": 0.7, "desc": "Volume > 70% 20d avg"},
+    HardGate.MACD: {"threshold": 0, "desc": "MACD > Signal AND Hist > 0"},
+    HardGate.ADX: {"threshold": 20, "desc": "ADX > 20"},
+    HardGate.EMA20: {"threshold": 0, "desc": "Close > EMA20 AND Close > EMA200"},
 }
 
 
@@ -70,8 +68,8 @@ class ScoreResult(dict):
         self.thresholds: dict = kwargs.get("thresholds", {})
         self.signal: str = kwargs.get("signal", "AVOID")
         self.hard_gates_passed: bool = kwargs.get("hard_gates_passed", False)
-        self.penalties: list[str] = kwargs.get("penalties", [])
-        self.penalty_total: int = kwargs.get("penalty_total", 0)
+        self.bonuses: list[str] = kwargs.get("bonuses", [])
+        self.bonus_total: int = kwargs.get("bonus_total", 0)
         self.usx_proxy: dict = kwargs.get("usx_proxy", {})
         self.gate_source: str = kwargs.get("gate_source", "")
         self.converged: bool = kwargs.get("converged", True)
@@ -111,18 +109,20 @@ def check_hard_gates(
     else:
         failed.append("Volume: missing column or insufficient history")
 
-    # 3. MACD Histogram > 0 أو تحول إيجابي مؤخراً
+    # 3. MACD > Signal AND Hist > 0 AND (positive or crossover)
     macd_line, signal_line, histogram = calc_macd(close)
-    if len(histogram) >= 3:
+    if len(histogram) >= 3 and len(macd_line) >= 1 and len(signal_line) >= 1:
         latest_hist = float(histogram.iloc[-1])
         prev_hist = float(histogram.iloc[-2])
         prev2_hist = float(histogram.iloc[-3])
-        # إيجابي الآن أو تحول من سالب لموجب في آخر 3 شمعات
+        latest_macd = float(macd_line.iloc[-1])
+        latest_signal = float(signal_line.iloc[-1])
+        macd_above_signal = latest_macd > latest_signal
         macd_positive = latest_hist > 0
         recent_crossover = prev_hist <= 0 and latest_hist > 0
         strong_crossover = prev2_hist <= 0 and prev_hist > 0
-        if not (macd_positive or recent_crossover or strong_crossover):
-            failed.append(f"MACD Hist = {latest_hist:.6f} (يجب > 0 أو تحول إيجابي)")
+        if not (macd_above_signal and (macd_positive or recent_crossover or strong_crossover)):
+            failed.append(f"MACD Hist = {latest_hist:.6f}, MACD({latest_macd:.2f}) ≤ Signal({latest_signal:.2f}) (يجب > Signal و Hist > 0)")
     else:
         failed.append("MACD: insufficient data")
 
@@ -135,43 +135,52 @@ def check_hard_gates(
     else:
         failed.append("ADX: missing high/low columns or insufficient history")
 
-    # 5. Close > EMA20 daily (P1.1 replaces VWAP — VWAP on daily cumsum was meaningless)
+    # 5. Close > EMA20 AND Close > EMA200
     if len(close) >= 20:
         ema_20_val = float(ema(close, 20).iloc[-1])
         if latest_close <= ema_20_val:
             failed.append(f"Price ({latest_close:.2f}) ≤ EMA20 ({ema_20_val:.2f})")
     else:
         failed.append("EMA20: insufficient history (<20 bars)")
+    if len(close) >= 200:
+        ema_200_val = float(ema(close, 200).iloc[-1])
+        if latest_close <= ema_200_val:
+            failed.append(f"Price ({latest_close:.2f}) ≤ EMA200 ({ema_200_val:.2f})")
 
     return GateResult(passed=len(failed) == 0, failed_gates=failed)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Penalty System — خصم من الـ Score النهائي
+# Bonus System — نقاط إضافية للإشارات الاستثنائية
 # ═══════════════════════════════════════════════════════════════════════
 
-PENALTIES = {
-    "rs_spy_very_negative": {"points": -15, "condition": "RS vs SPY < -2%"},
-    "volume_too_low": {"points": -10, "condition": "Volume < 30% 20d avg"},
-    "macd_negative_declining": {"points": -10, "condition": "MACD < 0 and declining"},
-    "below_ema200": {"points": -20, "condition": "Price below EMA200"},
-    "adx_choppy": {"points": -8, "condition": "ADX < 15"},
-    "bb_breakdown": {"points": -5, "condition": "BB Squeeze breakdown"},
+BONUSES = {
+    "volume_surge": {"points": 10, "condition": "Volume ≥ 200% 20d avg"},
+    "rs_leader": {"points": 10, "condition": "RS vs SPY > 5%"},
+    "adx_strong_trend": {"points": 5, "condition": "ADX > 30 and DI+ > DI-"},
+    "macd_cross_bonus": {"points": 5, "condition": "Fresh MACD bullish crossover"},
 }
 
 
-def calculate_penalties(
+def calculate_bonus(
     df: pd.DataFrame,
     spy_df: Optional[pd.DataFrame] = None,
 ) -> tuple[list[str], int]:
-    """حساب العقوبات السلبية."""
-    penalties_detail = []
-    total_penalty = 0
+    """حساب النقاط الإضافية للإشارات القوية."""
+    bonus_detail = []
+    total_bonus = 0
 
     close = df["close"].astype(float)
     latest_close = float(close.iloc[-1])
 
-    # 1. RS vs SPY very negative (< -2%)
+    # 1. Volume surge ≥ 200% 20d avg
+    if "volume" in df.columns and len(df) >= 20:
+        vol_ratio = calc_volume_ratio(df)
+        if vol_ratio >= 2.0:
+            total_bonus += BONUSES["volume_surge"]["points"]
+            bonus_detail.append(f"Volume surge = {vol_ratio:.2f}x → +10")
+
+    # 2. RS vs SPY > 5% (market leader)
     if spy_df is not None and len(spy_df) >= 20 and len(close) >= 20:
         spy_close = spy_df["close"].astype(float)
         sym_price_20d = float(close.iloc[-20])
@@ -180,55 +189,37 @@ def calculate_penalties(
         sym_ret_pct = (latest_close / sym_price_20d - 1) * 100 if sym_price_20d > 0 else 0
         spy_ret_pct = (spy_latest / spy_price_20d - 1) * 100 if spy_price_20d > 0 else 0
         relative = sym_ret_pct - spy_ret_pct
-        if relative < -2.0:
-            total_penalty += PENALTIES["rs_spy_very_negative"]["points"]
-            penalties_detail.append(f"RS vs SPY = {relative:+.2f}% → -15")
+        if relative > 5.0:
+            total_bonus += BONUSES["rs_leader"]["points"]
+            bonus_detail.append(f"RS vs SPY = {relative:+.2f}% → +10")
 
-    # 2. Volume extremely low (< 30% of avg)
-    if "volume" in df.columns and len(df) >= 20:
-        vol_ratio = calc_volume_ratio(df)
-        if vol_ratio < 0.3:
-            total_penalty += PENALTIES["volume_too_low"]["points"]
-            penalties_detail.append(f"Volume ratio = {vol_ratio:.2f} → -10")
-
-    # 3. MACD negative and declining
-    macd_line, signal_line, histogram = calc_macd(close)
-    if len(histogram) >= 2:
-        latest_hist = float(histogram.iloc[-1])
-        prev_hist = float(histogram.iloc[-2])
-        if latest_hist < 0 and prev_hist < latest_hist:
-            total_penalty += PENALTIES["macd_negative_declining"]["points"]
-            penalties_detail.append(f"MACD declining ({latest_hist:.4f} < {prev_hist:.4f}) → -10")
-
-    # 4. Price below EMA200
-    if len(close) >= 200:
-        ema_200 = float(ema(close, 200).iloc[-1])
-        if latest_close < ema_200:
-            total_penalty += PENALTIES["below_ema200"]["points"]
-            penalties_detail.append(f"Below EMA200 ({latest_close:.2f} < {ema_200:.2f}) → -20")
-
-    # 5. ADX choppy
+    # 3. ADX > 30 and DI+ > DI- (strong directional trend)
     if all(c in df.columns for c in ("high", "low")):
-        adx_val, _, _ = calc_adx(df, 14)
-        latest_adx = float(adx_val.iloc[-1])
-        if latest_adx < 15:
-            total_penalty += PENALTIES["adx_choppy"]["points"]
-            penalties_detail.append(f"ADX = {latest_adx:.1f} → -8")
+        try:
+            adx_val, plus_di, minus_di = calc_adx(df, 14)
+            latest_adx = float(adx_val.iloc[-1])
+            latest_pdi = float(plus_di.iloc[-1])
+            latest_mdi = float(minus_di.iloc[-1])
+            if latest_adx > 30 and latest_pdi > latest_mdi:
+                total_bonus += BONUSES["adx_strong_trend"]["points"]
+                bonus_detail.append(f"ADX = {latest_adx:.1f}, DI+ = {latest_pdi:.1f} > DI- = {latest_mdi:.1f} → +5")
+        except Exception:
+            pass
 
-    # 6. BB Squeeze breakdown (squeeze ended downward)
-    try:
-        upper, middle, lower, bandwidth = bollinger_bands(close, 20, 2)
-        latest_bw = float(bandwidth.iloc[-1])
-        avg_bw = float(bandwidth.iloc[-20:].mean()) if len(bandwidth) >= 20 else latest_bw
-        prev_bw = float(bandwidth.iloc[-2]) if len(bandwidth) >= 2 else latest_bw
-        # squeeze was active but now breaking down
-        if prev_bw < avg_bw * 0.8 and latest_bw > prev_bw and latest_close < float(lower.iloc[-1]):
-            total_penalty += PENALTIES["bb_breakdown"]["points"]
-            penalties_detail.append(f"BB Squeeze breakdown → -5")
-    except Exception:
-        pass
+    # 4. Fresh MACD bullish crossover (already in Hard Gates — bonus if recent)
+    macd_line, signal_line, histogram = calc_macd(close)
+    if len(histogram) >= 3:
+        h1 = float(histogram.iloc[-1])
+        h2 = float(histogram.iloc[-2])
+        h3 = float(histogram.iloc[-3])
+        if h2 <= 0 and h1 > 0:
+            total_bonus += BONUSES["macd_cross_bonus"]["points"]
+            bonus_detail.append(f"Fresh MACD crossover → +5")
+        elif h3 <= 0 and h2 > 0:
+            total_bonus += 3
+            bonus_detail.append(f"Recent MACD crossover (2 bars ago) → +3")
 
-    return penalties_detail, total_penalty
+    return bonus_detail, total_bonus
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -333,10 +324,11 @@ def usx_proxy_score(
 # ═══════════════════════════════════════════════════════════════════════
 
 # Gate values mapped to market regime
+# Hard Gates are now the primary filter; Score is priority ranking only.
 GATE_CONFIG = {
-    "RISK ON":       {"min_gate": 55, "strong_gate": 70},  # Lowered for paper test (A-Pre.3)
-    "CAUTION":       {"min_gate": 60, "strong_gate": 75},  # Lowered for paper test (A-Pre.3)
-    "CREDIT STRESS": {"min_gate": 65, "strong_gate": 80},  # Lowered for paper test (A-Pre.3)
+    "RISK ON":       {"min_gate": 50, "strong_gate": 65},
+    "CAUTION":       {"min_gate": 55, "strong_gate": 70},
+    "CREDIT STRESS": {"min_gate": 60, "strong_gate": 75},
     "EXTREME FEAR":  {"min_gate": 999, "strong_gate": 999},  # Pipeline halt
 }
 
@@ -361,7 +353,7 @@ def weighted_score(
     if not gates.passed:
         result.total = 0
         result.signal = "AVOID"
-        result.penalties = gates.failed_gates
+        result.bonuses = [f"FAILED_GATE: {g}" for g in gates.failed_gates]
     else:
         # Determine signal based on market gates
         market_status = get_market_status()
@@ -577,12 +569,12 @@ def weighted_score_raw(
     scores["gap"] = 0
     details["gap"] = {"value": 0, "max": 0, "note": "merged into Volume"}
 
-    # ── Subtotal before penalties ──
+    # ── Subtotal before bonuses ──
     subtotal = sum(scores.values())
 
-    # ── Penalty deductions ──
-    penalty_detail, penalty_total = calculate_penalties(df, spy_df)
-    final_total = max(0, subtotal + penalty_total)
+    # ── Bonus additions ──
+    bonus_detail, bonus_total = calculate_bonus(df, spy_df)
+    final_total = subtotal + bonus_total
 
     total = final_total
     confidence = round(final_total / 100 * 100, 1)
@@ -591,7 +583,6 @@ def weighted_score_raw(
     usx = usx_proxy_score(df, spy_df)
 
     # ── Convergence check ──
-    # If OpenBB score is HIGH but USX proxy is LOW → not converged (possible false signal)
     converged = True
     if final_total >= 65 and usx["proxy_pct"] < 40:
         converged = False
@@ -607,8 +598,8 @@ def weighted_score_raw(
             "signal": 65,
             "minimum": 65,
         },
-        penalties=penalty_detail,
-        penalty_total=penalty_total,
+        bonuses=bonus_detail,
+        bonus_total=bonus_total,
         usx_proxy=usx,
         converged=converged,
     )
@@ -628,8 +619,8 @@ def _score_to_dict(result: ScoreResult) -> dict:
         "thresholds": result.thresholds or {},
         "signal": result.signal,
         "hard_gates_passed": result.hard_gates_passed,
-        "penalties": result.penalties or [],
-        "penalty_total": result.penalty_total,
+        "bonuses": result.bonuses or [],
+        "bonus_total": result.bonus_total,
         "usx_proxy": result.usx_proxy or {},
         "gate_source": result.gate_source,
         "converged": result.converged,

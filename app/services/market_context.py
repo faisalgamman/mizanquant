@@ -346,9 +346,9 @@ def get_market_status(force_refresh: bool = False) -> dict:
     # This creates a 4 × 3 matrix (stress × trend) without touching any other code.
     # ─────────────────────────────────────────────────────────────────────────
     _base_gates = {
-        "RISK ON":       {"min_gate": 55, "strong_gate": 70},
-        "CAUTION":       {"min_gate": 60, "strong_gate": 75},
-        "CREDIT STRESS": {"min_gate": 65, "strong_gate": 80},
+        "RISK ON":       {"min_gate": 50, "strong_gate": 65},
+        "CAUTION":       {"min_gate": 55, "strong_gate": 70},
+        "CREDIT STRESS": {"min_gate": 60, "strong_gate": 75},
         "EXTREME FEAR":  {"min_gate": 99, "strong_gate": 99, "halt": True},
     }
     _regime_delta = {
