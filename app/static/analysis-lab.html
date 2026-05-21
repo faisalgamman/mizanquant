@@ -585,10 +585,10 @@ async function runSingle(name, type) {
   try {
     let data;
     if (type==='forecast') {
-      data = await apiFetch(`/api/forecast/${encodeURIComponent(name)}?symbol=${sym}&forecast_horizon=${horizon}&epochs=5&n_splits=1`, 120000);
+      data = await apiFetch(`/api/forecast/${encodeURIComponent(name)}?symbol=${sym}&forecast_horizon=${horizon}&epochs=3&n_splits=1`, 300000);
       processFcResult(name, data, id);
     } else {
-      data = await apiFetch(`/api/agent/${encodeURIComponent(name)}?symbol=${sym}&episodes=20&initial_capital=10000`, 120000);
+      data = await apiFetch(`/api/agent/${encodeURIComponent(name)}?symbol=${sym}&episodes=10&initial_capital=10000`, 300000);
       processAgResult(name, data, id);
     }
   } catch(e) {
@@ -604,8 +604,9 @@ async function runSingle(name, type) {
 // ═══ RUN ALL ═══
 async function runAll() {
   document.getElementById('runAllBtn').disabled = true;
-  document.getElementById('runAllBtn').textContent = '⏳ Running…';
+  document.getElementById('runAllBtn').textContent = '⏳ Forecast…';
   await runAllModels(true);
+  document.getElementById('runAllBtn').textContent = '⏳ Agents…';
   await runAllAgents(true);
   document.getElementById('runAllBtn').disabled = false;
   document.getElementById('runAllBtn').textContent = '▶ Run Full Analysis';
@@ -613,16 +614,23 @@ async function runAll() {
   showToast('✅ Full analysis complete for ' + (document.getElementById('symInput').value||'AAPL'));
 }
 
+// ── Batched runner: process items BATCH_SIZE at a time to avoid saturating Railway CPU ──
+async function runBatched(items, batchSize, runFn) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    await Promise.allSettled(items.slice(i, i + batchSize).map(runFn));
+  }
+}
+
 async function runAllModels(silent) {
   fcTotal = MODELS.length; fcRunning = 0;
   if (!silent) document.getElementById('fcRunAllBtn').disabled = true;
   const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
   const horizon = parseInt(document.getElementById('horizonSel').value)||5;
-  const promises = MODELS.map(async m => {
+  await runBatched(MODELS, 2, async (m) => {
     const id = 'fc-'+m.name;
     setCardRunning(id, true);
     try {
-      const data = await apiFetch(`/api/forecast/${encodeURIComponent(m.name)}?symbol=${sym}&forecast_horizon=${horizon}&epochs=5&n_splits=1`, 120000);
+      const data = await apiFetch(`/api/forecast/${encodeURIComponent(m.name)}?symbol=${sym}&forecast_horizon=${horizon}&epochs=3&n_splits=1`, 300000);
       processFcResult(m.name, data, id);
     } catch(e) {
       setCardError(id, e.message);
@@ -634,7 +642,6 @@ async function runAllModels(silent) {
       updateConsensus();
     }
   });
-  await Promise.allSettled(promises);
   if (!silent) document.getElementById('fcRunAllBtn').disabled = false;
   document.getElementById('fcProgress').textContent = `${fcTotal}/${fcTotal} done`;
 }
@@ -643,11 +650,11 @@ async function runAllAgents(silent) {
   agTotal = AGENTS.length; agRunning = 0;
   if (!silent) document.getElementById('agRunAllBtn').disabled = true;
   const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
-  const promises = AGENTS.map(async a => {
+  await runBatched(AGENTS, 2, async (a) => {
     const id = 'ag-'+a.name;
     setCardRunning(id, true);
     try {
-      const data = await apiFetch(`/api/agent/${encodeURIComponent(a.name)}?symbol=${sym}&episodes=20&initial_capital=10000`, 120000);
+      const data = await apiFetch(`/api/agent/${encodeURIComponent(a.name)}?symbol=${sym}&episodes=10&initial_capital=10000`, 300000);
       processAgResult(a.name, data, id);
     } catch(e) {
       setCardError(id, e.message);
@@ -659,7 +666,6 @@ async function runAllAgents(silent) {
       updateConsensus();
     }
   });
-  await Promise.allSettled(promises);
   if (!silent) document.getElementById('agRunAllBtn').disabled = false;
   document.getElementById('agProgress').textContent = `${agTotal}/${agTotal} done`;
 }
