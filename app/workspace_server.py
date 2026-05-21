@@ -662,14 +662,18 @@ async def run_agent(
     # Create agent with appropriate init args
     agent = _create_agent_safe(agent_name, window_size)
 
-    # Dispatch to the appropriate evaluation method
-    if hasattr(agent, "walk_forward_evaluate"):
-        result = _run_agent_walk_forward(agent, prices, dates, agent_name, symbol, initial_capital,
-                                          commission_bps, slippage_bps, window_size, episodes,
-                                          max_position, stop_loss_pct, max_drawdown_pct, train_ratio)
-    else:
-        result = _run_agent_backtest(agent, prices, dates, agent_name, symbol)
-    return result
+    try:
+        # Dispatch to the appropriate evaluation method
+        if hasattr(agent, "walk_forward_evaluate"):
+            result = _run_agent_walk_forward(agent, prices, dates, agent_name, symbol, initial_capital,
+                                              commission_bps, slippage_bps, window_size, episodes,
+                                              max_position, stop_loss_pct, max_drawdown_pct, train_ratio)
+        else:
+            result = _run_agent_backtest(agent, prices, dates, agent_name, symbol)
+        return result
+    finally:
+        # Clean up UUID checkpoint files from this run
+        _cleanup_agent_checkpoints(agent)
 
 
 def _create_agent_safe(agent_name: str, window_size: int):
@@ -682,6 +686,24 @@ def _create_agent_safe(agent_name: str, window_size: int):
         return create_agent(agent_name, state_size=window_size + 3, **extra)
     except TypeError:
         return create_agent(agent_name, **extra)
+
+
+def _cleanup_agent_checkpoints(agent):
+    """Remove temporary UUID checkpoint files created during this agent run."""
+    import os
+    try:
+        ckpt_dir = getattr(agent, "checkpoint_dir", None)
+        ckpt_name = getattr(agent, "checkpoint_name", None)
+        if ckpt_dir is None or ckpt_name is None:
+            return
+        from pathlib import Path
+        for f in Path(ckpt_dir).glob(f"{ckpt_name}*"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def _run_agent_walk_forward(agent, prices, dates, agent_name, symbol,
