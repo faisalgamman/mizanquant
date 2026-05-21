@@ -102,7 +102,17 @@ class RLAgentBase:
 
         # Simple Sharpe (annualized, assuming daily data)
         returns = np.diff(pv) / pv[:-1]
-        sharpe = float(np.mean(returns) / np.std(returns) * np.sqrt(252)) if len(returns) > 1 and np.std(returns) > 0 else 0.0
+        _EPS = 1e-6
+        if len(returns) < 2:
+            sharpe = 0.0
+        else:
+            mean_r = float(np.mean(returns))
+            std_r = float(np.std(returns))
+            sharp_raw = mean_r / (std_r + _EPS)
+            # Only annualize if enough observations to be meaningful
+            if len(returns) >= 20:
+                sharp_raw *= np.sqrt(252)
+            sharpe = float(min(sharp_raw, 3.0))
 
         # Win rate from trades
         buys = [t for t in self.trades if t[0] == "BUY"]

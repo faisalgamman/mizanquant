@@ -730,6 +730,11 @@ function processAgResult(name, data, id) {
   let sharpe=0, winRate=0, totalRet=0, sparkData=[];
   if (data && data.summary) {
     const s = data.summary;
+    // Silent failure: no trades and all zeros → mark as error
+    if (s.n_trades === 0 && s.sharpe_ratio === 0 && s.total_return === 0 && s.win_rate === 0) {
+      setCardError(id, 'Agent returned no trades');
+      return;
+    }
     sharpe = s.sharpe_ratio||0;
     winRate = (s.win_rate||0)*100;
     totalRet = (s.total_return||0)*100;
@@ -793,6 +798,14 @@ function setCardError(id, msg) {
   if (btn) { btn.disabled=false; btn.className='btn-run'; btn.textContent='↻ Retry'; }
   const ph = document.getElementById('spark-ph-'+id);
   if (ph) { ph.style.display='flex'; ph.textContent='error'; }
+  // Clear stale data so consensus does not count failed agents
+  const name = id.replace(/^(fc|ag)-/, '');
+  if (id.startsWith('ag-')) delete agResults[name];
+  if (id.startsWith('fc-')) delete fcResults[name];
+  ['met-sharpe-', 'met-wr-', 'met-extra-'].forEach(function(p) {
+    var el = document.getElementById(p+id);
+    if (el) el.textContent = '\u2014';
+  });
 }
 
 // ═══ CONSENSUS ═══
@@ -835,8 +848,10 @@ function updateConsensus() {
   document.getElementById('cfc_sharpe').style.color = fcSharpeAvg>1.5?'var(--green)':fcSharpeAvg>0.5?'var(--txt)':'var(--red)';
   document.getElementById('cag_sharpe').textContent = agSharpeAvg != null ? agSharpeAvg.toFixed(2) : '—';
   document.getElementById('cag_sharpe').style.color = agSharpeAvg>1.5?'var(--green)':agSharpeAvg>0.5?'var(--txt)':'var(--red)';
-  document.getElementById('cbullish').textContent = fcUp + (agRetAvg!=null&&agRetAvg>0?' + ' + agDone.filter(r=>r.totalRet>0).length : '');
-  document.getElementById('cbearish').textContent = fcDown + (agRetAvg!=null&&agRetAvg<0?' + ' + agDone.filter(r=>r.totalRet<0).length : '');
+  var agBullish = agRetAvg != null && agRetAvg > 0 ? agDone.filter(function(r){return r.totalRet>0}).length : 0;
+  var agBearish = agRetAvg != null && agRetAvg < 0 ? agDone.filter(function(r){return r.totalRet<0}).length : 0;
+  document.getElementById('cbullish').textContent = fcUp + agBullish;
+  document.getElementById('cbearish').textContent = fcDown + agBearish;
   document.getElementById('cconfidence').textContent = conf.toFixed(0) + '%';
 
   // Build consensus table

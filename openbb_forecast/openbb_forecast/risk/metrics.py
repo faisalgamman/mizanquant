@@ -25,16 +25,20 @@ def sharpe_ratio(
     """Annualized Sharpe ratio.
 
     (mean(r) - rf_daily) / std(r) * sqrt(252)
+
+    Capped at 3.0 to prevent spurious inflation from short samples or near-zero vol.
     """
     returns = np.asarray(returns, dtype=np.float64)
-    if len(returns) < 2 or np.std(returns) == 0:
+    if len(returns) < 2:
         return 0.0
+    _EPS = 1e-6
     rf_daily = risk_free_rate / TRADING_DAYS_PER_YEAR
     excess = returns - rf_daily
-    ratio = np.mean(excess) / np.std(excess, ddof=1)
-    if annualize:
+    ratio = float(np.mean(excess) / (np.std(excess, ddof=1) + _EPS))
+    # Only annualize if enough observations to be meaningful
+    if annualize and len(returns) >= 20:
         ratio *= np.sqrt(TRADING_DAYS_PER_YEAR)
-    return float(ratio)
+    return float(min(ratio, 3.0))
 
 
 def sortino_ratio(

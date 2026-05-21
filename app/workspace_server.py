@@ -673,11 +673,15 @@ async def run_agent(
 
 
 def _create_agent_safe(agent_name: str, window_size: int):
-    """Create agent with optional state_size."""
+    """Create agent with optional state_size and unique checkpoint (prevents concurrent race)."""
+    import uuid
+    extra = {}
+    if agent_name == "double_dqn":
+        extra["checkpoint_name"] = f"double_dqn_{uuid.uuid4().hex[:8]}"
     try:
-        return create_agent(agent_name, state_size=window_size + 3)
+        return create_agent(agent_name, state_size=window_size + 3, **extra)
     except TypeError:
-        return create_agent(agent_name)
+        return create_agent(agent_name, **extra)
 
 
 def _run_agent_walk_forward(agent, prices, dates, agent_name, symbol,
@@ -698,12 +702,30 @@ def _run_agent_walk_forward(agent, prices, dates, agent_name, symbol,
         max_drawdown_pct=max_drawdown_pct,
     )
 
+    bs = wf_result.get("backtest_summary", {})
+
+    # Classic agents (Turtle, MovingAverage, etc.) don't return test_results
+    if "test_results" not in wf_result or "benchmark_curve" not in wf_result:
+        return {
+            "symbol": symbol,
+            "agent": agent_name,
+            "results": [],
+            "summary": {
+                "total_return": bs.get("total_return", 0),
+                "sharpe_ratio": bs.get("sharpe_ratio", 0),
+                "max_drawdown": bs.get("max_drawdown", 0),
+                "n_trades": bs.get("n_trades", 0),
+                "win_rate": bs.get("win_rate", 0),
+            },
+            "risk_events": wf_result.get("risk_events", 0),
+            "stop_losses": wf_result.get("stop_losses", 0),
+        }
+
     test_results = wf_result["test_results"]
     split_idx = int(len(prices) * train_ratio)
     test_dates = dates[split_idx:]
     equity = test_results["equity_curve"]
     benchmark = wf_result["benchmark_curve"]
-    bs = wf_result["backtest_summary"]
 
     results = []
     for t in range(min(len(equity), len(test_dates))):
