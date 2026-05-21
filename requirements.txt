@@ -24,6 +24,7 @@ ib_insync>=0.9.86,<1.0
 apscheduler>=3.10.4,<4.0
 
 # ── Phase 1: Observability & Operations ──
+psutil>=5.9,<7.0                # memory/CPU monitoring (Railway OOM prevention)
 sentry-sdk>=2.0,<3.0
 structlog>=24.0,<25.0
 prometheus-client>=0.20,<1.0

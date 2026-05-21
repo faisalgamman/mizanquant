@@ -2026,9 +2026,12 @@ def _score_momentum(symbol: str, df: pd.DataFrame) -> dict:
 def _score_forecast_consensus(symbol: str) -> dict:
     """Quick forecast consensus score (0-30) using a subset of fast models + agents.
 
-    Runs 3 fast models (arima, ensemble, lstm) + 3 fast agents (moving_average,
-    signal_rolling, q_learning) to get a consensus direction & confidence.
+    On Railway (RAILWAY_ENVIRONMENT set) or when LIGHTWEIGHT_ML=true:
+    - Only uses arima (pure statsmodels, no PyTorch) — avoids OOM crashes.
+    Full mode: arima + ensemble + lstm + 3 RL agents.
     """
+    _lightweight = bool(os.environ.get("RAILWAY_ENVIRONMENT") or
+                        os.environ.get("LIGHTWEIGHT_ML", "").lower() in ("1", "true", "yes"))
     score = 0
     details = {"models": 0, "agents": 0}
     try:
@@ -2039,9 +2042,12 @@ def _score_forecast_consensus(symbol: str) -> dict:
     except Exception:
         return {"score": 0, "details": details}
 
-    # ── Fast models: arima, ensemble, lstm ──
+    # ── Fast models ──
+    # On Railway / lightweight mode: only arima (no PyTorch) to avoid OOM.
+    # Full mode: arima + ensemble + lstm.
+    _model_list = ["arima"] if _lightweight else ["arima", "ensemble", "lstm"]
     model_directions = []
-    for mname in ["arima", "ensemble", "lstm"]:
+    for mname in _model_list:
         try:
             kwargs = {}
             if mname == "lstm":
@@ -2057,16 +2063,18 @@ def _score_forecast_consensus(symbol: str) -> dict:
             continue
 
     # ── Fast agents ──
+    # Skip on Railway / lightweight mode — walk_forward_evaluate trains PyTorch agents
     agent_sharpes = []
-    for aname in ["moving_average", "signal_rolling", "q_learning"]:
-        try:
-            agent = _create_agent_safe(aname, 20)
-            wf = agent.walk_forward_evaluate(prices=prices, episodes=10,
-                                            initial_capital=10000, window_size=20)
-            bs = wf["backtest_summary"]
-            agent_sharpes.append(bs.get("sharpe_ratio", 0))
-        except Exception:
-            continue
+    if not _lightweight:
+        for aname in ["moving_average", "signal_rolling", "q_learning"]:
+            try:
+                agent = _create_agent_safe(aname, 20)
+                wf = agent.walk_forward_evaluate(prices=prices, episodes=10,
+                                                initial_capital=10000, window_size=20)
+                bs = wf["backtest_summary"]
+                agent_sharpes.append(bs.get("sharpe_ratio", 0))
+            except Exception:
+                continue
 
     # Score from model direction agreement
     if model_directions:
@@ -2456,11 +2464,15 @@ def _run_screener_bg(scan_symbols: list):
     # Filter, sort, build result
     filtered = [r for r in all_results if r.get("is_halal")]
     filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
+    # Cap at 10 for forecast scoring on Railway (was 50) — each call loads models into RAM.
+    _forecast_cap = 10 if os.environ.get("RAILWAY_ENVIRONMENT") else 20
     top = filtered[:50]
+    top_for_forecast = top[:_forecast_cap]
 
-    # Forecast on top
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top}
+    # Forecast on top — use 1 worker on Railway to prevent OOM (was 3)
+    _forecast_workers = 1 if os.environ.get("RAILWAY_ENVIRONMENT") else 2
+    with ThreadPoolExecutor(max_workers=_forecast_workers) as pool:
+        f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top_for_forecast}
         for ff in as_completed(f_futures):
             r = f_futures[ff]
             try:
@@ -4831,9 +4843,24 @@ def _quality_label(sharpe: float, win_rate: float) -> str:
     return "AVOID"
 
 
+def _get_rss_mb() -> float:
+    """Return current process RSS memory in MB (best-effort)."""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / 1024 / 1024
+    except Exception:
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+        except Exception:
+            return 0.0
+
+
 def _run_strategies_backtest():
     global _strategies_backtest_cache, _strategies_backtest_running
     try:
+        mem_before = _get_rss_mb()
+        logger.info("Strategies backtest starting (RSS=%.0fMB)", mem_before)
         from app.strategies.backtest import (
             fetch_data, backtest_momentum, backtest_breakout,
             backtest_swing, backtest_momentum_burst, SYMBOLS,
@@ -4923,7 +4950,9 @@ def _run_strategies_backtest():
                 "timestamp": datetime.utcnow().isoformat(),
                 "cached": True,
             }
-        logger.info("Strategies backtest complete: %d symbols", len(symbols_data))
+        mem_after = _get_rss_mb()
+        logger.info("Strategies backtest complete: %d symbols (RSS %.0f→%.0fMB)",
+                    len(symbols_data), mem_before, mem_after)
     except Exception as e:
         logger.error("Strategies backtest failed: %s", e)
     finally:
