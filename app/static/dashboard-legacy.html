@@ -6881,35 +6881,38 @@ function closeModal() {
 var _stratRetryTimer = null;
 async function loadStrategies() {
   var cards = document.getElementById('strategyCards');
-  if (!cards) return;
+  if (!cards) { document.title = 'ERR: strategyCards null'; return; }
   if (_stratRetryTimer) { clearTimeout(_stratRetryTimer); _stratRetryTimer = null; }
-  cards.innerHTML = '<div style="text-align:center;padding:40px;color:#9494a0;grid-column:1/-1;"><div style="font-size:24px;margin-bottom:12px;">⏳</div>Loading strategy data…</div>';
+  cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:24px;text-align:center;font-size:15px;font-weight:600;grid-column:1/-1;border-radius:8px;">⏳ جاري تحميل بيانات الاستراتيجيات…</div>';
   try {
     var force = (new URLSearchParams(window.location.search).get('refresh') === '1');
     var data = await apiGet('/api/strategies/backtest-data?force_refresh=' + force, 25000);
     if (data && data.status === 'scanning') {
-      cards.innerHTML = '<div style="text-align:center;padding:48px 24px;grid-column:1/-1;">' +
-        '<div style="font-size:32px;margin-bottom:16px;">🔄</div>' +
-        '<div style="font-size:15px;font-weight:600;color:#e4e4ec;margin-bottom:8px;">جاري تشغيل الاختبار الخلفي…</div>' +
-        '<div style="font-size:12px;color:#9494a0;margin-bottom:20px;">يتم تحليل 25 سهماً × 4 استراتيجيات. سيستغرق ذلك حوالي 60 ثانية.</div>' +
-        '<div style="font-size:11px;color:#5c5c6a;">سيتم التحديث تلقائياً…</div></div>';
+      cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:32px;text-align:center;grid-column:1/-1;border-radius:8px;">' +
+        '<div style="font-size:32px;margin-bottom:12px;">🔄</div>' +
+        '<div style="font-size:16px;font-weight:700;margin-bottom:8px;">جاري تشغيل الاختبار الخلفي…</div>' +
+        '<div style="font-size:12px;opacity:.8;">يتم تحليل 25 سهماً × 4 استراتيجيات — ~60 ثانية</div>' +
+        '<div style="font-size:11px;margin-top:12px;opacity:.6;">سيتم التحديث تلقائياً خلال 30 ثانية</div></div>';
       _stratRetryTimer = setTimeout(loadStrategies, 30000);
       return;
     }
     if (data && data.error) {
-      cards.innerHTML = '<div style="text-align:center;padding:40px;color:#f87171;grid-column:1/-1;">' + data.error + '</div>';
+      cards.innerHTML = '<div style="background:#3b1010;color:#f87171;padding:24px;text-align:center;font-size:14px;font-weight:600;grid-column:1/-1;border-radius:8px;">❌ ' + data.error + '</div>';
       return;
     }
     if (!data || (!Object.keys(data.strategies || {}).length && !Object.keys(data.symbols || {}).length)) {
-      cards.innerHTML = '<div style="text-align:center;padding:40px;color:#9494a0;grid-column:1/-1;">لا توجد بيانات بعد. اضغط Refresh.</div>';
+      cards.innerHTML = '<div style="background:#1a2535;color:#94a3b8;padding:24px;text-align:center;font-size:14px;grid-column:1/-1;border-radius:8px;">لا توجد بيانات بعد — اضغط Refresh</div>';
       return;
     }
-    renderStrategyCards(data);
-    renderBestPerStrategy(data);
-    renderFullTable(data);
+    try { renderStrategyCards(data); } catch(e1) {
+      cards.innerHTML = '<div style="background:#3b1010;color:#f87171;padding:20px;grid-column:1/-1;border-radius:8px;">❌ renderStrategyCards: ' + e1.message + '</div>';
+      return;
+    }
+    try { renderBestPerStrategy(data); } catch(e2) { console.error('renderBestPerStrategy:', e2); }
+    try { renderFullTable(data); } catch(e3) { console.error('renderFullTable:', e3); }
   } catch(e) {
-    var cards2 = document.getElementById('strategyCards');
-    if (cards2) cards2.innerHTML = '<div style="text-align:center;padding:40px;color:#f87171;grid-column:1/-1;">خطأ: ' + (e.message || e) + '</div>';
+    var c = document.getElementById('strategyCards');
+    if (c) c.innerHTML = '<div style="background:#3b1010;color:#f87171;padding:24px;text-align:center;font-size:14px;font-weight:600;grid-column:1/-1;border-radius:8px;">❌ خطأ: ' + (e.message || String(e)) + '</div>';
   }
 }
 
