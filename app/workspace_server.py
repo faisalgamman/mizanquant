@@ -4243,6 +4243,18 @@ def _build_widgets_json() -> dict:
         ],
     }
 
+    # Backtest Lab — full interactive backtest UI with Chart.js charts
+    bt_id = _widget_id("backtest")
+    widgets[bt_id] = {
+        "name": "Backtest Lab",
+        "description": "Walk-forward backtest: equity curve, drawdown, monthly heatmap, win/loss doughnut, SPY benchmark",
+        "category": "Analytics / Backtest",
+        "type": "iframe",
+        "endpoint": "backtest",
+        "gridData": {"w": 24, "h": 35},
+        "source": "Custom",
+    }
+
     return widgets
 
 
@@ -4572,6 +4584,22 @@ async def get_apps():
                     "description": "Ask the AI analyst questions about stocks and halal investing",
                     "layout": [
                         {"i": _wref("api/ai/ask"), "x": 0, "y": 0, "w": 24, "h": 14},
+                    ],
+                },
+            },
+        },
+
+        # ── Dashboard 9: Backtest Lab ──
+        {
+            "name": "Backtest Lab",
+            "description": "Walk-forward backtest with equity curve, drawdown, monthly heatmap, and SPY benchmark",
+            "tabs": {
+                "backtest": {
+                    "id": "backtest",
+                    "name": "Backtest",
+                    "description": "Interactive backtest with Chart.js visualizations",
+                    "layout": [
+                        {"i": _wref("backtest"), "x": 0, "y": 0, "w": 24, "h": 35},
                     ],
                 },
             },
