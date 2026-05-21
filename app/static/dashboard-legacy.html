@@ -1250,10 +1250,9 @@ select:focus,input:focus { border-color:var(--accent); }
 <div class="tab-content" id="tab-analysis">
   <iframe
     id="analysisFrame"
-    src=""
+    src="about:blank"
     data-src="/analysis-lab"
     style="width:100%;height:calc(100vh - var(--cmd-height) - var(--market-height) - var(--status-height) - 24px);border:none;border-radius:8px;display:block;"
-    loading="lazy"
     title="Analysis Lab">
   </iframe>
 </div>
@@ -3204,8 +3203,10 @@ function loadTabData(tabId) {
   };
   if (lazyIframes[tabId]) {
     var fr = document.getElementById(lazyIframes[tabId]);
-    if (fr && !fr.src && fr.getAttribute('data-src')) {
+    // Use data-loaded flag — fr.src resolves to base URL even when src="" so !fr.src is always false
+    if (fr && !fr.getAttribute('data-loaded') && fr.getAttribute('data-src')) {
       fr.src = fr.getAttribute('data-src');
+      fr.setAttribute('data-loaded', '1');
     }
     return;
   }
