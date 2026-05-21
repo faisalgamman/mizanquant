@@ -46,17 +46,6 @@ async def bcf_screener(portfolio: float = 100000):
     return _serve_or_compute(key, run_bcf_screener, args=(portfolio,), msg="Computing BCF screener...")
 
 
-@router.get("/backtest")
-async def backtest(symbol: str = "AAPL", start_date: str = "2022-01-01", end_date: str = "2024-12-31", portfolio: float = 100000, risk_pct: float = 1.0, hold_days: int = 3):
-    from halal_screener import _serve_or_compute, _cache_key, validate_symbol, validate_date, validate_range, run_backtest
-    s = validate_symbol(symbol)
-    validate_date(start_date); validate_date(end_date)
-    validate_range(portfolio, "portfolio", 1000, 10_000_000)
-    validate_range(risk_pct, "risk_pct", 0.1, 10.0)
-    validate_range(hold_days, "hold_days", 1, 60)
-    key = _cache_key("backtest", symbol=s, start=start_date, end=end_date, portfolio=portfolio, risk=risk_pct, hold=hold_days)
-    return _serve_or_compute(key, run_backtest, args=(s, start_date, end_date, portfolio, risk_pct, hold_days), msg=f"Computing backtest for {s}...")
-
 
 @router.get("/monte_carlo")
 async def monte_carlo(symbol: str = "AAPL", days: int = 30, simulations: int = 1000):
