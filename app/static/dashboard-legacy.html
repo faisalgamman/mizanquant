@@ -1793,13 +1793,26 @@ let charts = {};
 
 // ===== NAVIGATION =====
 function switchTab(tabId) {
-  document.querySelectorAll('.tab-content').forEach(t => { t.classList.remove('active'); t.style.display = 'none'; });
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  // Force hide ALL tabs via inline style (overrides any CSS rule)
+  document.querySelectorAll('.tab-content').forEach(function(t) {
+    t.classList.remove('active');
+    t.style.setProperty('display', 'none', 'important');
+  });
+  document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+  // Force show target tab via inline style with !important
   var tabEl = document.getElementById('tab-' + tabId);
-  if (tabEl) { tabEl.classList.add('active'); tabEl.style.display = 'block'; }
-  document.querySelector(`.nav-item[data-tab="${tabId}"]`).classList.add('active');
-  var navEl = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
-  document.getElementById('cmdTitle').textContent = (navEl ? navEl.textContent.trim().replace(/Live|\d+/g,'').trim() : tabId);
+  if (tabEl) {
+    tabEl.classList.add('active');
+    tabEl.style.setProperty('display', 'block', 'important');
+  }
+  var navEl = document.querySelector('.nav-item[data-tab="' + tabId + '"]');
+  if (navEl) navEl.classList.add('active');
+  var title = navEl ? navEl.textContent.trim().replace(/Live|\d+/g,'').trim() : tabId;
+  document.getElementById('cmdTitle').textContent = title;
+  // Save to sessionStorage so refresh restores same tab
+  try { sessionStorage.setItem('activeTab', tabId); } catch(e) {}
+  // Update URL hash without triggering hashchange loop
+  try { history.replaceState(null, '', '#' + tabId); } catch(e) {}
   if (window.innerWidth <= 900) document.getElementById('sidebar').classList.remove('open');
   loadTabData(tabId);
 }
@@ -5872,14 +5885,22 @@ function showKeyboardHelp() {
   document.body.appendChild(fab);
 })();
 
-// ===== HASH-BASED TAB NAVIGATION =====
+// ===== INITIAL TAB SELECTION =====
+// Script is at bottom of <body> so DOM is fully parsed.
+// Priority: URL hash > sessionStorage > default (overview)
 (function() {
-  function applyHash() {
-    var hash = location.hash.slice(1);
-    if (hash && document.getElementById('tab-' + hash)) switchTab(hash);
-  }
-  window.addEventListener('hashchange', applyHash);
-  window.addEventListener('load', applyHash);
+  var hash = location.hash.slice(1);
+  var saved = '';
+  try { saved = sessionStorage.getItem('activeTab') || ''; } catch(e) {}
+  var target = (hash && document.getElementById('tab-' + hash)) ? hash
+             : (saved && document.getElementById('tab-' + saved)) ? saved
+             : '';
+  if (target) switchTab(target);
+  // Keep hash changes working after initial load
+  window.addEventListener('hashchange', function() {
+    var h = location.hash.slice(1);
+    if (h && document.getElementById('tab-' + h)) switchTab(h);
+  });
 })();
 
 // ===== INIT =====
