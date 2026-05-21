@@ -294,7 +294,7 @@ async def v1_backtest(
     risk_pct: float = 1.0,
     hold_days: int = 3,
 ):
-    from halal_screener import run_backtest
+    from app.services.backtest_service import run_backtest
 
     s = validate_symbol(symbol)
     validate_date(start_date)
