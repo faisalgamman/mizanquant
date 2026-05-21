@@ -40,84 +40,78 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("workspace_server")
 
 # ---------------------------------------------------------------------------
-# Lifespan — initialises the full trading stack on startup (mirrors
-# halal_screener.py _startup_bootstrap so the same services run on Railway).
+# Lifespan — initialises the full trading stack on startup.
+# All heavy/blocking work runs in a daemon thread so Uvicorn starts
+# accepting requests immediately (avoids startup timeout on Railway).
 # ---------------------------------------------------------------------------
 
-_NON_FATAL = (
-    ValueError, KeyError, TypeError, RuntimeError, ZeroDivisionError,
-    IndexError, FileNotFoundError, OSError, Exception,
-)
-
-
-@contextlib.asynccontextmanager
-async def _lifespan(_app: FastAPI):
-    """Startup: init DB + trading engine + scheduler + fill-watcher."""
-    # ── 1. Database ──────────────────────────────────────────────────────────
+def _trading_stack_bootstrap():
+    """Run in a daemon thread — initialise DB, broker, scheduler, fill-watcher."""
     try:
         from app.db.database import init_db
         init_db()
-        logger.info("Database initialised successfully")
-    except _NON_FATAL as e:
-        logger.warning("Database init failed (non-fatal): %s", e)
+        logger.info("Bootstrap: database initialised")
+    except Exception as e:
+        logger.warning("Bootstrap: DB init failed (non-fatal): %s", e)
 
-    # ── 2. Auto-trade config guard ───────────────────────────────────────────
     try:
-        from app.config import assert_ready_for_auto_trade, ConfigurationError
+        from app.config import assert_ready_for_auto_trade
         assert_ready_for_auto_trade()
     except Exception as e:
-        logger.warning("Auto-trade config guard: %s — disabling AUTO_TRADE", e)
+        logger.warning("Bootstrap: auto-trade guard: %s — AUTO_TRADE disabled", e)
         try:
             from app.config import settings as _s
             _s.AUTO_TRADE_ENABLED = False
         except Exception:
             pass
 
-    # ── 3. Broker reconciliation ─────────────────────────────────────────────
     try:
         from app.services.trading_engine import reconcile_all_strategies
         recon = reconcile_all_strategies()
-        logger.info("Startup broker reconciliation: %s", recon)
-    except _NON_FATAL as e:
-        logger.error("Broker reconciliation failed (non-fatal): %s", e)
+        logger.info("Bootstrap: broker reconciliation: %s", recon)
+    except Exception as e:
+        logger.error("Bootstrap: reconciliation failed (non-fatal): %s", e)
 
-    # ── 4. Market regime snapshot ─────────────────────────────────────────────
     try:
         from app.services.regime import refresh_regime
         snap = refresh_regime()
-        logger.info("Startup regime snapshot: %s", snap)
-    except _NON_FATAL as e:
-        logger.error("Regime refresh failed (non-fatal): %s", e)
+        logger.info("Bootstrap: regime snapshot: %s", snap)
+    except Exception as e:
+        logger.error("Bootstrap: regime refresh failed (non-fatal): %s", e)
 
-    # ── 5. Trading scheduler (app.services.scheduler — separate from APScheduler pipeline) ──
     if os.environ.get("WORKER_SERVICE", "").lower() != "true":
         try:
             from app.services.scheduler import start_scheduler
             start_scheduler()
-            logger.info("Trading scheduler started (in-process)")
-        except _NON_FATAL as e:
-            logger.warning("Trading scheduler failed to start (non-fatal): %s", e)
+            logger.info("Bootstrap: trading scheduler started")
+        except Exception as e:
+            logger.warning("Bootstrap: scheduler failed (non-fatal): %s", e)
 
-    # ── 6. Fill watcher ───────────────────────────────────────────────────────
     try:
         from app.services.fill_watcher import start_fill_watcher
         start_fill_watcher()
-        logger.info("Fill watcher started")
-    except _NON_FATAL as e:
-        logger.warning("Fill watcher failed to start (non-fatal): %s", e)
+        logger.info("Bootstrap: fill watcher started")
+    except Exception as e:
+        logger.warning("Bootstrap: fill watcher failed (non-fatal): %s", e)
 
-    # ── 7. Telegram startup notification ─────────────────────────────────────
     try:
         from app.services.telegram_alert import send_message as _tg
-        _tg("✅ workspace_server started on Railway — trading stack active")
+        _tg("✅ workspace_server started — trading stack active")
     except Exception:
         pass
 
-    logger.info("Lifespan startup complete")
-    yield
+    logger.info("Bootstrap: trading stack initialisation complete")
 
-    # ── Shutdown ──────────────────────────────────────────────────────────────
-    logger.info("Lifespan shutdown — stopping scheduler and fill watcher")
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Non-blocking lifespan: kick off trading stack in a daemon thread."""
+    t = threading.Thread(target=_trading_stack_bootstrap, daemon=True, name="startup-bootstrap")
+    t.start()
+    logger.info("Lifespan: startup bootstrap running in background thread")
+    yield
+    # Shutdown
+    logger.info("Lifespan: shutdown — stopping scheduler and fill watcher")
     try:
         from app.services.scheduler import stop_scheduler
         stop_scheduler()
