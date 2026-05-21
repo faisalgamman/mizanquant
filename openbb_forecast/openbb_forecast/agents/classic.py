@@ -53,6 +53,11 @@ class RLAgentBase:
                 self._sell(price, step)
             self._update_portfolio(price)
 
+        # Force close any open position at last price so win_rate is meaningful
+        if self.position == 1:
+            self._sell(float(prices[-1]), len(prices) - 1)
+            self._update_portfolio(float(prices[-1]))
+
         final_value = self.portfolio_value[-1]
         profit = final_value - self.initial_balance
         return {
