@@ -4930,23 +4930,47 @@ def _run_strategies_backtest():
         _strategies_backtest_running = False
 
 
+def _kick_strategies_backtest_if_needed():
+    """Start background backtest if not already running and cache is empty."""
+    global _strategies_backtest_running
+    if not _strategies_backtest_running and not _strategies_backtest_cache:
+        _strategies_backtest_running = True
+        t = threading.Thread(target=_run_strategies_backtest, daemon=True)
+        t.name = "strategies-backtest"
+        t.start()
+        logger.info("Strategies backtest kicked off in background")
+
+
 @app.get("/api/strategies/backtest-data", include_in_schema=False)
 async def strategies_backtest_data(force_refresh: str = Query("false")):
-    """Strategy backtest comparison data for the Strategies tab."""
+    """Strategy backtest comparison data for the Strategies tab.
+    Returns immediately: cached data if available, else {status:'scanning'}.
+    Never blocks the event loop.
+    """
     global _strategies_backtest_running
 
     _force = str(force_refresh).lower() in ("true", "1", "yes")
 
-    with _strategies_backtest_lock:
-        cached = dict(_strategies_backtest_cache)
+    # Read cache without blocking event loop
+    try:
+        if _strategies_backtest_lock.acquire(timeout=0.5):
+            cached = dict(_strategies_backtest_cache)
+            _strategies_backtest_lock.release()
+        else:
+            cached = {}
+    except Exception:
+        cached = {}
 
     if cached and not _force:
         return cached
 
+    # Kick off background computation if not running
     if not _strategies_backtest_running:
         _strategies_backtest_running = True
         t = threading.Thread(target=_run_strategies_backtest, daemon=True)
+        t.name = "strategies-backtest"
         t.start()
+        logger.info("Strategies backtest started on demand")
 
     if cached:
         return {**cached, "source": "stale_cache", "scanning": True}
@@ -4955,7 +4979,7 @@ async def strategies_backtest_data(force_refresh: str = Query("false")):
         "strategies": {},
         "symbols": {},
         "status": "scanning",
-        "message": "Running strategy backtests in background. Refresh in ~60 seconds.",
+        "message": "الـ backtest قيد التشغيل — سيستغرق ~90 ثانية أول مرة. ستتحدث النتائج تلقائياً.",
         "cached": False,
         "timestamp": datetime.utcnow().isoformat(),
     }
@@ -5081,6 +5105,12 @@ def main():
     logger.info("Dashboards available at http://%s:%d/apps.json", host, port)
     logger.info("Features: Caching=24h, Pipeline=08:00/08:30/09:00ET, Scheduler=09:30ET, Charts, Comparison, Portfolio")
     _start_scheduler()
+    # Pre-warm the strategies backtest cache in the background at startup
+    # so that the Strategies tab loads immediately on first visit.
+    try:
+        _kick_strategies_backtest_if_needed()
+    except Exception as _e:
+        logger.warning("Could not pre-warm strategies backtest: %s", _e)
     uvicorn.run(app, host=host, port=port)
 
 

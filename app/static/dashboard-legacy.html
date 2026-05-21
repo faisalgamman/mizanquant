@@ -6920,13 +6920,15 @@ async function loadStrategies() {
   cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:24px;text-align:center;font-size:15px;font-weight:600;grid-column:1/-1;border-radius:8px;">⏳ جاري تحميل بيانات الاستراتيجيات…</div>';
   try {
     var force = (new URLSearchParams(window.location.search).get('refresh') === '1');
-    var data = await apiGet('/api/strategies/backtest-data?force_refresh=' + force, 25000);
+    var data = await apiGet('/api/strategies/backtest-data?force_refresh=' + force, 90000);
     if (data && data.status === 'scanning') {
+      var msg = data.message || 'يتم تحليل 25 سهماً × 4 استراتيجيات — ~90 ثانية';
       cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:32px;text-align:center;grid-column:1/-1;border-radius:8px;">' +
         '<div style="font-size:32px;margin-bottom:12px;">🔄</div>' +
-        '<div style="font-size:16px;font-weight:700;margin-bottom:8px;">جاري تشغيل الاختبار الخلفي…</div>' +
-        '<div style="font-size:12px;opacity:.8;">يتم تحليل 25 سهماً × 4 استراتيجيات — ~60 ثانية</div>' +
-        '<div style="font-size:11px;margin-top:12px;opacity:.6;">سيتم التحديث تلقائياً خلال 30 ثانية</div></div>';
+        '<div style="font-size:16px;font-weight:700;margin-bottom:8px;">الـ Backtest قيد التشغيل…</div>' +
+        '<div style="font-size:12px;opacity:.9;max-width:400px;margin:0 auto;">' + msg + '</div>' +
+        '<div style="font-size:11px;margin-top:16px;opacity:.6;">سيتم التحديث تلقائياً خلال 30 ثانية</div>' +
+        '<div style="margin-top:16px;"><div style="display:inline-block;width:120px;height:4px;background:#1e40af;border-radius:2px;overflow:hidden;"><div style="height:100%;background:#93c5fd;animation:scanBar 2s ease-in-out infinite;border-radius:2px;"></div></div></div></div>';
       _stratRetryTimer = setTimeout(loadStrategies, 30000);
       return;
     }
