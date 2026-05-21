@@ -4795,6 +4795,16 @@ async def get_trading_panel():
     return HTMLResponse("<h1>Trading Panel not found</h1>", status_code=404)
 
 
+@app.get("/analysis-lab", include_in_schema=False)
+async def get_analysis_lab():
+    """Serve the unified Analysis Lab — Forecast + Trading agents on one page."""
+    p = Path(__file__).resolve().parent / "static" / "analysis-lab.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
+    return HTMLResponse("<h1>Analysis Lab not found</h1>", status_code=404)
+
+
 @app.get("/risk-desk", include_in_schema=False)
 async def get_risk_desk_panel():
     """Serve the Risk Desk — Professional risk management."""

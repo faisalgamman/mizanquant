@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analysis Lab — Mizanquant</title>
+<script src="/static/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   ANALYSIS LAB — Unified Forecast + Trading Intelligence
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  --bg:          #0b0d12;
+  --bg-card:     #111520;
+  --bg-raised:   #181d28;
+  --bg-hover:    #1e2434;
+  --border:      rgba(255,255,255,.07);
+  --border-hi:   rgba(255,255,255,.14);
+  --txt:         #e2e5ed;
+  --txt2:        #7c8499;
+  --txt3:        #4a5066;
+  --accent:      #4f8ef7;
+  --accent2:     #7c6af4;
+  --green:       #3ecf8e;
+  --red:         #f25252;
+  --orange:      #f0a04b;
+  --gold:        #f5c842;
+  --r:           8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:15px;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+
+/* ── TOPBAR ── */
+.topbar{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;gap:12px;
+  padding:0 20px;height:56px;
+  background:var(--bg-card);border-bottom:1px solid var(--border);
+  backdrop-filter:blur(12px);
+}
+.logo{font-weight:800;font-size:16px;letter-spacing:-.3px;color:#fff;white-space:nowrap}
+.logo span{color:var(--accent)}
+.sep{width:1px;height:24px;background:var(--border)}
+.sym-wrap{display:flex;align-items:center;gap:8px;background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;min-width:120px}
+.sym-wrap input{background:none;border:none;color:var(--txt);font-size:13px;font-weight:700;width:80px;outline:none;text-transform:uppercase}
+.sym-wrap label{font-size:11px;color:var(--txt2)}
+.spacer{flex:1}
+.kpi-row{display:flex;gap:20px;align-items:center}
+.kpi{text-align:right}
+.kpi-val{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.kpi-label{font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.4px}
+.chip{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;letter-spacing:.3px}
+.chip-live{background:rgba(62,207,142,.15);color:var(--green)}
+.chip-warn{background:rgba(240,160,75,.15);color:var(--orange)}
+.btn{padding:7px 16px;border:none;border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#3a7be0}
+.btn-primary:disabled{opacity:.45;cursor:not-allowed}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--txt2)}
+.btn-ghost:hover{border-color:var(--border-hi);color:var(--txt)}
+.btn-sm{padding:5px 12px;font-size:12px}
+.btn-run{padding:4px 10px;font-size:11px;font-weight:700;border:none;border-radius:5px;cursor:pointer;background:var(--accent);color:#fff;transition:.12s;white-space:nowrap}
+.btn-run:hover{background:#3a7be0}
+.btn-run:disabled{opacity:.4;cursor:not-allowed}
+.btn-run.running{background:#7c6af4}
+
+/* ── SECTION TABS ── */
+.section-tabs{
+  display:flex;gap:0;padding:0 20px;margin-top:0;
+  background:var(--bg-card);border-bottom:1px solid var(--border);
+}
+.sec-tab{
+  padding:12px 20px;font-size:13px;font-weight:600;cursor:pointer;
+  border-bottom:2px solid transparent;color:var(--txt2);
+  transition:.15s;white-space:nowrap;
+}
+.sec-tab:hover{color:var(--txt)}
+.sec-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.sec-tab .badge-count{
+  display:inline-block;margin-left:6px;
+  background:var(--bg-raised);color:var(--txt2);
+  font-size:10px;padding:1px 6px;border-radius:8px;font-weight:500;
+}
+
+/* ── MAIN CONTENT ── */
+.content{padding:20px;max-width:1600px;margin:0 auto}
+.section-panel{display:none}
+.section-panel.active{display:block}
+
+/* ── FILTER BAR ── */
+.filter-bar{
+  display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  margin-bottom:16px;
+}
+.filter-chip{
+  padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;
+  background:var(--bg-raised);border:1px solid var(--border);color:var(--txt2);
+  transition:.12s;
+}
+.filter-chip:hover{border-color:var(--border-hi);color:var(--txt)}
+.filter-chip.active{background:rgba(79,142,247,.18);border-color:rgba(79,142,247,.5);color:var(--accent)}
+.filter-chip.cat-deep-rl.active{background:rgba(124,106,244,.18);border-color:rgba(124,106,244,.5);color:var(--accent2)}
+.filter-chip.cat-classic.active{background:rgba(62,207,142,.18);border-color:rgba(62,207,142,.5);color:var(--green)}
+.sort-select{padding:4px 8px;background:var(--bg-raised);border:1px solid var(--border);color:var(--txt2);border-radius:6px;font-size:12px;cursor:pointer;outline:none}
+.run-all-wrap{margin-left:auto;display:flex;align-items:center;gap:8px}
+.progress-text{font-size:11px;color:var(--txt2)}
+
+/* ── CARD GRID ── */
+.card-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:14px;
+}
+
+/* ── MODEL CARD ── */
+.m-card{
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);
+  padding:14px 16px;transition:border-color .2s;cursor:default;
+  position:relative;overflow:hidden;
+}
+.m-card:hover{border-color:var(--border-hi)}
+.m-card.state-running{border-color:rgba(124,106,244,.5)}
+.m-card.state-done{border-color:rgba(62,207,142,.3)}
+.m-card.state-error{border-color:rgba(242,82,82,.3)}
+.m-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.m-name{font-size:13px;font-weight:700;letter-spacing:-.1px;font-family:'SF Mono','Fira Code',monospace}
+.badges{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.4px;text-transform:uppercase}
+.badge-cat{background:rgba(79,142,247,.14);color:#6ba3f7}
+.badge-cat.lstm{background:rgba(124,106,244,.14);color:#a78df8}
+.badge-cat.gru{background:rgba(62,207,142,.14);color:#5bdaa0}
+.badge-cat.cnn{background:rgba(240,160,75,.14);color:#f5b96a}
+.badge-cat.rnn{background:rgba(79,142,247,.14);color:#6ba3f7}
+.badge-cat.transformer{background:rgba(245,200,66,.14);color:#f7d44c}
+.badge-cat.ensemble{background:rgba(79,142,247,.22);color:#7fbcff}
+.badge-cat.statistical{background:rgba(128,128,128,.14);color:#aaa}
+.badge-cat.deep-rl{background:rgba(124,106,244,.2);color:#a78df8}
+.badge-cat.q-learning{background:rgba(79,142,247,.14);color:#6ba3f7}
+.badge-cat.actor-critic{background:rgba(62,207,142,.14);color:#5bdaa0}
+.badge-cat.neuro-evolution{background:rgba(240,160,75,.14);color:#f5b96a}
+.badge-cat.classic{background:rgba(62,207,142,.2);color:#7de0ad}
+.badge-tier{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.4px}
+.tier-production{background:rgba(62,207,142,.2);color:var(--green)}
+.tier-staging{background:rgba(255,255,255,.06);color:var(--txt2)}
+.tier-idle{background:rgba(255,255,255,.04);color:var(--txt3)}
+
+/* ── SPARKLINE AREA ── */
+.sparkline-wrap{height:52px;margin:8px 0;position:relative}
+.sparkline-wrap canvas{width:100%!important;height:52px!important}
+.spark-placeholder{
+  height:52px;display:flex;align-items:center;justify-content:center;
+  color:var(--txt3);font-size:11px;letter-spacing:.2px;
+}
+
+/* ── METRICS ROW ── */
+.m-metrics{display:flex;gap:6px;margin-bottom:10px}
+.m-metric{flex:1;background:var(--bg-raised);border-radius:6px;padding:5px 7px}
+.m-metric-label{font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
+.m-metric-val{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.m-metric-val.up{color:var(--green)}
+.m-metric-val.down{color:var(--red)}
+.m-metric-val.neutral{color:var(--txt)}
+.m-metric-val.dim{color:var(--txt2);font-size:12px}
+
+/* ── CARD FOOTER ── */
+.m-footer{display:flex;justify-content:space-between;align-items:center}
+.m-status{font-size:10px;color:var(--txt3)}
+.m-status.running{color:var(--accent2)}
+.m-status.done-up{color:var(--green)}
+.m-status.done-down{color:var(--red)}
+.m-status.error{color:var(--red);opacity:.7}
+
+/* ── SPINNER ── */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{
+  width:12px;height:12px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.1);border-top-color:var(--accent2);
+  animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:4px;
+}
+/* ── PULSE BAR ── */
+@keyframes pulse-w{0%,100%{opacity:.4}50%{opacity:1}}
+.pulse-bar{
+  position:absolute;bottom:0;left:0;height:2px;
+  background:linear-gradient(90deg,var(--accent2),var(--accent));
+  animation:pulse-w 1.2s ease-in-out infinite;
+  border-radius:0 0 var(--r) var(--r);
+  width:100%;
+}
+
+/* ── CONSENSUS PANEL ── */
+.consensus-wrap{
+  margin-top:28px;padding:20px 24px;
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);
+}
+.consensus-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.consensus-title{font-size:15px;font-weight:700}
+.consensus-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.c-metric{background:var(--bg-raised);border-radius:var(--r);padding:14px 16px}
+.c-metric-label{font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.c-metric-val{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+.signal-badge{
+  display:inline-block;padding:6px 20px;border-radius:6px;font-size:14px;font-weight:800;letter-spacing:.5px;
+}
+.signal-BUY{background:rgba(62,207,142,.18);color:var(--green);border:1px solid rgba(62,207,142,.3)}
+.signal-SELL{background:rgba(242,82,82,.18);color:var(--red);border:1px solid rgba(242,82,82,.3)}
+.signal-HOLD{background:rgba(240,160,75,.18);color:var(--orange);border:1px solid rgba(240,160,75,.3)}
+.signal-WAIT{background:rgba(128,128,128,.1);color:var(--txt2);border:1px solid var(--border)}
+.consensus-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:16px}
+.consensus-table th{padding:6px 10px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.4px}
+.consensus-table td{padding:6px 10px;border-bottom:1px solid var(--border)}
+.consensus-table tr:last-child td{border-bottom:none}
+.consensus-table tr:hover td{background:var(--bg-raised)}
+
+/* ── EMPTY / LOADING ── */
+.empty-state{text-align:center;padding:48px 20px;color:var(--txt3);font-size:13px}
+.empty-icon{font-size:36px;margin-bottom:10px}
+.toast{
+  position:fixed;bottom:24px;right:24px;z-index:9999;
+  padding:10px 16px;border-radius:var(--r);
+  background:var(--bg-raised);border:1px solid var(--border-hi);
+  color:var(--txt);font-size:13px;font-weight:500;
+  animation:toastIn .2s ease;pointer-events:none;
+}
+@keyframes toastIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* ── COMBINED TAB LAYOUT ── */
+.combined-layout{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:900px){.combined-layout{grid-template-columns:1fr}.kpi-row{display:none}}
+@media(max-width:600px){.card-grid{grid-template-columns:1fr}.topbar{gap:8px}}
+.col-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.col-title{font-size:14px;font-weight:700}
+.col-count{font-size:11px;color:var(--txt2)}
+</style>
+</head>
+<body>
+
+<!-- ═══ TOPBAR ═══ -->
+<div class="topbar">
+  <div class="logo">Mizan<span>Quant</span></div>
+  <div class="sep"></div>
+  <div class="sym-wrap">
+    <label>SYMBOL</label>
+    <input id="symInput" type="text" value="AAPL" maxlength="8" spellcheck="false"
+           onkeydown="if(event.key==='Enter')refreshAll()">
+  </div>
+  <select id="horizonSel" style="padding:6px 10px;background:var(--bg-raised);border:1px solid var(--border);color:var(--txt2);border-radius:var(--r);font-size:12px;cursor:pointer;outline:none">
+    <option value="5">5-day horizon</option>
+    <option value="10">10-day horizon</option>
+    <option value="20">20-day horizon</option>
+  </select>
+
+  <div class="spacer"></div>
+  <div class="kpi-row" id="kpiRow">
+    <div class="kpi"><div class="kpi-val" id="kpiBestSharpe">—</div><div class="kpi-label">Best Sharpe</div></div>
+    <div class="sep"></div>
+    <div class="kpi"><div class="kpi-val" id="kpiDrifted">—</div><div class="kpi-label">Models Drifted</div></div>
+    <div class="sep"></div>
+    <div class="kpi"><div class="kpi-val" id="kpiRetrain">—</div><div class="kpi-label">Last Retrain</div></div>
+    <div class="sep"></div>
+    <div class="kpi"><div class="kpi-val" id="kpiScanFresh">—</div><div class="kpi-label">Scan Freshness</div></div>
+    <div class="sep"></div>
+  </div>
+  <button class="btn btn-primary" id="runAllBtn" onclick="runAll()">▶ Run Full Analysis</button>
+  <a href="/" class="btn btn-ghost btn-sm">← Dashboard</a>
+</div>
+
+<!-- ═══ SECTION TABS ═══ -->
+<div class="section-tabs">
+  <div class="sec-tab active" id="tab-combined" onclick="switchSection('combined')">
+    🔬 Combined Analysis
+  </div>
+  <div class="sec-tab" id="tab-forecast" onclick="switchSection('forecast')">
+    🔮 Forecast Lab
+    <span class="badge-count" id="forecastCount">—</span>
+  </div>
+  <div class="sec-tab" id="tab-trading" onclick="switchSection('trading')">
+    🤖 Trading Lab
+    <span class="badge-count" id="tradingCount">—</span>
+  </div>
+</div>
+
+<!-- ═══ CONTENT ═══ -->
+<div class="content">
+
+  <!-- ─ COMBINED ─ -->
+  <div class="section-panel active" id="panel-combined">
+    <div class="combined-layout">
+      <!-- Left: top 5 models -->
+      <div>
+        <div class="col-header">
+          <div class="col-title">🔮 Forecast Models</div>
+          <div class="col-count" id="fcDoneCount">0 / 0 done</div>
+        </div>
+        <div class="card-grid" id="combinedFcGrid" style="grid-template-columns:1fr 1fr"></div>
+      </div>
+      <!-- Right: top 5 agents -->
+      <div>
+        <div class="col-header">
+          <div class="col-title">🤖 Trading Agents</div>
+          <div class="col-count" id="agDoneCount">0 / 0 done</div>
+        </div>
+        <div class="card-grid" id="combinedAgGrid" style="grid-template-columns:1fr 1fr"></div>
+      </div>
+    </div>
+    <!-- Consensus -->
+    <div class="consensus-wrap" id="consensusPanel">
+      <div class="consensus-header">
+        <div class="consensus-title">🎯 Combined Signal — <span id="csymbol">AAPL</span></div>
+        <div id="signalBadge" class="signal-badge signal-WAIT">WAIT</div>
+      </div>
+      <div class="consensus-grid">
+        <div class="c-metric"><div class="c-metric-label">Overall Signal</div><div class="c-metric-val" id="csignal" style="color:var(--txt2)">—</div></div>
+        <div class="c-metric"><div class="c-metric-label">Avg Forecast Sharpe</div><div class="c-metric-val" id="cfc_sharpe">—</div></div>
+        <div class="c-metric"><div class="c-metric-label">Avg Agent Sharpe</div><div class="c-metric-val" id="cag_sharpe">—</div></div>
+        <div class="c-metric"><div class="c-metric-label">Models Bullish</div><div class="c-metric-val" id="cbullish">—</div></div>
+        <div class="c-metric"><div class="c-metric-label">Models Bearish</div><div class="c-metric-val" id="cbearish">—</div></div>
+        <div class="c-metric"><div class="c-metric-label">Confidence</div><div class="c-metric-val" id="cconfidence">—</div></div>
+      </div>
+      <table class="consensus-table" id="consensusTable" style="display:none">
+        <thead><tr>
+          <th>Source</th><th>Name</th><th>Type</th><th>Signal</th><th>Sharpe</th><th>Win Rate</th><th>Return</th>
+        </tr></thead>
+        <tbody id="consensusTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ─ FORECAST LAB ─ -->
+  <div class="section-panel" id="panel-forecast">
+    <div class="filter-bar" id="fcFilterBar">
+      <div class="filter-chip active" onclick="filterModels('All')" data-cat="All">All</div>
+      <!-- dynamically populated -->
+      <div class="run-all-wrap">
+        <span class="progress-text" id="fcProgress"></span>
+        <button class="btn btn-primary btn-sm" id="fcRunAllBtn" onclick="runAllModels()">▶ Run All Models</button>
+      </div>
+    </div>
+    <div class="card-grid" id="fcGrid"></div>
+  </div>
+
+  <!-- ─ TRADING LAB ─ -->
+  <div class="section-panel" id="panel-trading">
+    <div class="filter-bar" id="agFilterBar">
+      <div class="filter-chip active" onclick="filterAgents('All')" data-cat="All">All</div>
+      <!-- dynamically populated -->
+      <div class="run-all-wrap">
+        <span class="progress-text" id="agProgress"></span>
+        <button class="btn btn-primary btn-sm" id="agRunAllBtn" onclick="runAllAgents()">▶ Run All Agents</button>
+      </div>
+    </div>
+    <div class="card-grid" id="agGrid"></div>
+  </div>
+
+</div><!-- /content -->
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  ANALYSIS LAB — STATE
+// ═══════════════════════════════════════════════════════════
+var MODELS = [];   // [{name, category, sharpe, win_rate, status, ...}]
+var AGENTS = [];   // same
+var fcResults = {}; // { modelName: {data, error, direction, sharpe} }
+var agResults = {}; // { agentName: {data, error, sharpe, win_rate, total_return} }
+var sparkCharts = {};  // {id: Chart}
+var activeSection = 'combined';
+var fcCatFilter = 'All';
+var agCatFilter = 'All';
+var fcRunning = 0, fcTotal = 0;
+var agRunning = 0, agTotal = 0;
+
+// ═══ INIT ═══
+(async function init() {
+  try {
+    const info = await apiFetch('/api/info');
+    MODELS = (info.model_items || []).sort((a,b) => (b.sharpe||0)-(a.sharpe||0));
+    AGENTS = (info.agent_items || []).sort((a,b) => (b.sharpe||0)-(a.sharpe||0));
+
+    document.getElementById('forecastCount').textContent = MODELS.length;
+    document.getElementById('tradingCount').textContent = AGENTS.length;
+    document.getElementById('kpiBestSharpe').textContent = Math.max(...MODELS.concat(AGENTS).map(x=>x.sharpe||0)).toFixed(2);
+    document.getElementById('kpiDrifted').textContent = '0/' + (MODELS.length + AGENTS.length);
+    document.getElementById('kpiRetrain').textContent = info.last_full_retrain || '—';
+    document.getElementById('kpiScanFresh').textContent = info.smart_scan_freshness || '—';
+
+    buildForecastCards();
+    buildAgentCards();
+    buildCombinedCards();
+    buildFilterBars();
+    updateCounts();
+  } catch(e) {
+    showToast('⚠ Could not load model list: ' + e.message);
+  }
+})();
+
+// ═══ API HELPERS ═══
+async function apiFetch(url, timeout=15000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const r = await fetch(url, {signal: ctrl.signal});
+    clearTimeout(t);
+    if (!r.ok) { const txt = await r.text(); throw new Error('HTTP '+r.status+': '+txt.slice(0,120)); }
+    return r.json();
+  } catch(e) {
+    clearTimeout(t);
+    if (e.name === 'AbortError') throw new Error('Timed out');
+    throw e;
+  }
+}
+
+// ═══ SECTION SWITCH ═══
+function switchSection(s) {
+  activeSection = s;
+  document.querySelectorAll('.sec-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-'+s).classList.add('active');
+  document.getElementById('panel-'+s).classList.add('active');
+}
+
+// ═══ CARD BUILDERS ═══
+function catClass(cat) {
+  return (cat||'').toLowerCase().replace(/[^a-z0-9]/g,'-');
+}
+function tierHTML(tier, status) {
+  if (status === 'production') return '<span class="badge badge-tier tier-production">PROD</span>';
+  if (tier === 'production') return '<span class="badge badge-tier tier-production">PROD</span>';
+  if (status === 'idle') return '<span class="badge badge-tier tier-idle">IDLE</span>';
+  return '<span class="badge badge-tier tier-staging">STAGING</span>';
+}
+function catBadgeHTML(cat) {
+  const cls = catClass(cat);
+  return `<span class="badge badge-cat ${cls}">${cat||'?'}</span>`;
+}
+
+function makeCard(item, prefix) {
+  const id = prefix + '-' + item.name;
+  const sharpeStr = item.sharpe != null ? item.sharpe.toFixed(2) : '—';
+  const wrStr = item.win_rate != null ? item.win_rate.toFixed(0)+'%' : '—';
+  const type = prefix === 'fc' ? 'forecast' : 'agent';
+  return `
+  <div class="m-card" id="card-${id}" data-cat="${catClass(item.category)}">
+    <div class="m-card-top">
+      <div class="m-name">${item.name}</div>
+      <div class="badges">
+        ${catBadgeHTML(item.category)}
+        ${tierHTML(item.tier||'staging', item.status)}
+      </div>
+    </div>
+    <div class="sparkline-wrap" id="spark-wrap-${id}">
+      <div class="spark-placeholder" id="spark-ph-${id}">no data yet</div>
+      <canvas id="spark-${id}" style="display:none"></canvas>
+    </div>
+    <div class="m-metrics">
+      <div class="m-metric">
+        <div class="m-metric-label">Sharpe</div>
+        <div class="m-metric-val neutral" id="met-sharpe-${id}">${sharpeStr}</div>
+      </div>
+      <div class="m-metric">
+        <div class="m-metric-label">Win Rate</div>
+        <div class="m-metric-val neutral" id="met-wr-${id}">${wrStr}</div>
+      </div>
+      <div class="m-metric">
+        <div class="m-metric-label">${type==='forecast'?'Direction':'Return'}</div>
+        <div class="m-metric-val dim" id="met-extra-${id}">—</div>
+      </div>
+    </div>
+    <div class="m-footer">
+      <div class="m-status" id="status-${id}">idle</div>
+      <button class="btn-run" id="run-${id}" onclick="runSingle('${item.name}','${type}')">▶ Run</button>
+    </div>
+  </div>`;
+}
+
+function buildForecastCards() {
+  document.getElementById('fcGrid').innerHTML = MODELS.map(m => makeCard(m,'fc')).join('');
+}
+function buildAgentCards() {
+  document.getElementById('agGrid').innerHTML = AGENTS.map(a => makeCard(a,'ag')).join('');
+}
+function buildCombinedCards() {
+  // Show top 4 models + top 4 agents in combined view
+  const topM = MODELS.slice(0,8);
+  const topA = AGENTS.slice(0,8);
+  document.getElementById('combinedFcGrid').innerHTML = topM.map(m => makeCard(m,'fc')).join('');
+  document.getElementById('combinedAgGrid').innerHTML = topA.map(a => makeCard(a,'ag')).join('');
+}
+
+function buildFilterBars() {
+  // Forecast categories
+  const fcCats = [...new Set(MODELS.map(m => m.category))];
+  const fcBar = document.getElementById('fcFilterBar');
+  fcCats.forEach(cat => {
+    const d = document.createElement('div');
+    d.className = 'filter-chip cat-'+catClass(cat);
+    d.setAttribute('data-cat', catClass(cat));
+    d.textContent = cat;
+    d.onclick = () => filterModels(cat);
+    fcBar.insertBefore(d, fcBar.querySelector('.run-all-wrap'));
+  });
+  // Agent categories
+  const agCats = [...new Set(AGENTS.map(a => a.category))];
+  const agBar = document.getElementById('agFilterBar');
+  agCats.forEach(cat => {
+    const d = document.createElement('div');
+    d.className = 'filter-chip cat-'+catClass(cat);
+    d.setAttribute('data-cat', catClass(cat));
+    d.textContent = cat;
+    d.onclick = () => filterAgents(cat);
+    agBar.insertBefore(d, agBar.querySelector('.run-all-wrap'));
+  });
+}
+
+// ═══ FILTERS ═══
+function filterModels(cat) {
+  fcCatFilter = cat;
+  document.querySelectorAll('#fcFilterBar .filter-chip').forEach(c => {
+    c.classList.toggle('active', c.textContent.trim() === cat || (cat==='All' && c.getAttribute('data-cat')==='All'));
+  });
+  document.querySelectorAll('#fcGrid .m-card').forEach(card => {
+    const cc = card.getAttribute('data-cat');
+    card.style.display = (cat==='All' || cc===catClass(cat)) ? '' : 'none';
+  });
+}
+function filterAgents(cat) {
+  agCatFilter = cat;
+  document.querySelectorAll('#agFilterBar .filter-chip').forEach(c => {
+    c.classList.toggle('active', c.textContent.trim() === cat || (cat==='All' && c.getAttribute('data-cat')==='All'));
+  });
+  document.querySelectorAll('#agGrid .m-card').forEach(card => {
+    const cc = card.getAttribute('data-cat');
+    card.style.display = (cat==='All' || cc===catClass(cat)) ? '' : 'none';
+  });
+}
+
+// ═══ SPARKLINE ═══
+function drawSparkline(id, values, colorPos, colorNeg) {
+  const ph = document.getElementById('spark-ph-'+id);
+  const canvas = document.getElementById('spark-'+id);
+  if (!ph || !canvas) return;
+  ph.style.display = 'none';
+  canvas.style.display = 'block';
+
+  if (sparkCharts[id]) { sparkCharts[id].destroy(); delete sparkCharts[id]; }
+
+  const isUp = values[values.length-1] >= values[0];
+  const color = isUp ? (colorPos||'rgba(62,207,142,1)') : (colorNeg||'rgba(242,82,82,1)');
+  const colorFade = isUp ? 'rgba(62,207,142,0.08)' : 'rgba(242,82,82,0.08)';
+
+  sparkCharts[id] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: values.map((_,i)=>i),
+      datasets: [{
+        data: values,
+        borderColor: color,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: true,
+        backgroundColor: (ctx) => {
+          const g = ctx.chart.ctx.createLinearGradient(0,0,0,52);
+          g.addColorStop(0, colorFade);
+          g.addColorStop(1, 'transparent');
+          return g;
+        },
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: false, maintainAspectRatio: false, animation: {duration:400},
+      plugins: {legend:{display:false}, tooltip:{enabled:false}},
+      scales: { x:{display:false}, y:{display:false} },
+    }
+  });
+}
+
+// ═══ SINGLE RUN ═══
+async function runSingle(name, type) {
+  const prefix = type==='forecast' ? 'fc' : 'ag';
+  const id = prefix+'-'+name;
+  const sym = document.getElementById('symInput').value.trim().toUpperCase() || 'AAPL';
+  const horizon = parseInt(document.getElementById('horizonSel').value)||5;
+  setCardRunning(id, true);
+
+  try {
+    let data;
+    if (type==='forecast') {
+      data = await apiFetch(`/api/forecast/${encodeURIComponent(name)}?symbol=${sym}&forecast_horizon=${horizon}&epochs=5&n_splits=1`, 120000);
+      processFcResult(name, data, id);
+    } else {
+      data = await apiFetch(`/api/agent/${encodeURIComponent(name)}?symbol=${sym}&episodes=20&initial_capital=10000`, 120000);
+      processAgResult(name, data, id);
+    }
+  } catch(e) {
+    setCardError(id, e.message||String(e));
+    showToast('❌ '+name+': '+e.message);
+  } finally {
+    setCardRunning(id, false);
+    updateConsensus();
+    updateCounts();
+  }
+}
+
+// ═══ RUN ALL ═══
+async function runAll() {
+  document.getElementById('runAllBtn').disabled = true;
+  document.getElementById('runAllBtn').textContent = '⏳ Running…';
+  await runAllModels(true);
+  await runAllAgents(true);
+  document.getElementById('runAllBtn').disabled = false;
+  document.getElementById('runAllBtn').textContent = '▶ Run Full Analysis';
+  updateConsensus();
+  showToast('✅ Full analysis complete for ' + (document.getElementById('symInput').value||'AAPL'));
+}
+
+async function runAllModels(silent) {
+  fcTotal = MODELS.length; fcRunning = 0;
+  if (!silent) document.getElementById('fcRunAllBtn').disabled = true;
+  const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
+  const horizon = parseInt(document.getElementById('horizonSel').value)||5;
+  const promises = MODELS.map(async m => {
+    const id = 'fc-'+m.name;
+    setCardRunning(id, true);
+    try {
+      const data = await apiFetch(`/api/forecast/${encodeURIComponent(m.name)}?symbol=${sym}&forecast_horizon=${horizon}&epochs=5&n_splits=1`, 120000);
+      processFcResult(m.name, data, id);
+    } catch(e) {
+      setCardError(id, e.message);
+    } finally {
+      fcRunning++;
+      setCardRunning(id, false);
+      document.getElementById('fcProgress').textContent = `${fcRunning}/${fcTotal}`;
+      document.getElementById('fcDoneCount').textContent = `${fcRunning} / ${fcTotal} done`;
+      updateConsensus();
+    }
+  });
+  await Promise.allSettled(promises);
+  if (!silent) document.getElementById('fcRunAllBtn').disabled = false;
+  document.getElementById('fcProgress').textContent = `${fcTotal}/${fcTotal} done`;
+}
+
+async function runAllAgents(silent) {
+  agTotal = AGENTS.length; agRunning = 0;
+  if (!silent) document.getElementById('agRunAllBtn').disabled = true;
+  const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
+  const promises = AGENTS.map(async a => {
+    const id = 'ag-'+a.name;
+    setCardRunning(id, true);
+    try {
+      const data = await apiFetch(`/api/agent/${encodeURIComponent(a.name)}?symbol=${sym}&episodes=20&initial_capital=10000`, 120000);
+      processAgResult(a.name, data, id);
+    } catch(e) {
+      setCardError(id, e.message);
+    } finally {
+      agRunning++;
+      setCardRunning(id, false);
+      document.getElementById('agProgress').textContent = `${agRunning}/${agTotal}`;
+      document.getElementById('agDoneCount').textContent = `${agRunning} / ${agTotal} done`;
+      updateConsensus();
+    }
+  });
+  await Promise.allSettled(promises);
+  if (!silent) document.getElementById('agRunAllBtn').disabled = false;
+  document.getElementById('agProgress').textContent = `${agTotal}/${agTotal} done`;
+}
+
+function refreshAll() {
+  // Re-init with new symbol
+  fcResults = {}; agResults = {};
+  buildForecastCards();
+  buildAgentCards();
+  buildCombinedCards();
+  updateConsensus();
+}
+
+// ═══ RESULT PROCESSORS ═══
+function processFcResult(name, data, id) {
+  let direction = 'FLAT', sharpe = 0, conf = 0, sparkData = [];
+  if (data && data.results && data.results.length > 0) {
+    const r = data.results;
+    sparkData = r.map(x => x.predicted||0);
+    const first = r[0].predicted||0;
+    const last = r[r.length-1].predicted||0;
+    direction = last > first ? 'UP' : last < first ? 'DOWN' : 'FLAT';
+    sharpe = data.metrics ? (data.metrics.mape!=null ? Math.max(0, 100-data.metrics.mape)/20 : 0) : 0;
+    conf = data.metrics && data.metrics.mape != null ? Math.max(0, 100-data.metrics.mape) : 0;
+  }
+  fcResults[name] = {data, direction, sharpe, conf};
+
+  // Update card
+  const isUp = direction==='UP';
+  setCardDone(id, isUp);
+  document.getElementById('met-sharpe-'+id).textContent = sharpe.toFixed(2);
+  document.getElementById('met-sharpe-'+id).className = 'm-metric-val '+(sharpe>1.5?'up':sharpe>0.5?'neutral':'down');
+  document.getElementById('met-extra-'+id).textContent = direction === 'UP' ? '↑ Bullish' : direction==='DOWN'?'↓ Bearish':'→ Flat';
+  document.getElementById('met-extra-'+id).className = 'm-metric-val '+(isUp?'up':'down');
+  document.getElementById('status-'+id).textContent = direction + ' · conf ' + conf.toFixed(0)+'%';
+  document.getElementById('status-'+id).className = 'm-status '+(isUp?'done-up':'done-down');
+
+  if (sparkData.length > 2) {
+    drawSparkline(id, sparkData);
+  }
+}
+
+function processAgResult(name, data, id) {
+  let sharpe=0, winRate=0, totalRet=0, sparkData=[];
+  if (data && data.summary) {
+    const s = data.summary;
+    sharpe = s.sharpe_ratio||0;
+    winRate = (s.win_rate||0)*100;
+    totalRet = (s.total_return||0)*100;
+  }
+  if (data && data.results && data.results.length > 0) {
+    sparkData = data.results.map(x => x.portfolio_value||x.cumulative_return||0);
+  }
+  agResults[name] = {data, sharpe, winRate, totalRet};
+
+  const isUp = totalRet >= 0;
+  setCardDone(id, isUp);
+  document.getElementById('met-sharpe-'+id).textContent = sharpe.toFixed(2);
+  document.getElementById('met-sharpe-'+id).className = 'm-metric-val '+(sharpe>1.5?'up':sharpe>0.5?'neutral':'down');
+  document.getElementById('met-wr-'+id).textContent = winRate.toFixed(0)+'%';
+  document.getElementById('met-wr-'+id).className = 'm-metric-val '+(winRate>55?'up':winRate>45?'neutral':'down');
+  document.getElementById('met-extra-'+id).textContent = (totalRet>=0?'+':'')+totalRet.toFixed(1)+'%';
+  document.getElementById('met-extra-'+id).className = 'm-metric-val '+(isUp?'up':'down');
+  document.getElementById('status-'+id).textContent = 'Sharpe '+sharpe.toFixed(2)+' · WR '+winRate.toFixed(0)+'%';
+  document.getElementById('status-'+id).className = 'm-status '+(isUp?'done-up':'done-down');
+
+  if (sparkData.length > 2) {
+    drawSparkline(id, sparkData);
+  }
+}
+
+// ═══ CARD STATE HELPERS ═══
+function setCardRunning(id, on) {
+  const card = document.getElementById('card-'+id);
+  const btn = document.getElementById('run-'+id);
+  const status = document.getElementById('status-'+id);
+  if (!card) return;
+  if (on) {
+    card.classList.remove('state-done','state-error');
+    card.classList.add('state-running');
+    if (!card.querySelector('.pulse-bar')) {
+      const pb = document.createElement('div'); pb.className='pulse-bar'; card.appendChild(pb);
+    }
+    if (btn) { btn.disabled=true; btn.className='btn-run running'; btn.innerHTML='<span class="spinner"></span>Running'; }
+    if (status) { status.className='m-status running'; status.textContent='running…'; }
+  } else {
+    card.classList.remove('state-running');
+    const pb = card.querySelector('.pulse-bar');
+    if (pb) pb.remove();
+    if (btn) { btn.disabled=false; btn.className='btn-run'; btn.textContent='↻ Re-run'; }
+  }
+}
+function setCardDone(id, isUp) {
+  const card = document.getElementById('card-'+id);
+  if (!card) return;
+  card.classList.remove('state-running','state-error');
+  card.classList.add('state-done');
+}
+function setCardError(id, msg) {
+  const card = document.getElementById('card-'+id);
+  const status = document.getElementById('status-'+id);
+  const btn = document.getElementById('run-'+id);
+  if (!card) return;
+  card.classList.remove('state-running','state-done');
+  card.classList.add('state-error');
+  if (status) { status.className='m-status error'; status.textContent='error: '+msg.slice(0,60); }
+  if (btn) { btn.disabled=false; btn.className='btn-run'; btn.textContent='↻ Retry'; }
+  const ph = document.getElementById('spark-ph-'+id);
+  if (ph) { ph.style.display='flex'; ph.textContent='error'; }
+}
+
+// ═══ CONSENSUS ═══
+function updateConsensus() {
+  const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
+  document.getElementById('csymbol').textContent = sym;
+
+  // Forecast stats
+  const fcDone = Object.values(fcResults).filter(r => r.data);
+  const fcUp = fcDone.filter(r => r.direction==='UP').length;
+  const fcDown = fcDone.filter(r => r.direction==='DOWN').length;
+  const fcSharpeAvg = fcDone.length ? fcDone.reduce((s,r)=>s+r.sharpe,0)/fcDone.length : null;
+
+  // Agent stats
+  const agDone = Object.values(agResults).filter(r => r.data);
+  const agSharpeAvg = agDone.length ? agDone.reduce((s,r)=>s+r.sharpe,0)/agDone.length : null;
+  const agWRAvg = agDone.length ? agDone.reduce((s,r)=>s+r.winRate,0)/agDone.length : null;
+  const agRetAvg = agDone.length ? agDone.reduce((s,r)=>s+r.totalRet,0)/agDone.length : null;
+
+  const total = fcDone.length + agDone.length;
+  if (total === 0) return;
+
+  // Signal score: 0-100
+  let score = 50;
+  if (fcDone.length) score += (fcUp - fcDown) / fcDone.length * 20;
+  if (agRetAvg != null) score += Math.max(-20, Math.min(20, agRetAvg));
+  if (fcSharpeAvg != null) score += Math.max(-10, Math.min(10, (fcSharpeAvg-1)*5));
+  if (agSharpeAvg != null) score += Math.max(-10, Math.min(10, (agSharpeAvg-1)*5));
+  score = Math.max(0, Math.min(100, score));
+
+  const signal = score > 60 ? 'BUY' : score < 40 ? 'SELL' : 'HOLD';
+  const conf = Math.abs(score-50)*2;
+
+  document.getElementById('csignal').textContent = signal;
+  document.getElementById('csignal').style.color = signal==='BUY'?'var(--green)':signal==='SELL'?'var(--red)':'var(--orange)';
+  document.getElementById('signalBadge').className = 'signal-badge signal-'+signal;
+  document.getElementById('signalBadge').textContent = signal;
+
+  document.getElementById('cfc_sharpe').textContent = fcSharpeAvg != null ? fcSharpeAvg.toFixed(2) : '—';
+  document.getElementById('cfc_sharpe').style.color = fcSharpeAvg>1.5?'var(--green)':fcSharpeAvg>0.5?'var(--txt)':'var(--red)';
+  document.getElementById('cag_sharpe').textContent = agSharpeAvg != null ? agSharpeAvg.toFixed(2) : '—';
+  document.getElementById('cag_sharpe').style.color = agSharpeAvg>1.5?'var(--green)':agSharpeAvg>0.5?'var(--txt)':'var(--red)';
+  document.getElementById('cbullish').textContent = fcUp + (agRetAvg!=null&&agRetAvg>0?' + ' + agDone.filter(r=>r.totalRet>0).length : '');
+  document.getElementById('cbearish').textContent = fcDown + (agRetAvg!=null&&agRetAvg<0?' + ' + agDone.filter(r=>r.totalRet<0).length : '');
+  document.getElementById('cconfidence').textContent = conf.toFixed(0) + '%';
+
+  // Build consensus table
+  const rows = [];
+  for (const [n, r] of Object.entries(fcResults)) {
+    if (!r.data) continue;
+    rows.push({
+      source:'🔮', name:n, type:'Forecast',
+      signal: r.direction==='UP'?'↑ Bullish':r.direction==='DOWN'?'↓ Bearish':'→ Flat',
+      sharpe: r.sharpe.toFixed(2), wr:'—', ret:'—',
+      cls: r.direction==='UP'?'up':'down'
+    });
+  }
+  for (const [n, r] of Object.entries(agResults)) {
+    if (!r.data) continue;
+    rows.push({
+      source:'🤖', name:n, type:'Agent',
+      signal: r.totalRet>=0?'↑ '+r.totalRet.toFixed(1)+'%':'↓ '+r.totalRet.toFixed(1)+'%',
+      sharpe: r.sharpe.toFixed(2), wr: r.winRate.toFixed(0)+'%', ret:(r.totalRet>=0?'+':'')+r.totalRet.toFixed(1)+'%',
+      cls: r.totalRet>=0?'up':'down'
+    });
+  }
+  if (rows.length > 0) {
+    const tbody = document.getElementById('consensusTbody');
+    document.getElementById('consensusTable').style.display = '';
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.source}</td>
+        <td style="font-family:monospace;font-weight:600">${r.name}</td>
+        <td><span class="badge badge-cat ${catClass(r.type)}">${r.type}</span></td>
+        <td class="${r.cls}" style="color:${r.cls==='up'?'var(--green)':'var(--red)'};font-weight:700">${r.signal}</td>
+        <td>${r.sharpe}</td>
+        <td>${r.wr}</td>
+        <td style="color:${r.cls==='up'?'var(--green)':'var(--red)'}">${r.ret}</td>
+      </tr>`).join('');
+  }
+}
+
+// ═══ COUNT BADGES ═══
+function updateCounts() {
+  const fcDone = Object.keys(fcResults).length;
+  const agDone = Object.keys(agResults).length;
+  document.getElementById('fcDoneCount').textContent = `${fcDone} / ${MODELS.length} done`;
+  document.getElementById('agDoneCount').textContent = `${agDone} / ${AGENTS.length} done`;
+}
+
+// ═══ TOAST ═══
+var _toastTimer;
+function showToast(msg) {
+  let t = document.querySelector('.toast');
+  if (t) t.remove();
+  t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t && t.remove(), 4000);
+}
+</script>
+</body>
+</html>

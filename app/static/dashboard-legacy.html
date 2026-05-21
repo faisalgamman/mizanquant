@@ -986,6 +986,7 @@ select:focus,input:focus { border-color:var(--accent); }
     <div class="nav-section">General</div>
     <div class="nav-item active" data-tab="overview" onclick="switchTab('overview')" title="Overview"><i class="fas fa-th-large"></i><span>Overview</span><span class="badge">Live</span></div>
     <div class="nav-section">Forecasting</div>
+    <div class="nav-item" data-tab="analysis" onclick="switchTab('analysis')" title="Analysis Lab — Unified Forecast + Trading"><i class="fas fa-flask"></i><span>Analysis Lab</span><span class="badge" style="background:linear-gradient(90deg,#4f8ef7,#7c6af4);color:#fff">NEW</span></div>
     <div class="nav-item" data-tab="forecast" onclick="switchTab('forecast')" title="Forecast Lab"><i class="fas fa-brain"></i><span>Forecast Lab</span><span class="badge">19</span></div>
     <div class="nav-item" data-tab="trading" onclick="switchTab('trading')" title="Trading Lab"><i class="fas fa-robot"></i><span>Trading Lab</span><span class="badge">19</span></div>
     <div class="nav-item" data-tab="backtest" onclick="switchTab('backtest')" title="Backtest"><i class="fas fa-history"></i><span>Backtest</span></div>
@@ -1243,6 +1244,18 @@ select:focus,input:focus { border-color:var(--accent); }
 
     </div>
   </div>
+</div>
+
+<!-- TAB: Analysis Lab (unified Forecast + Trading in iframe) -->
+<div class="tab-content" id="tab-analysis">
+  <iframe
+    id="analysisFrame"
+    src=""
+    data-src="/analysis-lab"
+    style="width:100%;height:calc(100vh - var(--cmd-height) - var(--market-height) - var(--status-height) - 24px);border:none;border-radius:8px;display:block;"
+    loading="lazy"
+    title="Analysis Lab">
+  </iframe>
 </div>
 
 <!-- TAB: Forecast Lab -->
@@ -3185,6 +3198,17 @@ function refreshData() {
 
 // ===== TAB DATA LOADING =====
 function loadTabData(tabId) {
+  // Lazy-load iframes: set src only on first activation
+  var lazyIframes = {
+    'analysis': 'analysisFrame',
+  };
+  if (lazyIframes[tabId]) {
+    var fr = document.getElementById(lazyIframes[tabId]);
+    if (fr && !fr.src && fr.getAttribute('data-src')) {
+      fr.src = fr.getAttribute('data-src');
+    }
+    return;
+  }
   switch(tabId) {
     case 'overview': loadOverview(true); break;
     case 'forecast': loadForecastLab(); break;
