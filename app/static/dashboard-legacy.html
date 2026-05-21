@@ -6912,43 +6912,80 @@ function closeModal() {
 
 // ── Strategies Tab ──
 var _stratRetryTimer = null;
-async function loadStrategies() {
-  console.log('[loadStrategies] called, tab active:', document.getElementById('tab-strategies')?.style?.display);
+var _stratPollCount = 0;
+
+function _stratShowWaiting(msg, secs) {
   var cards = document.getElementById('strategyCards');
-  if (!cards) { document.title = 'ERR: strategyCards null'; console.error('[loadStrategies] strategyCards not found!'); return; }
+  if (!cards) return;
+  cards.innerHTML =
+    '<div style="background:#1e3a5f;color:#93c5fd;padding:36px 24px;text-align:center;grid-column:1/-1;border-radius:12px;">' +
+      '<div style="font-size:36px;margin-bottom:14px;">⏳</div>' +
+      '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">جاري تشغيل الـ Backtest…</div>' +
+      '<div style="font-size:12px;opacity:.85;max-width:380px;margin:0 auto 16px;">' + (msg || 'تحليل 25 سهماً × 4 استراتيجيات — ~90 ثانية أول مرة') + '</div>' +
+      '<div style="font-size:11px;opacity:.6;margin-bottom:16px;">سيتم التحديث تلقائياً خلال ' + secs + ' ثانية</div>' +
+      '<button onclick="loadStrategies()" style="background:#3b82f6;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↻ تحديث الآن</button>' +
+    '</div>';
+}
+
+function _stratShowError(msg) {
+  var cards = document.getElementById('strategyCards');
+  if (!cards) return;
+  cards.innerHTML =
+    '<div style="background:#3b1010;color:#f87171;padding:32px 24px;text-align:center;grid-column:1/-1;border-radius:12px;">' +
+      '<div style="font-size:32px;margin-bottom:12px;">⚠️</div>' +
+      '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">تعذّر تحميل البيانات</div>' +
+      '<div style="font-size:12px;opacity:.8;margin-bottom:16px;">' + msg + '</div>' +
+      '<button onclick="loadStrategies()" style="background:#ef4444;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↻ إعادة المحاولة</button>' +
+    '</div>';
+}
+
+async function loadStrategies() {
+  var cards = document.getElementById('strategyCards');
+  if (!cards) return;
   if (_stratRetryTimer) { clearTimeout(_stratRetryTimer); _stratRetryTimer = null; }
-  cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:24px;text-align:center;font-size:15px;font-weight:600;grid-column:1/-1;border-radius:8px;">⏳ جاري تحميل بيانات الاستراتيجيات…</div>';
+
+  cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:24px;text-align:center;font-size:14px;font-weight:600;grid-column:1/-1;border-radius:8px;">⏳ جاري الاتصال بالـ server…</div>';
+
   try {
     var force = (new URLSearchParams(window.location.search).get('refresh') === '1');
-    var data = await apiGet('/api/strategies/backtest-data?force_refresh=' + force, 90000);
+    // Short timeout (8s) — endpoint must respond instantly with status or data.
+    // If server is truly busy, we get a timeout and show retry UI.
+    var data = await apiGet('/api/strategies/backtest-data?force_refresh=' + force, 8000, 0);
+
     if (data && data.status === 'scanning') {
-      var msg = data.message || 'يتم تحليل 25 سهماً × 4 استراتيجيات — ~90 ثانية';
-      cards.innerHTML = '<div style="background:#1e3a5f;color:#93c5fd;padding:32px;text-align:center;grid-column:1/-1;border-radius:8px;">' +
-        '<div style="font-size:32px;margin-bottom:12px;">🔄</div>' +
-        '<div style="font-size:16px;font-weight:700;margin-bottom:8px;">الـ Backtest قيد التشغيل…</div>' +
-        '<div style="font-size:12px;opacity:.9;max-width:400px;margin:0 auto;">' + msg + '</div>' +
-        '<div style="font-size:11px;margin-top:16px;opacity:.6;">سيتم التحديث تلقائياً خلال 30 ثانية</div>' +
-        '<div style="margin-top:16px;"><div style="display:inline-block;width:120px;height:4px;background:#1e40af;border-radius:2px;overflow:hidden;"><div style="height:100%;background:#93c5fd;animation:scanBar 2s ease-in-out infinite;border-radius:2px;"></div></div></div></div>';
-      _stratRetryTimer = setTimeout(loadStrategies, 30000);
+      _stratPollCount++;
+      var waitSecs = Math.min(30 + _stratPollCount * 10, 60);
+      _stratShowWaiting(data.message, waitSecs);
+      _stratRetryTimer = setTimeout(loadStrategies, waitSecs * 1000);
       return;
     }
     if (data && data.error) {
-      cards.innerHTML = '<div style="background:#3b1010;color:#f87171;padding:24px;text-align:center;font-size:14px;font-weight:600;grid-column:1/-1;border-radius:8px;">❌ ' + data.error + '</div>';
+      _stratShowError(data.error);
       return;
     }
     if (!data || (!Object.keys(data.strategies || {}).length && !Object.keys(data.symbols || {}).length)) {
-      cards.innerHTML = '<div style="background:#1a2535;color:#94a3b8;padding:24px;text-align:center;font-size:14px;grid-column:1/-1;border-radius:8px;">لا توجد بيانات بعد — اضغط Refresh</div>';
+      _stratShowWaiting('لا توجد بيانات — قد يكون الـ backtest لم ينتهِ بعد', 30);
+      _stratRetryTimer = setTimeout(loadStrategies, 30000);
       return;
     }
+    _stratPollCount = 0; // reset on success
     try { renderStrategyCards(data); } catch(e1) {
-      cards.innerHTML = '<div style="background:#3b1010;color:#f87171;padding:20px;grid-column:1/-1;border-radius:8px;">❌ renderStrategyCards: ' + e1.message + '</div>';
+      _stratShowError('renderStrategyCards: ' + e1.message);
       return;
     }
     try { renderBestPerStrategy(data); } catch(e2) { console.error('renderBestPerStrategy:', e2); }
     try { renderFullTable(data); } catch(e3) { console.error('renderFullTable:', e3); }
   } catch(e) {
-    var c = document.getElementById('strategyCards');
-    if (c) c.innerHTML = '<div style="background:#3b1010;color:#f87171;padding:24px;text-align:center;font-size:14px;font-weight:600;grid-column:1/-1;border-radius:8px;">❌ خطأ: ' + (e.message || String(e)) + '</div>';
+    // Timeout or network error — server might be busy computing
+    var isTmout = e.message && e.message.indexOf('timed out') !== -1;
+    if (isTmout) {
+      _stratPollCount++;
+      var retrySecs = Math.min(20 + _stratPollCount * 10, 60);
+      _stratShowWaiting('الـ server مشغول — سيُعاد المحاولة خلال ' + retrySecs + ' ثانية', retrySecs);
+      _stratRetryTimer = setTimeout(loadStrategies, retrySecs * 1000);
+    } else {
+      _stratShowError(e.message || String(e));
+    }
   }
 }
 

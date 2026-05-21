@@ -4944,22 +4944,15 @@ def _kick_strategies_backtest_if_needed():
 @app.get("/api/strategies/backtest-data", include_in_schema=False)
 async def strategies_backtest_data(force_refresh: str = Query("false")):
     """Strategy backtest comparison data for the Strategies tab.
-    Returns immediately: cached data if available, else {status:'scanning'}.
-    Never blocks the event loop.
+    Always returns INSTANTLY — never blocks the asyncio event loop.
+    Python GIL guarantees safe dict read without acquiring the lock.
     """
     global _strategies_backtest_running
 
     _force = str(force_refresh).lower() in ("true", "1", "yes")
 
-    # Read cache without blocking event loop
-    try:
-        if _strategies_backtest_lock.acquire(timeout=0.5):
-            cached = dict(_strategies_backtest_cache)
-            _strategies_backtest_lock.release()
-        else:
-            cached = {}
-    except Exception:
-        cached = {}
+    # GIL makes simple dict-reference read thread-safe; no lock needed here
+    cached = _strategies_backtest_cache  # direct reference — O(1), no blocking
 
     if cached and not _force:
         return cached
@@ -5105,12 +5098,6 @@ def main():
     logger.info("Dashboards available at http://%s:%d/apps.json", host, port)
     logger.info("Features: Caching=24h, Pipeline=08:00/08:30/09:00ET, Scheduler=09:30ET, Charts, Comparison, Portfolio")
     _start_scheduler()
-    # Pre-warm the strategies backtest cache in the background at startup
-    # so that the Strategies tab loads immediately on first visit.
-    try:
-        _kick_strategies_backtest_if_needed()
-    except Exception as _e:
-        logger.warning("Could not pre-warm strategies backtest: %s", _e)
     uvicorn.run(app, host=host, port=port)
 
 
