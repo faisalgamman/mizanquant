@@ -508,8 +508,8 @@ try:
     from openbb_forecast.models.base import compute_forecast_metrics
     from openbb_forecast.models.factory import create_model, MODEL_NAMES
     _HAS_FORECAST = True
-except Exception:
-    logger.warning("openbb_forecast.models imports failed (torch unavailable); forecast endpoints disabled")
+except Exception as e:
+    logger.warning("openbb_forecast.models imports failed: %s", e)
     _HAS_FORECAST = False
     compute_forecast_metrics = None
     create_model = None
@@ -625,8 +625,8 @@ async def forecast_model(
 try:
     from openbb_forecast.agents.factory import create_agent, AGENT_NAMES
     _HAS_AGENTS = True
-except Exception:
-    logger.warning("openbb_forecast.agents imports failed; RL endpoints disabled")
+except Exception as e:
+    logger.warning("openbb_forecast.agents imports failed: %s", e)
     _HAS_AGENTS = False
     create_agent = None
     AGENT_NAMES = []
@@ -3506,6 +3506,7 @@ async def get_info():
             "name": a,
             "category": cat,
             "family": cat,
+            "tier": _agent_tier(a),
             "status": _mock_status(a),
             "last_trained": _mock_last_trained(a),
             "sharpe": _mock_sharpe(a),

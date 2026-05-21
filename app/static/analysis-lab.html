@@ -383,6 +383,23 @@ var agRunning = 0, agTotal = 0;
     document.getElementById('kpiRetrain').textContent = info.last_full_retrain || '—';
     document.getElementById('kpiScanFresh').textContent = info.smart_scan_freshness || '—';
 
+    if (MODELS.length === 0 && AGENTS.length === 0) {
+      document.getElementById('forecastCount').textContent = '⚠';
+      document.getElementById('tradingCount').textContent = '⚠';
+      document.getElementById('fcGrid').innerHTML =
+        '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:#f59e0b;">' +
+        '⚠️ لم يتم تحميل قائمة النماذج. قد يكون PyTorch غير متاح أو الذاكرة غير كافية.<br>' +
+        '<button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;">↻ إعادة المحاولة</button>' +
+        '</div>';
+      document.getElementById('agGrid').innerHTML = '';
+      document.getElementById('fcProgress').textContent = '0 / 0';
+      document.getElementById('agProgress').textContent = '0 / 0';
+      document.getElementById('fcDoneCount').textContent = '⚠ غير متاح';
+      document.getElementById('agDoneCount').textContent = '⚠ غير متاح';
+      document.getElementById('kpiBestSharpe').textContent = '—';
+      return;
+    }
+
     buildForecastCards();
     buildAgentCards();
     buildCombinedCards();
@@ -436,7 +453,7 @@ function catBadgeHTML(cat) {
 function makeCard(item, prefix) {
   const id = prefix + '-' + item.name;
   const sharpeStr = item.sharpe != null ? item.sharpe.toFixed(2) : '—';
-  const wrStr = item.win_rate != null ? item.win_rate.toFixed(0)+'%' : '—';
+  const wrStr = item.win_rate != null ? (item.win_rate * 100).toFixed(0)+'%' : '—';
   const type = prefix === 'fc' ? 'forecast' : 'agent';
   return `
   <div class="m-card" id="card-${id}" data-cat="${catClass(item.category)}">
@@ -688,8 +705,9 @@ function processFcResult(name, data, id) {
     const first = r[0].predicted||0;
     const last = r[r.length-1].predicted||0;
     direction = last > first ? 'UP' : last < first ? 'DOWN' : 'FLAT';
-    sharpe = data.metrics ? (data.metrics.mape!=null ? Math.max(0, 100-data.metrics.mape)/20 : 0) : 0;
-    conf = data.metrics && data.metrics.mape != null ? Math.max(0, 100-data.metrics.mape) : 0;
+    const mapePct = data.metrics && data.metrics.mape != null ? data.metrics.mape * 100 : null;
+    sharpe = mapePct != null ? Math.max(0, 100 - mapePct) / 20 : 0;
+    conf = mapePct != null ? Math.max(0, 100 - mapePct) : 0;
   }
   fcResults[name] = {data, direction, sharpe, conf};
 
