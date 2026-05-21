@@ -4808,6 +4808,157 @@ async def get_backtest_panel():
 
 
 # ---------------------------------------------------------------------------
+# Strategies Backtest Data — /api/strategies/backtest-data
+# ---------------------------------------------------------------------------
+
+_strategies_backtest_cache: dict = {}
+_strategies_backtest_lock = threading.Lock()
+_strategies_backtest_running = False
+
+
+def _quality_label(sharpe: float, win_rate: float) -> str:
+    if sharpe > 2.0 and win_rate > 60:
+        return "EXCELLENT"
+    if sharpe > 1.5 and win_rate > 50:
+        return "GOOD"
+    if sharpe > 1.0 and win_rate > 45:
+        return "OK"
+    if sharpe > 0.5 and win_rate > 40:
+        return "WEAK"
+    return "AVOID"
+
+
+def _run_strategies_backtest():
+    global _strategies_backtest_cache, _strategies_backtest_running
+    try:
+        from app.strategies.backtest import (
+            fetch_data, backtest_momentum, backtest_breakout,
+            backtest_swing, backtest_momentum_burst, SYMBOLS,
+        )
+
+        spy_df = fetch_data("SPY")
+        if spy_df is None:
+            logger.error("Strategies backtest: failed to fetch SPY")
+            return
+
+        symbols_data: dict[str, dict] = {}
+        strategies_agg: dict[str, list] = {
+            "Momentum": [], "Breakout": [], "Swing": [], "Momentum Burst": [],
+        }
+
+        for symbol in SYMBOLS:
+            df = fetch_data(symbol)
+            if df is None:
+                continue
+
+            sym_results = {}
+            for fn, name in [
+                (backtest_momentum, "Momentum"),
+                (backtest_breakout, "Breakout"),
+                (backtest_swing, "Swing"),
+                (backtest_momentum_burst, "Momentum Burst"),
+            ]:
+                try:
+                    r = fn(df, spy_df, symbol)
+                    q = _quality_label(r.sharpe, r.win_rate)
+                    sym_results[name] = {
+                        "trades": r.total_trades,
+                        "win_rate": r.win_rate,
+                        "sharpe": r.sharpe,
+                        "max_dd": abs(r.max_drawdown),
+                        "avg_return": r.avg_return,
+                        "profit_factor": r.profit_factor,
+                        "avg_hold": r.avg_hold_days,
+                        "quality": q,
+                        "signal": "BUY" if q in ("GOOD", "EXCELLENT") else "WAIT" if q in ("OK", "WEAK") else "AVOID",
+                    }
+                    strategies_agg[name].append({
+                        "symbol": symbol,
+                        "trades": r.total_trades,
+                        "win_rate": r.win_rate,
+                        "sharpe": r.sharpe,
+                        "max_dd": abs(r.max_drawdown),
+                        "avg_return": r.avg_return,
+                        "profit_factor": r.profit_factor,
+                    })
+                except Exception as e:
+                    logger.warning("Backtest %s/%s failed: %s", name, symbol, e)
+
+            if sym_results:
+                symbols_data[symbol] = sym_results
+
+        strategies_summary = {}
+        for name, items in strategies_agg.items():
+            if not items:
+                continue
+            total_trades = sum(i["trades"] for i in items)
+            avg_wr = round(sum(i["win_rate"] for i in items) / len(items), 1)
+            avg_sharpe = round(sum(i["sharpe"] for i in items) / len(items), 2)
+            avg_dd = round(sum(i["max_dd"] for i in items) / len(items), 1)
+            avg_ret = round(sum(i["avg_return"] for i in items) / len(items), 2)
+            avg_pf = round(sum(i["profit_factor"] for i in items) / len(items), 2)
+            best = max(items, key=lambda x: x["sharpe"])
+            strategies_summary[name] = {
+                "total_trades": total_trades,
+                "symbol_count": len(items),
+                "avg_win_rate": avg_wr,
+                "avg_sharpe": avg_sharpe,
+                "avg_max_dd": avg_dd,
+                "avg_return": avg_ret,
+                "avg_profit_factor": avg_pf,
+                "pass_win_rate": avg_wr >= 50,
+                "pass_sharpe": avg_sharpe >= 1.5,
+                "pass_max_dd": avg_dd <= 20,
+                "best_symbol": best["symbol"],
+                "best_symbol_sharpe": best["sharpe"],
+            }
+
+        with _strategies_backtest_lock:
+            _strategies_backtest_cache = {
+                "strategies": strategies_summary,
+                "symbols": symbols_data,
+                "timestamp": datetime.utcnow().isoformat(),
+                "cached": True,
+            }
+        logger.info("Strategies backtest complete: %d symbols", len(symbols_data))
+    except Exception as e:
+        logger.error("Strategies backtest failed: %s", e)
+    finally:
+        _strategies_backtest_running = False
+
+
+@app.get("/api/strategies/backtest-data", include_in_schema=False)
+async def strategies_backtest_data(force_refresh: str = Query("false")):
+    """Strategy backtest comparison data for the Strategies tab."""
+    global _strategies_backtest_running
+
+    _force = str(force_refresh).lower() in ("true", "1", "yes")
+
+    with _strategies_backtest_lock:
+        cached = dict(_strategies_backtest_cache)
+
+    if cached and not _force:
+        return cached
+
+    if not _strategies_backtest_running:
+        _strategies_backtest_running = True
+        t = threading.Thread(target=_run_strategies_backtest, daemon=True)
+        t.start()
+
+    if cached:
+        return {**cached, "source": "stale_cache", "scanning": True}
+
+    return {
+        "strategies": {},
+        "symbols": {},
+        "status": "scanning",
+        "message": "Running strategy backtests in background. Refresh in ~60 seconds.",
+        "cached": False,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # WebSocket — Real-time overview updates
 # ---------------------------------------------------------------------------
 
