@@ -337,17 +337,48 @@ def get_market_status(force_refresh: bool = False) -> dict:
         status, vix_val, vix_pct, credit_cls,
     )
 
-    # Gate levels tied to market status
-    gate_map = {
-        "RISK ON":       {"min_gate": 55, "strong_gate": 70},  # A-Pre.3 lowered for paper test
-        "CAUTION":       {"min_gate": 60, "strong_gate": 75},  # A-Pre.3 lowered for paper test
-        "CREDIT STRESS":  {"min_gate": 65, "strong_gate": 80},  # A-Pre.3 lowered for paper test
-        "EXTREME FEAR":   {"min_gate": 99, "strong_gate": 99, "halt": True},
+    # ── Regime-aware gate calibration ───────────────────────────────────────
+    # Base gates come from market stress (VIX + credit).
+    # A regime delta is then applied so that:
+    #   BULL  → thresholds drop  (-5 pts)  — market trend supports more signals
+    #   NEUTRAL → no change      (±0)
+    #   BEAR  → thresholds rise  (+7 pts)  — only high-conviction signals pass
+    # This creates a 4 × 3 matrix (stress × trend) without touching any other code.
+    # ─────────────────────────────────────────────────────────────────────────
+    _base_gates = {
+        "RISK ON":       {"min_gate": 55, "strong_gate": 70},
+        "CAUTION":       {"min_gate": 60, "strong_gate": 75},
+        "CREDIT STRESS": {"min_gate": 65, "strong_gate": 80},
+        "EXTREME FEAR":  {"min_gate": 99, "strong_gate": 99, "halt": True},
     }
-    gates = gate_map.get(status, {"min_gate": 60, "strong_gate": 75})
+    _regime_delta = {
+        "BULL":    (-5, -5),   # lower gates — trend in our favour
+        "NEUTRAL": ( 0,  0),   # unchanged
+        "BEAR":    (+7, +7),   # raise gates — demand higher conviction
+    }
+    gates = dict(_base_gates.get(status, {"min_gate": 60, "strong_gate": 75}))
+
+    # Only apply regime delta when not halted
+    if not gates.get("halt"):
+        try:
+            regime_state = get_regime().state          # "BULL" | "NEUTRAL" | "BEAR"
+            d_min, d_str = _regime_delta.get(regime_state, (0, 0))
+            gates["min_gate"]    = int(max(0, min(99, gates["min_gate"]    + d_min)))
+            gates["strong_gate"] = int(max(0, min(99, gates["strong_gate"] + d_str)))
+        except Exception as _re:
+            regime_state = "NEUTRAL"
+            logger.warning("Regime lookup failed in get_market_status: %s", _re)
+    else:
+        regime_state = "NEUTRAL"
+
+    logger.info(
+        "Regime-calibrated gates: status=%s regime=%s → min_gate=%d strong_gate=%d",
+        status, regime_state, gates["min_gate"], gates["strong_gate"],
+    )
 
     result = {
         "status": status,
+        "regime": regime_state,
         "vix": round(vix_val, 2),
         "vix_pctile": round(vix_pct, 1),
         "credit_ratio": credit.get("ratio"),

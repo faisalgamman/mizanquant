@@ -4910,6 +4910,7 @@ async function loadMarketStatus() {
   try {
     const data = await apiGet('/api/market/status?force_refresh=false');
     const status = data.status || 'RISK ON';
+    const regime = data.regime || 'NEUTRAL';
     const vix = data.vix || 0;
     const vixPct = data.vix_pctile || 0;
     const creditRatio = data.credit_ratio || 'N/A';
@@ -4925,13 +4926,16 @@ async function loadMarketStatus() {
     const statusClass = 'ms-' + status.toLowerCase().replace(/\s+/g, '-');
     const statusIcon = status === 'RISK ON' ? '🟢' : status === 'CAUTION' ? '🟡' : status === 'CREDIT STRESS' ? '🟠' : '🔴';
     const statusText = status === 'EXTREME FEAR' ? 'EXTREME FEAR' : status;
+    const regimeIcon  = regime === 'BULL' ? '📈' : regime === 'BEAR' ? '📉' : '➡️';
+    const regimeColor = regime === 'BULL' ? 'var(--green)' : regime === 'BEAR' ? 'var(--red)' : 'var(--text-muted)';
 
     bar.style.display = 'flex';
     bar.className = statusClass;
-    bar.title = 'Market Status (VIX-percentile-based) — differs from SPY Regime (EMA-based trend)';
+    bar.title = 'Gates = Market Stress (VIX/Credit) × Regime (SPY EMA trend) — calibrated automatically';
     bar.style.cssText += 'display:flex;padding:8px 16px;border-radius:8px;margin:8px 12px 0;font-size:12px;font-weight:600;align-items:center;gap:16px;flex-wrap:wrap;';
     bar.innerHTML = `
       <span>${statusIcon} <strong>${statusText}</strong></span>
+      <span style="color:${regimeColor}">${regimeIcon} ${regime}</span>
       <span>VIX: ${vix.toFixed(2)} (Pct ${vixPct.toFixed(1)}%)</span>
       <span>HY/IG: ${creditRatio}</span>
       <span>Min Gate: <strong>${minGate}</strong></span>

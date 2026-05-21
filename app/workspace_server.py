@@ -2457,7 +2457,7 @@ async def _smart_screener_impl(
         from app.services.market_context import get_market_status
         market_status = get_market_status()
     except Exception:
-        market_status = {"status": "RISK ON", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
+        market_status = {"status": "RISK ON", "regime": "NEUTRAL", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
 
     # Apply market-driven gates when min_score is default (0)
     effective_min_score = min_score
@@ -2576,7 +2576,7 @@ def _run_screener_bg(scan_symbols: list):
         from app.services.market_context import get_market_status
         market_status = get_market_status()
     except Exception:
-        market_status = {"status": "RISK ON", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
+        market_status = {"status": "RISK ON", "regime": "NEUTRAL", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
 
     qualified_count = sum(1 for r in top if r.get("smart_score", 0) >= market_status.get("strong_gate", 75))
     watch_count = sum(1 for r in top if market_status.get("min_gate", 60) <= r.get("smart_score", 0) < market_status.get("strong_gate", 75))
@@ -2590,6 +2590,7 @@ def _run_screener_bg(scan_symbols: list):
         "min_score": market_status.get("min_gate", 60),
         "strong_gate": market_status.get("strong_gate", 75),
         "market_status": market_status.get("status", "RISK ON"),
+        "regime": market_status.get("regime", "NEUTRAL"),  # BULL/NEUTRAL/BEAR
         "halt_pipeline": market_status.get("halt_pipeline", False),
         "results": top,
     }
