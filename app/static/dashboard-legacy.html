@@ -31,6 +31,8 @@
   --cmd-height: 48px;
   --market-height: 36px;
   --status-height: 28px;
+  --bg-card: oklch(0.09 0.01 60);
+  --bg-card-hover: oklch(0.11 0.01 60);
   --radius: 6px;
   --radius-sm: 4px;
   --mono: 'SF Mono','Fira Code','JetBrains Mono',monospace;
@@ -6866,17 +6868,38 @@ function closeModal() {
 }
 
 // ── Strategies Tab ──
+var _stratRetryTimer = null;
 async function loadStrategies() {
-  const cards = document.getElementById('strategyCards');
-  cards.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);grid-column:1/-1;"><i class="fas fa-spinner fa-spin fa-2x"></i><br>Loading strategy data...</div>';
+  var cards = document.getElementById('strategyCards');
+  if (!cards) return;
+  if (_stratRetryTimer) { clearTimeout(_stratRetryTimer); _stratRetryTimer = null; }
+  cards.innerHTML = '<div style="text-align:center;padding:40px;color:#9494a0;grid-column:1/-1;"><div style="font-size:24px;margin-bottom:12px;">⏳</div>Loading strategy data…</div>';
   try {
-    const data = await apiGet('/api/strategies/backtest-data?force_refresh=' + (new URLSearchParams(window.location.search).get('refresh') === '1'), 20000);
-    if (data.error) { cards.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red);">' + data.error + '</div>'; return; }
+    var force = (new URLSearchParams(window.location.search).get('refresh') === '1');
+    var data = await apiGet('/api/strategies/backtest-data?force_refresh=' + force, 25000);
+    if (data && data.status === 'scanning') {
+      cards.innerHTML = '<div style="text-align:center;padding:48px 24px;grid-column:1/-1;">' +
+        '<div style="font-size:32px;margin-bottom:16px;">🔄</div>' +
+        '<div style="font-size:15px;font-weight:600;color:#e4e4ec;margin-bottom:8px;">جاري تشغيل الاختبار الخلفي…</div>' +
+        '<div style="font-size:12px;color:#9494a0;margin-bottom:20px;">يتم تحليل 25 سهماً × 4 استراتيجيات. سيستغرق ذلك حوالي 60 ثانية.</div>' +
+        '<div style="font-size:11px;color:#5c5c6a;">سيتم التحديث تلقائياً…</div></div>';
+      _stratRetryTimer = setTimeout(loadStrategies, 30000);
+      return;
+    }
+    if (data && data.error) {
+      cards.innerHTML = '<div style="text-align:center;padding:40px;color:#f87171;grid-column:1/-1;">' + data.error + '</div>';
+      return;
+    }
+    if (!data || (!Object.keys(data.strategies || {}).length && !Object.keys(data.symbols || {}).length)) {
+      cards.innerHTML = '<div style="text-align:center;padding:40px;color:#9494a0;grid-column:1/-1;">لا توجد بيانات بعد. اضغط Refresh.</div>';
+      return;
+    }
     renderStrategyCards(data);
     renderBestPerStrategy(data);
     renderFullTable(data);
   } catch(e) {
-    cards.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red);">Error: ' + e.message + '</div>';
+    var cards2 = document.getElementById('strategyCards');
+    if (cards2) cards2.innerHTML = '<div style="text-align:center;padding:40px;color:#f87171;grid-column:1/-1;">خطأ: ' + (e.message || e) + '</div>';
   }
 }
 
