@@ -572,9 +572,9 @@ def weighted_score_raw(
     # ── Subtotal before bonuses ──
     subtotal = sum(scores.values())
 
-    # ── Bonus additions ──
+    # ── Bonus additions — capped at 100 to prevent score inflation ──
     bonus_detail, bonus_total = calculate_bonus(df, spy_df)
-    final_total = subtotal + bonus_total
+    final_total = min(100, subtotal + bonus_total)
 
     total = final_total
     confidence = round(final_total / 100 * 100, 1)
