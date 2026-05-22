@@ -28,12 +28,17 @@ if str(_app_root) not in sys.path:
 import pandas as pd
 import uvicorn
 import yfinance as yf
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
-from app.services.universe import HALAL_STOCKS_FALLBACK
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from app.services.universe import HALAL_STOCKS_FALLBACK
 from app.services.redis_client import cached_or_compute
 from app.services.fmp_client import fmp_client
+
+import secrets
+import hashlib
 
 
 logging.basicConfig(level=logging.INFO)
@@ -136,6 +141,42 @@ app = FastAPI(
 async def health():
     """Railway health check endpoint."""
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Dashboard login / logout routes
+# ---------------------------------------------------------------------------
+
+SESSION_COOKIE = hashlib.sha256(f"{DASHBOARD_USER}:{DASHBOARD_SECRET}".encode()).hexdigest()
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page():
+    """Show the login form."""
+    return HTMLResponse(content=LOGIN_HTML)
+
+
+@app.post("/login", include_in_schema=False)
+async def login_post(request: Request):
+    """Validate credentials and set session cookie."""
+    form = await request.form()
+    username = form.get("username", "")
+    password = form.get("password", "")
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    if username == DASHBOARD_USER and pw_hash == DASHBOARD_PASS_HASH:
+        resp = RedirectResponse(url="/", status_code=302)
+        resp.set_cookie(key="session", value=SESSION_COOKIE, httponly=True, max_age=86400, samesite="lax")
+        return resp
+    error_html = LOGIN_HTML.replace('</form>', '<div class="error">Invalid username or password</div></form>')
+    return HTMLResponse(content=error_html, status_code=200)
+
+
+@app.get("/logout", include_in_schema=False)
+async def logout():
+    """Clear session cookie and redirect to login."""
+    resp = RedirectResponse(url="/login", status_code=302)
+    resp.delete_cookie(key="session", path="/")
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +333,72 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Dashboard authentication — minimal session-based auth for deployment safety
+# ---------------------------------------------------------------------------
+
+DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
+DASHBOARD_PASS_HASH = os.getenv(
+    "DASHBOARD_PASS_HASH",
+    hashlib.sha256("mizan2026".encode()).hexdigest(),
+)
+DASHBOARD_SECRET = os.getenv("DASHBOARD_SECRET", secrets.token_hex(32))
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MizanQuant — Login</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:system-ui,sans-serif; background:#0b1121; color:#e2e8f0;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  .card { background:#1e293b; padding:40px; border-radius:12px; width:360px;
+          box-shadow:0 8px 32px rgba(0,0,0,.4); }
+  h1 { text-align:center; margin-bottom:8px; font-size:1.6rem; background:linear-gradient(135deg,#3b82f6,#8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  p { text-align:center; color:#94a3b8; margin-bottom:24px; font-size:.9rem; }
+  input { width:100%; padding:12px 14px; margin-bottom:14px; border:1px solid #334155;
+          border-radius:8px; background:#0f172a; color:#e2e8f0; font-size:1rem; outline:none; }
+  input:focus { border-color:#3b82f6; }
+  button { width:100%; padding:12px; background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+           border:none; border-radius:8px; color:#fff; font-size:1rem; font-weight:600; cursor:pointer; }
+  button:hover { opacity:.9; }
+  .error { color:#ef4444; text-align:center; margin-bottom:12px; font-size:.85rem; }
+</style></head>
+<body>
+<div class="card">
+  <h1>MizanQuant</h1>
+  <p>Dashboard Access</p>
+  <form method="post" action="/login">
+    <input type="text" name="username" placeholder="Username" required autofocus>
+    <input type="password" name="password" placeholder="Password" required>
+    <button type="submit">Sign In</button>
+  </form>
+</div>
+</body></html>"""
+
+
+class DashboardAuthMiddleware(BaseHTTPMiddleware):
+    """Protect dashboard & API routes behind a simple session cookie."""
+
+    EXEMPT_PATHS = {"/login", "/logout", "/static", "/health", "/livez", "/readyz"}
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if any(path.startswith(p) for p in self.EXEMPT_PATHS):
+            return await call_next(request)
+        if request.method == "POST" and path == "/login":
+            return await call_next(request)
+        session = request.cookies.get("session")
+        expected = hashlib.sha256(f"{DASHBOARD_USER}:{DASHBOARD_SECRET}".encode()).hexdigest()
+        if session == expected:
+            return await call_next(request)
+        if path.startswith("/api/") or path == "/":
+            return HTMLResponse(content=LOGIN_HTML, status_code=200)
+        return await call_next(request)
+
+
+app.add_middleware(DashboardAuthMiddleware)
 
 # Strategy imports
 try:
@@ -3466,6 +3573,55 @@ def _safe_render(self, content):
 JSONResponse.render = _safe_render
 
 
+def _live_or_mock_dashboard() -> dict:
+    """Return real broker data if credentials exist, else mock."""
+    try:
+        from app.services.alpaca_client import (
+            get_account as _ag, get_positions as _ap, get_orders as _ao,
+        )
+        account = _ag() or {}
+        positions = _ap() or []
+        orders = _ao(status="closed", limit=10) or []
+        if account:
+            equity = float(account.get("equity") or 0)
+            prev_equity = float(account.get("last_equity") or equity)
+            today_pnl = round(equity - prev_equity, 2)
+            return {
+                "pnl": {
+                    "today": today_pnl,
+                    "today_pct": round((today_pnl / prev_equity * 100) if prev_equity else 0, 2),
+                    "all_time": round(float(account.get("portfolio_value", 0)), 2),
+                    "week": None, "mtd": None, "week_pct": None, "mtd_pct": None,
+                    "all_time_pct": None,
+                },
+                "open_positions": [
+                    {
+                        "symbol": p["symbol"], "entry": float(p.get("avg_entry_price") or 0),
+                        "current": float(p.get("current_price") or 0),
+                        "pnl": float(p.get("unrealized_pl") or 0),
+                        "pnl_pct": round(float(p.get("unrealized_plpc") or 0) * 100, 2),
+                        "direction": "LONG" if float(p.get("qty", 0)) > 0 else "SHORT",
+                        "size": abs(int(float(p.get("qty", 0)))),
+                    } for p in positions[:10]
+                ],
+                "recent_signals": [
+                    {
+                        "symbol": o["symbol"], "action": o["side"].upper(),
+                        "status": o["status"], "guard": None,
+                        "price": float(o.get("filled_avg_price") or 0),
+                        "time": str(o.get("filled_at", ""))[:16],
+                        "confidence": None,
+                    } for o in orders[:5]
+                ],
+                "guard_activity": _mock_guard_activity(),
+                "scheduler_timeline": _mock_scheduler_timeline(),
+                "alerts": _mock_alerts(),
+            }
+    except Exception as exc:
+        logger.warning("Live broker data unavailable, using mock: %s", exc)
+    return {}
+
+
 @app.get("/api/info")
 async def get_info():
     """List all available models and agents with enriched metadata."""
@@ -3496,6 +3652,7 @@ async def get_info():
             "win_rate": _mock_win_rate(a),
             "is_champion": _mock_is_champion(a),
         })
+    dashboard = _live_or_mock_dashboard()
     return {
         "models": [m["name"] for m in model_items],
         "model_count": len(MODEL_NAMES),
@@ -3507,12 +3664,12 @@ async def get_info():
         "analytics": ["metrics"],
         "last_full_retrain": _mock_last_full_retrain(),
         "smart_scan_freshness": _mock_smart_scan_freshness(),
-        "pnl": _mock_pnl(),
-        "open_positions": _mock_open_positions(),
-        "recent_signals": _mock_recent_signals(),
-        "guard_activity": _mock_guard_activity(),
-        "scheduler_timeline": _mock_scheduler_timeline(),
-        "alerts": _mock_alerts(),
+        "pnl": dashboard.get("pnl") or _mock_pnl(),
+        "open_positions": dashboard.get("open_positions") or _mock_open_positions(),
+        "recent_signals": dashboard.get("recent_signals") or _mock_recent_signals(),
+        "guard_activity": dashboard.get("guard_activity") or _mock_guard_activity(),
+        "scheduler_timeline": dashboard.get("scheduler_timeline") or _mock_scheduler_timeline(),
+        "alerts": dashboard.get("alerts") or _mock_alerts(),
     }
 
 
@@ -4813,10 +4970,7 @@ async def public_positions():
 # ---------------------------------------------------------------------------
 
 
-from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-import os
 
 
 # Include portfolio router

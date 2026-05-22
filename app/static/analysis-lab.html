@@ -378,7 +378,7 @@ var agRunning = 0, agTotal = 0;
 
     document.getElementById('forecastCount').textContent = MODELS.length;
     document.getElementById('tradingCount').textContent = AGENTS.length;
-    document.getElementById('kpiBestSharpe').textContent = Math.max(...MODELS.concat(AGENTS).map(x=>x.sharpe||0)).toFixed(2);
+    document.getElementById('kpiBestSharpe').textContent = (MODELS.length + AGENTS.length > 0 ? Math.max(...MODELS.concat(AGENTS).map(x=>x.sharpe||0)).toFixed(2) : '—');
     document.getElementById('kpiDrifted').textContent = '0/' + (MODELS.length + AGENTS.length);
     document.getElementById('kpiRetrain').textContent = info.last_full_retrain || '—';
     document.getElementById('kpiScanFresh').textContent = info.smart_scan_freshness || '—';
