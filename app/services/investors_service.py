@@ -9,7 +9,18 @@ from sqlalchemy import select
 from app.db.database import SessionLocal
 from app.db.models import AnalystForecast, GoatInvestor, HotPick, Universe
 from app.services.fmp_client import fmp_client
-from app.services.market_data import market_data_service
+from app.services.market_data import fetch as _fetch_market_data
+
+
+def _get_last_price(symbol: str) -> float | None:
+    """Fetch the most recent close price for a symbol."""
+    try:
+        df = _fetch_market_data(symbol, period="5d")
+        if df is not None and not df.empty and "close" in df.columns:
+            return float(df["close"].iloc[-1])
+    except Exception:
+        pass
+    return None
 
 logger = logging.getLogger("investors_service")
 
@@ -105,7 +116,7 @@ class InvestorsService:
                     db.execute(AnalystForecast.__table__.delete().where(AnalystForecast.symbol == symbol))
 
                     # Current price
-                    current_price = market_data_service.get_last_price(symbol)
+                    current_price = _get_last_price(symbol)
 
                     forecast = AnalystForecast(
                         symbol=symbol,
@@ -175,7 +186,7 @@ class InvestorsService:
             ]
 
             for hp in simulated_hot_picks:
-                cp = market_data_service.get_last_price(hp["symbol"]) or hp["avg_buy"] * 1.05
+                cp = _get_last_price(hp["symbol"]) or hp["avg_buy"] * 1.05
                 pick = HotPick(
                     symbol=hp["symbol"],
                     avg_buy_price=hp["avg_buy"],
