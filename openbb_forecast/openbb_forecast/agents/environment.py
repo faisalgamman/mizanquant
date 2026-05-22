@@ -238,6 +238,10 @@ class TradingEnvironment:
         step_return = (current_value - prev_value) / max(prev_value, 1e-8)
         reward = self._differential_sharpe_reward(step_return)
 
+        # Penalise holding without positions to force active trading
+        if action == self.HOLD and not self._inventory:
+            reward -= 0.0005
+
         # Advance time
         self._t += 1
         if self._t >= len(self.prices) - 1:

@@ -128,13 +128,14 @@ class EvolutionStrategyAgent(BaseAgent):
     def _evaluate_fitness(self, weights: np.ndarray, env: TradingEnvironment) -> float:
         """Evaluate fitness of a weight vector via Sharpe ratio.
 
-        Using Sharpe ratio instead of raw returns encourages the evolution
-        to find strategies that are consistently good, not just occasionally lucky.
+        Uses Sharpe ratio instead of raw returns to encourage consistently
+        good strategies. Penalises agents that trade too rarely.
         """
         self.model.set_weights(weights)
         state = env.reset()
         daily_returns = []
         prev_value = env.initial_capital
+        n_trades_before = len(env._trade_returns)
 
         while True:
             action = self.select_action(state, explore=False)
@@ -150,9 +151,17 @@ class EvolutionStrategyAgent(BaseAgent):
             return 0.0
 
         returns = np.array(daily_returns)
+        n_trades = len(env._trade_returns) - n_trades_before
+        trade_density = n_trades / max(len(daily_returns), 1)
+
+        # Penalty for agents that trade too rarely (less than 1 trade per 50 days)
+        if trade_density < 0.02:
+            return float(returns.mean()) * 0.1
+
         if returns.std() < 1e-10:
-            return float(returns.mean()) * 100  # No variance = use mean
-        return float(returns.mean() / returns.std()) * np.sqrt(252)  # Annualized Sharpe
+            return 0.0
+
+        return float(returns.mean() / returns.std()) * np.sqrt(252)
 
     def _rank_transform(self, fitness: np.ndarray) -> np.ndarray:
         """Rank-based fitness shaping — robust to outlier fitness values.
