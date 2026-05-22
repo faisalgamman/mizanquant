@@ -109,11 +109,19 @@ function renderRegime(system, market) {
   const color = regime === "BULL" ? "var(--green)" : regime === "BEAR" ? "var(--red)" : "var(--amber)";
   const bg    = regime === "BULL" ? "var(--green-dim)" : regime === "BEAR" ? "var(--red-dim)" : "var(--amber-dim)";
 
-  $("regimeSub").textContent = `current · ${regime}`;
+  // Detect divergence between SPY trend and ML regime
+  const spyTrend = (market?.spy_regime?.regime ?? market?.spy_regime?.label ?? "").toUpperCase();
+  const mlRegime = regime.toUpperCase();
+  const diverged = spyTrend && mlRegime !== "UNKNOWN" && spyTrend !== mlRegime;
+
+  $("regimeSub").textContent = `ML · ${regime}${spyTrend ? " · SPY " + spyTrend : ""}`;
   $("regimeBar").innerHTML =
     `<div class="regime-bar" style="height:32px;">
        <div style="background:${bg};color:${color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:0.5px;">${regime}</div>
-     </div>`;
+     </div>` +
+    (diverged
+      ? `<div class="regime-diverge"><i class="fas fa-exclamation-circle"></i>Regime divergence — ML: ${mlRegime} vs SPY: ${spyTrend}. Signals may be lower confidence.</div>`
+      : "");
 }
 
 /* ─── Top signals (3 hero cards) + signal table ───────────────── */
@@ -252,6 +260,7 @@ function renderSignalTable() {
 async function selectSignal(symbol) {
   state.selectedSymbol = symbol;
   renderSignals();
+  openDrawer(symbol);
   $("anSubtitle").textContent = symbol + " · loading…";
   $("analyzePanel").innerHTML = `<div class="card"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px;"><i class="fas fa-circle-notch fa-spin" style="font-size:18px;display:block;margin-bottom:6px;"></i>Loading scoring & trade plan…</div></div>`;
 
@@ -760,9 +769,11 @@ async function loadAll(force = false) {
   api("/api/v1/guards/summary").then(g => {
     state.guards = g;
     renderGuards(g);
+    renderAlertBanner(ov?.system, g);
   });
   loadPaper();
   loadModels();
+  loadEquityCurve();
 }
 
 /* ─── Boot ────────────────────────────────────────────────────── */
@@ -786,9 +797,132 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+/* ─── Alert Banner ────────────────────────────────────────────── */
+function renderAlertBanner(system, guards) {
+  const banner = $("alertBanner");
+  if (!banner) return;
+
+  const killSwitch = system?.kill_switch === true || system?.killswitch === true;
+  const drawdown = system?.max_drawdown_pct ?? system?.drawdown ?? null;
+  const drawdownThreshold = 10; // show warning above 10%
+
+  let severity = null;
+  let msg = "";
+  let actionLabel = "";
+
+  if (killSwitch) {
+    severity = "critical";
+    msg = "Kill switch is active — all automated trading halted.";
+    actionLabel = "Details";
+  } else if (drawdown != null && Math.abs(drawdown) >= drawdownThreshold) {
+    severity = "warning";
+    msg = `Max drawdown at ${Math.abs(drawdown).toFixed(1)}% — review risk settings.`;
+    actionLabel = "Review";
+  } else if (guards?.active_blocks > 0) {
+    severity = "warning";
+    msg = `${guards.active_blocks} guard block${guards.active_blocks > 1 ? "s" : ""} active — some signals suppressed.`;
+    actionLabel = "View";
+  }
+
+  if (!severity) {
+    banner.className = "alert-banner";
+    document.querySelector(".main")?.classList.remove("has-alert");
+    return;
+  }
+
+  $("alertMsg").textContent = msg;
+  const actionBtn = $("alertActionBtn");
+  if (actionBtn) {
+    actionBtn.textContent = actionLabel;
+    actionBtn.style.display = actionLabel ? "" : "none";
+  }
+  banner.className = `alert-banner visible ${severity}`;
+  document.querySelector(".main")?.classList.add("has-alert");
+}
+
+function dismissAlert() {
+  const banner = $("alertBanner");
+  if (banner) banner.className = "alert-banner";
+  document.querySelector(".main")?.classList.remove("has-alert");
+}
+
+function handleAlertAction() {
+  const system = state.overview?.system;
+  if (system?.kill_switch || system?.killswitch) {
+    toast("Kill switch is ON — disable from the Risk Desk.", "error");
+  } else {
+    // Scroll to guards section
+    const el = $("guards");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+/* ─── Analyze Drawer ──────────────────────────────────────────── */
+function openDrawer(symbol) {
+  const drawer = $("analyzeDrawer");
+  if (drawer) drawer.classList.add("open");
+}
+
+function closeDrawer() {
+  const drawer = $("analyzeDrawer");
+  if (drawer) drawer.classList.remove("open");
+  state.selectedSymbol = null;
+  renderSignals();
+}
+
+/* ─── Equity Curve ────────────────────────────────────────────── */
+async function loadEquityCurve() {
+  const data = await api("/api/dashboard/equity-curve");
+  if (!data?.equity_curve?.length) return;
+
+  const curve = data.equity_curve;
+  const last = curve[curve.length - 1];
+  const first = curve[0];
+  const currentBalance = last?.balance ?? 0;
+  const startBalance = first?.balance ?? currentBalance;
+  const pnlPct = startBalance > 0 ? ((currentBalance - startBalance) / startBalance) * 100 : 0;
+
+  const wrap = $("equityChartWrap");
+  const valEl = $("equityVal");
+  const pnlEl = $("equityPnl");
+  const svgEl = $("equityChartSvg");
+  if (!wrap || !valEl || !pnlEl || !svgEl) return;
+
+  valEl.textContent = fmt$(currentBalance, 0);
+  pnlEl.textContent = fmtPct(pnlPct);
+  pnlEl.style.color = pnlPct >= 0 ? "var(--positive)" : "var(--negative)";
+
+  const balances = curve.map(p => p.balance ?? 0);
+  svgEl.innerHTML = areaChartSvg(balances, pnlPct >= 0 ? "var(--positive)" : "var(--negative)");
+  wrap.style.display = "";
+}
+
+function areaChartSvg(values, color) {
+  if (!values || values.length < 2) return "";
+  const W = 300, H = 52, pad = 2;
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = max - min || 1;
+  const step = (W - pad * 2) / (values.length - 1);
+
+  const pts = values.map((v, i) => {
+    const x = (pad + i * step).toFixed(1);
+    const y = (pad + ((max - v) / range) * (H - pad * 2)).toFixed(1);
+    return `${x},${y}`;
+  });
+
+  const linePath = "M" + pts.join(" L");
+  const areaPath = `${linePath} L${pts[pts.length - 1].split(",")[0]},${H} L${pad},${H} Z`;
+
+  return `<path d="${areaPath}" fill="${color}" fill-opacity="0.12"/>
+          <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`;
+}
+
 // Expose for inline onclick handlers
 window.selectSignal = selectSignal;
 window.sendToPaperTrade = sendToPaperTrade;
 window.runPipeline = runPipeline;
 window.loadAll = loadAll;
 window.loadConsensus = loadConsensus;
+window.closeDrawer = closeDrawer;
+window.dismissAlert = dismissAlert;
+window.handleAlertAction = handleAlertAction;
