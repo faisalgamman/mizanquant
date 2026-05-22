@@ -231,6 +231,39 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
 .col-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .col-title{font-size:14px;font-weight:700}
 .col-count{font-size:11px;color:var(--txt2)}
+
+/* ── FUNDAMENTALS TAB ── */
+.fund-layout{display:grid;grid-template-columns:1fr 1.4fr;gap:20px;align-items:start}
+@media(max-width:900px){.fund-layout{grid-template-columns:1fr}}
+.fund-col{display:flex;flex-direction:column;gap:0}
+.fund-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.fund-hdr-title{font-size:13px;font-weight:700;color:var(--txt)}
+.fund-empty{color:var(--txt3);font-size:12px;padding:20px;text-align:center;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r)}
+.fund-select{padding:4px 8px;background:var(--bg-raised);border:1px solid var(--border);color:var(--txt2);border-radius:6px;font-size:11px;cursor:pointer;outline:none}
+.fund-select:focus{border-color:var(--accent)}
+.ratio-group{margin-bottom:12px}
+.ratio-group-title{font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:4px 8px;background:rgba(79,142,247,.06);border-radius:4px}
+.ratio-row{display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;margin-bottom:3px}
+.ratio-row:hover{background:var(--bg-hover)}
+.ratio-key{font-size:11px;color:var(--txt2);text-transform:capitalize}
+.ratio-val{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.ratio-bar-wrap{height:3px;background:var(--bg-raised);border-radius:2px;margin-top:3px;overflow:hidden}
+.ratio-bar-fill{height:100%;border-radius:2px;transition:width .3s}
+.fin-table-wrap{overflow-x:auto;max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)}
+.fin-tbl{width:100%;border-collapse:collapse;font-size:11px;min-width:380px}
+.fin-tbl th{padding:5px 8px;text-align:right;background:var(--bg-raised);border-bottom:1px solid var(--border);font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;z-index:1}
+.fin-tbl th:first-child{text-align:left}
+.fin-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);color:var(--txt2)}
+.fin-tbl td:first-child{color:var(--txt);font-size:11px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.fin-tbl td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
+.fin-tbl tr.highlight td{color:var(--txt);font-weight:600;background:rgba(79,142,247,.04)}
+.fin-tbl tr:hover td{background:var(--bg-hover)}
+.yoy-up{color:var(--green);font-weight:700}
+.yoy-dn{color:var(--red);font-weight:700}
+.div-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.div-card{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px}
+.div-label{font-size:11px;color:var(--txt2)}
+.div-value{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -277,6 +310,9 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
   <div class="sec-tab" id="tab-trading" onclick="switchSection('trading')">
     🤖 Trading Lab
     <span class="badge-count" id="tradingCount">—</span>
+  </div>
+  <div class="sec-tab" id="tab-fundamentals" onclick="switchSection('fundamentals')">
+    📊 Fundamentals
   </div>
 </div>
 
@@ -350,6 +386,50 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
       </div>
     </div>
     <div class="card-grid" id="agGrid"></div>
+  </div>
+
+  <!-- ─ FUNDAMENTALS ─ -->
+  <div class="section-panel" id="panel-fundamentals">
+    <div class="fund-layout">
+
+      <!-- Left column: Ratios -->
+      <div class="fund-col">
+        <div class="fund-hdr">
+          <span class="fund-hdr-title">📈 Key Ratios</span>
+          <button class="btn btn-sm btn-ghost" onclick="loadRatios()">↻ Refresh</button>
+        </div>
+        <div id="ratioPanel">
+          <div class="fund-empty">Select a symbol above and click Refresh</div>
+        </div>
+      </div>
+
+      <!-- Right column: Financial Statements + Dividends -->
+      <div class="fund-col">
+        <div class="fund-hdr">
+          <span class="fund-hdr-title">📋 Financial Statements</span>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select id="finStmtType" onchange="loadFinancials()" class="fund-select">
+              <option value="income">Income</option>
+              <option value="balance">Balance Sheet</option>
+              <option value="cashflow">Cash Flow</option>
+            </select>
+            <button class="btn btn-sm btn-ghost" onclick="loadFinancials()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="finPanel">
+          <div class="fund-empty">Select a symbol above and click Refresh</div>
+        </div>
+
+        <div class="fund-hdr" style="margin-top:16px;">
+          <span class="fund-hdr-title">💰 Dividends</span>
+          <button class="btn btn-sm btn-ghost" onclick="loadDividends()">↻ Refresh</button>
+        </div>
+        <div id="divPanel">
+          <div class="fund-empty">—</div>
+        </div>
+      </div>
+
+    </div>
   </div>
 
 </div><!-- /content -->
@@ -433,6 +513,7 @@ function switchSection(s) {
   document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+s).classList.add('active');
   document.getElementById('panel-'+s).classList.add('active');
+  if (s === 'fundamentals') loadFundamentals();
 }
 
 // ═══ CARD BUILDERS ═══
@@ -907,6 +988,178 @@ function updateCounts() {
   const agDone = Object.keys(agResults).length;
   document.getElementById('fcDoneCount').textContent = `${fcDone} / ${MODELS.length} done`;
   document.getElementById('agDoneCount').textContent = `${agDone} / ${AGENTS.length} done`;
+}
+
+// ═══ FUNDAMENTALS ═══
+var _fundLoaded = '';
+
+function loadFundamentals() {
+  const sym = document.getElementById('symInput').value.trim().toUpperCase() || 'AAPL';
+  if (_fundLoaded === sym) return;
+  _fundLoaded = sym;
+  loadRatios(sym);
+  loadFinancials(sym);
+  loadDividends(sym);
+}
+
+async function loadRatios(sym) {
+  sym = sym || document.getElementById('symInput').value.trim().toUpperCase() || 'AAPL';
+  _fundLoaded = sym;
+  const panel = document.getElementById('ratioPanel');
+  panel.innerHTML = '<div class="fund-empty">Loading…</div>';
+  try {
+    const d = await apiFetch(`/api/stock/ratios?symbol=${sym}`);
+    if (d.error) { panel.innerHTML = `<div class="fund-empty">⚠ ${d.error}</div>`; return; }
+
+    const GROUPS = [
+      { key: 'profitability', label: '📊 Profitability', items: [
+        { k: 'gross_margin',      label: 'Gross Margin',      fmt: 'pct' },
+        { k: 'operating_margin',  label: 'Operating Margin',  fmt: 'pct' },
+        { k: 'profit_margin',     label: 'Net Margin',        fmt: 'pct' },
+        { k: 'ebitda_margin',     label: 'EBITDA Margin',     fmt: 'pct' },
+        { k: 'return_on_equity',  label: 'ROE',               fmt: 'pct' },
+        { k: 'return_on_assets',  label: 'ROA',               fmt: 'pct' },
+      ]},
+      { key: 'valuation', label: '💰 Valuation', items: [
+        { k: 'pe_ratio',               label: 'P/E (TTM)',          fmt: 'x' },
+        { k: 'forward_pe',             label: 'Forward P/E',        fmt: 'x' },
+        { k: 'peg_ratio',              label: 'PEG',                fmt: 'x' },
+        { k: 'price_to_book',          label: 'P/B',                fmt: 'x' },
+        { k: 'price_to_sales',         label: 'P/S',                fmt: 'x' },
+        { k: 'enterprise_to_ebitda',   label: 'EV/EBITDA',          fmt: 'x' },
+      ]},
+      { key: 'liquidity', label: '🏦 Liquidity & Debt', items: [
+        { k: 'current_ratio',   label: 'Current Ratio',  fmt: 'x' },
+        { k: 'quick_ratio',     label: 'Quick Ratio',    fmt: 'x' },
+        { k: 'debt_to_equity',  label: 'D/E Ratio',      fmt: 'x' },
+        { k: 'total_cash',      label: 'Total Cash',     fmt: '$b' },
+        { k: 'total_debt',      label: 'Total Debt',     fmt: '$b' },
+      ]},
+      { key: 'growth', label: '🚀 Growth (YoY)', items: [
+        { k: 'revenue_growth',            label: 'Revenue Growth',     fmt: 'pct' },
+        { k: 'earnings_growth',           label: 'Earnings Growth',    fmt: 'pct' },
+        { k: 'earnings_quarterly_growth', label: 'EPS Qtrly Growth',   fmt: 'pct' },
+      ]},
+    ];
+
+    let html = '';
+    for (const grp of GROUPS) {
+      const data = d[grp.key] || {};
+      html += `<div class="ratio-group"><div class="ratio-group-hdr">${grp.label}</div>`;
+      for (const item of grp.items) {
+        const raw = data[item.k];
+        if (raw == null) continue;
+        let display, colorClass = '';
+        if (item.fmt === 'pct') {
+          const pct = raw * 100;
+          display = pct.toFixed(1) + '%';
+          colorClass = pct >= 0 ? 'pos' : 'neg';
+        } else if (item.fmt === '$b') {
+          display = raw >= 1e9 ? (raw/1e9).toFixed(1)+'B' : raw >= 1e6 ? (raw/1e6).toFixed(0)+'M' : raw.toFixed(0);
+        } else {
+          display = raw.toFixed(2) + 'x';
+        }
+        const barW = Math.min(Math.abs(item.fmt === 'pct' ? raw * 100 : (raw / 50) * 100), 100);
+        html += `<div class="ratio-row">
+          <span class="ratio-label">${item.label}</span>
+          <div class="ratio-bar-wrap"><div class="ratio-bar ${colorClass}" style="width:${barW}%"></div></div>
+          <span class="ratio-val ${colorClass}">${display}</span>
+        </div>`;
+      }
+      html += '</div>';
+    }
+    panel.innerHTML = html || '<div class="fund-empty">No ratio data</div>';
+  } catch(e) {
+    panel.innerHTML = `<div class="fund-empty">⚠ ${e.message}</div>`;
+  }
+}
+
+async function loadFinancials(sym) {
+  sym = sym || document.getElementById('symInput').value.trim().toUpperCase() || 'AAPL';
+  const stmt = document.getElementById('finStmtType')?.value || 'income';
+  const panel = document.getElementById('finPanel');
+  panel.innerHTML = '<div class="fund-empty">Loading…</div>';
+  try {
+    const d = await apiFetch(`/api/stock/financials?symbol=${sym}&statement=${stmt}&periods=4`);
+    if (d.error || !d.rows?.length) { panel.innerHTML = `<div class="fund-empty">⚠ ${d.error || 'No data'}</div>`; return; }
+
+    const years = d.years || [];
+    const KEY_ROWS = {
+      income:   ['Total Revenue','Gross Profit','Operating Income','Net Income','EBITDA','Diluted EPS'],
+      balance:  ['Total Assets','Total Liabilities Net Minority Interest','Stockholders Equity','Total Debt','Cash And Cash Equivalents'],
+      cashflow: ['Operating Cash Flow','Free Cash Flow','Capital Expenditure','Issuance Of Debt','Repurchase Of Capital Stock'],
+    };
+    const priority = KEY_ROWS[stmt] || [];
+    let rows = d.rows.slice();
+    rows.sort((a, b) => {
+      const ai = priority.indexOf(a.item), bi = priority.indexOf(b.item);
+      if (ai >= 0 && bi >= 0) return ai - bi;
+      if (ai >= 0) return -1;
+      if (bi >= 0) return 1;
+      return 0;
+    });
+    rows = rows.slice(0, 15);
+
+    const fmtNum = v => {
+      if (v == null) return '—';
+      const abs = Math.abs(v);
+      const s = v < 0 ? '-' : '';
+      if (abs >= 1e12) return s + (abs/1e12).toFixed(1) + 'T';
+      if (abs >= 1e9)  return s + (abs/1e9).toFixed(1) + 'B';
+      if (abs >= 1e6)  return s + (abs/1e6).toFixed(1) + 'M';
+      return s + abs.toFixed(0);
+    };
+
+    let html = '<table class="fin-tbl"><thead><tr><th>Item</th>';
+    for (const y of years) html += `<th>${y}</th>`;
+    html += '<th>YoY</th></tr></thead><tbody>';
+    for (const row of rows) {
+      const yoy = row.yoy_change_pct;
+      const yoyClass = yoy == null ? '' : yoy >= 0 ? 'pos' : 'neg';
+      const yoyStr = yoy == null ? '—' : (yoy >= 0 ? '+' : '') + yoy.toFixed(1) + '%';
+      html += `<tr><td class="fin-item">${row.item}</td>`;
+      for (const y of years) html += `<td>${fmtNum(row[y])}</td>`;
+      html += `<td class="${yoyClass}">${yoyStr}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    panel.innerHTML = html;
+  } catch(e) {
+    panel.innerHTML = `<div class="fund-empty">⚠ ${e.message}</div>`;
+  }
+}
+
+async function loadDividends(sym) {
+  sym = sym || document.getElementById('symInput').value.trim().toUpperCase() || 'AAPL';
+  const panel = document.getElementById('divPanel');
+  panel.innerHTML = '<div class="fund-empty">Loading…</div>';
+  try {
+    const d = await apiFetch(`/api/stock/dividends?symbol=${sym}`);
+    const yield_ = d.dividend_yield != null ? (d.dividend_yield * 100).toFixed(2) + '%' : '—';
+    const rate   = d.dividend_rate  != null ? '$' + d.dividend_rate.toFixed(2) + '/yr' : '—';
+    const payout = d.payout_ratio   != null ? (d.payout_ratio * 100).toFixed(0) + '%' : '—';
+    const exDiv  = d.ex_dividend_date || '—';
+    const hist   = d.last_24_payments || [];
+
+    let html = `<div class="div-grid">
+      <div class="div-card"><div class="div-card-val">${yield_}</div><div class="div-card-lbl">Yield</div></div>
+      <div class="div-card"><div class="div-card-val">${rate}</div><div class="div-card-lbl">Annual Rate</div></div>
+      <div class="div-card"><div class="div-card-val">${payout}</div><div class="div-card-lbl">Payout Ratio</div></div>
+      <div class="div-card"><div class="div-card-val" style="font-size:11px">${exDiv}</div><div class="div-card-lbl">Ex-Div Date</div></div>
+    </div>`;
+
+    if (hist.length) {
+      html += '<table class="fin-tbl" style="margin-top:8px"><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody>';
+      for (const h of hist.slice().reverse().slice(0, 8)) {
+        html += `<tr><td>${h.date}</td><td>$${h.dividend?.toFixed(4) ?? '—'}</td></tr>`;
+      }
+      html += '</tbody></table>';
+    } else {
+      html += '<div class="fund-empty" style="margin-top:6px">No dividend history</div>';
+    }
+    panel.innerHTML = html;
+  } catch(e) {
+    panel.innerHTML = `<div class="fund-empty">⚠ ${e.message}</div>`;
+  }
 }
 
 // ═══ TOAST ═══
