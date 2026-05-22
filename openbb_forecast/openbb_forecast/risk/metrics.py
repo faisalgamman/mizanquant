@@ -26,19 +26,25 @@ def sharpe_ratio(
 
     (mean(r) - rf_daily) / std(r) * sqrt(252)
 
-    Capped at 3.0 to prevent spurious inflation from short samples or near-zero vol.
+    Returns 0.0 when sample is too small (< 20 observations) to be statistically
+    meaningful. No upper cap is applied — the caller is responsible for interpreting
+    high values (e.g. > 3.0) as a signal to investigate data quality.
     """
     returns = np.asarray(returns, dtype=np.float64)
-    if len(returns) < 2:
+    # Require at least 20 observations for a meaningful estimate
+    if len(returns) < 20:
         return 0.0
-    _EPS = 1e-6
+    _EPS = 1e-8
     rf_daily = risk_free_rate / TRADING_DAYS_PER_YEAR
     excess = returns - rf_daily
-    ratio = float(np.mean(excess) / (np.std(excess, ddof=1) + _EPS))
-    # Only annualize if enough observations to be meaningful
-    if annualize and len(returns) >= 20:
+    std = float(np.std(excess, ddof=1))
+    if std < _EPS:
+        # Near-zero variance: strategy is essentially flat, not a reliable signal
+        return 0.0
+    ratio = float(np.mean(excess) / std)
+    if annualize:
         ratio *= np.sqrt(TRADING_DAYS_PER_YEAR)
-    return float(min(ratio, 3.0))
+    return float(ratio)
 
 
 def sortino_ratio(
@@ -117,10 +123,17 @@ def annualized_return(returns: np.ndarray) -> float:
     return float((1 + total) ** (1 / n_years) - 1)
 
 
+_MIN_TRADES_FOR_WIN_RATE = 5
+
+
 def win_rate(trade_returns: np.ndarray) -> float:
-    """Fraction of trades with positive return."""
+    """Fraction of trades with positive return.
+
+    Returns 0.0 when fewer than _MIN_TRADES_FOR_WIN_RATE trades are available —
+    a single winning trade must not appear as 100% win rate.
+    """
     trade_returns = np.asarray(trade_returns, dtype=np.float64)
-    if len(trade_returns) == 0:
+    if len(trade_returns) < _MIN_TRADES_FOR_WIN_RATE:
         return 0.0
     return float(np.sum(trade_returns > 0) / len(trade_returns))
 

@@ -159,9 +159,13 @@ def walk_forward_validate(
                 acc = float(np.mean(pred_dir == actual_dir))
             else:
                 acc = 0.0
-            # Sharpe from predicted returns
-            returns = np.diff(preds) / (np.abs(preds[:-1]) + 1e-9)
-            sharpe = _calc_sharpe(returns)
+            # Sharpe from a simulated directional strategy on ACTUAL returns.
+            # go long when prediction rises, flat otherwise — avoids lookahead bias
+            # because preds come from the held-out test fold only.
+            actual_rets = np.diff(actuals) / (np.abs(actuals[:-1]) + 1e-9)
+            pred_direction = np.sign(np.diff(preds))  # +1 up, -1 down, 0 flat
+            strategy_rets = pred_direction * actual_rets
+            sharpe = _calc_sharpe(strategy_rets)
 
             fold_metrics.append({
                 "fold": fold_idx + 1,

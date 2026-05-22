@@ -311,7 +311,7 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
       </div>
       <div class="consensus-grid">
         <div class="c-metric"><div class="c-metric-label">Overall Signal</div><div class="c-metric-val" id="csignal" style="color:var(--txt2)">—</div></div>
-        <div class="c-metric"><div class="c-metric-label">Avg Forecast Sharpe</div><div class="c-metric-val" id="cfc_sharpe">—</div></div>
+        <div class="c-metric"><div class="c-metric-label" title="Avg FQ Score: (100−MAPE)/20 — not a real Sharpe ratio.">Avg Forecast FQ</div><div class="c-metric-val" id="cfc_sharpe">—</div></div>
         <div class="c-metric"><div class="c-metric-label">Avg Agent Sharpe</div><div class="c-metric-val" id="cag_sharpe">—</div></div>
         <div class="c-metric"><div class="c-metric-label">Models Bullish</div><div class="c-metric-val" id="cbullish">—</div></div>
         <div class="c-metric"><div class="c-metric-label">Models Bearish</div><div class="c-metric-val" id="cbearish">—</div></div>
@@ -319,7 +319,7 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
       </div>
       <table class="consensus-table" id="consensusTable" style="display:none">
         <thead><tr>
-          <th>Source</th><th>Name</th><th>Type</th><th>Signal</th><th>Sharpe</th><th>Win Rate</th><th>Return</th>
+          <th>Source</th><th>Name</th><th>Type</th><th>Signal</th><th>Sharpe / FQ</th><th>Win Rate</th><th>Return</th>
         </tr></thead>
         <tbody id="consensusTbody"></tbody>
       </table>
@@ -479,7 +479,7 @@ function makeCard(item, prefix) {
     </div>
     <div class="m-metrics">
       <div class="m-metric">
-        <div class="m-metric-label">Sharpe</div>
+        <div class="m-metric-label" title="${type==='forecast'?'Forecast Quality: (100−MAPE)/20. Not a real Sharpe ratio.':'Sharpe ratio from out-of-sample walk-forward backtest.'}">${type==='forecast'?'FQ Score':'Sharpe'}</div>
         <div class="m-metric-val neutral" id="met-sharpe-${id}">${sharpeStr}</div>
       </div>
       <div class="m-metric">
