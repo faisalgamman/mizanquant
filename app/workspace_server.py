@@ -5008,6 +5008,8 @@ async def public_strategies():
         for sid, cfg in CFG.items():
             result.append({
                 "id": cfg.strategy_id, "name": cfg.name,
+                "configured": True,
+                "broker_type": os.environ.get("BROKER_TYPE", "alpaca"),
                 "max_positions": cfg.max_positions, "position_pct": cfg.position_pct,
                 "trailing_stop": cfg.trailing_stop_enabled, "trailing_stop_pct": cfg.trailing_stop_pct,
                 "static_sl_pct": cfg.static_sl_pct, "min_confidence": cfg.min_confidence,
@@ -5407,14 +5409,14 @@ async def get_halal_screener():
 
 @app.get("/strategy-dashboard", include_in_schema=False)
 async def get_strategies_page():
-    """Serve the Strategies Dashboard (React SPA)."""
-    p = Path(__file__).resolve().parent / "static" / "strategies-app" / "index.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    # Fallback to old page
-    p2 = Path(__file__).resolve().parent / "static" / "strategies.html"
-    if p2.exists():
-        return HTMLResponse(content=p2.read_text(encoding="utf-8"))
+    """Serve the Strategies Dashboard."""
+    _base = Path(__file__).resolve().parent / "static"
+    # Prefer the vanilla HTML page (uses real strategy configs); React SPA uses model registry names
+    for name in ("strategies.html", "strategies-app/index.html"):
+        p = _base / name
+        if p.exists():
+            return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                                headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     return HTMLResponse("<h1>Strategies not found</h1>", status_code=404)
 
 
