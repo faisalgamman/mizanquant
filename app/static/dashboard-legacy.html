@@ -202,6 +202,21 @@ body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg-primary
 .wf-section-body { padding:0 4px; }
 .wf-section-body.collapsed { display:none; }
 
+/* ═══ STRATEGY TICKER DRILL-DOWN ═══ */
+.strategy-card-clickable { cursor:pointer; transition:transform 0.15s ease,box-shadow 0.15s ease; }
+.strategy-card-clickable:hover { transform:translateY(-2px); box-shadow:0 4px 20px rgba(200,150,62,0.15); }
+.active-card-boundary { outline:2px solid #c8963e; outline-offset:-2px; }
+.strategy-ticker-table { width:100%; border-collapse:collapse; font-size:12px; }
+.strategy-ticker-table th { padding:8px 12px; text-align:left; color:var(--text-muted); text-transform:uppercase; font-size:10px; letter-spacing:0.5px; border-bottom:1px solid var(--border); }
+.strategy-ticker-table td { padding:6px 12px; border-bottom:1px solid var(--border); }
+.strategy-ticker-table tbody tr:hover { background:var(--bg-tertiary); }
+.signal-badge { display:inline-block; padding:2px 10px; border-radius:4px; font-size:10px; font-weight:700; }
+.signal-badge.buy { background:#064e3b; color:#6ee7b7; }
+.signal-badge.wait { background:#78350f; color:#fbbf24; }
+.signal-badge.avoid { background:#450a0a; color:#fca5a5; }
+.score-bar { height:4px; border-radius:2px; background:var(--bg-tertiary); overflow:hidden; margin-top:2px; }
+.score-bar-fill { height:100%; border-radius:2px; transition:width 0.5s ease; }
+
 /* ═══ LOWER ROW — Advanced Market Intelligence ═══ */
 .lower-row { display:grid; grid-template-columns:1.2fr 1.5fr 1.8fr; gap:10px; margin-top:8px; }
 .lw-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
@@ -1782,6 +1797,20 @@ select:focus,input:focus { border-color:var(--accent); }
     <div style="background:#1e3a5f;color:#93c5fd;padding:40px;text-align:center;grid-column:1/-1;border-radius:8px;font-size:14px;font-weight:600;">
       <i class="fas fa-spinner fa-spin fa-2x" style="margin-bottom:12px;display:block;"></i>
       Loading strategy data…
+    </div>
+  </div>
+
+  <!-- Strategy Ticker Drill-Down -->
+  <div id="strategyTickerSection" class="card" style="margin-bottom:20px;display:none;">
+    <div class="card-header">
+      <div><div class="card-title" id="tickerTableTitle">Ticker Signals</div>
+      <div class="card-subtitle">Smart screener signals filtered by selected strategy</div></div>
+    </div>
+    <div id="strategyTickerTable" style="overflow-x:auto;padding:16px;">
+      <div style="color:var(--text-muted);font-size:13px;text-align:center;padding:24px;">
+        <i class="fas fa-search" style="font-size:20px;display:block;margin-bottom:8px;color:var(--accent);"></i>
+        Select a strategy card above to drill into ticker signals
+      </div>
     </div>
   </div>
 
@@ -7159,6 +7188,7 @@ async function loadStrategies() {
     }
     try { renderBestPerStrategy(data); } catch(e2) { console.error('renderBestPerStrategy:', e2); }
     try { renderFullTable(data); } catch(e3) { console.error('renderFullTable:', e3); }
+    try { var fs = Object.keys(data.strategies || {})[0]; if (fs) selectStrategy(fs); } catch(e4) {}
   } catch(e) {
     // Timeout or network error — server might be busy computing
     var isTmout = e.message && e.message.indexOf('timed out') !== -1;
@@ -7183,7 +7213,7 @@ function renderStrategyCards(data) {
     const wrOk = s.pass_win_rate ? '✅' : '⚠️';
     const shOk = s.pass_sharpe ? '✅' : '⚠️';
     const ddOk = s.pass_max_dd ? '✅' : '⚠️';
-    html += '<div style="background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;">';
+    html += '<div class="strategy-card-clickable" data-strategy="' + name + '" onclick="selectStrategy(this.dataset.strategy)" style="background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;">';
     html += '<div style="background:' + color + ';padding:10px 16px;font-weight:700;font-size:14px;letter-spacing:-0.3px;">' + name + '</div>';
     html += '<div style="padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">';
     html += '<div><span style="color:var(--text-muted);">Trades</span><br><strong>' + s.total_trades + '</strong></div>';
@@ -7198,6 +7228,54 @@ function renderStrategyCards(data) {
     }
     html += '</div></div>';
   }
+  container.innerHTML = html;
+}
+
+function selectStrategy(name) {
+  document.querySelectorAll('#strategyCards > div[data-strategy]').forEach(function(el) {
+    el.classList.remove('active-card-boundary');
+    if (el.getAttribute('data-strategy') === name) {
+      el.classList.add('active-card-boundary');
+    }
+  });
+  var section = document.getElementById('strategyTickerSection');
+  if (section) section.style.display = '';
+  renderStrategyTickerTable(name);
+}
+
+function renderStrategyTickerTable(strategyName) {
+  var container = document.getElementById('strategyTickerTable');
+  if (!container) return;
+  var title = document.getElementById('tickerTableTitle');
+  if (title) title.textContent = strategyName + ' — Ticker Signals';
+  var filtered = _allSignals.filter(function(r) {
+    return r.strategy && r.strategy.toLowerCase() === strategyName.toLowerCase();
+  });
+  if (filtered.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:24px;">' +
+      '<i class="fas fa-inbox" style="font-size:20px;display:block;margin-bottom:8px;color:var(--text-secondary);"></i>' +
+      'No tickers found for "' + strategyName + '". ' +
+      '<button class="btn btn-sm btn-primary" onclick="switchTab(\'research\');setTimeout(function(){runSmartScreener()},300)" style="margin-top:8px;">Run Smart Screener</button></div>';
+    return;
+  }
+  filtered.sort(function(a, b) { return (b.smart_score || 0) - (a.smart_score || 0); });
+  var html = '<table class="strategy-ticker-table"><thead><tr>' +
+    '<th>Symbol</th><th>Score</th><th>Signal</th><th>Technical Reason</th>' +
+    '</tr></thead><tbody>';
+  filtered.forEach(function(r) {
+    var score = r.smart_score || 0;
+    var signal = r.signal || 'WAIT';
+    var signalClass = signal === 'BUY' ? 'buy' : signal === 'AVOID' ? 'avoid' : 'wait';
+    var reason = r.strategy_reason || r.momentum_details?.error || '—';
+    var barColor = score >= 70 ? '#10b981' : score >= 40 ? '#f59e0b' : '#ef4444';
+    html += '<tr>' +
+      '<td style="font-weight:600;font-family:var(--mono);font-size:13px;">' + r.symbol + '</td>' +
+      '<td style="min-width:100px;"><div style="font-weight:600;font-size:12px;">' + score + '/100</div><div class="score-bar"><div class="score-bar-fill" style="width:' + score + '%;background:' + barColor + ';"></div></div></td>' +
+      '<td><span class="signal-badge ' + signalClass + '">' + signal + '</span></td>' +
+      '<td style="font-size:11px;color:var(--text-muted);max-width:220px;">' + reason + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
   container.innerHTML = html;
 }
 
