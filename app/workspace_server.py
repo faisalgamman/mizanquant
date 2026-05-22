@@ -39,6 +39,7 @@ from app.services.fmp_client import fmp_client
 
 import secrets
 import hashlib
+import hmac
 
 
 logging.basicConfig(level=logging.INFO)
@@ -212,26 +213,60 @@ async def login_page(next: str = "/"):
 @app.post("/login", include_in_schema=False)
 async def login_post(request: Request):
     """Validate credentials and set session cookie."""
-    form = await request.form()
-    username = form.get("username", "")
-    password = form.get("password", "")
-    next_url = form.get("next", "/") or "/"
-    # Prevent open redirects — only allow relative paths
-    if not next_url.startswith("/"):
-        next_url = "/"
-    pw_hash = hashlib.sha256(password.encode()).hexdigest()
-    # Accept DASHBOARD_PASS_HASH as either:
-    #   - a sha256 hex digest (64 chars) → compare hash
-    #   - a plaintext password           → compare directly
-    stored = DASHBOARD_PASS_HASH
-    is_hashed = len(stored) == 64 and all(c in "0123456789abcdef" for c in stored.lower())
-    password_ok = secrets.compare_digest(pw_hash, stored) if is_hashed else secrets.compare_digest(password, stored)
-    if username == DASHBOARD_USER and password_ok:
-        resp = RedirectResponse(url=next_url, status_code=302)
-        resp.set_cookie(key="session", value=_make_session_token(), httponly=True, max_age=86400, samesite="lax")
-        return resp
-    error_html = LOGIN_HTML.replace('</form>', '<div class="error">Invalid username or password</div></form>')
-    return HTMLResponse(content=error_html, status_code=401)
+    try:
+        form = await request.form()
+        username = str(form.get("username") or "")
+        password = str(form.get("password") or "")
+        next_url = str(form.get("next") or "/")
+        if not next_url.startswith("/"):
+            next_url = "/"
+
+        # Compute sha256 of entered password (lowercase hex)
+        pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+        # DASHBOARD_PASS_HASH can be stored as:
+        #   • a sha256 hex digest (64 hex chars) — compare with pw_hash
+        #   • a plaintext password               — compare with entered password
+        stored = str(DASHBOARD_PASS_HASH or "").strip()
+        stored_lower = stored.lower()
+        is_hashed = (len(stored) == 64 and
+                     all(c in "0123456789abcdef" for c in stored_lower))
+
+        # Use hmac-safe comparison on bytes to avoid timing attacks & TypeError
+        if is_hashed:
+            password_ok = hmac.compare_digest(
+                pw_hash.encode("ascii"), stored_lower.encode("ascii")
+            )
+        else:
+            password_ok = hmac.compare_digest(
+                password.encode("utf-8"), stored.encode("utf-8")
+            )
+
+        user_ok = hmac.compare_digest(
+            username.encode("utf-8"),
+            str(DASHBOARD_USER or "").encode("utf-8")
+        )
+
+        if user_ok and password_ok:
+            resp = RedirectResponse(url=next_url, status_code=302)
+            resp.set_cookie(
+                key="session", value=_make_session_token(),
+                httponly=True, max_age=86400, samesite="lax"
+            )
+            return resp
+
+        error_html = LOGIN_HTML.replace(
+            '</form>', '<div class="error">Invalid username or password</div></form>'
+        )
+        return HTMLResponse(content=error_html, status_code=401)
+
+    except Exception as exc:
+        logger.error("login_post error: %s", exc, exc_info=True)
+        error_html = LOGIN_HTML.replace(
+            '</form>',
+            f'<div class="error">Server error — check Railway logs</div></form>'
+        )
+        return HTMLResponse(content=error_html, status_code=500)
 
 
 @app.get("/logout", include_in_schema=False)
