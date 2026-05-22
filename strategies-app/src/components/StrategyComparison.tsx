@@ -1,5 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { strategyResults } from '../data/mockData';
+import type { StrategyResult } from '../data/types';
 
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
@@ -15,27 +15,35 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
-const chartData = strategyResults
-  .filter((s) => s.status === 'active')
-  .map((s) => ({ name: s.name, sharpe: s.sharpe, netProfit: Math.round(s.netProfit / 1000) }));
+export default function StrategyComparison({ strategies, loading }: { strategies: StrategyResult[]; loading: boolean }) {
+  const active = strategies.filter((s) => s.status === 'active');
+  const chartData = active.map((s) => ({
+    name: s.name,
+    sharpe: s.sharpe,
+    netProfit: Math.round(s.net_profit / 1000),
+  }));
 
-export default function StrategyComparison() {
   return (
     <div className="bg-bg-surface border border-border-default rounded-lg p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-text-primary text-md font-semibold tracking-[0.3px]">Strategy Comparison</h2>
-        <span className="text-text-muted text-xs">active strategies</span>
+        {loading && <span className="text-text-muted text-xs animate-pulse">Loading...</span>}
+        {!loading && <span className="text-text-muted text-xs">{active.length} active</span>}
       </div>
-      <ResponsiveContainer width="100%" height={chartData.length * 50 + 20}>
-        <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
-          <XAxis type="number" tick={{ fill: '#5c5c6a', fontSize: 10 }} tickLine={false} axisLine={false} />
-          <YAxis type="category" dataKey="name" tick={{ fill: '#9494a0', fontSize: 11 }} tickLine={false} axisLine={false} width={90} />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="sharpe" fill="#c8963e" fillOpacity={0.8} radius={[0, 3, 3, 0]} barSize={12} />
-          <Bar dataKey="netProfit" fill="#4ade80" fillOpacity={0.6} radius={[0, 3, 3, 0]} barSize={12} />
-        </BarChart>
-      </ResponsiveContainer>
+      {strategies.length === 0 && !loading ? (
+        <div className="flex items-center justify-center h-[200px] text-text-muted text-xs">No strategy data available</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={chartData.length * 50 + 20}>
+          <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
+            <XAxis type="number" tick={{ fill: '#5c5c6a', fontSize: 10 }} tickLine={false} axisLine={false} />
+            <YAxis type="category" dataKey="name" tick={{ fill: '#9494a0', fontSize: 11 }} tickLine={false} axisLine={false} width={90} />
+            <Tooltip content={<CustomTooltip />} />
+            <Bar dataKey="sharpe" fill="#c8963e" fillOpacity={0.8} radius={[0, 3, 3, 0]} barSize={12} />
+            <Bar dataKey="netProfit" fill="#4ade80" fillOpacity={0.6} radius={[0, 3, 3, 0]} barSize={12} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }

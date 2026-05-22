@@ -1,5 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { drawdownData } from '../data/mockData';
+import type { DrawdownPoint } from '../data/types';
 
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
@@ -11,22 +11,27 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
-export default function DrawdownChart() {
+export default function DrawdownChart({ data, loading }: { data: DrawdownPoint[]; loading: boolean }) {
   return (
     <div className="bg-bg-surface border border-border-default rounded-lg p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-text-primary text-md font-semibold tracking-[0.3px]">Drawdown</h2>
-        <span className="text-text-muted text-xs">peak-to-trough</span>
+        {loading && <span className="text-text-muted text-xs animate-pulse">Loading...</span>}
+        {!loading && <span className="text-text-muted text-xs">peak-to-trough</span>}
       </div>
-      <ResponsiveContainer width="100%" height={140}>
-        <BarChart data={drawdownData} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
-          <XAxis dataKey="date" tick={{ fill: '#5c5c6a', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={60} />
-          <YAxis domain={['auto', 0]} tick={{ fill: '#5c5c6a', fontSize: 10 }} tickFormatter={(v: number) => `${v.toFixed(0)}%`} tickLine={false} axisLine={false} width={40} />
-          <Tooltip content={<CustomTooltip />} />
-          <ReferenceLine y={0} stroke="rgba(255,255,255,0.06)" />
-          <Bar dataKey="drawdown" fill="#f87171" fillOpacity={0.6} radius={[2, 2, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      {data.length === 0 && !loading ? (
+        <div className="flex items-center justify-center h-[140px] text-text-muted text-xs">No drawdown data available</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={140}>
+          <BarChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+            <XAxis dataKey="date" tick={{ fill: '#5c5c6a', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={60} />
+            <YAxis domain={['auto', 0]} tick={{ fill: '#5c5c6a', fontSize: 10 }} tickFormatter={(v: number) => `${v.toFixed(0)}%`} tickLine={false} axisLine={false} width={40} />
+            <Tooltip content={<CustomTooltip />} />
+            <ReferenceLine y={0} stroke="rgba(255,255,255,0.06)" />
+            <Bar dataKey="drawdown" fill="#f87171" fillOpacity={0.6} radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }
