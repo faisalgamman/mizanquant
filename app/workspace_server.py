@@ -442,11 +442,14 @@ class DashboardAuthMiddleware(BaseHTTPMiddleware):
     """
 
     _EXEMPT_PREFIXES = ("/login", "/logout", "/health", "/livez", "/readyz",
-                        "/static", "/favicon", "/ws/")
+                        "/favicon", "/ws/")
 
     async def dispatch(self, request, call_next):
         path = request.url.path
-        # Always let exempt paths through
+        # Allow static assets (JS/CSS/fonts/images) but NOT .html files directly
+        if path.startswith("/static/") and not path.endswith(".html"):
+            return await call_next(request)
+        # Always let other exempt paths through
         if any(path.startswith(p) for p in self._EXEMPT_PREFIXES):
             return await call_next(request)
         # Dev mode: no DASHBOARD_USER configured → skip auth
@@ -5316,13 +5319,14 @@ if os.path.isdir(_static_dir):
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
     """Serve the professional trading dashboard."""
-    # Resolve relative to this file, not CWD, so it works in any deployment
-    dashboard_path = Path(__file__).resolve().parent / "static" / "dashboard-legacy.html"
-    if dashboard_path.exists():
-        return HTMLResponse(
-            content=dashboard_path.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
-        )
+    _base = Path(__file__).resolve().parent / "static"
+    for name in ("dashboard.html", "dashboard-legacy.html"):
+        p = _base / name
+        if p.exists():
+            return HTMLResponse(
+                content=p.read_text(encoding="utf-8"),
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+            )
     return HTMLResponse("<h1>Dashboard not found</h1><p>Run the server from the project root.</p>", status_code=404)
 
 
@@ -5330,6 +5334,16 @@ async def get_dashboard():
 async def get_dashboard_alt():
     """Alias for the dashboard."""
     return await get_dashboard()
+
+
+@app.get("/legacy", include_in_schema=False)
+async def get_legacy_dashboard():
+    """Serve the legacy dashboard (kept for backward compatibility)."""
+    p = Path(__file__).resolve().parent / "static" / "dashboard-legacy.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+    return RedirectResponse("/")
 
 
 @app.get("/forecast", include_in_schema=False)
