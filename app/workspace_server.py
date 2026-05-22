@@ -5323,6 +5323,13 @@ try:
 except Exception:
     logger.warning("dashboard router not available — skipped")
 
+# Include investors API routes
+try:
+    from app.routers.investors import router as investors_router
+    app.include_router(investors_router)
+except Exception:
+    logger.warning("investors router not available — skipped")
+
 # Mount static files for dashboard
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
@@ -5456,6 +5463,16 @@ async def get_backtest_panel():
     if backtest_path.exists():
         return HTMLResponse(content=backtest_path.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Backtest not found</h1>", status_code=404)
+
+
+@app.get("/investors", include_in_schema=False)
+async def get_investors_page():
+    """Serve the Investors Insights page."""
+    p = Path(__file__).resolve().parent / "static" / "investors.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
+    return HTMLResponse("<h1>Investors Insights not found</h1>", status_code=404)
 
 
 # ---------------------------------------------------------------------------

@@ -301,6 +301,35 @@ class FMPClient:
             return data[:25]
         return None
 
+    def get_analyst_recommendations(self, symbol: str) -> list[dict] | None:
+        """Analyst stock recommendations (Buy/Sell/Hold ratings)."""
+        data = self._get(f"v3/analyst-stock-recommendations/{symbol.upper()}")
+        if isinstance(data, list):
+            return data
+        return None
+
+    # ------------------------------------------------------------------
+    # Investors Insights (G.O.A.T / Institutional / Senate)
+    # ------------------------------------------------------------------
+
+    def get_senate_trading(self, symbol: str | None = None) -> list[dict] | None:
+        """Recent senate trading disclosures."""
+        params = {"symbol": symbol.upper()} if symbol else {}
+        data = self._get("v4/senate-trading", params)
+        if isinstance(data, list):
+            return data
+        return None
+
+    def get_institutional_portfolio(self, cik: str, date: str | None = None) -> list[dict] | None:
+        """Institutional portfolio by CIK (e.g., 13F filings)."""
+        params = {"cik": cik}
+        if date:
+            params["date"] = date
+        data = self._get("v4/institutional-ownership/portfolio", params)
+        if isinstance(data, list):
+            return data
+        return None
+
     # ------------------------------------------------------------------
     # Stock News
     # ------------------------------------------------------------------

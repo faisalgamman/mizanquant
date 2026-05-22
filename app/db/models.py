@@ -251,3 +251,44 @@ class BacktestRun(Base):
     code_hash = Column(String(16), nullable=False)
     config_hash = Column(String(16), nullable=False)
     extra = Column(JSON, nullable=True)  # catch-all: agent params, model version, etc.
+
+
+class AnalystForecast(Base):
+    """Cached analyst forecasts (Buy/Sell/Hold, Target Price)."""
+    __tablename__ = "analyst_forecasts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    firm = Column(String(100), nullable=True)
+    recommendation = Column(String(50), nullable=True)  # e.g., "STRONG BUY", "HOLD"
+    target_price = Column(Float, nullable=True)
+    current_price = Column(Float, nullable=True)
+    entry_date = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class GoatInvestor(Base):
+    """G.O.A.T Investors portfolio metadata."""
+    __tablename__ = "goat_investors"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    investor_type = Column(String(50), nullable=True)  # "Hedge Fund", "Congress", "Family Office"
+    organization = Column(String(100), nullable=True)
+    image_url = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class HotPick(Base):
+    """Aggregated Hot Investors Picks."""
+    __tablename__ = "hot_picks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    company_name = Column(String(100), nullable=True)
+    avg_buy_price = Column(Float, nullable=True)
+    current_price = Column(Float, nullable=True)
+    buys_count = Column(Integer, default=0)
+    total_value = Column(Float, nullable=True)
+    investors = Column(JSON, nullable=True)  # List of investor IDs or names who bought
+    created_at = Column(DateTime, default=_utcnow)
