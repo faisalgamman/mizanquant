@@ -4722,6 +4722,25 @@ except Exception:
 # Public API endpoints for dashboard (no auth required)
 # ---------------------------------------------------------------------------
 
+@app.get("/api/public/strategies", include_in_schema=False)
+async def public_strategies():
+    """Public strategy configs (no auth required)."""
+    try:
+        from app.config import STRATEGY_CONFIGS as CFG
+        result = []
+        for sid, cfg in CFG.items():
+            result.append({
+                "id": cfg.strategy_id, "name": cfg.name,
+                "max_positions": cfg.max_positions, "position_pct": cfg.position_pct,
+                "trailing_stop": cfg.trailing_stop_enabled, "trailing_stop_pct": cfg.trailing_stop_pct,
+                "static_sl_pct": cfg.static_sl_pct, "min_confidence": cfg.min_confidence,
+            })
+        return result if result else [{"message": "No strategies configured"}]
+    except Exception as e:
+        logger.warning(f"Public strategies failed: {e}")
+        return []
+
+
 @app.get("/api/public/portfolio-summary", include_in_schema=False)
 async def public_portfolio_summary():
     """Public portfolio summary for dashboard (no auth required)."""

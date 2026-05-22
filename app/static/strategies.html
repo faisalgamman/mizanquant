@@ -183,7 +183,7 @@ function sigClass(s) {
 async function loadOverview() {
   document.getElementById('loadingOverview').style.display = '';
   document.getElementById('overviewContent').style.display = 'none';
-  const [strategies, summary] = await Promise.all([apiGet('/strategies'), apiGet('/portfolio/summary')]);
+  const [strategies, summary] = await Promise.all([apiGet('/api/public/strategies'), apiGet('/api/public/portfolio-summary')]);
   strategiesCache = strategies;
   document.getElementById('loadingOverview').style.display = 'none';
   if (!strategies && !summary) {
@@ -199,19 +199,18 @@ async function loadOverview() {
 
 function renderSummaryBar(summary) {
   const el = document.getElementById('summaryBar');
-  if (!summary || !summary[0]) {
-    el.innerHTML = '<div class="summary-item"><div class="label">Status</div><div class="value" style="font-size:14px;color:var(--muted)">No portfolio data</div></div>';
+  if (!summary || summary.error) {
+    el.innerHTML = '<div class="summary-item"><div class="label">Status</div><div class="value" style="font-size:14px;color:var(--muted)">' + (summary ? summary.error : 'No portfolio data') + '</div></div>';
     return;
   }
-  const s = summary[0];
+  const s = summary;
   const items = [
-    { label: 'Equity', value: s.Equity || '—' },
-    { label: 'Cash', value: s.Cash || '—' },
-    { label: 'Buying Power', value: s['Buying Power'] || '—' },
-    { label: 'Portfolio Value', value: s['Portfolio Value'] || '—' },
-    { label: 'Daily P&L', value: s['Daily P&L'] || '—', cls: (s['Daily P&L']||'').includes('-') ? 'text-red' : 'text-green' },
-    { label: 'P&L %', value: s['Daily P&L %'] || '—', cls: (s['Daily P&L %']||'').includes('-') ? 'text-red' : 'text-green' },
-    { label: 'Status', value: s.Status || '—' },
+    { label: 'Equity', value: s.equity != null ? '$'+s.equity.toLocaleString() : '—' },
+    { label: 'Cash', value: s.cash != null ? '$'+s.cash.toLocaleString() : '—' },
+    { label: 'Buying Power', value: s.buying_power != null ? '$'+s.buying_power.toLocaleString() : '—' },
+    { label: 'Positions', value: s.positions_count != null ? s.positions_count : '—' },
+    { label: 'Daily P&L', value: s.daily_pl != null ? (s.daily_pl >= 0 ? '+': '') + '$'+s.daily_pl.toFixed(2) : '—', cls: s.daily_pl < 0 ? 'text-red' : 'text-green' },
+    { label: 'Status', value: s.status || '—' },
   ];
   el.innerHTML = items.map(i => `<div class="summary-item"><div class="label">${i.label}</div><div class="value ${i.cls||''}">${i.value}</div></div>`).join('');
 }
@@ -314,28 +313,28 @@ function renderSymbolTable(data) {
 async function loadPositions() {
   document.getElementById('loadingPositions').style.display = '';
   document.getElementById('positionsContent').style.display = 'none';
-  const positions = await apiGet('/portfolio/positions');
+  const positions = await apiGet('/api/public/positions');
   document.getElementById('loadingPositions').style.display = 'none';
   document.getElementById('positionsContent').style.display = '';
   const el = document.getElementById('positionsTableWrap');
-  if (!positions || positions.length === 0 || positions[0].message) {
+  if (!positions || positions.length === 0) {
     el.innerHTML = '<div class="empty-state"><div class="icon">📭</div>No open positions</div>';
     return;
   }
   let html = `<table><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg Entry</th><th>Current</th><th>Market Value</th><th>P&L</th><th>P&L %</th></tr></thead><tbody>`;
   for (const p of positions) {
-    const plStr = (p['Unrealized P&L'] || '').replace('$','').replace(',','');
-    const pl = parseFloat(plStr);
-    const isNeg = isNaN(pl) ? false : pl < 0;
+    const pl = p.unrealized_pl || 0;
+    const plPct = p.unrealized_plpc || 0;
+    const isNeg = pl < 0;
     html += `<tr>
-      <td><strong>${p.Symbol || '—'}</strong></td>
-      <td>${p.Side || 'LONG'}</td>
-      <td>${p.Qty || '—'}</td>
-      <td>${p['Avg Entry'] || '—'}</td>
-      <td>${p.Current || '—'}</td>
-      <td>${p['Market Value'] || '—'}</td>
-      <td class="${isNeg ? 'text-red' : 'text-green'}">${p['Unrealized P&L'] || '—'}</td>
-      <td class="${isNeg ? 'text-red' : 'text-green'}">${p['P&L %'] || '—'}</td>
+      <td><strong>${p.symbol || '—'}</strong></td>
+      <td>${p.side || 'LONG'}</td>
+      <td>${p.qty || '—'}</td>
+      <td>${p.avg_entry_price != null ? '$'+p.avg_entry_price.toFixed(2) : '—'}</td>
+      <td>${p.current_price != null ? '$'+p.current_price.toFixed(2) : '—'}</td>
+      <td>${p.market_value != null ? '$'+p.market_value.toLocaleString() : '—'}</td>
+      <td class="${isNeg ? 'text-red' : 'text-green'}">${pl >= 0 ? '+' : ''}$${pl.toFixed(2)}</td>
+      <td class="${isNeg ? 'text-red' : 'text-green'}">${(plPct*100).toFixed(2)}%</td>
     </tr>`;
   }
   html += '</tbody></table>';
