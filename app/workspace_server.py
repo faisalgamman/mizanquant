@@ -923,6 +923,38 @@ async def _fmp_call(method, *args, **kwargs):
     return await asyncio.to_thread(lambda: method(*args, **kwargs))
 
 
+async def _yf_info(symbol: str, timeout: float = 12.0) -> dict:
+    """Fetch yfinance ticker info with timeout. Returns {} on timeout/error."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(lambda: yf.Ticker(symbol).info or {}),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("yfinance info timeout [%s] > %.1fs", symbol, timeout)
+        return {}
+    except Exception as e:
+        logger.warning("yfinance info error [%s]: %s", symbol, e)
+        return {}
+
+
+async def _yf_download(symbol: str, period: str = "1y", timeout: float = 15.0) -> pd.DataFrame:
+    """Download yfinance OHLCV with timeout. Returns empty DataFrame on timeout/error."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: yf.download(symbol, period=period, progress=False, auto_adjust=True),
+            ),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("yfinance download timeout [%s] > %.1fs", symbol, timeout)
+        return pd.DataFrame()
+    except Exception as e:
+        logger.warning("yfinance download error [%s]: %s", symbol, e)
+        return pd.DataFrame()
+
+
 _HARAM_SECTORS = {
     "financial services", "financial", "banks", "insurance",
 }
@@ -1030,7 +1062,7 @@ async def stock_summary(
 ):
     """Comprehensive stock summary: profile, sector, valuation ratios, dividend."""
     async def compute():
-        info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        info = await _yf_info(symbol)
         if not info or not info.get("longName"):
             fmp_data = await _fmp_call(fmp_client.get_company_data, symbol)
             if fmp_data:
@@ -1099,7 +1131,7 @@ async def stock_summary(
             "avg_volume": info.get("averageVolume"),
             "market_state": info.get("marketState", ""),
         }
-    return await cached_or_compute(f"stock:summary:{symbol.upper()}", 300, compute)
+    return await cached_or_compute(f"stock:summary:{symbol.upper()}", 300, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/ratios")
@@ -1108,7 +1140,7 @@ async def stock_ratios(
 ):
     """Key financial ratios: profitability, liquidity, leverage, efficiency."""
     async def compute():
-        info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        info = await _yf_info(symbol)
         if not info or info.get("regularMarketPrice") is None and not info.get("marketCap"):
             ratios = await _fmp_call(fmp_client.get_financial_ratios, symbol)
             if ratios:
@@ -1159,7 +1191,7 @@ async def stock_ratios(
             "liquidity": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in liquidity.items()},
             "growth": {k: round(v, 4) if isinstance(v, (int, float)) else v for k, v in growth.items()},
         }
-    return await cached_or_compute(f"stock:ratios:{symbol.upper()}", 600, compute)
+    return await cached_or_compute(f"stock:ratios:{symbol.upper()}", 600, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/financials")
@@ -1233,7 +1265,7 @@ async def stock_financials(
                 return {"symbol": symbol, "statement": statement, "years": years, "rows": rows}
 
         return {"symbol": symbol, "statement": statement, "error": "No data", "rows": [], "years": []}
-    return await cached_or_compute(f"stock:financials:{symbol.upper()}:{statement}", 3600, compute)
+    return await cached_or_compute(f"stock:financials:{symbol.upper()}:{statement}", 3600, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/dividends")
@@ -1275,7 +1307,7 @@ async def stock_dividends(
             "ex_dividend_date": None,
             "last_24_payments": history,
         }
-    return await cached_or_compute(f"stock:dividends:{symbol.upper()}", 3600, compute)
+    return await cached_or_compute(f"stock:dividends:{symbol.upper()}", 3600, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/holders")
@@ -1315,7 +1347,7 @@ async def stock_holders(
             "major_holders": major_holders[:5],
             "institutional_holders": institutional[:10],
         }
-    return await cached_or_compute(f"stock:holders:{symbol.upper()}", 86400, compute)
+    return await cached_or_compute(f"stock:holders:{symbol.upper()}", 86400, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/earnings")
@@ -1380,7 +1412,7 @@ async def stock_earnings(
             "forward_eps": info.get("forwardEps"),
             "quarterly_surprises": surprises,
         }
-    return await cached_or_compute(f"stock:earnings:{symbol.upper()}", 3600, compute)
+    return await cached_or_compute(f"stock:earnings:{symbol.upper()}", 3600, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/screener")
@@ -1528,12 +1560,7 @@ async def stock_news(
         if fmp_news:
             return {"symbol": symbol, "count": len(fmp_news), "news": fmp_news}
         return {"symbol": symbol, "count": 0, "news": []}
-    return await cached_or_compute(f"stock:news:{symbol.upper()}:{limit}", 900, compute)
-
-
-# ---------------------------------------------------------------------------
-# Stock Chart — OHLCV price history via yfinance
-# ---------------------------------------------------------------------------
+    return await cached_or_compute(f"stock:news:{symbol.upper()}:{limit}", 900, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/chart")
@@ -1546,7 +1573,7 @@ async def stock_chart(
     period = period_map.get(range, "1mo")
 
     async def compute():
-        df = await asyncio.to_thread(lambda: yf.download(symbol, period=period, progress=False, auto_adjust=True))
+        df = await _yf_download(symbol, period)
         if df is None or df.empty:
             return {"symbol": symbol, "range": range, "bars": []}
         bars = []
@@ -1561,12 +1588,7 @@ async def stock_chart(
                 "volume": int(row["Volume"]) if "Volume" in row else 0,
             })
         return {"symbol": symbol, "range": range, "bars": bars}
-    return await cached_or_compute(f"stock:chart:{symbol.upper()}:{range}", 300, compute)
-
-
-# ---------------------------------------------------------------------------
-# Stock Peers — companies in the same sector
-# ---------------------------------------------------------------------------
+    return await cached_or_compute(f"stock:chart:{symbol.upper()}:{range}", 300, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/peers")
@@ -1576,7 +1598,7 @@ async def stock_peers(
 ):
     """Find peer companies in the same sector with key comparison metrics."""
     async def compute():
-        info = await asyncio.to_thread(lambda: yf.Ticker(symbol).info or {})
+        info = await _yf_info(symbol)
         sector = info.get("sector", "")
         industry = info.get("industry", "")
         company = info.get("longName") or info.get("shortName") or symbol
@@ -1588,7 +1610,7 @@ async def stock_peers(
             if candidate == symbol:
                 continue
             try:
-                cinfo = await asyncio.to_thread(lambda: yf.Ticker(candidate).info or {})
+                cinfo = await _yf_info(candidate)
                 csector = cinfo.get("sector", "")
                 if csector != sector:
                     continue
@@ -1616,12 +1638,7 @@ async def stock_peers(
             "industry": industry,
             "peers": peers,
         }
-    return await cached_or_compute(f"stock:peers:{symbol.upper()}:{limit}", 3600, compute)
-
-
-# ---------------------------------------------------------------------------
-# Stock Analyst — upgrades/downgrades, recommendations, earnings calendar, profile
-# ---------------------------------------------------------------------------
+    return await cached_or_compute(f"stock:peers:{symbol.upper()}:{limit}", 3600, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/analyst")
@@ -1746,85 +1763,7 @@ async def stock_analyst(
             "earnings_calendar": earnings_calendar,
             "company_profile": company_profile,
         }
-    return await cached_or_compute(f"stock:analyst:{symbol.upper()}", 1800, compute)
-
-
-async def _analyst_fmp_fallback(symbol: str) -> dict:
-    """FMP fallback for /api/stock/analyst when yfinance has no data."""
-    profile = await _fmp_call(fmp_client.get_profile, symbol)
-    pt = await _fmp_call(fmp_client.get_price_target, symbol)
-    estimates = await _fmp_call(fmp_client.get_analyst_estimates, symbol)
-    cal = await _fmp_call(fmp_client.get_earnings_calendar, [symbol])
-
-    company_profile = {}
-    if profile:
-        company_profile = {
-            "name": profile.get("companyName", symbol),
-            "sector": profile.get("sector"),
-            "industry": profile.get("industry"),
-            "website": profile.get("website"),
-            "employees": profile.get("fullTimeEmployees"),
-            "country": profile.get("country"),
-            "city": profile.get("city"),
-            "state": profile.get("state"),
-            "address": profile.get("address"),
-            "zip": None,
-            "description": (profile.get("description") or "")[:2000],
-            "market_cap": profile.get("marketCap"),
-            "enterprise_value": profile.get("enterpriseValue"),
-            "exchange": profile.get("exchangeShortName"),
-            "currency": profile.get("currency"),
-        }
-
-    price_targets = {
-        "high": _safe_float(pt.get("targetHigh") if pt else None),
-        "low": _safe_float(pt.get("targetLow") if pt else None),
-        "mean": _safe_float(pt.get("targetMean") if pt else None),
-        "median": _safe_float(pt.get("targetMedian") if pt else None),
-    }
-
-    analyst_consensus = {}
-    if pt:
-        analyst_consensus = {
-            "rating": pt.get("rating"),
-            "mean_rating": _safe_float(pt.get("ratingScore")),
-            "num_opinions": pt.get("numberOfAnalysts"),
-            "avg_rating_text": pt.get("rating"),
-        }
-
-    earnings_calendar = {}
-    earnings_data = cal.get("earnings", {})
-    if symbol.upper() in earnings_data:
-        earnings_calendar = {"earnings_date": [earnings_data[symbol.upper()]]}
-
-    recommendations = {}
-    if estimates:
-        try:
-            e = estimates[0]
-            recommendations = {
-                "strong_buy": int(e.get("numberOfAnalysts", 0)) if e.get("estimate") and "strongBuy" in str(e).lower() else 0,
-                "buy": 0,
-                "hold": 0,
-                "sell": 0,
-                "strong_sell": 0,
-            }
-        except Exception:
-            pass
-
-    return {
-        "symbol": symbol,
-        "upgrades_downgrades": [],
-        "recommendations": recommendations,
-        "price_targets": price_targets,
-        "analyst_consensus": analyst_consensus,
-        "earnings_calendar": earnings_calendar,
-        "company_profile": company_profile,
-    }
-
-
-# ---------------------------------------------------------------------------
-# DCF Valuation — FMP-only endpoint (yfinance doesn't provide DCF)
-# ---------------------------------------------------------------------------
+    return await cached_or_compute(f"stock:analyst:{symbol.upper()}", 1800, compute, compute_timeout=15)
 
 
 @app.get("/api/stock/dcf")
@@ -1842,7 +1781,7 @@ async def stock_dcf(
             "stock_price": _safe_float(data.get("Stock Price")),
             "date": data.get("date", ""),
         }
-    return await cached_or_compute(f"stock:dcf:{symbol.upper()}", 86400, compute)
+    return await cached_or_compute(f"stock:dcf:{symbol.upper()}", 86400, compute, compute_timeout=15)
 
 
 # ---------------------------------------------------------------------------

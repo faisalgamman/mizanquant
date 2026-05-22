@@ -56,6 +56,7 @@ async def cached_or_compute(
     compute_func,
     force_refresh: bool = False,
     json_encoder=None,
+    compute_timeout: float | None = None,
 ):
     """Fetch from Redis cache or compute-and-store.
 
@@ -65,6 +66,7 @@ async def cached_or_compute(
         compute_func: Async callable returning a JSON-serialisable dict
         force_refresh: Skip cache and re-compute
         json_encoder: Optional custom JSON encoder (default ``str``)
+        compute_timeout: Optional timeout in seconds for compute_func
 
     Returns:
         The computed (or cached) data dict.
@@ -79,7 +81,15 @@ async def cached_or_compute(
             except Exception as exc:
                 logger.debug("Redis cache read error for %s: %s", redis_key, exc)
 
-    data = await compute_func()
+    if compute_timeout is not None:
+        import asyncio
+        try:
+            data = await asyncio.wait_for(compute_func(), timeout=compute_timeout)
+        except asyncio.TimeoutError:
+            logger.warning("compute timeout [%s] > %.1fs", redis_key, compute_timeout)
+            return {"error": f"Compute timed out after {compute_timeout}s", "timeout": True}
+    else:
+        data = await compute_func()
 
     redis = await get_redis()
     if redis is not None:
