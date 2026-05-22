@@ -4905,8 +4905,8 @@ async def get_risk_desk_panel():
     return HTMLResponse("<h1>Risk Desk not found</h1>", status_code=404)
 
 
-@app.get("/screener", include_in_schema=False)
-async def get_screener_panel():
+@app.get("/halal-screener", include_in_schema=False)
+async def get_halal_screener():
     """Serve the Halal Screener interface."""
     p = Path(__file__).resolve().parent / "static" / "halal-screener.html"
     if p.exists():
@@ -4917,7 +4917,7 @@ async def get_screener_panel():
     return HTMLResponse("<h1>Screener not found</h1>", status_code=404)
 
 
-@app.get("/strategies", include_in_schema=False)
+@app.get("/strategy-dashboard", include_in_schema=False)
 async def get_strategies_page():
     """Serve the Strategies Dashboard."""
     p = Path(__file__).resolve().parent / "static" / "strategies.html"
