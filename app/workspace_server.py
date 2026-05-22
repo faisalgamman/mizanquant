@@ -680,7 +680,18 @@ SCREENER_CACHE_TTL = 900  # 15 minutes
 # DL Forecast Endpoints (18+ models)
 # ---------------------------------------------------------------------------
 
-_IS_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_SERVICE_NAME"))
+# Detect torch availability once at startup — environment-agnostic.
+# CPU-only wheel (~250 MB) fits Railway; full CUDA wheel (~1.9 GB) does not.
+# All DL model gates use _HAS_TORCH instead of checking RAILWAY_ENVIRONMENT.
+try:
+    import torch as _torch_probe
+    _HAS_TORCH = True
+    logger.info("torch %s ready (device: %s)", _torch_probe.__version__,
+                "cuda" if _torch_probe.cuda.is_available() else "cpu")
+    del _torch_probe
+except ImportError:
+    _HAS_TORCH = False
+    logger.warning("torch not installed — DL models will fall back to ARIMA-only")
 
 # Full model/agent name lists — used for display in /api/info regardless of
 # what can actually run. Defined here so they never require torch to import.
@@ -702,21 +713,20 @@ _ALL_AGENT_NAMES: list[str] = [
 
 try:
     from openbb_forecast.models.base import compute_forecast_metrics
-    if _IS_RAILWAY:
-        # Railway has ~512MB RAM — torch alone is ~800MB → OOM crash.
-        # Import ARIMA only (pure statsmodels, no torch dependency).
+    if _HAS_TORCH:
+        from openbb_forecast.models.factory import create_model, MODEL_NAMES  # type: ignore[assignment]
+        logger.info("Full model set loaded: %s", MODEL_NAMES)
+    else:
+        # torch not available — ARIMA-only graceful fallback
         from openbb_forecast.models.arima import ARIMAForecaster
 
         def create_model(name: str, **kw):  # type: ignore[misc]
             if name != "arima":
-                raise ValueError(f"Model '{name}' unavailable on Railway (OOM prevention)")
+                raise ValueError(f"Model '{name}' requires torch (not installed)")
             return ARIMAForecaster(**kw)
 
         MODEL_NAMES = ["arima"]
-        logger.info("Railway mode: loaded ARIMA-only (torch skipped to prevent OOM)")
-    else:
-        from openbb_forecast.models.factory import create_model, MODEL_NAMES  # type: ignore[assignment]
-        logger.info("Full model set loaded: %s", MODEL_NAMES)
+        logger.info("No torch — ARIMA-only mode")
     _HAS_FORECAST = True
 except Exception as e:
     logger.warning("openbb_forecast.models imports failed: %s", e)
@@ -833,15 +843,16 @@ async def forecast_model(
 # ---------------------------------------------------------------------------
 
 try:
-    if _IS_RAILWAY:
-        # All RL agents (DQN, PPO, A2C, etc.) require torch → skip on Railway.
+    if _HAS_TORCH:
+        from openbb_forecast.agents.factory import create_agent, AGENT_NAMES  # type: ignore[assignment]
+        _HAS_AGENTS = True
+        logger.info("RL agents loaded: %s", AGENT_NAMES)
+    else:
+        # torch not available — RL agents require it
         create_agent = None
         AGENT_NAMES = []
         _HAS_AGENTS = False
-        logger.info("Railway mode: RL agents disabled (torch skipped to prevent OOM)")
-    else:
-        from openbb_forecast.agents.factory import create_agent, AGENT_NAMES  # type: ignore[assignment]
-        _HAS_AGENTS = True
+        logger.info("No torch — RL agents disabled")
 except Exception as e:
     logger.warning("openbb_forecast.agents imports failed: %s", e)
     _HAS_AGENTS = False
@@ -2318,12 +2329,12 @@ def _score_momentum(symbol: str, df: pd.DataFrame) -> dict:
 def _score_forecast_consensus(symbol: str) -> dict:
     """Quick forecast consensus score (0-30) using a subset of fast models + agents.
 
-    On Railway (RAILWAY_ENVIRONMENT set) or when LIGHTWEIGHT_ML=true:
-    - Only uses arima (pure statsmodels, no PyTorch) — avoids OOM crashes.
+    When _HAS_TORCH is False or LIGHTWEIGHT_ML=true:
+    - Only uses arima (pure statsmodels, no PyTorch).
     Full mode: arima + ensemble + lstm + 3 RL agents.
     """
-    _lightweight = bool(os.environ.get("RAILWAY_ENVIRONMENT") or
-                        os.environ.get("LIGHTWEIGHT_ML", "").lower() in ("1", "true", "yes"))
+    _lightweight = (not _HAS_TORCH or
+                    os.environ.get("LIGHTWEIGHT_ML", "").lower() in ("1", "true", "yes"))
     score = 0
     details = {"models": 0, "agents": 0}
     try:
@@ -2755,13 +2766,13 @@ def _run_screener_bg(scan_symbols: list):
     # Filter, sort, build result
     filtered = [r for r in all_results if r.get("is_halal")]
     filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
-    # Cap at 10 for forecast scoring on Railway (was 50) — each call loads models into RAM.
-    _forecast_cap = 10 if os.environ.get("RAILWAY_ENVIRONMENT") else 20
+    # Cap forecast symbols when torch not available (ARIMA-only is fast; DL is heavier)
+    _forecast_cap = 20 if _HAS_TORCH else 10
     top = filtered[:50]
     top_for_forecast = top[:_forecast_cap]
 
-    # Forecast on top — use 1 worker on Railway to prevent OOM (was 3)
-    _forecast_workers = 1 if os.environ.get("RAILWAY_ENVIRONMENT") else 2
+    # Parallelism: more workers when torch models are available
+    _forecast_workers = 2 if _HAS_TORCH else 1
     with ThreadPoolExecutor(max_workers=_forecast_workers) as pool:
         f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top_for_forecast}
         for ff in as_completed(f_futures):
