@@ -677,9 +677,25 @@ SCREENER_CACHE_TTL = 900  # 15 minutes
 # DL Forecast Endpoints (18+ models)
 # ---------------------------------------------------------------------------
 
+_IS_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_SERVICE_NAME"))
+
 try:
     from openbb_forecast.models.base import compute_forecast_metrics
-    from openbb_forecast.models.factory import create_model, MODEL_NAMES
+    if _IS_RAILWAY:
+        # Railway has ~512MB RAM — torch alone is ~800MB → OOM crash.
+        # Import ARIMA only (pure statsmodels, no torch dependency).
+        from openbb_forecast.models.arima import ARIMAForecaster
+
+        def create_model(name: str, **kw):  # type: ignore[misc]
+            if name != "arima":
+                raise ValueError(f"Model '{name}' unavailable on Railway (OOM prevention)")
+            return ARIMAForecaster(**kw)
+
+        MODEL_NAMES = ["arima"]
+        logger.info("Railway mode: loaded ARIMA-only (torch skipped to prevent OOM)")
+    else:
+        from openbb_forecast.models.factory import create_model, MODEL_NAMES  # type: ignore[assignment]
+        logger.info("Full model set loaded: %s", MODEL_NAMES)
     _HAS_FORECAST = True
 except Exception as e:
     logger.warning("openbb_forecast.models imports failed: %s", e)
@@ -796,8 +812,15 @@ async def forecast_model(
 # ---------------------------------------------------------------------------
 
 try:
-    from openbb_forecast.agents.factory import create_agent, AGENT_NAMES
-    _HAS_AGENTS = True
+    if _IS_RAILWAY:
+        # All RL agents (DQN, PPO, A2C, etc.) require torch → skip on Railway.
+        create_agent = None
+        AGENT_NAMES = []
+        _HAS_AGENTS = False
+        logger.info("Railway mode: RL agents disabled (torch skipped to prevent OOM)")
+    else:
+        from openbb_forecast.agents.factory import create_agent, AGENT_NAMES  # type: ignore[assignment]
+        _HAS_AGENTS = True
 except Exception as e:
     logger.warning("openbb_forecast.agents imports failed: %s", e)
     _HAS_AGENTS = False
