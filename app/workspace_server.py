@@ -144,16 +144,69 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
+# Dashboard authentication constants — must be defined before middleware & routes
+# ---------------------------------------------------------------------------
+
+DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
+DASHBOARD_PASS_HASH = os.getenv(
+    "DASHBOARD_PASS_HASH",
+    hashlib.sha256("mizan2026".encode()).hexdigest(),
+)
+# DASHBOARD_SECRET stays constant per-process; sessions invalidate on restart.
+# Set DASHBOARD_SECRET env var on Railway to persist sessions across deploys.
+DASHBOARD_SECRET = os.getenv("DASHBOARD_SECRET", secrets.token_hex(32))
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MizanQuant — Login</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:system-ui,sans-serif; background:#0b1121; color:#e2e8f0;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  .card { background:#1e293b; padding:40px; border-radius:12px; width:360px;
+          box-shadow:0 8px 32px rgba(0,0,0,.4); }
+  h1 { text-align:center; margin-bottom:8px; font-size:1.6rem; background:linear-gradient(135deg,#3b82f6,#8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  p { text-align:center; color:#94a3b8; margin-bottom:24px; font-size:.9rem; }
+  input { width:100%; padding:12px 14px; margin-bottom:14px; border:1px solid #334155;
+          border-radius:8px; background:#0f172a; color:#e2e8f0; font-size:1rem; outline:none; }
+  input:focus { border-color:#3b82f6; }
+  button { width:100%; padding:12px; background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+           border:none; border-radius:8px; color:#fff; font-size:1rem; font-weight:600; cursor:pointer; }
+  button:hover { opacity:.9; }
+  .error { color:#ef4444; text-align:center; margin-bottom:12px; font-size:.85rem; }
+</style></head>
+<body>
+<div class="card">
+  <h1>MizanQuant</h1>
+  <p>Dashboard Access</p>
+  <form method="post" action="/login">
+    <input type="text" name="username" placeholder="Username" required autofocus>
+    <input type="password" name="password" placeholder="Password" required>
+    <button type="submit">Sign In</button>
+  </form>
+</div>
+</body></html>"""
+
+
+def _make_session_token() -> str:
+    """Compute the expected session cookie value for the current DASHBOARD_SECRET."""
+    return hashlib.sha256(f"{DASHBOARD_USER}:{DASHBOARD_SECRET}".encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
 # Dashboard login / logout routes
 # ---------------------------------------------------------------------------
 
-SESSION_COOKIE = hashlib.sha256(f"{DASHBOARD_USER}:{DASHBOARD_SECRET}".encode()).hexdigest()
-
-
 @app.get("/login", include_in_schema=False)
-async def login_page():
+async def login_page(next: str = "/"):
     """Show the login form."""
-    return HTMLResponse(content=LOGIN_HTML)
+    safe_next = next if next.startswith("/") else "/"
+    html = LOGIN_HTML.replace('action="/login"', f'action="/login"').replace(
+        '<input type="text" name="username"',
+        f'<input type="hidden" name="next" value="{safe_next}"><input type="text" name="username"'
+    )
+    return HTMLResponse(content=html)
 
 
 @app.post("/login", include_in_schema=False)
@@ -162,13 +215,17 @@ async def login_post(request: Request):
     form = await request.form()
     username = form.get("username", "")
     password = form.get("password", "")
+    next_url = form.get("next", "/") or "/"
+    # Prevent open redirects — only allow relative paths
+    if not next_url.startswith("/"):
+        next_url = "/"
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     if username == DASHBOARD_USER and pw_hash == DASHBOARD_PASS_HASH:
-        resp = RedirectResponse(url="/", status_code=302)
-        resp.set_cookie(key="session", value=SESSION_COOKIE, httponly=True, max_age=86400, samesite="lax")
+        resp = RedirectResponse(url=next_url, status_code=302)
+        resp.set_cookie(key="session", value=_make_session_token(), httponly=True, max_age=86400, samesite="lax")
         return resp
     error_html = LOGIN_HTML.replace('</form>', '<div class="error">Invalid username or password</div></form>')
-    return HTMLResponse(content=error_html, status_code=200)
+    return HTMLResponse(content=error_html, status_code=401)
 
 
 @app.get("/logout", include_in_schema=False)
@@ -334,68 +391,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Dashboard authentication — minimal session-based auth for deployment safety
-# ---------------------------------------------------------------------------
-
-DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
-DASHBOARD_PASS_HASH = os.getenv(
-    "DASHBOARD_PASS_HASH",
-    hashlib.sha256("mizan2026".encode()).hexdigest(),
-)
-DASHBOARD_SECRET = os.getenv("DASHBOARD_SECRET", secrets.token_hex(32))
-
-LOGIN_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>MizanQuant — Login</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:system-ui,sans-serif; background:#0b1121; color:#e2e8f0;
-         display:flex; align-items:center; justify-content:center; min-height:100vh; }
-  .card { background:#1e293b; padding:40px; border-radius:12px; width:360px;
-          box-shadow:0 8px 32px rgba(0,0,0,.4); }
-  h1 { text-align:center; margin-bottom:8px; font-size:1.6rem; background:linear-gradient(135deg,#3b82f6,#8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-  p { text-align:center; color:#94a3b8; margin-bottom:24px; font-size:.9rem; }
-  input { width:100%; padding:12px 14px; margin-bottom:14px; border:1px solid #334155;
-          border-radius:8px; background:#0f172a; color:#e2e8f0; font-size:1rem; outline:none; }
-  input:focus { border-color:#3b82f6; }
-  button { width:100%; padding:12px; background:linear-gradient(135deg,#3b82f6,#8b5cf6);
-           border:none; border-radius:8px; color:#fff; font-size:1rem; font-weight:600; cursor:pointer; }
-  button:hover { opacity:.9; }
-  .error { color:#ef4444; text-align:center; margin-bottom:12px; font-size:.85rem; }
-</style></head>
-<body>
-<div class="card">
-  <h1>MizanQuant</h1>
-  <p>Dashboard Access</p>
-  <form method="post" action="/login">
-    <input type="text" name="username" placeholder="Username" required autofocus>
-    <input type="password" name="password" placeholder="Password" required>
-    <button type="submit">Sign In</button>
-  </form>
-</div>
-</body></html>"""
-
-
 class DashboardAuthMiddleware(BaseHTTPMiddleware):
-    """Protect dashboard & API routes behind a simple session cookie."""
+    """Protect all dashboard pages and API routes behind a simple session cookie.
 
-    EXEMPT_PATHS = {"/login", "/logout", "/static", "/health", "/livez", "/readyz"}
+    - Unauthenticated page requests  → redirect to /login
+    - Unauthenticated /api/* requests → JSON 401 (so fetch() gets a proper error)
+    - Exempt: /login /logout /health /livez /readyz /static /favicon.ico /ws/
+    - If DASHBOARD_USER env var is not set (dev mode), auth is skipped.
+    """
+
+    _EXEMPT_PREFIXES = ("/login", "/logout", "/health", "/livez", "/readyz",
+                        "/static", "/favicon", "/ws/")
 
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if any(path.startswith(p) for p in self.EXEMPT_PATHS):
+        # Always let exempt paths through
+        if any(path.startswith(p) for p in self._EXEMPT_PREFIXES):
             return await call_next(request)
-        if request.method == "POST" and path == "/login":
+        # Dev mode: no DASHBOARD_USER configured → skip auth
+        if not os.environ.get("DASHBOARD_USER"):
             return await call_next(request)
+        # Validate session cookie
         session = request.cookies.get("session")
-        expected = hashlib.sha256(f"{DASHBOARD_USER}:{DASHBOARD_SECRET}".encode()).hexdigest()
-        if session == expected:
+        if session and secrets.compare_digest(session, _make_session_token()):
             return await call_next(request)
-        if path.startswith("/api/") or path == "/":
-            return HTMLResponse(content=LOGIN_HTML, status_code=200)
-        return await call_next(request)
+        # Not authenticated
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Not authenticated — visit /login"}, status_code=401)
+        # Page request → redirect to login
+        next_url = path
+        return RedirectResponse(url=f"/login?next={next_url}", status_code=302)
 
 
 app.add_middleware(DashboardAuthMiddleware)
