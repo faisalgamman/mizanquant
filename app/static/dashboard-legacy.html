@@ -202,6 +202,55 @@ body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg-primary
 .wf-section-body { padding:0 4px; }
 .wf-section-body.collapsed { display:none; }
 
+/* ═══ LOWER ROW — Advanced Market Intelligence ═══ */
+.lower-row { display:grid; grid-template-columns:1.2fr 1.5fr 1.8fr; gap:10px; margin-top:8px; }
+.lw-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
+.lw-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border-light); }
+.lw-title { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); }
+.lw-subtitle { font-size:9px; color:var(--text-muted); }
+.lw-row { display:flex; justify-content:space-between; align-items:center; padding:3px 0; font-size:11px; }
+.lw-row + .lw-row { border-top:1px solid var(--border-light); }
+.lw-symbol { font-weight:600; font-family:var(--mono); color:var(--text-primary); width:52px; }
+.lw-value { font-family:var(--mono); font-size:11px; text-align:right; }
+.lw-cpr { font-family:var(--mono); font-size:11px; text-align:right; width:44px; }
+.lw-premium { font-family:var(--mono); font-size:11px; text-align:right; width:60px; }
+.lw-shimmer { height:10px; background:var(--bg-tertiary); border-radius:4px; animation:pulse 1.5s infinite; }
+.lw-shimmer + .lw-shimmer { margin-top:6px; }
+@keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:0.8} }
+
+/* Sector heatmap grid */
+.sec-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:4px; }
+.sec-cell { padding:6px 8px; border-radius:var(--radius-sm); text-align:center; font-size:10px; cursor:default; }
+.sec-cell .sec-ticker { font-weight:600; font-family:var(--mono); color:var(--text-primary); }
+.sec-cell .sec-perf { font-family:var(--mono); font-size:11px; margin-top:1px; }
+.sec-positive { background:rgba(74,222,128,0.12); border:1px solid rgba(74,222,128,0.20); }
+.sec-positive-strong { background:rgba(74,222,128,0.22); border:1px solid rgba(74,222,128,0.35); }
+.sec-negative { background:rgba(248,113,113,0.12); border:1px solid rgba(248,113,113,0.20); }
+.sec-negative-strong { background:rgba(248,113,113,0.22); border:1px solid rgba(248,113,113,0.35); }
+.sec-neutral { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); }
+
+/* Calendar rows */
+.cal-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:11px; }
+.cal-row + .cal-row { border-top:1px solid var(--border-light); }
+.cal-event { flex:1; color:var(--text-primary); }
+.cal-date { font-family:var(--mono); font-size:10px; color:var(--text-muted); width:72px; text-align:right; }
+.cal-fig { font-family:var(--mono); font-size:11px; width:52px; text-align:right; }
+.cal-fig.fore { color:var(--accent); }
+.cal-badge { font-size:8px; padding:1px 5px; border-radius:6px; font-weight:600; text-transform:uppercase; margin-left:6px; }
+.cal-high { background:rgba(248,113,113,0.15); color:#f87171; }
+.cal-med { background:rgba(251,191,36,0.12); color:#fbbf24; }
+
+/* Whale holdings */
+.whale-row { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:11px; }
+.whale-row + .whale-row { border-top:1px solid var(--border-light); }
+.whale-symbol { font-weight:600; font-family:var(--mono); color:var(--text-primary); width:48px; }
+.whale-bar-bg { flex:1; height:14px; background:var(--bg-tertiary); border-radius:3px; overflow:hidden; }
+.whale-bar { height:100%; border-radius:3px; background:var(--accent); }
+.whale-pct { font-family:var(--mono); width:40px; text-align:right; color:var(--text-primary); }
+
+@media (max-width:1199px) { .lower-row { grid-template-columns:1fr 1fr; } .sec-grid { grid-template-columns:1fr 1fr 1fr; } }
+@media (max-width:899px)  { .lower-row { grid-template-columns:1fr; } .sec-grid { grid-template-columns:1fr 1fr; } }
+
 /* ═══ PORTFOLIO BAR (compact) ═══ */
 /* ═══ MARKET CONTEXT STRIP ═══ */
 .mc-strip { display:flex; gap:6px; }
@@ -1239,6 +1288,56 @@ select:focus,input:focus { border-color:var(--accent); }
         </div>
         <div class="wf-section-body" id="schedulerTimelineCard">
           <div id="schedulerTimeline"></div>
+        </div>
+      </div>
+
+      <!-- LOWER ROW: Advanced Market Intelligence -->
+      <div class="lower-row">
+        <!-- Options Flow -->
+        <div class="lw-card" id="lwOptionsFlow">
+          <div class="lw-header">
+            <span class="lw-title">☰ Options Flow</span>
+            <span class="lw-subtitle">Top notional · Call/Put</span>
+          </div>
+          <div id="optionsFlowBody">
+            <div class="lw-shimmer" style="width:90%"></div>
+            <div class="lw-shimmer" style="width:70%"></div>
+            <div class="lw-shimmer" style="width:80%"></div>
+            <div class="lw-shimmer" style="width:60%"></div>
+          </div>
+        </div>
+        <!-- Sector Heatmap -->
+        <div class="lw-card" id="lwSectors">
+          <div class="lw-header">
+            <span class="lw-title">⊞ Sector Heatmap</span>
+            <span class="lw-subtitle">1-day performance</span>
+          </div>
+          <div class="sec-grid" id="sectorHeatmapBody">
+            <div class="lw-shimmer" style="width:100%"></div>
+            <div class="lw-shimmer" style="width:100%"></div>
+            <div class="lw-shimmer" style="width:100%"></div>
+            <div class="lw-shimmer" style="width:100%"></div>
+          </div>
+          <div style="margin-top:6px;display:flex;gap:8px;font-size:9px;color:var(--text-muted);align-items:center;">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(74,222,128,0.22);vertical-align:middle;margin-right:2px;"></span> Strong</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(74,222,128,0.12);vertical-align:middle;margin-right:2px;"></span> Positive</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(255,255,255,0.03);vertical-align:middle;margin-right:2px;"></span> Neutral</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(248,113,113,0.12);vertical-align:middle;margin-right:2px;"></span> Negative</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(248,113,113,0.22);vertical-align:middle;margin-right:2px;"></span> Weak</span>
+          </div>
+        </div>
+        <!-- Whale Portfolio + Macro Calendar -->
+        <div class="lw-card" id="lwWhaleMacro">
+          <div class="lw-header">
+            <span class="lw-title">⌂ Whale Portfolio · Macro Calendar</span>
+            <span class="lw-subtitle" id="whaleAsOf">Renaissance Technologies</span>
+          </div>
+          <div id="whaleMacroBody">
+            <div class="lw-shimmer" style="width:85%"></div>
+            <div class="lw-shimmer" style="width:65%"></div>
+            <div class="lw-shimmer" style="width:75%"></div>
+            <div class="lw-shimmer" style="width:55%"></div>
+          </div>
         </div>
       </div>
 
@@ -4620,6 +4719,77 @@ async function loadNews() {
   }
 }
 
+/* ═══ LOWER ROW: Options Flow ═══ */
+async function loadOptionsFlow() {
+  try {
+    const data = await apiGet('/api/dashboard/options-flow');
+    if (!data || data.length === 0) { document.getElementById('optionsFlowBody').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">No options flow data</div>'; return; }
+    var html = '';
+    data.slice(0,8).forEach(function(item) {
+      var isPos = item.premium >= 0;
+      html += '<div class="lw-row"><span class="lw-symbol">' + item.symbol + '</span>';
+      html += '<span class="lw-cpr" style="color:' + (item.call_put_ratio >= 1 ? 'var(--green)' : 'var(--red)') + '">' + item.call_put_ratio.toFixed(2) + '</span>';
+      html += '<span class="lw-premium" style="color:' + (isPos ? 'var(--green)' : 'var(--red)') + '">' + (isPos ? '+' : '') + '$' + (item.premium / 1e6).toFixed(1) + 'M</span></div>';
+    });
+    document.getElementById('optionsFlowBody').innerHTML = html;
+  } catch(e) { document.getElementById('optionsFlowBody').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Options flow unavailable</div>'; }
+}
+
+/* ═══ LOWER ROW: Sector Heatmap ═══ */
+async function loadSectorHeatmap() {
+  try {
+    const data = await apiGet('/api/sectors/performance');
+    var sectors = data.performance || [];
+    if (sectors.length === 0) { document.getElementById('sectorHeatmapBody').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">No sector data</div>'; return; }
+    var html = '';
+    sectors.forEach(function(s) {
+      var p = s.perf_1d || 0;
+      var cls = 'sec-neutral';
+      if (p > 0.5) cls = 'sec-positive-strong';
+      else if (p > 0) cls = 'sec-positive';
+      else if (p < -0.5) cls = 'sec-negative-strong';
+      else if (p < 0) cls = 'sec-negative';
+      html += '<div class="sec-cell ' + cls + '"><div class="sec-ticker">' + s.ticker + '</div>';
+      html += '<div class="sec-perf" style="color:' + (p >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (p >= 0 ? '+' : '') + p.toFixed(2) + '%</div></div>';
+    });
+    document.getElementById('sectorHeatmapBody').innerHTML = html;
+  } catch(e) { document.getElementById('sectorHeatmapBody').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Sectors unavailable</div>'; }
+}
+
+/* ═══ LOWER ROW: Whale Portfolio + Macro Calendar ═══ */
+async function loadWhaleMacro() {
+  try {
+    var html = '';
+    // Whale portfolio
+    const whale = await apiGet('/api/dashboard/whale-portfolio');
+    if (whale && whale.holdings) {
+      document.getElementById('whaleAsOf').textContent = whale.fund_name + ' · ' + whale.as_of_date;
+      html += '<div style="margin-bottom:8px;">';
+      whale.holdings.slice(0,8).forEach(function(h) {
+        html += '<div class="whale-row"><span class="whale-symbol">' + h.symbol + '</span>';
+        html += '<div class="whale-bar-bg"><div class="whale-bar" style="width:' + h.value_pct * 6 + '%"></div></div>';
+        html += '<span class="whale-pct">' + h.value_pct.toFixed(1) + '%</span></div>';
+      });
+      html += '</div>';
+    }
+    // Macro Calendar
+    const macro = await apiGet('/api/dashboard/macro-calendar');
+    if (macro && macro.length > 0) {
+      html += '<div style="padding-top:8px;margin-top:8px;border-top:1px solid var(--border-light);">';
+      html += '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary);margin-bottom:6px;">⬡ Macro Calendar</div>';
+      macro.slice(0,5).forEach(function(ev) {
+        var badgeCls = ev.impact === 'high' ? 'cal-high' : 'cal-med';
+        html += '<div class="cal-row"><span class="cal-event">' + ev.event + ' <span class="cal-badge ' + badgeCls + '">' + ev.impact + '</span></span>';
+        html += '<span class="cal-date">' + ev.date.slice(5) + '</span>';
+        html += '<span class="cal-fig">' + ev.previous.toFixed(1) + '</span>';
+        html += '<span class="cal-fig fore">' + ev.forecast.toFixed(1) + '</span></div>';
+      });
+      html += '</div>';
+    }
+    document.getElementById('whaleMacroBody').innerHTML = html || '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Market intelligence pending</div>';
+  } catch(e) { document.getElementById('whaleMacroBody').innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Market intelligence unavailable</div>'; }
+}
+
 async function loadChart(range) {
   const sym = _currentSymbol;
   if (!sym) return;
@@ -5921,6 +6091,7 @@ function showKeyboardHelp() {
   window._universeSymbols = await loadUniverse();
   await checkStatus();
   await loadOverview();
+  Promise.all([loadOptionsFlow(), loadSectorHeatmap(), loadWhaleMacro()]).catch(function(){});
   updateTimestamp();
   updateETClock();
   await loadAlertsTab();
