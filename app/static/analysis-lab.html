@@ -455,17 +455,26 @@ function makeCard(item, prefix) {
   const sharpeStr = item.sharpe != null ? item.sharpe.toFixed(2) : '—';
   const wrStr = item.win_rate != null ? (item.win_rate * 100).toFixed(0)+'%' : '—';
   const type = prefix === 'fc' ? 'forecast' : 'agent';
+  // item.available === false means model exists but can't run (e.g. Railway OOM prevention)
+  const unavailable = item.available === false;
+  const runBtn = unavailable
+    ? `<button class="btn-run" disabled title="Requires GPU/torch — unavailable on Railway" style="opacity:0.4;cursor:not-allowed;">⚠ N/A</button>`
+    : `<button class="btn-run" id="run-${id}" onclick="runSingle('${item.name}','${type}')">▶ Run</button>`;
+  const railwayBadge = unavailable
+    ? `<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;font-size:9px;padding:1px 5px;border-radius:3px;">ARIMA-only</span>`
+    : '';
   return `
-  <div class="m-card" id="card-${id}" data-cat="${catClass(item.category)}">
+  <div class="m-card${unavailable?' m-card-dim':''}" id="card-${id}" data-cat="${catClass(item.category)}" style="${unavailable?'opacity:0.65;':''}">
     <div class="m-card-top">
       <div class="m-name">${item.name}</div>
       <div class="badges">
         ${catBadgeHTML(item.category)}
+        ${railwayBadge}
         ${tierHTML(item.tier||'staging', item.status)}
       </div>
     </div>
     <div class="sparkline-wrap" id="spark-wrap-${id}">
-      <div class="spark-placeholder" id="spark-ph-${id}">no data yet</div>
+      <div class="spark-placeholder" id="spark-ph-${id}">${unavailable?'torch required':'no data yet'}</div>
       <canvas id="spark-${id}" style="display:none"></canvas>
     </div>
     <div class="m-metrics">
@@ -484,7 +493,7 @@ function makeCard(item, prefix) {
     </div>
     <div class="m-footer">
       <div class="m-status" id="status-${id}">idle</div>
-      <button class="btn-run" id="run-${id}" onclick="runSingle('${item.name}','${type}')">▶ Run</button>
+      ${runBtn}
     </div>
   </div>`;
 }

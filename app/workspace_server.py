@@ -679,6 +679,24 @@ SCREENER_CACHE_TTL = 900  # 15 minutes
 
 _IS_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_SERVICE_NAME"))
 
+# Full model/agent name lists — used for display in /api/info regardless of
+# what can actually run. Defined here so they never require torch to import.
+_ALL_MODEL_NAMES: list[str] = [
+    "arima", "lstm", "gru", "bigru", "gru_2path", "gru_seq2seq",
+    "bigru_seq2seq", "gru_vae", "transformer", "ensemble",
+    "cnn_seq2seq", "dilated_cnn", "vanilla", "vanilla_bi",
+    "vanilla_2path", "lstm_2path", "bilstm_seq2seq", "lstm_vae",
+    "attention_rnn",
+]
+_ALL_AGENT_NAMES: list[str] = [
+    "double_dqn", "policy_gradient", "evolution_strategy",
+    "turtle", "moving_average", "signal_rolling", "abcd_strategy",
+    "q_learning", "double_q_learning", "recurrent_q_learning",
+    "duel_q_learning", "double_duel_q_learning", "curiosity_q_learning",
+    "recurrent_curiosity_q_learning", "actor_critic", "actor_critic_duel",
+    "actor_critic_recurrent", "neuro_evolution", "neuro_evolution_novelty",
+]
+
 try:
     from openbb_forecast.models.base import compute_forecast_metrics
     if _IS_RAILWAY:
@@ -826,6 +844,11 @@ except Exception as e:
     _HAS_AGENTS = False
     create_agent = None
     AGENT_NAMES = []
+
+# _RUNNABLE_* = what can actually execute (may be subset on Railway)
+# _ALL_*      = full list for display in /api/info (always 19+19)
+_RUNNABLE_MODEL_NAMES = MODEL_NAMES
+_RUNNABLE_AGENT_NAMES = AGENT_NAMES
 
 
 @app.get("/api/agent/{agent_name}")
@@ -3714,8 +3737,11 @@ def _live_or_mock_dashboard() -> dict:
 @app.get("/api/info")
 async def get_info():
     """List all available models and agents with enriched metadata."""
+    # Use _ALL_MODEL_NAMES for display so all 19 cards appear in the UI even on
+    # Railway where only ARIMA can actually run.  The `available` field tells the
+    # frontend whether the model can be executed right now.
     model_items = []
-    for m in sorted(MODEL_NAMES):
+    for m in sorted(_ALL_MODEL_NAMES):
         cat = _model_category(m)
         model_items.append({
             "name": m,
@@ -3726,9 +3752,10 @@ async def get_info():
             "sharpe": _mock_sharpe(m),
             "win_rate": _mock_win_rate(m),
             "is_champion": _mock_is_champion(m),
+            "available": m in _RUNNABLE_MODEL_NAMES,
         })
     agent_items = []
-    for a in sorted(AGENT_NAMES):
+    for a in sorted(_ALL_AGENT_NAMES):
         cat = _agent_category(a)
         agent_items.append({
             "name": a,
@@ -3740,6 +3767,7 @@ async def get_info():
             "sharpe": _mock_sharpe(a),
             "win_rate": _mock_win_rate(a),
             "is_champion": _mock_is_champion(a),
+            "available": a in _RUNNABLE_AGENT_NAMES,
         })
     dashboard = _live_or_mock_dashboard()
     return {
