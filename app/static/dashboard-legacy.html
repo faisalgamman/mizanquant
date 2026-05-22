@@ -5,86 +5,62 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mizanquant — Halal Trading Suite</title>
 <link rel="icon" type="image/svg+xml" href="/static/logo-favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/fontawesome/all.min.css">
 <script src="/static/chart.umd.min.js"></script>
 <style>
 :root {
-  /* ════════════════════════════════════════════
-     DESIGN TOKENS — Mizanquant v2 "Terminal"
-     Source: DESIGN.md
-     ════════════════════════════════════════════ */
-
-  /* Backgrounds — warm near-black (not cold blue-black) */
-  --bg-root:       #0c0c10;
-  --bg-surface:    #14141a;
-  --bg-raised:     #1c1c26;
-  --bg-overlay:    #242430;
-
-  /* Old name aliases (backward compat) */
-  --bg-primary:    var(--bg-root);
-  --bg-secondary:  var(--bg-surface);
-  --bg-tertiary:   var(--bg-raised);
-  --bg-card:       var(--bg-raised);
-  --bg-card-hover: #22222e;
-
-  /* Borders */
-  --border-subtle:  rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-strong:  rgba(255, 255, 255, 0.10);
-  --border:         var(--border-strong);
-  --border-light:   var(--border-default);
-
-  /* Text */
-  --text-primary:   #e4e4ec;
-  --text-secondary: #9494a0;
-  --text-muted:     #5c5c6a;
-  --text-disabled:  #3c3c48;
-
-  /* Accent — Warm Gold (Islamic geometric art reference) */
-  --accent:        #c8963e;
-  --accent-hover:  #d4a853;
-  --accent-dim:    rgba(200, 150, 62, 0.10);
-  --accent-glow:   rgba(200, 150, 62, 0.18);
-
-  /* Semantic — keep old + add new names */
-  --positive:      #4ade80;
-  --positive-dim:  rgba(74, 222, 128, 0.10);
-  --green:         var(--positive);
-  --green-dim:     var(--positive-dim);
-  --negative:      #f87171;
-  --negative-dim:  rgba(248, 113, 113, 0.10);
-  --red:           var(--negative);
-  --red-dim:       var(--negative-dim);
-  --warning:       #fbbf24;
-  --warning-dim:   rgba(251, 191, 36, 0.10);
-  --amber:         var(--warning);
-  --amber-dim:     var(--warning-dim);
-  --orange:        var(--warning);
-  --orange-dim:    var(--warning-dim);
-  --info:          #60a5fa;
-  --info-dim:      rgba(96, 165, 250, 0.10);
-
-  /* Layout */
+  --bg-primary: oklch(0.03 0.006 60);
+  --bg-secondary: oklch(0.06 0.008 60);
+  --bg-tertiary: oklch(0.09 0.01 60);
+  --border: oklch(0.15 0.008 60 / 0.35);
+  --border-light: oklch(0.15 0.008 60 / 0.15);
+  --text-primary: oklch(0.92 0.005 60);
+  --text-secondary: oklch(0.65 0.008 60);
+  --text-muted: oklch(0.45 0.01 60);
+  --green: oklch(0.68 0.16 150);
+  --green-dim: oklch(0.68 0.16 150 / 0.12);
+  --red: oklch(0.55 0.14 20);
+  --red-dim: oklch(0.55 0.14 20 / 0.12);
+  --amber: oklch(0.62 0.10 80);
+  --amber-dim: oklch(0.62 0.10 80 / 0.12);
+  --accent: oklch(0.68 0.16 150);
+  --accent-dim: oklch(0.68 0.16 150 / 0.15);
   --sidebar-width: 56px;
-  --cmd-height:    48px;
+  --cmd-height: 48px;
   --market-height: 36px;
   --status-height: 28px;
+  --bg-card: oklch(0.09 0.01 60);
+  --bg-card-hover: oklch(0.11 0.01 60);
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --mono: 'SF Mono','Fira Code','JetBrains Mono',monospace;
+  --font-mono: var(--mono);
+  --font-body: 'Inter',-apple-system,sans-serif;
 
-  /* Radius */
-  --radius-none: 0;
-  --radius-sm:   3px;
-  --radius-md:   5px;
-  --radius-lg:   8px;
-  --radius-xl:   12px;
-  --radius:      var(--radius-lg);
+  /* DESIGN.md aliases (supplement, not replacement) */
+  --bg-root:      var(--bg-primary);
+  --bg-surface:   var(--bg-secondary);
+  --bg-raised:    var(--bg-tertiary);
+  --bg-overlay:   #242430;
+  --border-subtle: rgba(255,255,255,0.04);
+  --border-default: var(--border-light);
+  --border-strong: var(--border);
+  --accent-hover: #47c66a;
+  --accent-glow:  rgba(62,207,142,0.18);
+  --positive:     var(--green);
+  --positive-dim: var(--green-dim);
+  --negative:     var(--red);
+  --negative-dim: var(--red-dim);
+  --warning:      var(--amber);
+  --warning-dim:  var(--amber-dim);
+  --info:         #60a5fa;
+  --info-dim:     rgba(96,165,250,0.10);
 
-  /* Typography */
-  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
-  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono:    'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  --mono:         var(--font-mono);
-
-  /* Font scale (minor third: 1.2) */
+  /* Font scale */
   --text-xs:   0.625rem;
   --text-sm:   0.75rem;
   --text-base: 0.8125rem;
@@ -101,7 +77,7 @@
   --duration-slow:   350ms;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:var(--font-body); background:var(--bg-primary); color:var(--text-primary); min-height:100vh; overflow-x:hidden; font-size:13px; }
+body { font-family:'Inter',-apple-system,sans-serif; background:var(--bg-primary); color:var(--text-primary); min-height:100vh; overflow-x:hidden; font-size:13px; }
 ::-webkit-scrollbar { width:4px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
@@ -847,7 +823,7 @@ select:focus,input:focus { border-color:var(--accent); }
 .qtp-actions .qtp-paper { background:linear-gradient(135deg,var(--accent),#8b5cf6); color:#fff; }
 .qtp-actions .qtp-paper:hover { opacity:0.85; }
 .qtp-actions .qtp-live { background:var(--bg-card); color:var(--text-muted); border:1px solid var(--border); cursor:not-allowed; }
-.qtp-actions .qtp-live .premium-lock { display:inline-flex; align-items:center; gap:3px; padding:1px 6px; border-radius:3px; background:linear-gradient(135deg,var(--accent),var(--accent-hover)); color:#fff; font-size:8px; font-weight:700; }
+.qtp-actions .qtp-live .premium-lock { display:inline-flex; align-items:center; gap:3px; padding:1px 6px; border-radius:3px; background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff; font-size:8px; font-weight:700; }
 .qtp-section-title { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin:14px 0 6px; font-weight:600; }
 .qtp-detail-row { display:flex; justify-content:space-between; padding:4px 0; font-size:11px; color:var(--text-muted); }
 .qtp-detail-row .qtp-detail-val { font-weight:600; color:var(--text-primary); }
@@ -924,7 +900,7 @@ select:focus,input:focus { border-color:var(--accent); }
 .mc-card .mc-gauge-val { font-size:22px; font-weight:700; }
 .mc-card .mc-gauge-sub { font-size:10px; color:var(--text-muted); margin-top:2px; }
 /* VIX gauge */
-.mc-vix { color:var(--warning); }
+.mc-vix { color:#f59e0b; }
 /* Traffic light */
 .traffic-green { color:var(--green); } .traffic-yellow { color:var(--orange); } .traffic-red { color:var(--red); }
 /* Breadth bar */
@@ -1851,7 +1827,7 @@ select:focus,input:focus { border-color:var(--accent); }
         <div class="card-title" style="color:#e2e8f0;font-size:14px;font-weight:700;">Strategy Backtest Comparison</div>
         <div class="card-subtitle" style="color:#94a3b8;">4 strategies × 25 halal stocks (2015–2026)</div>
       </div>
-      <button onclick="loadStrategies()" style="background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;"><i class="fas fa-sync-alt"></i> Refresh</button>
+      <button onclick="loadStrategies()" style="background:#3b82f6;color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;"><i class="fas fa-sync-alt"></i> Refresh</button>
     </div>
   </div>
 
@@ -3166,8 +3142,13 @@ async function loadOverview(showLoading = true) {
       const vixGauge = Math.min((vix.vix||20) / 40 * 100, 100);
     const vixColor = (vix.vix||20) < 15 ? 'var(--positive)' : (vix.vix||20) < 25 ? 'var(--warning)' : 'var(--negative)';
     const spyGaugeColor = spy.regime === 'bull' ? 'var(--positive)' : spy.regime === 'bear' ? 'var(--negative)' : 'var(--warning)';
+    const spyGaugeVal = spy.regime === 'bull' ? 75 : spy.regime === 'bear' ? 25 : 50;
+    const brPct = breadth.breadth_pct || 50;
     const brColor = brPct > 60 ? 'var(--positive)' : brPct > 40 ? 'var(--warning)' : 'var(--negative)';
+    const crClass = credit.classification === 'ok' ? 'traffic-green' : credit.classification === 'stress' ? 'traffic-red' : 'traffic-yellow';
+    const crLabel = credit.classification === 'ok' ? 'OK' : credit.classification === 'stress' ? 'STRESS' : 'WATCH';
     const crColor = credit.classification === 'ok' ? 'var(--positive)' : credit.classification === 'stress' ? 'var(--negative)' : 'var(--warning)';
+    const liqPct = liquidity.liquidity_pct || 50;
     const liqColor = liqPct > 60 ? 'var(--positive)' : liqPct > 40 ? 'var(--warning)' : 'var(--negative)';
 
     // ── Trend arrows (↑↓→) from localStorage ──
@@ -7194,7 +7175,7 @@ function _stratShowWaiting(msg, secs) {
       '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">جاري تشغيل الـ Backtest…</div>' +
       '<div style="font-size:12px;opacity:.85;max-width:380px;margin:0 auto 16px;">' + (msg || 'تحليل 25 سهماً × 4 استراتيجيات — ~90 ثانية أول مرة') + '</div>' +
       '<div style="font-size:11px;opacity:.6;margin-bottom:16px;">سيتم التحديث تلقائياً خلال ' + secs + ' ثانية</div>' +
-      '<button onclick="loadStrategies()" style="background:var(--accent);color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↻ تحديث الآن</button>' +
+      '<button onclick="loadStrategies()" style="background:#3b82f6;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↻ تحديث الآن</button>' +
     '</div>';
 }
 
@@ -7206,7 +7187,7 @@ function _stratShowError(msg) {
       '<div style="font-size:32px;margin-bottom:12px;">⚠️</div>' +
       '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">تعذّر تحميل البيانات</div>' +
       '<div style="font-size:12px;opacity:.8;margin-bottom:16px;">' + msg + '</div>' +
-      '<button onclick="loadStrategies()" style="background:var(--negative);color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↻ إعادة المحاولة</button>' +
+      '<button onclick="loadStrategies()" style="background:#ef4444;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">↻ إعادة المحاولة</button>' +
     '</div>';
 }
 
