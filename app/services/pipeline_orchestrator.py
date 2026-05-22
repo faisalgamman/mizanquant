@@ -686,16 +686,46 @@ class UnifiedPipeline:
 
             body = "\n".join(lines)
 
-            # Save to DB
+            # Save to DB — use real broker equity, not just today's executed value
             from app.db.database import SessionLocal
             from app.db.models import PortfolioSnapshot
+
+            executed_value = sum(s.position_value for s in executed)
+
+            # Determine actual portfolio equity from broker; fallback to last snapshot
+            snapshot_equity: float = 100_000.0
+            try:
+                from app.services.alpaca_client import get_account as _get_acct
+                _acct = _get_acct()
+                if _acct:
+                    snapshot_equity = float(_acct.get("equity") or _acct.get("portfolio_value") or snapshot_equity)
+            except Exception:
+                pass
+
+            if snapshot_equity <= 0:
+                # Last-resort: carry forward the most recent valid snapshot
+                try:
+                    _db2 = SessionLocal()
+                    try:
+                        _last = (
+                            _db2.query(PortfolioSnapshot)
+                            .filter(PortfolioSnapshot.total_equity > 0)
+                            .order_by(PortfolioSnapshot.created_at.desc())
+                            .first()
+                        )
+                        if _last:
+                            snapshot_equity = float(_last.total_equity)
+                    finally:
+                        _db2.close()
+                except Exception:
+                    pass
 
             db = SessionLocal()
             try:
                 db.add(PortfolioSnapshot(
-                    total_equity=sum(s.position_value for s in executed),
-                    cash=100000.0 - sum(s.position_value for s in executed),
-                    buying_power=200000.0 - sum(s.position_value for s in executed),
+                    total_equity=snapshot_equity,
+                    cash=max(0.0, snapshot_equity - executed_value),
+                    buying_power=max(0.0, snapshot_equity * 2 - executed_value),
                     positions_json=[{
                         "symbol": s.symbol,
                         "qty": s.position_size_qty,

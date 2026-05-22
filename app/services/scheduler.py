@@ -229,8 +229,8 @@ def _scheduler_loop():
                     scheduler_metrics.record_cycle_end("pipeline_filter", success=False, error=str(e))
                     logger.error(f"Pipeline filter failed: {e}")
 
-            # --- PIPELINE STAGES 4-7: Full analysis + execution at 9:00-9:30 AM ET (once per day) ---
-            if _is_weekday(now) and now.hour == 9 and now.minute < 5 and last_pipeline_full != today_str:
+            # --- PIPELINE STAGES 4-7: Full analysis + execution at 9:45 AM ET (once per day) ---
+            if _is_weekday(now) and now.hour == 9 and now.minute >= 45 and last_pipeline_full != today_str:
                 last_pipeline_full = today_str
                 logger.info("Pipeline stages 4-7: AI consensus + Kelly + Guardian + Alpaca...")
                 try:

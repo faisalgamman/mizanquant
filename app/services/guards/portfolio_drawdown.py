@@ -23,7 +23,7 @@ def _recent_drawdown(strategy_id: str | None) -> float | None:
     except Exception:
         return None
 
-    equities = [float(s.total_equity or 0) for s in snapshots if s.total_equity]
+    equities = [float(s.total_equity) for s in snapshots if s.total_equity and s.total_equity > 0]
     if len(equities) < 2:
         return None
     peak = equities[0]
