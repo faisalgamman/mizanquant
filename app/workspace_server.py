@@ -2418,6 +2418,117 @@ def _score_forecast_consensus(symbol: str) -> dict:
     return {"score": min(score, 30), "details": details}
 
 
+# ---------------------------------------------------------------------------
+# Sentiment Score — VADER news + analyst consensus (0-20)
+# ---------------------------------------------------------------------------
+
+def _sentiment_score(symbol: str, info: dict | None = None) -> dict:
+    """Composite sentiment score 0-20.
+
+    10 pts from VADER on recent news headlines.
+    10 pts from analyst consensus (recommendation key + price target upside).
+    Never raises — returns neutral (10) on any failure.
+    """
+    score = 0
+    details: dict = {}
+
+    # ── Part 1: News VADER (0-10) ──
+    try:
+        import nltk
+        from nltk.sentiment.vader import SentimentIntensityAnalyzer
+        try:
+            nltk.data.find("sentiment/vader_lexicon.zip")
+        except LookupError:
+            nltk.download("vader_lexicon", quiet=True)
+
+        headlines: list[str] = []
+        try:
+            ticker_obj = yf.Ticker(symbol)
+            raw_news = ticker_obj.news or []
+            headlines = [a.get("title", "") for a in raw_news[:10] if a.get("title")]
+        except Exception:
+            pass
+
+        if not headlines:
+            fmp_news = fmp_client.get_stock_news(symbol, limit=10)
+            if fmp_news:
+                headlines = [n.get("title", "") or n.get("headline", "") for n in fmp_news[:10] if n]
+                headlines = [h for h in headlines if h]
+
+        if headlines:
+            sia = SentimentIntensityAnalyzer()
+            compounds = [sia.polarity_scores(h)["compound"] for h in headlines]
+            compound = float(np.mean(compounds))
+            news_score = max(0, min(10, int((compound + 1.0) / 2.0 * 10)))
+            details["news_compound"] = round(compound, 3)
+            details["headlines_analyzed"] = len(headlines)
+        else:
+            news_score = 5
+            compound = 0.0
+            details["news_compound"] = 0.0
+            details["headlines_analyzed"] = 0
+
+        score += news_score
+        details["news_score"] = news_score
+    except Exception as _e:
+        score += 5
+        details["news_score"] = 5
+        details["news_error"] = str(_e)[:60]
+
+    # ── Part 2: Analyst consensus (0-10) ──
+    try:
+        if not info:
+            info = {}
+        rec_key = (info.get("recommendationKey") or "").lower().replace(" ", "_").replace("-", "_")
+        current_price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
+        target_mean = _safe_float(info.get("targetMeanPrice"))
+        num_opinions = int(info.get("numberOfAnalystOpinions") or 0)
+
+        upside_pct = 0.0
+        if target_mean and current_price and current_price > 0:
+            upside_pct = (target_mean - current_price) / current_price * 100.0
+
+        _key_map = {
+            "strong_buy": 10, "strongbuy": 10,
+            "buy": 8, "outperform": 7, "overweight": 7, "positive": 7,
+            "hold": 5, "neutral": 5, "market_perform": 5, "equal_weight": 5,
+            "underperform": 2, "underweight": 2, "negative": 2,
+            "sell": 1, "strong_sell": 0,
+        }
+        analyst_score = _key_map.get(rec_key, 5)
+
+        if upside_pct > 25:
+            analyst_score = min(10, analyst_score + 2)
+        elif upside_pct > 12:
+            analyst_score = min(10, analyst_score + 1)
+        elif upside_pct < -10:
+            analyst_score = max(0, analyst_score - 2)
+
+        if num_opinions < 3:
+            analyst_score = max(3, analyst_score - 1)
+
+        score += analyst_score
+        details["analyst_score"] = analyst_score
+        details["rec_key"] = rec_key or "unknown"
+        details["num_opinions"] = num_opinions
+        details["target_mean"] = target_mean
+        details["upside_pct"] = round(upside_pct, 1)
+    except Exception as _e:
+        score += 5
+        details["analyst_score"] = 5
+        details["analyst_error"] = str(_e)[:60]
+
+    total = min(20, score)
+    if total >= 14:
+        label = "bullish"
+    elif total >= 7:
+        label = "neutral"
+    else:
+        label = "bearish"
+
+    return {"score": total, "label": label, "details": details}
+
+
 def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.DataFrame | None = None) -> dict | None:
     """Full analysis: halal + fundamental (40) + technical momentum (30).
 
@@ -2729,6 +2840,132 @@ async def smart_screener(
         max_results=max_results, use_cache=use_cache,
         add_forecast=add_forecast, watchlist=watchlist,
     )
+
+
+@app.get("/api/screener/deep-picks")
+async def screener_deep_picks(
+    limit: int = Query(15, description="Max results (halal, sorted by composite score)"),
+    use_cache: str = Query("true", description="Use cached results"),
+):
+    """Stock Intelligence — enriched screener with sentiment + fundamental breakdown.
+
+    Composite Score (0-100):
+      Technical   30 pts  momentum + strategy (RS vs SPY, EMA, MACD, ADX, Volume)
+      Fundamental 25 pts  profitability + valuation + growth (rescaled from 0-40)
+      Sentiment   20 pts  VADER news sentiment + analyst consensus & price target
+      AI/ML       15 pts  forecast model + agent consensus (rescaled from 0-30)
+      Halal       10 pts  AAOIFI screens passed (debt/interest/haram/liquidity)
+    """
+    _use_cache = str(use_cache).lower() not in ("false", "0", "no")
+    cache_key_dp = f"deep_picks_{limit}"
+
+    if _use_cache:
+        cached = _cache_get(cache_key_dp, max_age=1800)  # 30 min TTL
+        if cached:
+            return cached
+
+    # Pull from smart screener cache
+    screener_data = _cache_get("smart_screener", max_age=86400)
+    if not screener_data or not screener_data.get("results"):
+        return {
+            "status": "scanning",
+            "message": "Smart screener is initializing. Trigger /api/stock/smart-screener first.",
+            "results": [],
+            "total": 0,
+            "composite_max": 100,
+        }
+
+    raw_results: list[dict] = screener_data.get("results", [])[:limit * 2]
+
+    def _enrich_one(r: dict) -> dict:
+        symbol = r.get("symbol", "")
+        try:
+            with _yf_semaphore:
+                t = yf.Ticker(symbol)
+                info = t.info or {}
+        except Exception:
+            info = {}
+
+        sent = _sentiment_score(symbol, info)
+
+        # Rescale sub-scores to composite denominator
+        tech   = min(30, r.get("momentum_score", 0) + max(0, r.get("strategy_score", 0) - 50))
+        fund40 = r.get("fundamental_score", 0)                       # original 0-40
+        fund   = int(fund40 * 25 / 40)                               # → 0-25
+        sent_s = sent["score"]                                        # 0-20
+        fc30   = r.get("forecast_score", r.get("forecast_proxy", 0)) # original 0-30
+        ai     = int(fc30 * 15 / 30)                                  # → 0-15
+        screens = r.get("halal_screens", 0)
+        halal_s = int(screens / 4 * 10) if screens else (10 if r.get("is_halal") else 0)
+
+        composite = min(100, tech + fund + sent_s + ai + halal_s)
+
+        # Fundamental grade
+        if fund >= 22: f_grade = "A"
+        elif fund >= 17: f_grade = "B"
+        elif fund >= 12: f_grade = "C"
+        else: f_grade = "D"
+
+        # Composite signal
+        if composite >= 72 and r.get("is_halal"):
+            sig_composite = "STRONG BUY"
+        elif composite >= 55:
+            sig_composite = "BUY"
+        elif composite >= 38:
+            sig_composite = "WATCH"
+        else:
+            sig_composite = "AVOID"
+
+        return {
+            **r,
+            # Sentiment layer
+            "sentiment_score":    sent_s,
+            "sentiment_label":    sent["label"],
+            "sentiment_compound": sent["details"].get("news_compound", 0.0),
+            "analyst_upside":     sent["details"].get("upside_pct", 0.0),
+            "analyst_rating":     sent["details"].get("rec_key", ""),
+            "analyst_target":     sent["details"].get("target_mean"),
+            # Composite breakdown
+            "composite_score":    composite,
+            "score_tech":         tech,
+            "score_fund":         fund,
+            "score_sentiment":    sent_s,
+            "score_ai":           ai,
+            "score_halal":        halal_s,
+            "f_grade":            f_grade,
+            "signal_composite":   sig_composite,
+        }
+
+    enriched: list[dict] = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(_enrich_one, r): r for r in raw_results}
+        for f in as_completed(futures):
+            try:
+                enriched.append(f.result())
+            except Exception:
+                pass
+
+    # Keep halal only, sort by composite
+    top = sorted(
+        [r for r in enriched if r.get("is_halal", False)],
+        key=lambda x: x.get("composite_score", 0),
+        reverse=True,
+    )[:limit]
+
+    result = {
+        "status": "ready",
+        "total": len(top),
+        "scanned": screener_data.get("total_scanned", 0),
+        "regime": screener_data.get("regime", "NEUTRAL"),
+        "market_status": screener_data.get("market_status", ""),
+        "halt_pipeline": screener_data.get("halt_pipeline", False),
+        "composite_max": 100,
+        "score_breakdown": {"tech": 30, "fund": 25, "sentiment": 20, "ai": 15, "halal": 10},
+        "results": top,
+        "screener_ts": screener_data.get("timestamp", ""),
+    }
+    _cache_set(cache_key_dp, result)
+    return result
 
 
 def _run_screener_bg(scan_symbols: list):

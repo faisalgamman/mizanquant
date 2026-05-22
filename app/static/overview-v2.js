@@ -774,6 +774,7 @@ async function loadAll(force = false) {
   loadPaper();
   loadModels();
   loadEquityCurve();
+  loadDeepPicks();
 }
 
 /* ─── Boot ────────────────────────────────────────────────────── */
@@ -917,6 +918,161 @@ function areaChartSvg(values, color) {
           <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`;
 }
 
+/* ─── Stock Intelligence ──────────────────────────────────────── */
+var _intelData = null;
+var _intelFilter = "all";
+
+async function loadDeepPicks(forceRefresh = false) {
+  const tbody = $("intelTableBody");
+  if (!tbody) return;
+
+  tbody.innerHTML = `<tr><td colspan="14" class="intel-loading">
+    <i class="fas fa-circle-notch"></i><br>Running intelligence scan…
+  </td></tr>`;
+
+  const useCache = forceRefresh ? "false" : "true";
+  const data = await api(`/api/screener/deep-picks?limit=15&use_cache=${useCache}`);
+
+  if (!data || data.status === "scanning") {
+    tbody.innerHTML = `<tr><td colspan="14" class="intel-empty">
+      <i class="fas fa-satellite-dish"></i><br>
+      Smart screener is initializing. Trigger a scan from
+      <a href="/halal-screener" style="color:var(--accent)">Halal Screener</a>
+      or click <b>Scan</b>.
+    </td></tr>`;
+    // Auto-trigger screener in background
+    api("/api/stock/smart-screener?use_cache=false&max_results=50");
+    return;
+  }
+
+  _intelData = data;
+  _renderIntelTable(data);
+
+  // Meta line
+  const regime = data.regime || "—";
+  const regimeColor = regime === "BULL" ? "var(--positive)" : regime === "BEAR" ? "var(--negative)" : "var(--warning)";
+  const intelMeta = $("intelMeta");
+  if (intelMeta) {
+    intelMeta.textContent = `${data.total} picks · ${data.scanned || 0} scanned`;
+  }
+  const regimeBadge = $("intelRegimeBadge");
+  if (regimeBadge) {
+    regimeBadge.innerHTML = `<span style="padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700;
+      background:${regimeColor}22;color:${regimeColor};border:1px solid ${regimeColor}44;">
+      ${regime}
+    </span>`;
+  }
+  const scanMeta = $("intelScanMeta");
+  if (scanMeta && data.screener_ts) {
+    const ts = new Date(data.screener_ts);
+    const hhMM = ts.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+    scanMeta.textContent = `Last scan ${hhMM}`;
+  }
+}
+
+function _renderIntelTable(data) {
+  const tbody = $("intelTableBody");
+  if (!tbody || !data?.results) return;
+
+  let rows = [...data.results];
+
+  // Apply filter
+  if (_intelFilter === "strong")  rows = rows.filter(r => r.signal_composite === "STRONG BUY");
+  if (_intelFilter === "buy")     rows = rows.filter(r => ["STRONG BUY","BUY"].includes(r.signal_composite));
+  if (_intelFilter === "bullish") rows = rows.filter(r => r.sentiment_label === "bullish");
+  if (_intelFilter === "upside")  rows = rows.filter(r => (r.analyst_upside || 0) > 10);
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="14" class="intel-empty">
+      <i class="fas fa-filter"></i><br>No results for this filter.
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map((r, i) => {
+    const rank = i + 1;
+    const rankClass = rank === 1 ? "r1" : rank === 2 ? "r2" : rank === 3 ? "r3" : "";
+    const composite = r.composite_score ?? 0;
+    const gaugeColor = composite >= 70 ? "var(--positive)" : composite >= 50 ? "var(--accent)" : composite >= 35 ? "var(--warning)" : "var(--negative)";
+
+    // Sub-score bars (T/F/S/AI)
+    const subBars = [
+      { v: r.score_tech      ?? 0, max: 30, c: "#60a5fa", l: "T" },
+      { v: r.score_fund      ?? 0, max: 25, c: "#c8963e", l: "F" },
+      { v: r.score_sentiment ?? 0, max: 20, c: "#a78bfa", l: "S" },
+      { v: r.score_ai        ?? 0, max: 15, c: "#34d399", l: "AI" },
+    ].map(s => {
+      const pct = Math.round(s.v / s.max * 100);
+      return `<div class="intel-sub" title="${s.l}: ${s.v}/${s.max}">
+        <div class="intel-sub-bar-wrap">
+          <div class="intel-sub-bar" style="height:${pct}%;background:${s.c};"></div>
+        </div>
+        <span class="intel-sub-lbl">${s.l}</span>
+      </div>`;
+    }).join("");
+
+    const sent = r.sentiment_label || "neutral";
+    const sentIcon = sent === "bullish" ? "▲" : sent === "bearish" ? "▼" : "●";
+    const upside = r.analyst_upside ?? 0;
+    const upsideClass = upside > 10 ? "upside-pos" : upside < -5 ? "upside-neg" : "upside-neu";
+    const upsideStr = upside !== 0 ? `${upside > 0 ? "+" : ""}${upside.toFixed(1)}%` : "—";
+    const rating = (r.analyst_rating || "").replace(/_/g, " ").toUpperCase() || "—";
+
+    const sig = (r.signal_composite || "WATCH").replace(/ /g, "_");
+    const chgPct = r.change_pct ?? 0;
+    const chgClass = chgPct >= 0 ? "pos" : "neg";
+
+    return `<tr onclick="selectSignal('${r.symbol}')" title="Click to analyze ${r.symbol}">
+      <td><span class="intel-rank ${rankClass}">${rank}</span></td>
+      <td>
+        <div class="intel-sym">${r.symbol}</div>
+        <div class="intel-co">${r.company || ""}</div>
+      </td>
+      <td>
+        <div class="intel-gauge-wrap">
+          <span class="intel-gauge-val" style="color:${gaugeColor}">${composite}</span>
+          <div class="intel-gauge-bar">
+            <div class="intel-gauge-fill" style="width:${composite}%;background:${gaugeColor};"></div>
+          </div>
+        </div>
+      </td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:#60a5fa">${r.score_tech ?? 0}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:#c8963e">${r.score_fund ?? 0}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:#a78bfa">${r.score_sentiment ?? 0}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:#34d399">${r.score_ai ?? 0}</span></td>
+      <td><span class="f-grade ${r.f_grade || "D"}">${r.f_grade || "D"}</span></td>
+      <td><span class="sent-badge ${sent}">${sentIcon} ${sent}</span></td>
+      <td>
+        <div style="line-height:1.3">
+          <span class="${upsideClass}" style="font-size:11px">${upsideStr}</span>
+          <div style="font-size:9px;color:var(--text-muted)">${rating}</div>
+        </div>
+      </td>
+      <td>
+        <span style="font-family:var(--mono);font-size:11px">$${(r.price ?? 0).toFixed(2)}</span>
+      </td>
+      <td>
+        <span class="${chgClass}" style="font-size:11px">
+          ${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%
+        </span>
+      </td>
+      <td><span class="sig-badge ${sig}">${(r.signal_composite || "WATCH").replace("STRONG BUY","SB")}</span></td>
+      <td style="color:var(--text-muted);font-size:10px">${r.sector || "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function setIntelFilter(f, btn) {
+  _intelFilter = f;
+  document.querySelectorAll(".intel-filter-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  if (_intelData) _renderIntelTable(_intelData);
+}
+
+function refreshDeepPicks() {
+  loadDeepPicks(true);
+}
+
 // Expose for inline onclick handlers
 window.selectSignal = selectSignal;
 window.sendToPaperTrade = sendToPaperTrade;
@@ -926,3 +1082,5 @@ window.loadConsensus = loadConsensus;
 window.closeDrawer = closeDrawer;
 window.dismissAlert = dismissAlert;
 window.handleAlertAction = handleAlertAction;
+window.setIntelFilter = setIntelFilter;
+window.refreshDeepPicks = refreshDeepPicks;

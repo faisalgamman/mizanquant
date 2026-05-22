@@ -756,6 +756,163 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   display: flex; align-items: center; gap: 5px;
 }
 
+/* ─── UTILITY ─────────────────────────────────────────────────── */
+.pos { color: var(--positive); }
+.neg { color: var(--negative); }
+.txt-muted { color: var(--text-muted); }
+
+/* ─── STOCK INTELLIGENCE ──────────────────────────────────────── */
+.intel-section {
+  margin: 0 12px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.intel-hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+.intel-hdr-title {
+  font-family: var(--font-display); font-size: 12px; font-weight: 600;
+  color: var(--text-primary); letter-spacing: 0.3px; flex: 1;
+}
+.intel-hdr-meta { font-size: 10px; color: var(--text-muted); }
+.intel-score-legend {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+}
+.intel-score-legend span {
+  font-size: 9px; color: var(--text-muted);
+  display: flex; align-items: center; gap: 4px;
+}
+.intel-score-legend .leg-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+}
+.intel-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 14px; border-bottom: 1px solid var(--border-subtle);
+}
+.intel-filter-btn {
+  padding: 3px 10px; font-size: 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--border-default); background: transparent;
+  color: var(--text-secondary); cursor: pointer; font-family: var(--font-body);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.intel-filter-btn.active, .intel-filter-btn:hover {
+  background: var(--accent-dim); border-color: var(--accent);
+  color: var(--accent);
+}
+.intel-status {
+  margin-left: auto; font-size: 9px; color: var(--text-muted);
+  display: flex; align-items: center; gap: 4px;
+}
+.intel-scan-btn {
+  padding: 3px 10px; font-size: 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--border-default); background: var(--accent-dim);
+  color: var(--accent); cursor: pointer; font-family: var(--font-body);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.intel-scan-btn:hover { background: var(--accent); color: #000; }
+
+/* Intel table */
+.intel-table-wrap { overflow-x: auto; }
+.intel-table {
+  width: 100%; border-collapse: collapse; font-size: 11px;
+}
+.intel-table thead tr {
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.intel-table th {
+  padding: 7px 10px; text-align: left;
+  font-size: 9px; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.intel-table td {
+  padding: 8px 10px; border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle; white-space: nowrap;
+}
+.intel-table tr:last-child td { border-bottom: none; }
+.intel-table tr:hover td { background: var(--bg-raised); }
+.intel-table tr { cursor: pointer; }
+
+/* Rank badge */
+.intel-rank {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--bg-overlay); color: var(--text-muted);
+  font-size: 9px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.intel-rank.r1 { background: var(--accent-dim); color: var(--accent); }
+.intel-rank.r2 { background: rgba(192,192,192,0.1); color: #c0c0c0; }
+.intel-rank.r3 { background: rgba(180,130,80,0.1); color: #b48250; }
+
+/* Symbol cell */
+.intel-sym { font-weight: 700; font-size: 12px; color: var(--text-primary); }
+.intel-co  { font-size: 9px; color: var(--text-muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Composite score gauge */
+.intel-gauge-wrap { display: flex; align-items: center; gap: 6px; min-width: 90px; }
+.intel-gauge-val {
+  font-family: var(--mono); font-size: 14px; font-weight: 700;
+  min-width: 28px; text-align: right;
+}
+.intel-gauge-bar { flex: 1; height: 5px; background: var(--bg-overlay); border-radius: 3px; overflow: hidden; }
+.intel-gauge-fill { height: 100%; border-radius: 3px; transition: width 0.6s var(--ease-out); }
+
+/* Mini score bars (sub-scores) */
+.intel-sub-scores { display: flex; gap: 3px; }
+.intel-sub { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 22px; }
+.intel-sub-bar-wrap { width: 16px; height: 28px; background: var(--bg-overlay); border-radius: 2px; overflow: hidden; display: flex; flex-direction: column-reverse; }
+.intel-sub-bar { width: 100%; border-radius: 2px; transition: height 0.5s var(--ease-out); }
+.intel-sub-lbl { font-size: 7px; color: var(--text-muted); text-transform: uppercase; }
+
+/* Sentiment badge */
+.sent-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px; border-radius: 10px; font-size: 9px; font-weight: 600;
+}
+.sent-badge.bullish { background: var(--positive-dim); color: var(--positive); }
+.sent-badge.neutral { background: var(--warning-dim); color: var(--warning); }
+.sent-badge.bearish { background: var(--negative-dim); color: var(--negative); }
+
+/* Fundamental grade */
+.f-grade {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 4px; font-size: 11px; font-weight: 700;
+}
+.f-grade.A { background: var(--positive-dim); color: var(--positive); }
+.f-grade.B { background: rgba(74,222,128,0.06); color: #86efac; }
+.f-grade.C { background: var(--warning-dim); color: var(--warning); }
+.f-grade.D { background: var(--negative-dim); color: var(--negative); }
+
+/* Signal badge */
+.sig-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 700;
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.sig-badge.STRONG_BUY { background: var(--positive-dim); color: var(--positive); border: 1px solid rgba(74,222,128,0.25); }
+.sig-badge.BUY        { background: rgba(74,222,128,0.06); color: #86efac; border: 1px solid rgba(74,222,128,0.12); }
+.sig-badge.WATCH      { background: var(--warning-dim); color: var(--warning); border: 1px solid rgba(251,191,36,0.2); }
+.sig-badge.AVOID      { background: var(--negative-dim); color: var(--negative); border: 1px solid rgba(248,113,113,0.2); }
+
+/* Analyst upside */
+.upside-pos { color: var(--positive); font-weight: 600; }
+.upside-neg { color: var(--negative); font-weight: 600; }
+.upside-neu { color: var(--text-muted); }
+
+/* Loading / empty state */
+.intel-loading, .intel-empty {
+  padding: 40px 20px; text-align: center;
+  color: var(--text-muted); font-size: 12px;
+}
+.intel-loading i { margin-bottom: 8px; font-size: 20px; animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.intel-empty i { margin-bottom: 8px; font-size: 20px; }
+
 /* ─── RESPONSIVE ──────────────────────────────────────────────── */
 @media (max-width: 1280px) {
   .workflow { grid-template-columns: 1.6fr 1.2fr; }
@@ -954,6 +1111,60 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
         <div class="wf-head"><span class="wf-title">Schedule</span><span class="wf-sub">Daily cycle</span></div>
         <div class="wf-body"><div id="schedule"></div></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ STOCK INTELLIGENCE ═══════════════════════════════════ -->
+  <div class="intel-section">
+    <div class="intel-hdr">
+      <span class="intel-hdr-title">📡 Stock Intelligence</span>
+      <div class="intel-score-legend">
+        <span><span class="leg-dot" style="background:#60a5fa"></span>Technical</span>
+        <span><span class="leg-dot" style="background:#c8963e"></span>Fundamental</span>
+        <span><span class="leg-dot" style="background:#a78bfa"></span>Sentiment</span>
+        <span><span class="leg-dot" style="background:#34d399"></span>AI/ML</span>
+        <span><span class="leg-dot" style="background:#fbbf24"></span>Halal</span>
+      </div>
+      <span class="intel-hdr-meta" id="intelMeta">—</span>
+    </div>
+    <div class="intel-toolbar">
+      <button class="intel-filter-btn active" data-f="all"     onclick="setIntelFilter('all',this)">All</button>
+      <button class="intel-filter-btn"        data-f="strong"  onclick="setIntelFilter('strong',this)">Strong Buy</button>
+      <button class="intel-filter-btn"        data-f="buy"     onclick="setIntelFilter('buy',this)">Buy</button>
+      <button class="intel-filter-btn"        data-f="bullish" onclick="setIntelFilter('bullish',this)">Bullish Sentiment</button>
+      <button class="intel-filter-btn"        data-f="upside"  onclick="setIntelFilter('upside',this)">High Analyst Upside</button>
+      <div class="intel-status" id="intelStatus">
+        <span id="intelRegimeBadge"></span>
+        <span id="intelScanMeta"></span>
+      </div>
+      <button class="intel-scan-btn" onclick="refreshDeepPicks()" title="Refresh Intelligence Scan">
+        <i class="fas fa-brain"></i> Scan
+      </button>
+    </div>
+    <div class="intel-table-wrap">
+      <table class="intel-table">
+        <thead><tr>
+          <th>#</th>
+          <th>Symbol</th>
+          <th>Score</th>
+          <th title="Technical: RS vs SPY + EMA + MACD + ADX + Volume">T</th>
+          <th title="Fundamental: Profitability + Valuation + Growth">F</th>
+          <th title="Sentiment: News VADER + Analyst Consensus">S</th>
+          <th title="AI/ML: Forecast model + agent consensus">AI</th>
+          <th>Grade</th>
+          <th>Sentiment</th>
+          <th>Analyst</th>
+          <th>Price</th>
+          <th>Chg</th>
+          <th>Signal</th>
+          <th>Sector</th>
+        </tr></thead>
+        <tbody id="intelTableBody">
+          <tr><td colspan="14" class="intel-loading">
+            <i class="fas fa-circle-notch"></i><br>Loading intelligence scan…
+          </td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
