@@ -216,7 +216,7 @@ async def _get_pipeline():
             {"time": "02:00", "task": "Model retraining", "type": "maintenance"},
             {"time": "08:00", "task": "Data collection", "type": "pipeline"},
             {"time": "08:30", "task": "Halal + Smart filter", "type": "pipeline"},
-            {"time": "09:00", "task": "AI consensus + Kelly + Guardian + Alpaca", "type": "pipeline"},
+            {"time": "09:45", "task": "AI consensus + Kelly + Guardian + Alpaca", "type": "pipeline"},
             {"time": "10:30", "task": "Intraday signals scan", "type": "signal"},
             {"time": "12:00", "task": "Midday signals scan", "type": "signal"},
             {"time": "14:30", "task": "Afternoon signals scan", "type": "signal"},

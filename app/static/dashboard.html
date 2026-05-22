@@ -6,51 +6,106 @@
 <title>mizanquant — Overview</title>
 <link rel="icon" type="image/svg+xml" href="/static/logo-favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/fontawesome/all.min.css">
 <style>
 :root {
-  --bg-primary:    oklch(0.03 0.006 60);
-  --bg-secondary:  oklch(0.06 0.008 60);
-  --bg-tertiary:   oklch(0.09 0.010 60);
-  --border:        oklch(0.15 0.008 60 / 0.35);
-  --border-light:  oklch(0.15 0.008 60 / 0.15);
-  --text-primary:   oklch(0.92 0.005 60);
-  --text-secondary: oklch(0.65 0.008 60);
-  --text-muted:     oklch(0.45 0.010 60);
-  --green:      oklch(0.68 0.16 150);
-  --green-dim:  oklch(0.68 0.16 150 / 0.12);
-  --red:        oklch(0.55 0.14 20);
-  --red-dim:    oklch(0.55 0.14 20 / 0.12);
-  --amber:      oklch(0.62 0.10 80);
-  --amber-dim:  oklch(0.62 0.10 80 / 0.12);
-  --accent:     oklch(0.68 0.16 150);
-  --accent-dim: oklch(0.68 0.16 150 / 0.15);
+  /* Backgrounds — DESIGN.md §5.1 */
+  --bg-root:       #0c0c10;
+  --bg-surface:    #14141a;
+  --bg-raised:     #1c1c26;
+  --bg-overlay:    #242430;
+
+  /* Aliases used throughout the CSS */
+  --bg-primary:    var(--bg-root);
+  --bg-secondary:  var(--bg-surface);
+  --bg-tertiary:   var(--bg-raised);
+
+  /* Borders */
+  --border-subtle:  rgba(255,255,255,0.04);
+  --border-default: rgba(255,255,255,0.06);
+  --border-strong:  rgba(255,255,255,0.10);
+  --border:         var(--border-default);
+  --border-light:   var(--border-subtle);
+
+  /* Text */
+  --text-primary:   #e4e4ec;
+  --text-secondary: #9494a0;
+  --text-muted:     #5c5c6a;
+  --text-disabled:  #3c3c48;
+
+  /* Accent — warm gold (Islamic geometric art reference) */
+  --accent:         #c8963e;
+  --accent-hover:   #d4a853;
+  --accent-dim:     rgba(200,150,62,0.10);
+  --accent-glow:    rgba(200,150,62,0.18);
+
+  /* Semantic — DESIGN.md naming */
+  --positive:       #4ade80;
+  --positive-dim:   rgba(74,222,128,0.10);
+  --negative:       #f87171;
+  --negative-dim:   rgba(248,113,113,0.10);
+  --warning:        #fbbf24;
+  --warning-dim:    rgba(251,191,36,0.10);
+  --info:           #60a5fa;
+  --info-dim:       rgba(96,165,250,0.10);
+
+  /* Aliases for inline JS that uses old names */
+  --green:      var(--positive);
+  --green-dim:  var(--positive-dim);
+  --red:        var(--negative);
+  --red-dim:    var(--negative-dim);
+  --amber:      var(--warning);
+  --amber-dim:  var(--warning-dim);
+
+  /* Layout */
   --sidebar-w: 56px;
   --cmd-h: 48px;
   --market-h: 36px;
   --status-h: 28px;
-  --radius: 6px;
-  --mono: "JetBrains Mono", "SF Mono", "Fira Code", ui-monospace, monospace;
+
+  /* Radii — DESIGN.md §5.4 */
+  --radius-sm:  3px;
+  --radius-md:  5px;
+  --radius-lg:  8px;
+  --radius-xl:  12px;
+  --radius:     var(--radius-md);
+
+  /* Typography */
+  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* Text scale — minor third 1.2 */
+  --text-xs:   0.625rem;
+  --text-sm:   0.75rem;
+  --text-base: 0.8125rem;
+  --text-md:   0.9375rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.375rem;
+  --text-2xl:  1.625rem;
+
+  /* Motion */
+  --ease-out:        cubic-bezier(0.16,1,0.3,1);
+  --ease-in-out:     cubic-bezier(0.65,0,0.35,1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: "Inter", -apple-system, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg-primary); color: var(--text-primary);
-  min-height: 100vh; overflow-x: hidden; font-size: 13px;
+  min-height: 100vh; overflow-x: hidden; font-size: var(--text-base);
   -webkit-font-smoothing: antialiased;
 }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 ::selection { background: var(--accent-dim); color: var(--accent); }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-@keyframes shimmer { 0%{background-position:-200px 0} 100%{background-position:calc(200px + 100%) 0} }
-.skeleton {
-  background: linear-gradient(90deg, var(--bg-tertiary) 0%, var(--border-light) 50%, var(--bg-tertiary) 100%);
-  background-size: 200px 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 4px;
-}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+/* No shimmer — DESIGN.md anti-pattern. Use pulse only. */
+.loading { opacity: 0.35; animation: pulse 1.5s ease-in-out infinite; }
 
 /* ─── SIDEBAR ─────────────────────────────────────────────────── */
 .sidebar {
@@ -130,7 +185,7 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   z-index: 90;
   display: flex; align-items: center; gap: 12px; padding: 0 16px;
 }
-.cmd-title { font-size: 13px; font-weight: 600; }
+.cmd-title { font-size: var(--text-base); font-weight: 600; font-family: var(--font-display); }
 .cmd-center { flex: 1; display: flex; justify-content: center; }
 .cmd-search {
   display: flex; align-items: center; gap: 6px;
@@ -199,18 +254,23 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .wf-section { margin-bottom: 8px; }
 .wf-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 8px; border-bottom: 1px solid var(--border-light);
+  padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 6px; user-select: none;
 }
-.wf-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
-.wf-sub { font-size: 9px; color: var(--text-muted); }
+.wf-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.wf-sub { font-size: 9px; color: var(--text-muted); opacity: 0.7; }
 .wf-body { padding: 0 4px; }
 
 /* ─── COMMON CARDS ────────────────────────────────────────────── */
 .card {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
   padding: 12px;
 }
 .badge {
@@ -234,8 +294,8 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 /* ─── MARKET STRIP ────────────────────────────────────────────── */
 .mc-strip { display: flex; gap: 6px; }
 .mc-card {
-  flex: 1; background: var(--bg-tertiary);
-  border: 1px solid var(--border-light); border-radius: 6px;
+  flex: 1; background: var(--bg-raised);
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
   padding: 8px 6px; text-align: center; min-width: 0;
 }
 .mc-lab { font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
@@ -260,12 +320,13 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   gap: 6px; margin-bottom: 8px;
 }
 .sfc {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-light); border-radius: 6px;
-  padding: 10px; cursor: pointer; transition: all 0.2s;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+  padding: 10px; cursor: pointer;
+  transition: border-color var(--duration-fast), background var(--duration-fast), box-shadow var(--duration-fast);
 }
-.sfc:hover { border-color: var(--accent); transform: translateY(-1px); }
-.sfc.selected { border-color: var(--accent); background: var(--accent-dim); }
+.sfc:hover { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+.sfc.selected { border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 0 1px var(--accent-glow); }
 .sfc-top { display: flex; align-items: center; gap: 8px; }
 .ring { position: relative; width: 44px; height: 44px; flex-shrink: 0; }
 .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
@@ -320,9 +381,9 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   padding: 3px 6px;
   border-bottom: 1px solid var(--border-light);
 }
-.s-table tr { cursor: pointer; }
-.s-table tr:hover { background: var(--bg-tertiary); }
-.s-table tr.selected { background: var(--bg-tertiary); }
+.s-table tr { cursor: pointer; transition: background var(--duration-fast); }
+.s-table tr:hover { background: var(--bg-raised); }
+.s-table tr.selected { background: var(--accent-dim); border-left: 2px solid var(--accent); }
 .score-bar {
   height: 4px; border-radius: 2px;
   background: var(--bg-primary); overflow: hidden; min-width: 40px;

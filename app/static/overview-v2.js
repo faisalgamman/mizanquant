@@ -69,9 +69,9 @@ function renderMarket(market) {
   if (!market) return;
   const vix = market.vix?.value ?? market.vix?.vix ?? null;
   const spy = market.spy_regime?.label ?? market.spy_regime?.regime ?? "—";
-  const breadth = market.breadth?.advance_decline ?? market.breadth?.value ?? null;
-  const credit = market.credit?.hyg_lqd_ratio ?? market.credit?.value ?? null;
-  const liq = market.liquidity?.score ?? market.liquidity?.value ?? null;
+  const breadth = market.breadth?.breadth_pct ?? null;
+  const credit = market.credit?.ratio ?? null;
+  const liq = market.liquidity?.liquidity_pct ?? null;
 
   // Top market-bar values
   $("mbSpy").textContent     = spy ?? "—";
@@ -541,7 +541,7 @@ function renderSectors(sectors) {
   }
   $("secSub").textContent = `${sectors.length} sector ETFs · daily`;
   $("sectorGrid").innerHTML = sectors.map(s => {
-    const chg = Number(s.change_pct ?? s.daily_change ?? s.change ?? 0);
+    const chg = Number(s.perf_1d ?? s.change_pct ?? s.daily_change ?? 0);
     const isHaram = HARAM_SECTORS.has(s.name || s.sector) || s.haram === true;
     const intensity = clamp(Math.abs(chg) / 2.5, 0, 1);
     const bg = chg >= 0
