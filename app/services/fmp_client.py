@@ -112,15 +112,57 @@ class FMPClient:
 
     BASE_URL = "https://financialmodelingprep.com/stable"
 
+    # In-memory TTL cache (key -> (data, expiry))
+    _cache: dict[str, Any] = {}
+    _cache_expiry: dict[str, float] = {}
+
+    # TTL per endpoint pattern (seconds); fundamental data changes quarterly at most
+    _CACHE_TTL: dict[str, int] = {
+        "profile": 604800,                # 7 days
+        "income-statement": 604800,       # 7 days
+        "balance-sheet-statement": 604800,
+        "cash-flow-statement": 604800,
+        "key-metrics": 604800,
+        "financial-ratios": 604800,
+        "dcf": 604800,
+        "historical-dividends": 604800,
+        "price-target-consensus": 86400,  # 1 day
+        "price-target": 86400,
+        "analyst-estimates": 86400,
+        "stock-news": 3600,               # 1 hour
+        "general-news": 3600,
+        "earning-calendar": 3600,         # 1 hour
+    }
+
     def __init__(self):
         self.api_key = settings.FMP_API_KEY or ""
 
     def _is_available(self) -> bool:
         return bool(self.api_key) and not _FMP_BREAKER.is_open()
 
+    @staticmethod
+    def _cache_key(endpoint: str, params: dict | None = None) -> str:
+        if params:
+            sorted_parts = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+            return f"{endpoint}?{sorted_parts}"
+        return endpoint
+
+    def _cache_ttl_for(self, endpoint: str) -> int:
+        for pattern, ttl in self._CACHE_TTL.items():
+            if pattern in endpoint:
+                return ttl
+        return 3600  # default 1 hour
+
     def _get(self, endpoint: str, params: dict | None = None) -> Any | None:
+        """Get data with in-memory TTL cache + network fallback."""
+        ckey = self._cache_key(endpoint, params)
+        now = time.time()
+
+        if ckey in self._cache_expiry and now < self._cache_expiry[ckey]:
+            return self._cache.get(ckey)
+
         if not self._is_available():
-            return None
+            return self._cache.get(ckey)
 
         _fmp_rate_limit()
 
@@ -134,6 +176,9 @@ class FMPClient:
                 resp.raise_for_status()
                 data = resp.json()
                 _FMP_BREAKER.record_success()
+                ttl = self._cache_ttl_for(endpoint)
+                self._cache[ckey] = data
+                self._cache_expiry[ckey] = now + ttl
                 return data
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
@@ -146,11 +191,11 @@ class FMPClient:
             else:
                 logger.error(f"FMP HTTP {e.response.status_code} for {endpoint}")
             _FMP_BREAKER.record_failure()
-            return None
+            return self._cache.get(ckey)
         except Exception as e:
             logger.error(f"FMP request failed for {endpoint}: {e}")
             _FMP_BREAKER.record_failure()
-            return None
+            return self._cache.get(ckey)
 
     # ------------------------------------------------------------------
     # Company Profile / Info

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
@@ -45,23 +46,44 @@ def _ema(values: list[float], span: int) -> list[float]:
     return ema_vals
 
 
+# ---------------------------------------------------------------------------
+# FRED series cache — 4-hour TTL, serves stale on network failure
+# ---------------------------------------------------------------------------
+
+_FRED_CACHE: dict[str, tuple[list[float], float]] = {}
+_FRED_CACHE_TTL = 14400  # 4 hours
+
+
 def _fetch_fred_series(series_id: str) -> list[float]:
+    now = time.time()
+    if series_id in _FRED_CACHE:
+        values, expiry = _FRED_CACHE[series_id]
+        if now < expiry:
+            return values
+
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-    with httpx.Client(timeout=20) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-    reader = csv.DictReader(io.StringIO(resp.text))
-    values: list[float] = []
-    for row in reader:
-        raw = row.get(series_id)
-        try:
-            if raw and raw != ".":
-                values.append(float(raw))
-        except ValueError:
-            continue
-    if not values:
-        raise ValueError(f"No FRED values returned for {series_id}")
-    return values
+    try:
+        with httpx.Client(timeout=20) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+        reader = csv.DictReader(io.StringIO(resp.text))
+        values: list[float] = []
+        for row in reader:
+            raw = row.get(series_id)
+            try:
+                if raw and raw != ".":
+                    values.append(float(raw))
+            except ValueError:
+                continue
+        if not values:
+            raise ValueError(f"No FRED values returned for {series_id}")
+        _FRED_CACHE[series_id] = (values, now + _FRED_CACHE_TTL)
+        return values
+    except Exception as exc:
+        if series_id in _FRED_CACHE:
+            logger.warning("FRED fetch failed, serving stale cache for %s: %s", series_id, exc)
+            return _FRED_CACHE[series_id][0]
+        raise
 
 
 def _fetch_spy_ema_slope_pct() -> float:
