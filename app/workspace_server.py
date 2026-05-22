@@ -220,7 +220,13 @@ async def login_post(request: Request):
     if not next_url.startswith("/"):
         next_url = "/"
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
-    if username == DASHBOARD_USER and pw_hash == DASHBOARD_PASS_HASH:
+    # Accept DASHBOARD_PASS_HASH as either:
+    #   - a sha256 hex digest (64 chars) → compare hash
+    #   - a plaintext password           → compare directly
+    stored = DASHBOARD_PASS_HASH
+    is_hashed = len(stored) == 64 and all(c in "0123456789abcdef" for c in stored.lower())
+    password_ok = secrets.compare_digest(pw_hash, stored) if is_hashed else secrets.compare_digest(password, stored)
+    if username == DASHBOARD_USER and password_ok:
         resp = RedirectResponse(url=next_url, status_code=302)
         resp.set_cookie(key="session", value=_make_session_token(), httponly=True, max_age=86400, samesite="lax")
         return resp
