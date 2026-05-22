@@ -689,12 +689,13 @@ function renderStatus(system) {
   if (!system) return;
   const broker = system.broker || "unknown";
   $("sbBroker").textContent  = `Broker · ${broker}`;
-  $("sbBrokerDot").className = "dot " + (broker === "connected" ? "dot-green" : "dot-red");
+  $("sbBrokerDot").className = "dot " + (broker === "connected" ? "dot-green" : broker === "not_configured" ? "dot-amber" : "dot-red");
   $("sbAutoTrade").textContent = `Auto-trade ${system.auto_trading || "off"}`;
   $("sbRegime").textContent    = `Regime ${system.regime || "?"}`;
   $("sbKillSwitch").textContent = `Kill-switch ${system.kill_switch ? "ON" : "off"}`;
-  $("sysText").textContent = system.status === "ok" ? "Connected" : "Degraded";
-  $("sysDot").className = "dot " + (system.status === "ok" ? "dot-green" : "dot-amber");
+  const healthy = system.status === "ok" || system.status === "operational";
+  $("sysText").textContent = healthy ? "Connected" : "Degraded";
+  $("sysDot").className = "dot " + (healthy ? "dot-green" : "dot-amber");
   $("sbPipeline").textContent = `Pipeline · ${system.uptime_seconds ? "alive" : "—"}`;
 }
 

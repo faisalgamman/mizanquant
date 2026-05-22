@@ -67,11 +67,14 @@ async def _dashboard_health():
     from app.services.scheduler_metrics import scheduler_metrics
     metrics = scheduler_metrics.health()
     broker_ok = checks["broker"] == "connected"
+    broker_unconfigured = checks["broker"] == "not_configured"
     db_ok = checks["database"]
     md_ok = checks["market_data"]
-    if broker_ok and db_ok:
-        status = "operational"
+    if db_ok and (broker_ok or broker_unconfigured):
+        # DB connected + broker either active or just not configured → ok
+        status = "ok"
     elif broker_ok or db_ok:
+        # One critical component has an error (not just unconfigured)
         status = "degraded"
     else:
         status = "down"
