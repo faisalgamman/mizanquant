@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strategies — MizanQuant</title>
+<style>
+:root {
+  --bg: #0b0e14; --surface: #131820; --card: #1a212e; --border: #2a3348;
+  --text: #e2e8f0; --muted: #8892a8; --accent: #3b82f6; --green: #22c55e;
+  --red: #ef4444; --yellow: #eab308; --orange: #f97316; --radius: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font: 14px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.header h1 { font-size: 22px; font-weight: 600; }
+.header h1 span { color: var(--accent); }
+.refresh-btn { background: var(--accent); color: #fff; border: none; padding: 8px 20px; border-radius: var(--radius); cursor: pointer; font-size: 13px; }
+.refresh-btn:hover { opacity: .85; }
+.refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
+.last-updated { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* Strategy cards grid */
+.strategy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 28px; }
+.strategy-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.strategy-card .title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+.strategy-card .title .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+.badge-active { background: #16a34a22; color: var(--green); }
+.badge-inactive { background: #6b728022; color: var(--muted); }
+.strategy-card .stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+.strategy-card .stat-row .label { color: var(--muted); }
+.strategy-card .stat-row .value { font-weight: 500; }
+.strategy-card .trade-btn { margin-top: 12px; padding: 6px 0; width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); cursor: pointer; font-size: 12px; }
+.strategy-card .trade-btn:hover { background: var(--surface); }
+
+/* Backtest comparison table */
+.section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.section-title .count { color: var(--muted); font-weight: 400; font-size: 13px; }
+.table-wrap { overflow-x: auto; margin-bottom: 28px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { background: var(--surface); color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+tr:hover td { background: #ffffff08; }
+.pass { color: var(--green); }
+.fail { color: var(--red); }
+
+/* Portfolio summary bar */
+.summary-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 28px; }
+.summary-item { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; text-align: center; }
+.summary-item .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.summary-item .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+.text-green { color: var(--green); } .text-red { color: var(--red); }
+
+/* Positions table */
+.positions-wrap { margin-bottom: 28px; }
+
+/* Loading / empty / error states */
+.loading { text-align: center; padding: 60px 20px; color: var(--muted); }
+.loading .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-state .icon { font-size: 40px; margin-bottom: 8px; }
+.error-state { text-align: center; padding: 40px 20px; color: var(--red); }
+.error-state .icon { font-size: 36px; margin-bottom: 8px; }
+
+/* Tabs */
+.tab-bar { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+.tab-btn { padding: 10px 20px; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Signal badges */
+.signal-buy { color: var(--green); font-weight: 600; }
+.signal-wait { color: var(--yellow); font-weight: 600; }
+.signal-avoid { color: var(--red); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1><span>Strategies</span> Dashboard</h1>
+    <div class="last-updated" id="lastUpdated">Loading...</div>
+  </div>
+  <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">⟳ Refresh</button>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="backtest">Backtest Comparison</button>
+  <button class="tab-btn" data-tab="positions">Positions</button>
+</div>
+
+<!-- === TAB: Overview === -->
+<div class="tab-content active" id="tab-overview">
+  <div class="loading" id="loadingOverview">
+    <div class="spinner"></div>
+    Loading portfolio data...
+  </div>
+  <div id="overviewContent" style="display:none;">
+    <div class="summary-bar" id="summaryBar"></div>
+    <div class="section-title">Strategy Configuration</div>
+    <div class="strategy-grid" id="strategyGrid"></div>
+  </div>
+</div>
+
+<!-- === TAB: Backtest === -->
+<div class="tab-content" id="tab-backtest">
+  <div class="loading" id="loadingBacktest">
+    <div class="spinner"></div>
+    Running backtest comparison (90s first time)...
+  </div>
+  <div id="backtestContent" style="display:none;">
+    <div class="section-title">Strategy Backtest Results</div>
+    <div class="table-wrap" id="backtestTableWrap"></div>
+    <div class="section-title" style="margin-top:20px;">Top Symbol Details</div>
+    <div class="table-wrap" id="symbolTableWrap"></div>
+  </div>
+</div>
+
+<!-- === TAB: Positions === -->
+<div class="tab-content" id="tab-positions">
+  <div class="loading" id="loadingPositions">
+    <div class="spinner"></div>
+    Loading positions...
+  </div>
+  <div id="positionsContent" style="display:none;">
+    <div class="section-title">Portfolio Positions</div>
+    <div class="table-wrap" id="positionsTableWrap"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let strategiesCache = null;
+let backtestCache = null;
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'backtest' && !backtestCache) loadBacktest();
+    if (btn.dataset.tab === 'positions') loadPositions();
+  });
+});
+
+async function apiGet(path) {
+  try {
+    const res = await fetch(API + path, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+function fmt(val) {
+  if (val == null || val === '') return '—';
+  return val.toLocaleString();
+}
+function fmtPct(val) {
+  if (val == null || isNaN(val)) return '—';
+  return (typeof val === 'number' ? val : parseFloat(val)).toFixed(2) + '%';
+}
+function fmtUsd(val) {
+  if (val == null || isNaN(val)) return '—';
+  return '$' + (typeof val === 'number' ? val : parseFloat(val)).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtBool(v) { return v ? '<span class="pass">✓</span>' : '<span class="fail">✗</span>'; }
+function sigClass(s) {
+  if (!s) return '';
+  const u = s.toUpperCase();
+  if (u === 'BUY') return 'signal-buy';
+  if (u === 'WAIT') return 'signal-wait';
+  if (u === 'AVOID') return 'signal-avoid';
+  return '';
+}
+
+// === Overview Tab ===
+async function loadOverview() {
+  document.getElementById('loadingOverview').style.display = '';
+  document.getElementById('overviewContent').style.display = 'none';
+  const [strategies, summary] = await Promise.all([apiGet('/strategies'), apiGet('/portfolio/summary')]);
+  strategiesCache = strategies;
+  document.getElementById('loadingOverview').style.display = 'none';
+  if (!strategies && !summary) {
+    document.getElementById('overviewContent').innerHTML = '<div class="error-state"><div class="icon">⚠</div>Could not load strategy data</div>';
+    document.getElementById('overviewContent').style.display = '';
+    return;
+  }
+  document.getElementById('overviewContent').style.display = '';
+  renderSummaryBar(summary);
+  renderStrategyGrid(strategies);
+  updateTimestamp();
+}
+
+function renderSummaryBar(summary) {
+  const el = document.getElementById('summaryBar');
+  if (!summary || !summary[0]) {
+    el.innerHTML = '<div class="summary-item"><div class="label">Status</div><div class="value" style="font-size:14px;color:var(--muted)">No portfolio data</div></div>';
+    return;
+  }
+  const s = summary[0];
+  const items = [
+    { label: 'Equity', value: s.Equity || '—' },
+    { label: 'Cash', value: s.Cash || '—' },
+    { label: 'Buying Power', value: s['Buying Power'] || '—' },
+    { label: 'Portfolio Value', value: s['Portfolio Value'] || '—' },
+    { label: 'Daily P&L', value: s['Daily P&L'] || '—', cls: (s['Daily P&L']||'').includes('-') ? 'text-red' : 'text-green' },
+    { label: 'P&L %', value: s['Daily P&L %'] || '—', cls: (s['Daily P&L %']||'').includes('-') ? 'text-red' : 'text-green' },
+    { label: 'Status', value: s.Status || '—' },
+  ];
+  el.innerHTML = items.map(i => `<div class="summary-item"><div class="label">${i.label}</div><div class="value ${i.cls||''}">${i.value}</div></div>`).join('');
+}
+
+function renderStrategyGrid(strategies) {
+  const el = document.getElementById('strategyGrid');
+  if (!strategies || strategies.length === 0 || strategies[0].message) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">📋</div>No strategies configured</div>';
+    return;
+  }
+  el.innerHTML = strategies.map(s => `
+    <div class="strategy-card">
+      <div class="title">
+        <span>${s.name || s.id}</span>
+        <span class="badge ${s.configured ? 'badge-active' : 'badge-inactive'}">${s.configured ? 'Active' : 'Not Configured'}</span>
+      </div>
+      <div class="stat-row"><span class="label">Max Positions</span><span class="value">${s.max_positions || '—'}</span></div>
+      <div class="stat-row"><span class="label">Position %</span><span class="value">${s.position_pct ? (s.position_pct*100).toFixed(1)+'%' : '—'}</span></div>
+      <div class="stat-row"><span class="label">Min Confidence</span><span class="value">${s.min_confidence || '—'}</span></div>
+      <div class="stat-row"><span class="label">Trailing Stop</span><span class="value">${s.trailing_stop ? s.trailing_stop_pct+'%' : 'Off'}</span></div>
+      <div class="stat-row"><span class="label">Stop Loss</span><span class="value">${s.static_sl_pct ? s.static_sl_pct+'%' : '—'}</span></div>
+      <div class="stat-row"><span class="label">Broker</span><span class="value">${s.broker_type || '—'}</span></div>
+    </div>
+  `).join('');
+}
+
+// === Backtest Tab ===
+async function loadBacktest() {
+  document.getElementById('loadingBacktest').style.display = '';
+  document.getElementById('backtestContent').style.display = 'none';
+  const data = await apiGet('/api/strategies/backtest-data?force_refresh=true');
+  backtestCache = data;
+  document.getElementById('loadingBacktest').style.display = 'none';
+  if (!data || (data.status === 'scanning')) {
+    document.getElementById('backtestContent').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">⏳</div>
+        <div>${data && data.message ? data.message : 'Backtest scanning in progress — please wait ~90s and refresh.'}</div>
+      </div>`;
+    document.getElementById('backtestContent').style.display = '';
+    if (data && data.status === 'scanning') setTimeout(loadBacktest, 10000);
+    return;
+  }
+  document.getElementById('backtestContent').style.display = '';
+  renderBacktestTable(data);
+  renderSymbolTable(data);
+  updateTimestamp();
+}
+
+function renderBacktestTable(data) {
+  const el = document.getElementById('backtestTableWrap');
+  const strats = data.strategies || {};
+  const keys = Object.keys(strats);
+  if (!keys.length) { el.innerHTML = '<div class="empty-state"><div class="icon">📊</div>No backtest data yet</div>'; return; }
+  let html = `<table><thead><tr><th>Strategy</th><th>Trades</th><th>Win Rate</th><th>Sharpe</th><th>Max DD</th><th>Return</th><th>Profit Factor</th><th>Best Symbol</th></tr></thead><tbody>`;
+  for (const k of keys) {
+    const s = strats[k];
+    html += `<tr>
+      <td><strong>${k}</strong></td>
+      <td>${s.total_trades ?? '—'}</td>
+      <td class="${s.pass_win_rate ? 'pass' : 'fail'}">${fmtPct(s.avg_win_rate)}</td>
+      <td class="${s.pass_sharpe ? 'pass' : 'fail'}">${s.avg_sharpe != null ? s.avg_sharpe.toFixed(2) : '—'}</td>
+      <td class="${s.pass_max_dd ? 'pass' : 'fail'}">${fmtPct(s.avg_max_dd)}</td>
+      <td>${fmtPct(s.avg_return)}</td>
+      <td>${s.avg_profit_factor != null ? s.avg_profit_factor.toFixed(2) : '—'}</td>
+      <td>${s.best_symbol || '—'}${s.best_symbol_sharpe != null ? ' ('+s.best_symbol_sharpe.toFixed(2)+')' : ''}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function renderSymbolTable(data) {
+  const el = document.getElementById('symbolTableWrap');
+  const syms = data.symbols || {};
+  const keys = Object.keys(syms);
+  if (!keys.length) { el.innerHTML = ''; return; }
+  let html = `<table><thead><tr><th>Symbol</th><th>Strategy</th><th>Trades</th><th>Win Rate</th><th>Sharpe</th><th>Max DD</th><th>Return</th><th>Signal</th></tr></thead><tbody>`;
+  for (const sym of keys.slice(0, 30)) {
+    const strats = syms[sym];
+    for (const sname of Object.keys(strats)) {
+      const s = strats[sname];
+      html += `<tr>
+        <td><strong>${sym}</strong></td>
+        <td>${sname}</td>
+        <td>${s.trades ?? '—'}</td>
+        <td>${fmtPct(s.win_rate)}</td>
+        <td>${s.sharpe != null ? s.sharpe.toFixed(2) : '—'}</td>
+        <td>${fmtPct(s.max_dd)}</td>
+        <td>${fmtPct(s.avg_return)}</td>
+        <td class="${sigClass(s.signal)}">${s.signal || '—'}</td>
+      </tr>`;
+    }
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+// === Positions Tab ===
+async function loadPositions() {
+  document.getElementById('loadingPositions').style.display = '';
+  document.getElementById('positionsContent').style.display = 'none';
+  const positions = await apiGet('/portfolio/positions');
+  document.getElementById('loadingPositions').style.display = 'none';
+  document.getElementById('positionsContent').style.display = '';
+  const el = document.getElementById('positionsTableWrap');
+  if (!positions || positions.length === 0 || positions[0].message) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">📭</div>No open positions</div>';
+    return;
+  }
+  let html = `<table><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg Entry</th><th>Current</th><th>Market Value</th><th>P&L</th><th>P&L %</th></tr></thead><tbody>`;
+  for (const p of positions) {
+    const plStr = (p['Unrealized P&L'] || '').replace('$','').replace(',','');
+    const pl = parseFloat(plStr);
+    const isNeg = isNaN(pl) ? false : pl < 0;
+    html += `<tr>
+      <td><strong>${p.Symbol || '—'}</strong></td>
+      <td>${p.Side || 'LONG'}</td>
+      <td>${p.Qty || '—'}</td>
+      <td>${p['Avg Entry'] || '—'}</td>
+      <td>${p.Current || '—'}</td>
+      <td>${p['Market Value'] || '—'}</td>
+      <td class="${isNeg ? 'text-red' : 'text-green'}">${p['Unrealized P&L'] || '—'}</td>
+      <td class="${isNeg ? 'text-red' : 'text-green'}">${p['P&L %'] || '—'}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function updateTimestamp() {
+  document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+}
+
+// Initial load
+loadOverview();
+
+// Auto-refresh every 60s
+setInterval(() => { if (document.getElementById('tab-overview').classList.contains('active')) loadOverview(); }, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alerts — MizanQuant</title>
+<style>
+:root {
+  --bg: #0b0e14; --surface: #131820; --card: #1a212e; --border: #2a3348;
+  --text: #e2e8f0; --muted: #8892a8; --accent: #3b82f6; --green: #22c55e;
+  --red: #ef4444; --yellow: #eab308; --orange: #f97316; --radius: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font: 14px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+.header h1 { font-size: 22px; font-weight: 600; }
+.header h1 span { color: var(--accent); }
+.header h1 .badge { font-size: 12px; background: var(--red); color: #fff; padding: 2px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; }
+.refresh-btn { background: var(--accent); color: #fff; border: none; padding: 8px 20px; border-radius: var(--radius); cursor: pointer; font-size: 13px; }
+.refresh-btn:hover { opacity: .85; }
+.refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
+.last-updated { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* Filter bar */
+.filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.filter-btn { padding: 6px 16px; border: 1px solid var(--border); border-radius: 16px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+.filter-btn:hover { color: var(--text); border-color: var(--muted); }
+.filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Alert list */
+.alert-list { display: flex; flex-direction: column; gap: 6px; }
+.alert-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); transition: opacity .3s; }
+.alert-item.unread { border-left: 3px solid var(--accent); }
+.alert-item .icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.icon-info { background: #3b82f622; color: var(--accent); }
+.icon-success { background: #22c55e22; color: var(--green); }
+.icon-warning { background: #eab30822; color: var(--yellow); }
+.icon-error { background: #ef444422; color: var(--red); }
+.alert-item .body { flex: 1; min-width: 0; }
+.alert-item .title { font-weight: 500; font-size: 13px; }
+.alert-item .desc { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.alert-item .meta { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.alert-item .meta .tag { padding: 1px 6px; border-radius: 4px; background: var(--surface); }
+.alert-item .time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* Summary cards */
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.summary-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; text-align: center; }
+.summary-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.summary-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+
+/* Loading / Empty / Error */
+.loading { text-align: center; padding: 60px 20px; color: var(--muted); }
+.loading .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-state .icon { font-size: 40px; margin-bottom: 8px; }
+.error-state { text-align: center; padding: 40px 20px; color: var(--red); }
+
+/* Section title */
+.section-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; margin-top: 24px; }
+.section-title:first-of-type { margin-top: 0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1><span>Alerts</span> Center <span class="badge" id="unreadBadge" style="display:none;">0</span></h1>
+    <div class="last-updated" id="lastUpdated">Loading...</div>
+  </div>
+  <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">⟳ Refresh</button>
+</div>
+
+<!-- Filter -->
+<div class="filter-bar" id="filterBar">
+  <button class="filter-btn active" data-filter="all">All</button>
+  <button class="filter-btn" data-filter="guard">Guard</button>
+  <button class="filter-btn" data-filter="system">System</button>
+  <button class="filter-btn" data-filter="trade">Trade</button>
+  <button class="filter-btn" data-filter="market">Market</button>
+  <button class="filter-btn" data-filter="info">Info</button>
+</div>
+
+<div class="loading" id="loadingAlerts">
+  <div class="spinner"></div>
+  Loading alerts...
+</div>
+<div id="alertsContent" style="display:none;">
+  <div class="summary-grid" id="summaryGrid"></div>
+  <div class="section-title">Guard Rail Events</div>
+  <div class="alert-list" id="guardList"></div>
+  <div class="section-title">System Status</div>
+  <div class="alert-list" id="systemList"></div>
+</div>
+
+<script>
+const API = '';
+let allAlerts = [];
+let currentFilter = 'all';
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    renderAlerts();
+  });
+});
+
+async function apiGet(path) {
+  try {
+    const res = await fetch(API + path, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+function now() { return new Date().toISOString(); }
+function timeAgo(ts) {
+  if (!ts) return '';
+  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString();
+}
+
+async function loadAll() {
+  document.getElementById('loadingAlerts').style.display = '';
+  document.getElementById('alertsContent').style.display = 'none';
+  const [status, guards, guardSummary] = await Promise.all([
+    apiGet('/api/system/status'),
+    apiGet('/v1/guards/recent?limit=50'),
+    apiGet('/v1/guards/summary'),
+  ]);
+  document.getElementById('loadingAlerts').style.display = 'none';
+  document.getElementById('alertsContent').style.display = '';
+  allAlerts = [];
+
+  // Build alert list
+  if (guards && Array.isArray(guards)) {
+    for (const g of guards) {
+      allAlerts.push({
+        type: 'guard',
+        icon: g.passed ? '✓' : '✗',
+        iconClass: g.passed ? 'icon-success' : 'icon-error',
+        title: (g.passed ? 'Passed: ' : 'Blocked: ') + (g.guard_name || g.name || 'Guard'),
+        desc: g.reason || '',
+        symbol: g.symbol || '',
+        ts: g.ts || g.timestamp || now(),
+        passed: g.passed,
+      });
+    }
+  }
+
+  // System status alerts
+  if (status) {
+    if (status.kill_switch) {
+      allAlerts.push({ type: 'system', icon: '⚠', iconClass: 'icon-warning', title: 'Kill Switch ACTIVE', desc: 'Emergency stop engaged — no trades will be placed', ts: status.timestamp });
+    }
+    if (status.auto_trade_enabled) {
+      allAlerts.push({ type: 'trade', icon: '⟳', iconClass: 'icon-info', title: 'Auto-Trade Enabled', desc: 'System is placing trades automatically', ts: status.timestamp });
+    } else {
+      allAlerts.push({ type: 'trade', icon: '⏸', iconClass: 'icon-warning', title: 'Auto-Trade Disabled', desc: 'Manual mode — no auto trades', ts: status.timestamp });
+    }
+    if (status.open_positions != null) {
+      allAlerts.push({ type: 'trade', icon: '📊', iconClass: 'icon-info', title: `Open Positions: ${status.open_positions}`, desc: `${status.positions ? status.positions.length : 0} positions loaded from broker`, ts: status.timestamp });
+    }
+    if (status.guardrail_events && status.guardrail_events.length) {
+      for (const g of status.guardrail_events) {
+        allAlerts.push({ type: 'guard', icon: g.passed ? '✓' : '✗', iconClass: g.passed ? 'icon-success' : 'icon-error', title: g.name || 'Guard', desc: g.reason || (g.passed ? 'Passed' : 'Blocked'), ts: status.timestamp, passed: g.passed });
+      }
+    }
+    // Market/open positions as market alerts
+    if (status.positions && status.positions.length) {
+      for (const p of status.positions.slice(0, 5)) {
+        const pl = parseFloat(p.unrealized_pl || 0);
+        allAlerts.push({ type: 'market', icon: pl >= 0 ? '📈' : '📉', iconClass: pl >= 0 ? 'icon-success' : 'icon-error', title: p.symbol || 'Position', desc: `Qty: ${p.qty || 0} | P&L: $${(pl).toFixed(2)}`, ts: status.timestamp });
+      }
+    }
+  }
+
+  // Guard summary top cards
+  if (guardSummary && typeof guardSummary === 'object') {
+    renderSummary(guardSummary, status);
+  } else {
+    renderSummary({}, status);
+  }
+
+  renderAlerts();
+  document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+}
+
+function renderSummary(guardSummary, status) {
+  const el = document.getElementById('summaryGrid');
+  const guardCount = Object.values(guardSummary).reduce((a, b) => a + b, 0);
+  const items = [
+    { label: 'Total Alerts', value: allAlerts.length, cls: '' },
+    { label: 'Guard Blocks', value: guardCount, cls: guardCount > 0 ? 'text-red' : '' },
+    { label: 'Kill Switch', value: status?.kill_switch ? 'ON' : 'OFF', cls: status?.kill_switch ? 'text-red' : 'text-green' },
+    { label: 'Auto Trade', value: status?.auto_trade_enabled ? 'ON' : 'OFF', cls: status?.auto_trade_enabled ? 'text-green' : 'text-yellow' },
+    { label: 'Open Positions', value: status?.open_positions ?? '—', cls: '' },
+    { label: 'Uptime', value: status?.uptime_seconds ? Math.floor(status.uptime_seconds / 3600) + 'h' : '—', cls: '' },
+  ];
+  el.innerHTML = items.map(i => `<div class="summary-card"><div class="label">${i.label}</div><div class="value ${i.cls}">${i.value}</div></div>`).join('');
+}
+
+function renderAlerts() {
+  let filtered = allAlerts;
+  if (currentFilter !== 'all') {
+    filtered = allAlerts.filter(a => a.type === currentFilter);
+  }
+
+  // Guard list
+  const guardEl = document.getElementById('guardList');
+  const guardAlerts = filtered.filter(a => a.type === 'guard');
+  if (!guardAlerts.length) {
+    guardEl.innerHTML = '<div class="empty-state"><div class="icon">🛡</div>No guard events</div>';
+  } else {
+    guardEl.innerHTML = guardAlerts.map(a => alertHTML(a)).join('');
+  }
+
+  // System/trade/market list
+  const sysEl = document.getElementById('systemList');
+  const sysAlerts = filtered.filter(a => a.type !== 'guard');
+  if (!sysAlerts.length) {
+    sysEl.innerHTML = '<div class="empty-state"><div class="icon">🔔</div>No alerts</div>';
+  } else {
+    sysEl.innerHTML = sysAlerts.map(a => alertHTML(a)).join('');
+  }
+
+  // Unread badge
+  const unread = allAlerts.filter(a => !a._read).length;
+  const badge = document.getElementById('unreadBadge');
+  if (unread > 0) { badge.textContent = unread; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+}
+
+function alertHTML(a) {
+  return `<div class="alert-item ${a.passed === false ? 'unread' : ''}">
+    <div class="icon ${a.iconClass || 'icon-info'}">${a.icon || '•'}</div>
+    <div class="body">
+      <div class="title">${a.title}</div>
+      ${a.desc ? `<div class="desc">${a.desc}</div>` : ''}
+      <div class="meta">
+        ${a.symbol ? `<span class="tag">${a.symbol}</span>` : ''}
+        <span class="tag">${a.type}</span>
+        ${a.passed != null ? `<span class="tag">${a.passed ? 'Passed' : 'Blocked'}</span>` : ''}
+      </div>
+    </div>
+    <div class="time" title="${a.ts}">${timeAgo(a.ts)}</div>
+  </div>`;
+}
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>

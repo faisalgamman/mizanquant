@@ -4888,11 +4888,41 @@ async def get_risk_desk_panel():
 
 @app.get("/screener", include_in_schema=False)
 async def get_screener_panel():
-    """Serve the Smart Screener interface."""
-    screener_path = Path(__file__).resolve().parent / "static" / "screener.html"
-    if screener_path.exists():
-        return HTMLResponse(content=screener_path.read_text(encoding="utf-8"))
+    """Serve the Halal Screener interface."""
+    p = Path(__file__).resolve().parent / "static" / "halal-screener.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    p = Path(__file__).resolve().parent / "static" / "screener.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Screener not found</h1>", status_code=404)
+
+
+@app.get("/strategies", include_in_schema=False)
+async def get_strategies_page():
+    """Serve the Strategies Dashboard."""
+    p = Path(__file__).resolve().parent / "static" / "strategies.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Strategies not found</h1>", status_code=404)
+
+
+@app.get("/alerts", include_in_schema=False)
+async def get_alerts_page():
+    """Serve the Alerts Center."""
+    p = Path(__file__).resolve().parent / "static" / "alerts.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Alerts not found</h1>", status_code=404)
+
+
+@app.get("/ai-assistant", include_in_schema=False)
+async def get_ai_assistant_page():
+    """Serve the AI Assistant."""
+    p = Path(__file__).resolve().parent / "static" / "ai-assistant.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>AI Assistant not found</h1>", status_code=404)
 
 
 @app.get("/backtest", include_in_schema=False)
