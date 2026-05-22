@@ -648,11 +648,12 @@ async function runBatched(items, batchSize, runFn) {
 }
 
 async function runAllModels(silent) {
-  fcTotal = MODELS.length; fcRunning = 0;
+  const runnable = MODELS.filter(m => m.available !== false);
+  fcTotal = runnable.length; fcRunning = 0;
   if (!silent) document.getElementById('fcRunAllBtn').disabled = true;
   const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
   const horizon = parseInt(document.getElementById('horizonSel').value)||5;
-  await runBatched(MODELS, 2, async (m) => {
+  await runBatched(runnable, 2, async (m) => {
     const id = 'fc-'+m.name;
     setCardRunning(id, true);
     try {
@@ -673,10 +674,11 @@ async function runAllModels(silent) {
 }
 
 async function runAllAgents(silent) {
-  agTotal = AGENTS.length; agRunning = 0;
+  const runnable = AGENTS.filter(a => a.available !== false);
+  agTotal = runnable.length; agRunning = 0;
   if (!silent) document.getElementById('agRunAllBtn').disabled = true;
   const sym = document.getElementById('symInput').value.trim().toUpperCase()||'AAPL';
-  await runBatched(AGENTS, 2, async (a) => {
+  await runBatched(runnable, 2, async (a) => {
     const id = 'ag-'+a.name;
     setCardRunning(id, true);
     try {
