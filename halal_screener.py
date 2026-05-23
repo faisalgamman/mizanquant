@@ -503,17 +503,9 @@ def run_screener():
     cache_set("all", results)
     return results
 
-# Round-trip transaction cost in basis points (commission + slippage + spread).
-# Chan Ch.2: a backtest without costs systematically overstates edge.
-BACKTEST_COST_BPS = 20.0  # 0.20% per side -> 0.40% round-trip
-
-
-def _apply_costs(price: float, side: str) -> float:
-    """Apply transaction cost to a fill price.
-    side='buy' -> price worsened up; side='sell' -> price worsened down.
-    """
-    slip = price * (BACKTEST_COST_BPS / 10_000.0)
-    return price + slip if side == "buy" else price - slip
+# Round-trip transaction cost — centralised in execution_costs.py (Phase 0).
+# Import here so any code in this module that references the names still works.
+from app.services.execution_costs import apply_costs as _apply_costs, BACKTEST_COST_BPS
 
 
 def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):

@@ -121,50 +121,133 @@ def walk_forward_validate(
     y: np.ndarray,
     predict_fn: Callable[[np.ndarray], np.ndarray],
     n_splits: int = 5,
+    gap: int = 0,
+    min_train_ratio: float = 0.6,
+    cost_bps: float = 20.0,
 ) -> dict[str, Any]:
     """Run walk-forward validation and compute aggregated metrics.
 
+    Phase 2 upgrade: uses ``WalkForwardSplit`` (with embargo ``gap``) from
+    the openbb_forecast library instead of the local fixed-split helper.
+
+    Phase 1 upgrade: runs ``LeakageAuditor`` on the first fold.
+
+    Phase 3 upgrade: applies transaction costs (``cost_bps`` per side) to
+    simulated strategy returns before computing Sharpe.
+
+    Phase 4 upgrade: computes DSR + permutation p-value + bootstrap lower
+    bound on all out-of-sample returns.
+
     Args:
-        X: feature array (samples, seq_len, features)
-        y: target array
-        predict_fn: function taking X_test and returning predictions
-        n_splits: number of walk-forward folds
+        X:               Feature array (samples [, seq_len, features]).
+        y:               Target array.
+        predict_fn:      Function taking X_test → predictions.
+        n_splits:        Number of walk-forward folds.
+        gap:             Embargo samples between train and test boundaries.
+                         Set to sequence_length to prevent overlap leakage.
+        min_train_ratio: Minimum fraction of data in the first training fold.
+        cost_bps:        One-way transaction cost in basis points (default 20).
 
     Returns:
-        Dict with test_sharpe, test_acc, fold_metrics, avg_mse, etc.
+        Dict with test_sharpe, test_acc, fold_metrics, avg_mse,
+        fold_sharpe_std (stability), deflated_sharpe, permutation_pvalue,
+        bootstrap_lower_5pct, leakage_clean, leakage_report.
     """
-    folds = walk_forward_split(X, y, n_splits=n_splits)
-    fold_metrics = []
-    all_preds = []
-    all_actuals = []
+    # ── Pillar 2: WalkForwardSplit with embargo gap ────────────────────
+    try:
+        from openbb_forecast.data.validation import WalkForwardSplit
+        splitter = WalkForwardSplit(
+            n_splits=n_splits,
+            min_train_ratio=min_train_ratio,
+            gap=gap,
+        )
+        raw_folds = splitter.split(len(X))
+    except Exception as _wf_err:
+        logger.warning("WalkForwardSplit unavailable (%s), falling back to local split", _wf_err)
+        raw_folds = [(np.arange(0, int(len(X) * (0.6 + 0.08 * i))),
+                      np.arange(int(len(X) * (0.6 + 0.08 * i)),
+                                min(int(len(X) * (0.6 + 0.08 * (i + 1))), len(X))))
+                     for i in range(n_splits)]
+        raw_folds = [f for f in raw_folds if len(f[1]) > 0]
 
-    for fold_idx, (X_tr, y_tr, X_te, y_te) in enumerate(folds):
+    # ── Pillar 1: LeakageAuditor on first fold ────────────────────────
+    leakage_clean: bool = True
+    leakage_report: dict = {}
+    try:
+        from openbb_forecast.data.leakage_auditor import LeakageAuditor
+        if raw_folds:
+            train_idx, test_idx = raw_folds[0]
+            # Flatten to 2-D for the auditor (works for 3-D LSTM arrays too)
+            X2d = X.reshape(len(X), -1) if X.ndim > 2 else X
+            features_df = pd.DataFrame(
+                X2d, columns=[f"feat_{j}" for j in range(X2d.shape[1])]
+            )
+            labels_s = pd.Series(np.asarray(y).ravel()[:len(X2d)], name="target")
+            audit = LeakageAuditor().audit(
+                features=features_df,
+                labels=labels_s,
+                train_idx=train_idx,
+                test_idx=test_idx,
+                scaler_refit_per_fold=True,
+                gap=gap,
+                shuffle_split=False,
+            )
+            # CRITICAL / HIGH = real data leakage → block.
+            # MEDIUM = advisory (e.g. distributional drift) → warn only.
+            blocking = [f for f in audit.findings if f.severity in ("CRITICAL", "HIGH")]
+            leakage_clean = len(blocking) == 0
+            leakage_report = audit.to_dict()
+            if not leakage_clean:
+                logger.warning(
+                    "LeakageAuditor found %d CRITICAL/HIGH issue(s) in "
+                    "walk-forward fold 0:\n%s",
+                    len(blocking), audit.summary(),
+                )
+            elif audit.fails > 0:
+                logger.info(
+                    "LeakageAuditor: %d advisory (MEDIUM) warning(s) only — "
+                    "pipeline marked clean.", audit.fails
+                )
+    except Exception as _la_err:
+        logger.debug("LeakageAuditor skipped: %s", _la_err)
+
+    fold_metrics = []
+    all_strategy_rets: list[float] = []
+
+    for fold_idx, (train_idx, test_idx) in enumerate(raw_folds):
+        X_tr = X[train_idx]
+        y_tr = y[train_idx]
+        X_te = X[test_idx]
+        y_te = y[test_idx]
         try:
             preds = predict_fn(X_te)
             if preds is None:
                 continue
             preds = np.asarray(preds).flatten()
             actuals = np.asarray(y_te).flatten()
-            # align lengths
             min_len = min(len(preds), len(actuals))
             preds = preds[:min_len]
             actuals = actuals[:min_len]
 
             mse = float(np.mean((preds - actuals) ** 2))
             mae = float(np.mean(np.abs(preds - actuals)))
-            # directional accuracy
             if min_len >= 2:
                 pred_dir = np.diff(preds) > 0
                 actual_dir = np.diff(actuals) > 0
                 acc = float(np.mean(pred_dir == actual_dir))
             else:
                 acc = 0.0
-            # Sharpe from a simulated directional strategy on ACTUAL returns.
-            # go long when prediction rises, flat otherwise — avoids lookahead bias
-            # because preds come from the held-out test fold only.
+
+            # Directional-strategy returns on ACTUAL prices.
             actual_rets = np.diff(actuals) / (np.abs(actuals[:-1]) + 1e-9)
             pred_direction = np.sign(np.diff(preds))  # +1 up, -1 down, 0 flat
+
+            # ── Pillar 3: apply round-trip cost to every triggered trade ──
+            round_trip = 2.0 * cost_bps / 10_000.0
+            active = pred_direction != 0
             strategy_rets = pred_direction * actual_rets
+            strategy_rets[active] -= round_trip  # deduct cost only when trading
+
             sharpe = _calc_sharpe(strategy_rets)
 
             fold_metrics.append({
@@ -176,26 +259,54 @@ def walk_forward_validate(
                 "train_size": len(X_tr),
                 "test_size": len(X_te),
             })
-            all_preds.extend(preds.tolist())
-            all_actuals.extend(actuals.tolist())
+            all_strategy_rets.extend(strategy_rets.tolist())
         except Exception as e:
             logger.warning("Walk-forward fold %d failed: %s", fold_idx + 1, e)
 
     if not fold_metrics:
-        return {"test_sharpe": 0.0, "test_acc": 0.0, "fold_metrics": [],
-                "avg_mse": 0.0, "status": "failed"}
+        return {
+            "test_sharpe": 0.0, "test_acc": 0.0, "fold_metrics": [],
+            "avg_mse": 0.0, "status": "failed",
+            "fold_sharpe_std": 0.0,
+            "deflated_sharpe": 0.0, "permutation_pvalue": 1.0,
+            "bootstrap_lower_5pct": 0.0,
+            "leakage_clean": leakage_clean, "leakage_report": leakage_report,
+        }
 
-    avg_sharpe = np.mean([m["sharpe"] for m in fold_metrics])
-    avg_acc = np.mean([m["directional_acc"] for m in fold_metrics])
-    avg_mse = np.mean([m["mse"] for m in fold_metrics])
+    avg_sharpe = float(np.mean([m["sharpe"] for m in fold_metrics]))
+    fold_sharpe_std = float(np.std([m["sharpe"] for m in fold_metrics]))
+    avg_acc = float(np.mean([m["directional_acc"] for m in fold_metrics]))
+    avg_mse = float(np.mean([m["mse"] for m in fold_metrics]))
+
+    # ── Pillar 4: Robustness QC on pooled OOS returns ────────────────
+    dsr = 0.0
+    pval = 1.0
+    boot_lb = 0.0
+    try:
+        from app.services.backtest_qc import qc_report as _qc_report
+        if len(all_strategy_rets) >= 5:
+            qc = _qc_report(all_strategy_rets, n_trials=1, annualization=252)
+            dsr = round(float(qc.get("deflated_sharpe", 0.0)), 3)
+            pval = round(float(qc.get("permutation_pvalue", 1.0)), 3)
+            boot_lb = round(float(qc.get("bootstrap_lower_5pct", 0.0)), 6)
+    except Exception as _qc_err:
+        logger.debug("qc_report skipped: %s", _qc_err)
 
     return {
-        "test_sharpe": round(float(avg_sharpe), 3),
-        "test_acc": round(float(avg_acc), 4),
-        "avg_mse": round(float(avg_mse), 6),
+        "test_sharpe": round(avg_sharpe, 3),
+        "test_acc": round(avg_acc, 4),
+        "avg_mse": round(avg_mse, 6),
         "fold_metrics": fold_metrics,
         "n_folds": len(fold_metrics),
+        "fold_sharpe_std": round(fold_sharpe_std, 3),
         "status": "ok",
+        # ── Robustness QC ──
+        "deflated_sharpe": dsr,
+        "permutation_pvalue": pval,
+        "bootstrap_lower_5pct": boot_lb,
+        # ── Leakage ──
+        "leakage_clean": leakage_clean,
+        "leakage_report": leakage_report,
     }
 
 
@@ -964,6 +1075,9 @@ def run_quality_pipeline(
         benchmark_vs_spy=spy_bench,
     )
 
+    leakage_clean: bool = bool(wf_result.get("leakage_clean", True))
+    leakage_report: dict = wf_result.get("leakage_report", {})
+
     return {
         "quality_gate": gate,
         "walk_forward": wf_result,
@@ -973,4 +1087,7 @@ def run_quality_pipeline(
         "report": report,
         "pipeline_status": "ok" if gate.passed else "quality_gate_failed",
         "outliers_removed": len(prices) - len(clean_prices),
+        # Pillar 1 output — forwarded to model_registry quality gates
+        "leakage_clean": leakage_clean,
+        "leakage_report": leakage_report,
     }

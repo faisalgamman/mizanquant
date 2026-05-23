@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from app.services.execution_costs import apply_costs
+
 SYMBOLS = [
     "AAPL", "NVDA", "MSFT", "GOOGL", "COST",
     "AMZN", "META", "TSLA", "AVGO", "AMD",
@@ -147,56 +149,82 @@ def fetch_data(symbol: str) -> Optional[pd.DataFrame]:
         return None
 
 
-def _simulate_trade(df: pd.DataFrame, entry_idx: int,
-                    stop_price: float, tp1: float, tp2: float, tp3: float,
-                    hold_max: int, strategy: str) -> TradeResult:
-    entry_price = float(df["close"].iloc[entry_idx])
+def _simulate_trade(
+    df: pd.DataFrame,
+    entry_idx: int,
+    stop_price: float,
+    tp1: float,
+    tp2: float,
+    tp3: float,
+    hold_max: int,
+    strategy: str,
+    entry_price: float | None = None,
+) -> TradeResult:
+    """Simulate a single trade starting at ``entry_idx``.
+
+    Phase 3 fix — no same-bar look-ahead, costs on every fill:
+    * Callers must pass ``entry_idx = signal_bar + 1`` (next-open fill).
+    * ``entry_price`` should be ``apply_costs(open[entry_idx], 'buy')``.
+      If ``None``, the open of ``entry_idx`` is used and costs are applied
+      automatically.
+    * Every exit (TP, SL, max-hold close) is marked through
+      ``apply_costs(..., 'sell')``.
+    """
+    # ── Entry ────────────────────────────────────────────────────────────
+    if entry_price is None:
+        raw = (float(df["open"].iloc[entry_idx])
+               if "open" in df.columns
+               else float(df["close"].iloc[entry_idx]))
+        entry_price = apply_costs(raw, "buy")
     entry_date = str(df.index[entry_idx].date())
     exit_date = entry_date
     exit_price = entry_price
     exit_reason = "max_hold"
     tp1_hit = tp2_hit = tp3_hit = False
     high_water = entry_price
+    offset = 0
 
     for offset in range(1, min(hold_max + 1, len(df) - entry_idx - 1)):
         idx = entry_idx + offset
         day_close = float(df["close"].iloc[idx])
-        day_high = float(df["high"].iloc[idx])
-        day_low = float(df["low"].iloc[idx])
+        day_high  = float(df["high"].iloc[idx])
+        day_low   = float(df["low"].iloc[idx])
         exit_date = str(df.index[idx].date())
 
         high_water = max(high_water, day_high)
 
+        # Momentum: trailing stop activates after day 3
         if strategy == "momentum" and offset > 3:
             if day_low <= stop_price:
-                exit_price = stop_price * 0.99
+                exit_price = apply_costs(stop_price, "sell")
                 exit_reason = "stop_loss"
                 tp1_hit = tp2_hit = False
                 break
 
         if day_high >= tp3:
-            exit_price = tp3
+            exit_price = apply_costs(tp3, "sell")
             exit_reason = "tp3"
             tp1_hit = tp2_hit = tp3_hit = True
             break
         if day_high >= tp2 and exit_reason != "tp3":
-            exit_price = tp2
+            exit_price = apply_costs(tp2, "sell")
             tp1_hit = True
             tp2_hit = True
             if offset >= hold_max - 2:
                 exit_reason = "tp2"
                 break
         if day_high >= tp1 and exit_reason not in ("tp2", "tp3"):
-            exit_price = tp1
+            exit_price = apply_costs(tp1, "sell")
             tp1_hit = True
             break
 
         if day_low <= stop_price:
-            exit_price = stop_price * 0.99
+            exit_price = apply_costs(stop_price, "sell")
             exit_reason = "stop_loss"
             break
 
-        exit_price = day_close
+        # Max-hold / time exit
+        exit_price = apply_costs(day_close, "sell")
 
     ret = (exit_price - entry_price) / entry_price * 100
     return TradeResult(
@@ -208,7 +236,7 @@ def _simulate_trade(df: pd.DataFrame, entry_idx: int,
         exit_price=round(exit_price, 2),
         return_pct=round(ret, 2),
         exit_reason=exit_reason,
-        hold_days=offset if "offset" in dir() else 0,
+        hold_days=offset,
         tp1_hit=tp1_hit,
         tp2_hit=tp2_hit,
         tp3_hit=tp3_hit,
@@ -219,7 +247,9 @@ def _compute_metrics(trades: list[TradeResult]) -> dict:
     if not trades:
         return {"total_trades": 0, "win_rate": 0, "avg_return": 0,
                 "total_return": 0, "sharpe": 0, "max_drawdown": 0,
-                "avg_hold_days": 0, "profit_factor": 0}
+                "avg_hold_days": 0, "profit_factor": 0,
+                "deflated_sharpe": 0.0, "permutation_pvalue": 1.0,
+                "bootstrap_lower_5pct": 0.0}
 
     returns = np.array([t.return_pct for t in trades])
     wins = returns[returns > 0]
@@ -228,14 +258,30 @@ def _compute_metrics(trades: list[TradeResult]) -> dict:
     avg_ret = float(np.mean(returns))
     total_ret = float(np.sum(returns))
 
-    sharpe = (float(np.mean(returns)) - RISK_FREE) / (float(np.std(returns)) + 1e-9) * np.sqrt(252 / float(np.mean([t.hold_days for t in trades]) + 1)) if len(returns) > 1 else 0
     avg_hold = float(np.mean([t.hold_days for t in trades]))
+    sharpe = (float(np.mean(returns)) - RISK_FREE) / (float(np.std(returns)) + 1e-9) * np.sqrt(252 / max(avg_hold + 1, 1)) if len(returns) > 1 else 0
 
     cum = np.cumsum(returns)
     dd = cum - np.maximum.accumulate(cum)
     mdd = float(np.min(dd)) if len(dd) > 0 else 0
 
     profit_factor = float(np.sum(wins) / (abs(np.sum(losses)) + 1e-9)) if len(losses) > 0 else float("inf")
+
+    # ── Pillar 4: Robustness QC (DSR + permutation + bootstrap) ──────────
+    dsr = 0.0
+    pval = 1.0
+    boot_lb = 0.0
+    try:
+        from app.services.backtest_qc import qc_report
+        # returns are in % — convert to fractions for qc_report
+        ret_frac = [r / 100.0 for r in returns.tolist()]
+        ann = max(int(252 / max(avg_hold, 1)), 12)
+        qc = qc_report(ret_frac, n_trials=1, annualization=ann)
+        dsr = round(float(qc.get("deflated_sharpe", 0.0)), 3)
+        pval = round(float(qc.get("permutation_pvalue", 1.0)), 3)
+        boot_lb = round(float(qc.get("bootstrap_lower_5pct", 0.0)), 6)
+    except Exception:
+        pass
 
     return {
         "total_trades": len(trades),
@@ -246,6 +292,9 @@ def _compute_metrics(trades: list[TradeResult]) -> dict:
         "max_drawdown": round(mdd, 2),
         "avg_hold_days": round(avg_hold, 1),
         "profit_factor": round(profit_factor, 2),
+        "deflated_sharpe": dsr,
+        "permutation_pvalue": pval,
+        "bootstrap_lower_5pct": boot_lb,
     }
 
 
@@ -288,16 +337,17 @@ def backtest_momentum(df: pd.DataFrame, spy_df: pd.DataFrame, symbol: str) -> Ba
     trades = []
     in_trade = False
     for i in range(200, len(df) - 60):
-        if not in_trade and entry_signal.iloc[i]:
-            price = float(close.iloc[i])
-            risk = price * 0.04
-            stop = price - risk
-            sl_price = price - risk * 1.5
-            tp1 = price + risk * 1.5
-            tp2 = price + risk * 3.0
-            tp3 = price + risk * 5.0
+        # Phase 3: signal at close[i] → fill at open[i+1] (no same-bar look-ahead)
+        if not in_trade and entry_signal.iloc[i] and i + 1 < len(df):
+            next_open = float(df["open"].iloc[i + 1]) if "open" in df.columns else float(close.iloc[i + 1])
+            ep = apply_costs(next_open, "buy")
+            risk = ep * 0.04
+            sl_price = ep - risk * 1.5
+            tp1 = ep + risk * 1.5
+            tp2 = ep + risk * 3.0
+            tp3 = ep + risk * 5.0
 
-            tr = _simulate_trade(df, i, sl_price, tp1, tp2, tp3, 15, "momentum")
+            tr = _simulate_trade(df, i + 1, sl_price, tp1, tp2, tp3, 15, "momentum", entry_price=ep)
             tr.symbol = symbol
             tr.strategy = "Momentum"
             trades.append(tr)
@@ -344,15 +394,16 @@ def backtest_reversion(df: pd.DataFrame, symbol: str) -> BacktestResult:
     trades = []
     in_trade = False
     for i in range(200, len(df) - 30):
-        if not in_trade and entry_signal.iloc[i]:
-            price = float(close.iloc[i])
-            # P1.4 — live strategy uses entry - 1.5*ATR (not bb_low - atr)
-            stop = float(price - 1.5 * atr_val.iloc[i])
+        if not in_trade and entry_signal.iloc[i] and i + 1 < len(df):
+            next_open = float(df["open"].iloc[i + 1]) if "open" in df.columns else float(close.iloc[i + 1])
+            ep = apply_costs(next_open, "buy")
+            # P1.4 — live strategy uses entry - 1.5*ATR
+            stop = float(ep - 1.5 * atr_val.iloc[i])
             tp1 = float(ema20.iloc[i])
             tp2 = float(bb_mid.iloc[i])
             tp3 = float(bb_up.iloc[i])
 
-            tr = _simulate_trade(df, i, stop, tp1, tp2, tp3, 7, "reversion")
+            tr = _simulate_trade(df, i + 1, stop, tp1, tp2, tp3, 7, "reversion", entry_price=ep)
             tr.symbol = symbol
             tr.strategy = "Mean Reversion"
             trades.append(tr)
@@ -399,16 +450,17 @@ def backtest_breakout(df: pd.DataFrame, symbol: str) -> BacktestResult:
     trades = []
     in_trade = False
     for i in range(300, len(df) - 60):
-        if not in_trade and entry_signal.iloc[i]:
-            price = float(close.iloc[i])
+        if not in_trade and entry_signal.iloc[i] and i + 1 < len(df):
+            next_open = float(df["open"].iloc[i + 1]) if "open" in df.columns else float(close.iloc[i + 1])
+            ep = apply_costs(next_open, "buy")
             atr_v = float(atr_val.iloc[i])
             resistance = float(high_20.iloc[i])
             stop = round(resistance * 0.995, 2)
-            tp1 = round(price + atr_v * 2, 2)
-            tp2 = round(price + atr_v * 4, 2)
-            tp3 = round(price + atr_v * 6, 2)
+            tp1 = round(ep + atr_v * 2, 2)
+            tp2 = round(ep + atr_v * 4, 2)
+            tp3 = round(ep + atr_v * 6, 2)
 
-            tr = _simulate_trade(df, i, stop, tp1, tp2, tp3, 20, "breakout")
+            tr = _simulate_trade(df, i + 1, stop, tp1, tp2, tp3, 20, "breakout", entry_price=ep)
             tr.symbol = symbol
             tr.strategy = "Breakout"
             trades.append(tr)
@@ -463,19 +515,20 @@ def backtest_swing(df: pd.DataFrame, spy_df: pd.DataFrame, symbol: str) -> Backt
     trades = []
     in_trade = False
     for i in range(200, len(df) - 40):
-        if not in_trade and entry_signal.iloc[i]:
-            price = float(close.iloc[i])
+        if not in_trade and entry_signal.iloc[i] and i + 1 < len(df):
+            next_open = float(df["open"].iloc[i + 1]) if "open" in df.columns else float(close.iloc[i + 1])
+            ep = apply_costs(next_open, "buy")
 
-            prev_high = float(high.iloc[max(0, i - 20):i].max()) if i >= 20 else price * 1.03
-            pullback_low = float(low.iloc[max(0, i - 10):i + 1].min()) if i >= 10 else price * 0.97
+            prev_high = float(high.iloc[max(0, i - 20):i].max()) if i >= 20 else ep * 1.03
+            pullback_low = float(low.iloc[max(0, i - 10):i + 1].min()) if i >= 10 else ep * 0.97
             stop = round(pullback_low * 0.997, 2)
 
             tp1 = round(prev_high, 2)
-            fib_ext = prev_high - price if prev_high > price else price * 0.03
-            tp2 = round(price + fib_ext * 1.272, 2)
-            tp3 = round(price + fib_ext * 1.618, 2)
+            fib_ext = prev_high - ep if prev_high > ep else ep * 0.03
+            tp2 = round(ep + fib_ext * 1.272, 2)
+            tp3 = round(ep + fib_ext * 1.618, 2)
 
-            tr = _simulate_trade(df, i, stop, tp1, tp2, tp3, 15, "swing")
+            tr = _simulate_trade(df, i + 1, stop, tp1, tp2, tp3, 15, "swing", entry_price=ep)
             tr.symbol = symbol
             tr.strategy = "Swing"
             trades.append(tr)
@@ -519,15 +572,16 @@ def backtest_momentum_burst(df: pd.DataFrame, spy_df: pd.DataFrame, symbol: str)
     trades = []
     in_trade = False
     for i in range(200, len(df) - 10):
-        if not in_trade and entry_signal.iloc[i]:
-            price = float(close.iloc[i])
-            atr_i = float(atr_val.iloc[i]) if not pd.isna(atr_val.iloc[i]) else price * 0.02
-            stop = price - 1.5 * atr_i
-            tp1 = price * 1.05
-            tp2 = price * 1.08
-            tp3 = price * 1.12
+        if not in_trade and entry_signal.iloc[i] and i + 1 < len(df):
+            next_open = float(df["open"].iloc[i + 1]) if "open" in df.columns else float(close.iloc[i + 1])
+            ep = apply_costs(next_open, "buy")
+            atr_i = float(atr_val.iloc[i]) if not pd.isna(atr_val.iloc[i]) else ep * 0.02
+            stop = ep - 1.5 * atr_i
+            tp1 = ep * 1.05
+            tp2 = ep * 1.08
+            tp3 = ep * 1.12
 
-            tr = _simulate_trade(df, i, stop, tp1, tp2, tp3, 5, "momentum_burst")
+            tr = _simulate_trade(df, i + 1, stop, tp1, tp2, tp3, 5, "momentum_burst", entry_price=ep)
             tr.symbol = symbol
             tr.strategy = "Momentum Burst"
             trades.append(tr)

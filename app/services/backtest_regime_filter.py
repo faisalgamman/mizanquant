@@ -50,7 +50,10 @@ def _ema(series: pd.Series, period: int = _EMA_PERIOD) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
 
-def classify_regime(entry_date: datetime | str) -> str:
+def classify_regime(
+    entry_date: datetime | str,
+    spy_df: pd.DataFrame | None = None,
+) -> str:
     """Classify the market regime at a given entry date.
 
     Uses SPY's position relative to its 200-day EMA:
@@ -58,14 +61,28 @@ def classify_regime(entry_date: datetime | str) -> str:
       - SPY < EMA200 - 2% → BEAR
       - Otherwise → NEUTRAL
 
+    Args:
+        entry_date: The date of the trade entry (ISO string or datetime).
+        spy_df: Optional pre-fetched SPY DataFrame (must have a "close"
+            column and a DatetimeIndex covering ``entry_date``).  When
+            supplied the function uses *point-in-time* data from the
+            backtest window itself — faster and correct for historical
+            trades older than 400 days.  When ``None`` the function
+            fetches the last 400 days from today (legacy behaviour, only
+            suitable for recent/live trades).
+
     Returns "UNKNOWN" if SPY data is unavailable.
     """
     if isinstance(entry_date, str):
-        entry_date = datetime.fromisoformat(entry_date)
+        # Handle both "2024-03-15" and full ISO timestamps
+        try:
+            entry_date = datetime.fromisoformat(entry_date.replace("Z", "+00:00"))
+        except ValueError:
+            entry_date = datetime.fromisoformat(entry_date[:10])
     if entry_date.tzinfo is None:
         entry_date = entry_date.replace(tzinfo=timezone.utc)
 
-    df = _fetch_spy_since(days=400)
+    df = spy_df if spy_df is not None else _fetch_spy_since(days=400)
     if df is None:
         return "UNKNOWN"
 
@@ -98,16 +115,26 @@ def classify_regime(entry_date: datetime | str) -> str:
     return "NEUTRAL"
 
 
-def tag_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def tag_trades(
+    trades: list[dict[str, Any]],
+    spy_df: pd.DataFrame | None = None,
+) -> list[dict[str, Any]]:
     """Tag each trade dict with 'regime_at_entry'.
 
-    Each dict must have an 'entry_date' key (ISO format string or datetime).
-    Modifies and returns the same list.
+    Accepts dicts that use either ``'entry_date'`` (lower-case, from
+    strategies/backtest.py) or ``'Entry Date'`` (Title Case, from
+    backtest_service.py / halal_screener.py).  Modifies and returns the
+    same list.
+
+    Args:
+        trades:  List of trade dicts.
+        spy_df:  Optional pre-fetched SPY DataFrame forwarded to
+            ``classify_regime`` for point-in-time accuracy.
     """
     for trade in trades:
-        entry = trade.get("entry_date")
+        entry = trade.get("entry_date") or trade.get("Entry Date")
         if entry:
-            trade["regime_at_entry"] = classify_regime(entry)
+            trade["regime_at_entry"] = classify_regime(entry, spy_df=spy_df)
         else:
             trade["regime_at_entry"] = "UNKNOWN"
     return trades

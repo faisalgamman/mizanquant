@@ -1,13 +1,7 @@
 """Standalone backtest engine — no halal_screener dependency."""
+from app.services.execution_costs import apply_costs as _apply_costs, BACKTEST_COST_BPS
 from app.services.market_data import fetch as fetch_market_data
 from app.services.technical import ema, rsi, macd, atr, calc_metrics, get_score
-
-BACKTEST_COST_BPS = 20.0
-
-
-def _apply_costs(price: float, side: str) -> float:
-    slip = price * (BACKTEST_COST_BPS / 10_000.0)
-    return price + slip if side == "buy" else price - slip
 
 
 def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
@@ -163,6 +157,21 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
         mdd = summary[0].get("Max Drawdown %", 0) or -0.001
         rf  = round(summary[0].get("Return %", 0) / abs(mdd), 3) if mdd else 0
 
+        # ── Regime Breakdown ──────────────────────────────────────────
+        regime_breakdown: dict = {}
+        try:
+            from app.services.backtest_regime_filter import (
+                tag_trades, compute_per_regime_breakdown,
+            )
+            # Reuse the SPY data already fetched for the benchmark — this
+            # gives point-in-time accuracy for every historical trade date.
+            spy_for_regime = spy if (spy is not None and len(spy) >= 2) else None
+            # trades use "Entry Date" key (Title Case)
+            tag_trades(trades, spy_df=spy_for_regime)
+            regime_breakdown = compute_per_regime_breakdown(trades)
+        except Exception:
+            pass
+
         summary[0].update({
             "Benchmark Return %": benchmark_return_pct,
             "Max Consec Wins":    max_cw,
@@ -172,6 +181,7 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
             "equity_curve":       equity_curve,
             "monthly_returns":    monthly_returns,
             "benchmark_equity":   benchmark_equity,
+            "regime_breakdown":   regime_breakdown,
         })
 
         return summary + trades

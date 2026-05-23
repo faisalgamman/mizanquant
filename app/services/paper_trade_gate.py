@@ -36,7 +36,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from app.services.backtest_qc import deflated_sharpe
+from app.services.backtest_qc import deflated_sharpe, permutation_pvalue
 
 
 @dataclass
@@ -49,6 +49,10 @@ class GraduationStatus:
     mean_return: float
     sharpe: float
     dsr: float
+    # Pillar 4 additions
+    permutation_pvalue: float = 1.0
+    # Pillar 5 additions
+    regime_robust: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -60,6 +64,8 @@ class GraduationStatus:
             "mean_return_pct": round(self.mean_return * 100, 4),
             "sharpe": round(self.sharpe, 3),
             "dsr": round(self.dsr, 3),
+            "permutation_pvalue": round(self.permutation_pvalue, 3),
+            "regime_robust": self.regime_robust,
         }
 
 
@@ -72,6 +78,15 @@ def evaluate_graduation(
     min_unique_symbols: int = 8,
     min_dsr: float = 0.60,
     n_trials_announced: int = 1,
+    # Pillar 4: permutation test gate
+    max_permutation_pvalue: float = float(
+        __import__("os").environ.get("QUALITY_GATE_MAX_PVAL", "0.05")
+    ),
+    # Pillar 5: regime robustness
+    regime_breakdown: "dict | None" = None,
+    min_profitable_regimes: int = int(
+        __import__("os").environ.get("QUALITY_GATE_MIN_REGIMES", "2")
+    ),
 ) -> GraduationStatus:
     """Pure graduation evaluator.
 
@@ -119,16 +134,40 @@ def evaluate_graduation(
         mu = 0.0
         sharpe = 0.0
         dsr = 0.0
+        pval = 1.0
     else:
         mu = float(rets.mean())
         sd = float(rets.std(ddof=1)) if n > 1 else 0.0
         sharpe = float(mu / sd * np.sqrt(252)) if sd > 0 else 0.0
         dsr = deflated_sharpe(rets, n_trials=n_trials_announced)
+        # Pillar 4: permutation p-value (how often does noise beat this edge?)
+        pval = permutation_pvalue(rets, n_perm=500)
 
     if mu <= 0:
         failures.append(f"mean_return_pct={mu*100:.3f}<=0")
     if dsr < min_dsr:
         failures.append(f"DSR={dsr:.2f}<{min_dsr}")
+
+    # Pillar 4: permutation gate — block strategies whose edge is noise
+    if pval >= max_permutation_pvalue and n > 0:
+        failures.append(
+            f"permutation_pvalue={pval:.3f}>={max_permutation_pvalue} "
+            f"(edge indistinguishable from random)"
+        )
+
+    # Pillar 5: regime robustness — must not depend on a single regime
+    regime_robust = True
+    if regime_breakdown:
+        profitable_regimes = sum(
+            1 for reg in ("BULL", "NEUTRAL", "BEAR")
+            if float(regime_breakdown.get(reg, {}).get("avg_return", -1.0)) > 0
+        )
+        regime_robust = profitable_regimes >= min_profitable_regimes
+        if not regime_robust:
+            failures.append(
+                f"regime_robustness={profitable_regimes} profitable regimes "
+                f"< {min_profitable_regimes} required"
+            )
 
     graduated = len(failures) == 0
     reason = "graduated — eligible for live capital" if graduated else "; ".join(failures)
@@ -142,6 +181,8 @@ def evaluate_graduation(
         mean_return=mu,
         sharpe=sharpe,
         dsr=dsr,
+        permutation_pvalue=round(pval, 3),
+        regime_robust=regime_robust,
     )
 
 

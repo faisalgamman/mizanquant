@@ -43,7 +43,19 @@ def test_register_staging():
 
 def test_promote_to_production():
     mr.register("ensemble", alias="staging", artifact_path="models/ensemble/challenger.pt", version="v3")
-    mr.promote_to_production("ensemble", version="v3", artifact_path="models/ensemble/challenger.pt")
+    # Must supply metrics that pass ALL quality gates (Sharpe, Acc, MaxDD, DSR, p-value)
+    mr.promote_to_production(
+        "ensemble",
+        version="v3",
+        artifact_path="models/ensemble/challenger.pt",
+        metrics={
+            "test_sharpe": 1.5,
+            "test_acc": 0.62,
+            "max_drawdown": 8.0,
+            "deflated_sharpe": 0.75,
+            "permutation_pvalue": 0.02,
+        },
+    )
     prod = mr.resolve("ensemble")
     assert prod is not None
     assert prod["version"] == "v3"
