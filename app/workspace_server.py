@@ -495,18 +495,25 @@ try:
                 pass
             df_w = None
             try:
-                tw = yf.Ticker(symbol)
-                wf = tw.history(period="3mo", interval="1wk")
-                if wf is not None and len(wf) > 20:
-                    wf.index = pd.DatetimeIndex(wf.index)
-                    wf.columns = [c.lower() for c in wf.columns]
-                    df_w = wf
+                # Weekly bars: resample Alpaca daily data (server-safe, no yfinance)
+                from app.services.market_data import fetch as _md_fetch_strat
+                _daily = _md_fetch_strat(symbol, period="3mo")
+                if _daily is not None and len(_daily) > 10:
+                    _daily.index = pd.DatetimeIndex(_daily.index)
+                    _daily.columns = [c.lower() for c in _daily.columns]
+                    wf = _daily.resample("W").agg({
+                        "open": "first", "high": "max",
+                        "low": "min", "close": "last", "volume": "sum",
+                    }).dropna()
+                    if len(wf) > 8:
+                        df_w = wf
             except Exception:
                 pass
             df_15 = None
             try:
-                t15 = yf.Ticker(symbol)
-                m15 = t15.history(period="5d", interval="15m")
+                # 15-min bars: Alpaca intraday (server-safe, no yfinance)
+                from app.services.market_data import fetch_alpaca_intraday as _fetch_intra
+                m15 = _fetch_intra(symbol, timeframe="15Min", days_back=5)
                 if m15 is not None and len(m15) > 30:
                     m15.index = pd.DatetimeIndex(m15.index)
                     m15.columns = [c.lower() for c in m15.columns]
@@ -1000,7 +1007,7 @@ def _run_agent_backtest(agent, prices, dates, agent_name, symbol):
         results.append({
             "date": dates[t],
             "portfolio_value": float(equity[t]),
-            "benchmark_value": float(prices[t]) / prices[0] * prices[0] if len(prices) > 0 else 0,
+            "benchmark_value": float(prices[t]) / float(prices[0]) * 10000.0 if len(prices) > 0 and prices[0] else 0,
             "cumulative_return": float(equity[t]) / 10000 - 1.0,
         })
 
@@ -1256,22 +1263,6 @@ async def _yf_info(symbol: str, timeout: float = 12.0) -> dict:
         logger.warning("yfinance info error [%s]: %s", symbol, e)
     return {}
 
-
-async def _yf_download(symbol: str, period: str = "1y", timeout: float = 15.0) -> pd.DataFrame:
-    """Download yfinance OHLCV with timeout. Returns empty DataFrame on timeout/error."""
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                lambda: yf.download(symbol, period=period, progress=False, auto_adjust=True),
-            ),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("yfinance download timeout [%s] > %.1fs", symbol, timeout)
-        return pd.DataFrame()
-    except Exception as e:
-        logger.warning("yfinance download error [%s]: %s", symbol, e)
-        return pd.DataFrame()
 
 
 _HARAM_SECTORS = {

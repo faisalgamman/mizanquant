@@ -10,9 +10,11 @@ when yfinance data is unavailable.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -84,7 +86,6 @@ _FMP_BREAKER = _CircuitBreaker("fmp", threshold=5, reset=120.0)
 
 
 def _safe_float(val, default: float = 0.0) -> float:
-    import math
     if val is None:
         return default
     try:
@@ -136,6 +137,14 @@ class FMPClient:
 
     def __init__(self):
         self.api_key = settings.FMP_API_KEY or ""
+        # Persistent HTTP client — reused across requests (connection pooling)
+        self._http = httpx.Client(timeout=10)
+
+    def __del__(self):
+        try:
+            self._http.close()
+        except Exception:
+            pass
 
     def _is_available(self) -> bool:
         return bool(self.api_key) and not _FMP_BREAKER.is_open()
@@ -153,14 +162,105 @@ class FMPClient:
                 return ttl
         return 3600  # default 1 hour
 
+    # ------------------------------------------------------------------
+    # Database cache helpers (L2 — persistent across restarts)
+    # ------------------------------------------------------------------
+
+    def _db_cache_get(self, key: str, now: datetime) -> Any | None:
+        """Read from persistent DB cache. Returns None on miss/error."""
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models import FMPCache
+            db = SessionLocal()
+            try:
+                row = db.query(FMPCache).filter(
+                    FMPCache.cache_key == key,
+                    FMPCache.expires_at > now,
+                ).first()
+                if row:
+                    logger.debug("FMP cache hit (db): %s", key[:80])
+                    return row.data
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("FMP db cache read failed: %s", exc)
+        return None
+
+    def _db_cache_set(self, key: str, data: Any, expires: datetime) -> None:
+        """Write to persistent DB cache. Silent on error."""
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models import FMPCache
+            db = SessionLocal()
+            try:
+                row = db.query(FMPCache).filter(FMPCache.cache_key == key).first()
+                if row:
+                    row.data = data
+                    row.expires_at = expires
+                else:
+                    db.add(FMPCache(cache_key=key, data=data, expires_at=expires))
+                db.commit()
+            except Exception:
+                db.rollback()
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("FMP db cache write failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Core HTTP helper
+    # ------------------------------------------------------------------
+
+    def _http_get(self, url: str, params: dict) -> Any | None:
+        """Single HTTP GET with retry after 429. Returns parsed JSON or None."""
+        try:
+            resp = self._http.get(url, params=params)
+            resp.raise_for_status()
+            _FMP_BREAKER.record_success()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if status == 429:
+                wait = 65  # 65s ensures the rate-limit window resets
+                logger.warning("FMP 429 rate limit — waiting %ds then retrying", wait)
+                time.sleep(wait)
+                try:
+                    resp2 = self._http.get(url, params=params)
+                    resp2.raise_for_status()
+                    _FMP_BREAKER.record_success()
+                    return resp2.json()
+                except Exception as retry_exc:
+                    logger.error("FMP retry after 429 also failed: %s", retry_exc)
+            elif status == 402:
+                logger.debug("FMP 402 (premium endpoint) for %s — skipping", url)
+            elif status == 403:
+                logger.error("FMP 403 — API key invalid or expired")
+            else:
+                logger.error("FMP HTTP %d for %s", status, url)
+            _FMP_BREAKER.record_failure()
+        except Exception as exc:
+            logger.error("FMP request failed: %s", exc)
+            _FMP_BREAKER.record_failure()
+        return None
+
     def _get(self, endpoint: str, params: dict | None = None) -> Any | None:
-        """Get data with in-memory TTL cache + network fallback."""
+        """Two-tier cache: L1 in-memory → L2 database → L3 HTTP."""
         ckey = self._cache_key(endpoint, params)
         now = time.time()
+        now_dt = datetime.fromtimestamp(now, tz=timezone.utc)
 
+        # L1: in-memory (sub-millisecond for hot paths)
         if ckey in self._cache_expiry and now < self._cache_expiry[ckey]:
             return self._cache.get(ckey)
 
+        # L2: database (survives container restarts)
+        db_data = self._db_cache_get(ckey, now_dt)
+        if db_data is not None:
+            self._cache[ckey] = db_data           # warm L1
+            self._cache_expiry[ckey] = now + 60   # keep warm 60s in-memory
+            return db_data
+
+        # Circuit breaker / no API key — return stale in-memory value if any
         if not self._is_available():
             return self._cache.get(ckey)
 
@@ -170,32 +270,14 @@ class FMPClient:
         request_params = dict(params or {})
         request_params["apikey"] = self.api_key
 
-        try:
-            with httpx.Client(timeout=10) as client:
-                resp = client.get(url, params=request_params)
-                resp.raise_for_status()
-                data = resp.json()
-                _FMP_BREAKER.record_success()
-                ttl = self._cache_ttl_for(endpoint)
-                self._cache[ckey] = data
-                self._cache_expiry[ckey] = now + ttl
-                return data
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                logger.warning("FMP rate limit hit — waiting 60s")
-                time.sleep(60)
-            elif e.response.status_code == 402:
-                logger.debug(f"FMP 402 (premium required) for {endpoint} — skipping")
-            elif e.response.status_code == 403:
-                logger.error("FMP API key invalid or expired")
-            else:
-                logger.error(f"FMP HTTP {e.response.status_code} for {endpoint}")
-            _FMP_BREAKER.record_failure()
-            return self._cache.get(ckey)
-        except Exception as e:
-            logger.error(f"FMP request failed for {endpoint}: {e}")
-            _FMP_BREAKER.record_failure()
-            return self._cache.get(ckey)
+        data = self._http_get(url, request_params)
+        if data is not None:
+            ttl = self._cache_ttl_for(endpoint)
+            expires_dt = datetime.fromtimestamp(now + ttl, tz=timezone.utc)
+            self._db_cache_set(ckey, data, expires_dt)   # persist (L2)
+            self._cache[ckey] = data                      # warm (L1)
+            self._cache_expiry[ckey] = now + ttl
+        return data if data is not None else self._cache.get(ckey)
 
     # ------------------------------------------------------------------
     # Company Profile / Info

@@ -95,3 +95,11 @@ def _run_schema_migrations():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_history_client_order_id ON trade_history (client_order_id)"))
             except Exception:
                 logger.debug("Could not create trade_history client_order_id index", exc_info=True)
+
+    # FMP persistent cache (added post-deployment May-2026)
+    if "fmp_cache" not in tables:
+        try:
+            Base.metadata.tables["fmp_cache"].create(bind=engine)
+            logger.info("Created fmp_cache table for persistent FMP response caching")
+        except Exception as exc:
+            logger.warning("Could not create fmp_cache table: %s", exc)

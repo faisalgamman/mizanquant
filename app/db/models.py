@@ -267,6 +267,22 @@ class AnalystForecast(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class FMPCache(Base):
+    """Persistent FMP API response cache — survives container restarts.
+
+    Two-tier strategy: in-memory dict (L1, sub-ms) + this table (L2, durable).
+    TTLs mirror fmp_client._CACHE_TTL: 7 days for fundamentals, 1h for news.
+    """
+
+    __tablename__ = "fmp_cache"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key  = Column(String(512), nullable=False, unique=True, index=True)
+    data       = Column(JSON, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
 class GoatInvestor(Base):
     """G.O.A.T Investors portfolio metadata."""
     __tablename__ = "goat_investors"
