@@ -120,6 +120,7 @@ def _scheduler_loop():
     last_pretrain_ml = ""
     last_signal_audit = ""
     last_reference_refresh = ""
+    last_pairs_scan = ""
     last_pipeline_data = ""
     last_pipeline_filter = ""
     last_pipeline_full = ""
@@ -275,6 +276,20 @@ def _scheduler_loop():
                             scheduler_metrics.record_cycle_end("signals_scan", success=False, error=str(e))
                             logger.error(f"Intraday signals scan failed ({label}): {e}", exc_info=True)
                         break  # only fire one slot per loop iteration
+
+            # --- PAIRS TRADING: 11:00 AM ET (once per day, market open) ---
+            # Runs during market hours so execute_buy's market-hours guard
+            # passes. Long-only relative-value cointegration cycle (Phase 3).
+            if _is_weekday(now) and now.hour == 11 and now.minute < 5 and last_pairs_scan != today_str:
+                last_pairs_scan = today_str
+                logger.info("Pairs trading: running cointegration cycle...")
+                try:
+                    scheduler_metrics.record_cycle_start("pairs_scan")
+                    _run_pairs_scan()
+                    scheduler_metrics.record_cycle_end("pairs_scan", success=True)
+                except Exception as e:
+                    scheduler_metrics.record_cycle_end("pairs_scan", success=False, error=str(e))
+                    logger.error(f"Pairs trading cycle failed: {e}", exc_info=True)
 
             # Sleep 60 seconds between checks
             time.sleep(60)
@@ -707,6 +722,35 @@ def _run_signal_audit():
     """Daily signal drift audit hook."""
     completed = _run_repo_script("scripts/audit_signals.py")
     logger.info("audit_signals.py completed: %s", completed.stdout.strip())
+
+
+def _run_pairs_scan():
+    """Daily halal pairs-trading cycle (Phase 3).
+
+    Scans the universe (within-sector) for cointegrated pairs and executes
+    long-only relative-value entries/exits via the standard trading engine
+    (all halal/risk/cost gates inherited). Sends a Telegram summary.
+    """
+    from app.services.pairs_strategy import run_pairs_cycle
+    from app.services.telegram_alert import send_message as tg_send
+
+    summary = run_pairs_cycle()
+    pairs = summary.get("pairs_scanned", 0)
+    entries = summary.get("entries", 0)
+    exits = summary.get("exits", 0)
+    logger.info("Pairs cycle: %d pairs, %d entries, %d exits", pairs, entries, exits)
+
+    if entries or exits:
+        lines = [
+            f"  {a['action']}: {a.get('symbol')} (z={a.get('z')})"
+            for a in summary.get("actions", []) if a.get("executed")
+        ]
+        tg_send(
+            f"PAIRS TRADING CYCLE\n\n"
+            f"Cointegrated pairs: {pairs}\n"
+            f"Entries: {entries} | Exits: {exits}\n"
+            + ("\n".join(lines) if lines else "")
+        )
 
 
 def _run_reference_data_refresh():

@@ -434,3 +434,57 @@ async def v1_backtest(
 
     await asyncio.to_thread(_save_backtest_cache, key, result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Halal pairs trading endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/pairs/candidates")
+async def v1_pairs_candidates(force_refresh: bool = False, max_pairs: int = 20):
+    """Currently cointegrated pairs (within-sector) from the scanner.
+
+    Returns p-value, hedge ratio, OU half-life, and live z-score per pair.
+    """
+    try:
+        from app.services.pairs_scanner import find_cointegrated_pairs
+
+        def _scan():
+            pairs = find_cointegrated_pairs(max_pairs=max_pairs, force_refresh=force_refresh)
+            return [p.as_dict() for p in pairs]
+
+        pairs = await asyncio.to_thread(_scan)
+        return {"count": len(pairs), "pairs": pairs}
+    except Exception as exc:
+        logger.exception("pairs/candidates failed")
+        return {"error": str(exc)}
+
+
+@router.get("/pairs/signals")
+async def v1_pairs_signals():
+    """Current long-only pairs signals (entry/exit/hold) — computed, not executed.
+
+    Reflects the relative-value rule: at a spread extreme, buy the relatively
+    undervalued leg; exit when the spread reverts. No short side is ever
+    emitted (halal long-only constraint).
+    """
+    try:
+        from app.services import pairs_strategy as ps
+
+        def _signals():
+            sigs = ps.compute_signals()
+            return [s.as_dict() for s in sigs]
+
+        signals = await asyncio.to_thread(_signals)
+        actionable = [s for s in signals if s["action"] in ("long_y", "long_x", "exit")]
+        return {
+            "enabled": ps.PAIRS_TRADING_ENABLED,
+            "entry_z": ps.PAIRS_ENTRY_Z,
+            "exit_z": ps.PAIRS_EXIT_Z,
+            "count": len(signals),
+            "actionable": len(actionable),
+            "signals": signals,
+        }
+    except Exception as exc:
+        logger.exception("pairs/signals failed")
+        return {"error": str(exc)}

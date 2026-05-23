@@ -1,0 +1,280 @@
+"""Cointegrated-pair scanner for halal pairs trading (Phase 3A).
+
+Wires the previously-orphaned ``app.services.cointegration`` toolkit into a
+production scanner.  Pairs are formed **within the same sector only** (per
+user decision) — economically meaningful relationships, fewer spurious
+cointegrations, and far less compute than a full O(N²) universe sweep.
+
+Pipeline per sector:
+  1. Pull the halal universe (universe.get_universe_symbols) and group by
+     sector (universe.get_symbol_info[...]["sector"]).
+  2. Correlation pre-filter on daily returns (PAIRS_CORRELATION_MIN) to cut
+     the candidate set before the expensive Engle–Granger test.
+  3. cointegration_report() on each surviving candidate; keep only pairs that
+     pass the combined gate (EG p-value + tradable OU half-life).
+  4. Rank by p-value ascending, truncate to PAIRS_MAX_PAIRS.
+
+Results are cached (memory + JSON) with a TTL because cointegration
+relationships are stable over weeks — no need to re-run the heavy scan every
+trading cycle.
+
+Environment
+-----------
+PAIRS_PVALUE_MAX        Max Engle–Granger p-value to accept (default 0.05).
+PAIRS_MAX_HALF_LIFE     Max OU half-life in bars to accept (default 30).
+PAIRS_CORRELATION_MIN   Min |corr| of returns to survive pre-filter (0.7).
+PAIRS_MAX_PAIRS         Max cointegrated pairs returned (default 20).
+PAIRS_SCAN_TTL          Cache TTL in seconds (default 86400 = 1 day).
+PAIRS_SCAN_LOOKBACK     History window for the scan (default "1y").
+PAIRS_MIN_SECTOR_SIZE   Minimum symbols in a sector to bother scanning (3).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import os
+import time
+from dataclasses import dataclass
+from itertools import combinations
+from pathlib import Path
+
+logger = logging.getLogger("screener")
+
+# ── Config (env-driven) ──────────────────────────────────────────────────────
+
+PAIRS_PVALUE_MAX: float = float(os.environ.get("PAIRS_PVALUE_MAX", "0.05"))
+PAIRS_MAX_HALF_LIFE: float = float(os.environ.get("PAIRS_MAX_HALF_LIFE", "30"))
+PAIRS_CORRELATION_MIN: float = float(os.environ.get("PAIRS_CORRELATION_MIN", "0.7"))
+PAIRS_MAX_PAIRS: int = int(os.environ.get("PAIRS_MAX_PAIRS", "20"))
+PAIRS_SCAN_TTL: float = float(os.environ.get("PAIRS_SCAN_TTL", "86400"))
+PAIRS_SCAN_LOOKBACK: str = os.environ.get("PAIRS_SCAN_LOOKBACK", "1y")
+PAIRS_MIN_SECTOR_SIZE: int = int(os.environ.get("PAIRS_MIN_SECTOR_SIZE", "3"))
+
+_CACHE_PATH = Path(os.environ.get("PAIRS_SCAN_CACHE", "pairs_scan_cache.json"))
+
+# Module-level cache
+_cache_pairs: list["PairReport"] | None = None
+_cache_ts: float = 0.0
+
+
+# ── Data object ───────────────────────────────────────────────────────────────
+
+@dataclass
+class PairReport:
+    """A cointegrated pair discovered by the scanner."""
+    y_symbol: str
+    x_symbol: str
+    sector: str
+    pvalue: float
+    hedge_ratio: float
+    intercept: float
+    half_life: float
+    zscore: float
+
+    @property
+    def pair_key(self) -> str:
+        return f"{self.y_symbol}/{self.x_symbol}"
+
+    def as_dict(self) -> dict:
+        return {
+            "pair": self.pair_key,
+            "y_symbol": self.y_symbol,
+            "x_symbol": self.x_symbol,
+            "sector": self.sector,
+            "pvalue": round(self.pvalue, 4),
+            "hedge_ratio": round(self.hedge_ratio, 4),
+            "intercept": round(self.intercept, 4),
+            "half_life_bars": round(self.half_life, 2),
+            "zscore": round(self.zscore, 3),
+        }
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _close_series(symbol: str, lookback: str):
+    """Fetch the close-price Series for *symbol* (DatetimeIndex), or None."""
+    try:
+        from app.services.market_data import fetch as fetch_market_data
+
+        df = fetch_market_data(symbol, period=lookback)
+        if df is None or len(df) < 60:
+            return None
+        col_map = {c.lower(): c for c in df.columns}
+        close_col = col_map.get("close") or col_map.get("adjclose")
+        if not close_col:
+            return None
+        s = df[close_col].dropna()
+        s.name = symbol
+        return s if len(s) >= 60 else None
+    except Exception as exc:
+        logger.debug("pairs_scanner: close fetch failed for %s: %s", symbol, exc)
+        return None
+
+
+def _group_by_sector() -> dict[str, list[str]]:
+    """Return {sector: [symbols...]} for the active halal universe."""
+    from app.db.database import SessionLocal
+    from app.services.universe import get_symbol_info, get_universe_symbols
+
+    sectors: dict[str, list[str]] = {}
+    db = SessionLocal()
+    try:
+        symbols = get_universe_symbols(db)
+        for sym in symbols:
+            info = get_symbol_info(db, sym)
+            sector = (info or {}).get("sector") or "UNKNOWN"
+            sectors.setdefault(sector, []).append(sym)
+    finally:
+        db.close()
+    # Drop the UNKNOWN bucket and tiny sectors (can't form meaningful pairs)
+    return {
+        sec: syms
+        for sec, syms in sectors.items()
+        if sec != "UNKNOWN" and len(syms) >= PAIRS_MIN_SECTOR_SIZE
+    }
+
+
+def _returns_correlation(s_a, s_b) -> float:
+    """|Pearson correlation| of aligned daily returns, or 0.0 on failure."""
+    try:
+        import pandas as pd
+
+        joined = pd.concat([s_a, s_b], axis=1, join="inner").dropna()
+        if len(joined) < 60:
+            return 0.0
+        rets = joined.pct_change().dropna()
+        if len(rets) < 40:
+            return 0.0
+        corr = rets.iloc[:, 0].corr(rets.iloc[:, 1])
+        return abs(float(corr)) if corr is not None and math.isfinite(corr) else 0.0
+    except Exception:
+        return 0.0
+
+
+# ── Cache I/O ─────────────────────────────────────────────────────────────────
+
+def _save_cache(pairs: list[PairReport]) -> None:
+    try:
+        _CACHE_PATH.write_text(
+            json.dumps({"ts": time.time(), "pairs": [p.as_dict() for p in pairs]}, indent=2)
+        )
+    except Exception as exc:
+        logger.debug("pairs_scanner: cache save failed: %s", exc)
+
+
+def _load_disk_cache() -> list[PairReport] | None:
+    try:
+        if not _CACHE_PATH.exists():
+            return None
+        data = json.loads(_CACHE_PATH.read_text())
+        if time.time() - float(data.get("ts", 0)) > PAIRS_SCAN_TTL:
+            return None
+        pairs = []
+        for d in data.get("pairs", []):
+            pairs.append(PairReport(
+                y_symbol=d["y_symbol"], x_symbol=d["x_symbol"], sector=d["sector"],
+                pvalue=d["pvalue"], hedge_ratio=d["hedge_ratio"],
+                intercept=d.get("intercept", 0.0), half_life=d["half_life_bars"],
+                zscore=d["zscore"],
+            ))
+        return pairs
+    except Exception:
+        return None
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def find_cointegrated_pairs(
+    max_pairs: int | None = None,
+    force_refresh: bool = False,
+) -> list[PairReport]:
+    """Scan the halal universe (within-sector) for cointegrated pairs.
+
+    Cached for PAIRS_SCAN_TTL seconds. Pass force_refresh=True to rescan.
+    """
+    global _cache_pairs, _cache_ts
+
+    max_pairs = max_pairs if max_pairs is not None else PAIRS_MAX_PAIRS
+
+    # Memory cache
+    if not force_refresh and _cache_pairs is not None and (time.time() - _cache_ts) < PAIRS_SCAN_TTL:
+        return _cache_pairs[:max_pairs]
+
+    # Disk cache
+    if not force_refresh:
+        disk = _load_disk_cache()
+        if disk is not None:
+            _cache_pairs = disk
+            _cache_ts = time.time()
+            return disk[:max_pairs]
+
+    from app.services.cointegration import cointegration_report
+
+    sectors = _group_by_sector()
+    logger.info("pairs_scanner: scanning %d sectors for cointegrated pairs", len(sectors))
+
+    results: list[PairReport] = []
+
+    for sector, symbols in sectors.items():
+        # Fetch each symbol's closes once for this sector
+        closes: dict[str, object] = {}
+        for sym in symbols:
+            s = _close_series(sym, PAIRS_SCAN_LOOKBACK)
+            if s is not None:
+                closes[sym] = s
+        avail = sorted(closes.keys())
+        if len(avail) < 2:
+            continue
+
+        for a, b in combinations(avail, 2):
+            # Correlation pre-filter (cheap) before the EG test (expensive)
+            if _returns_correlation(closes[a], closes[b]) < PAIRS_CORRELATION_MIN:
+                continue
+            try:
+                import pandas as pd
+                joined = pd.concat([closes[a], closes[b]], axis=1, join="inner").dropna()
+                if len(joined) < 60:
+                    continue
+                y_vals = joined.iloc[:, 0].values
+                x_vals = joined.iloc[:, 1].values
+                rep = cointegration_report(
+                    y_vals, x_vals,
+                    pvalue_threshold=PAIRS_PVALUE_MAX,
+                    max_half_life_bars=PAIRS_MAX_HALF_LIFE,
+                )
+                if rep.is_cointegrated:
+                    results.append(PairReport(
+                        y_symbol=a, x_symbol=b, sector=sector,
+                        pvalue=rep.pvalue, hedge_ratio=rep.hedge_ratio,
+                        intercept=rep.intercept, half_life=rep.half_life,
+                        zscore=rep.zscore,
+                    ))
+            except Exception as exc:
+                logger.debug("pairs_scanner: report failed for %s/%s: %s", a, b, exc)
+
+    # Rank by p-value ascending (strongest cointegration first)
+    results.sort(key=lambda p: p.pvalue)
+
+    _cache_pairs = results
+    _cache_ts = time.time()
+    _save_cache(results)
+
+    logger.info("pairs_scanner: found %d cointegrated pairs", len(results))
+    return results[:max_pairs]
+
+
+def clear_cache() -> None:
+    """Reset the in-memory + disk cache (used in tests)."""
+    global _cache_pairs, _cache_ts
+    _cache_pairs = None
+    _cache_ts = 0.0
+    try:
+        if _CACHE_PATH.exists():
+            _CACHE_PATH.unlink()
+    except Exception:
+        pass
+
+
+__all__ = ["PairReport", "find_cointegrated_pairs", "clear_cache"]
