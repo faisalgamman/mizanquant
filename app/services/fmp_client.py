@@ -308,6 +308,58 @@ class FMPClient:
             return data
         return None
 
+    def get_institutional_holders(self, symbol: str) -> list[dict] | None:
+        """Institutional stock holders."""
+        data = self._get("institutional-holder", {"symbol": symbol.upper()})
+        if isinstance(data, list):
+            return data[:20]
+        return None
+
+    # ------------------------------------------------------------------
+    # VIX (index — not available via Alpaca)
+    # ------------------------------------------------------------------
+
+    def get_vix(self) -> float | None:
+        """Current ^VIX value (CBOE Volatility Index)."""
+        try:
+            data = self._get("quote", {"symbol": "^VIX"})
+            if isinstance(data, list) and data:
+                return float(data[0].get("price", 0)) or None
+            if isinstance(data, dict) and "price" in data:
+                return float(data["price"]) or None
+        except Exception:
+            pass
+        return None
+
+    def get_vix_history(self, period_days: int = 365) -> "pd.Series | None":
+        """^VIX daily close history as a pd.Series indexed by date."""
+        import pandas as pd
+        from datetime import datetime, timedelta, timezone
+        try:
+            today = datetime.now(timezone.utc).date()
+            start = (today - timedelta(days=period_days)).isoformat()
+            data = self._get(
+                "historical-price-eod/full",
+                {"symbol": "^VIX", "from": start, "to": today.isoformat()},
+            )
+            records = None
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                records = data.get("historical") or data.get("historicalStockList", [{}])[0].get("historicalStockList")
+            if not records:
+                return None
+            df = pd.DataFrame(records)
+            if "date" not in df.columns or "close" not in df.columns:
+                return None
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").set_index("date")
+            series = df["close"].astype(float).dropna()
+            return series if len(series) > 0 else None
+        except Exception as exc:
+            logger.debug("FMP VIX history failed: %s", exc)
+            return None
+
     # ------------------------------------------------------------------
     # Investors Insights (G.O.A.T / Institutional / Senate)
     # ------------------------------------------------------------------

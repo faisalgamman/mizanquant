@@ -194,9 +194,9 @@ class UnifiedPipeline:
 
     def _stage_collect_data(self) -> StageReport:
         """Stage 1: Fetch latest prices for all halal symbols, cache in DB."""
-        import yfinance as yf
         from app.db.database import SessionLocal
         from app.db.models import MarketDataCache
+        from app.services.market_data import fetch as _md_fetch
 
         t0 = time.perf_counter()
         stage = StageReport(stage="collect")
@@ -212,26 +212,19 @@ class UnifiedPipeline:
 
             def _fetch_one(sym: str) -> dict | None:
                 try:
-                    from app.services.market_context import _run_with_timeout
-                    df = _run_with_timeout(
-                        lambda: yf.download(sym, period="2d", progress=False, auto_adjust=True),
-                        timeout=15.0,
-                        fallback=None,
-                    )
+                    # market_data.fetch: IBKR → Alpaca → yfinance; cached, rate-limited
+                    df = _md_fetch(sym, period="1mo")
                     if df is None or df.empty:
                         return None
-                    # Flatten MultiIndex columns from auto_adjust=True
-                    if isinstance(df.columns, pd.MultiIndex):
-                        df.columns = df.columns.droplevel(1)
                     latest = df.iloc[-1]
                     return {
                         "symbol": sym.upper(),
                         "date": today_str,
-                        "open": float(latest.get("Open", 0)),
-                        "high": float(latest.get("High", 0)),
-                        "low": float(latest.get("Low", 0)),
-                        "close": float(latest.get("Close", 0)),
-                        "volume": int(latest.get("Volume", 0)),
+                        "open": float(latest.get("open", 0)),
+                        "high": float(latest.get("high", 0)),
+                        "low": float(latest.get("low", 0)),
+                        "close": float(latest.get("close", 0)),
+                        "volume": int(latest.get("volume", 0)),
                     }
                 except Exception:
                     return None

@@ -27,8 +27,8 @@ _CONTEXT_CACHE_TTL = 900  # 15 min — yfinance is slow & rate-limited
 _cache_lock = threading.Lock()
 _refresh_in_flight = threading.Lock()
 
-# Bounded executor for yfinance calls so a stalled fetch can't pin the event loop.
-_yf_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yf-ctx")
+# Bounded executor for slow external calls so a stalled fetch can't pin the event loop.
+_yf_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mc-ctx")
 
 
 def _run_with_timeout(fn: Callable, timeout: float, fallback):
@@ -63,11 +63,19 @@ def _classify_vix(vix: float) -> str:
 
 
 def _fetch_vix_close() -> Optional[float]:
-    """Fetch ^VIX close from yFinance (fallback to regime.vix)."""
+    """Fetch ^VIX close — FMP primary (works on servers), regime.vix fallback."""
+    try:
+        from app.services.fmp_client import fmp_client
+        vix = fmp_client.get_vix()
+        if vix is not None and vix > 0:
+            return vix
+    except Exception:
+        pass
+    # Local fallback: yfinance (works without server restrictions)
     try:
         import yfinance as yf
         ticker = yf.Ticker("^VIX")
-        hist = ticker.history(period="1y")
+        hist = ticker.history(period="5d")
         if hist is not None and not hist.empty and "Close" in hist.columns:
             return float(hist["Close"].iloc[-1])
     except Exception:
@@ -77,7 +85,15 @@ def _fetch_vix_close() -> Optional[float]:
 
 
 def _fetch_vix_series() -> Optional[list[float]]:
-    """Fetch 1y ^VIX close history."""
+    """Fetch 1y ^VIX close history — FMP primary."""
+    try:
+        from app.services.fmp_client import fmp_client
+        series = fmp_client.get_vix_history(365)
+        if series is not None and len(series) > 1:
+            return [float(v) for v in series.values]
+    except Exception:
+        pass
+    # Local fallback: yfinance
     try:
         import yfinance as yf
         ticker = yf.Ticker("^VIX")
@@ -158,55 +174,39 @@ def _yf_safe(symbol: str) -> str:
 
 
 def get_market_breadth() -> dict:
-    """% of halal symbols with close above EMA 50 (batch yFinance download)."""
+    """% of halal symbols with close above EMA 50 — individual market_data.fetch() calls."""
     from app.services.universe import HALAL_STOCKS_FALLBACK
-    all_syms = list(HALAL_STOCKS_FALLBACK)
-    symbols = all_syms[:30]
-    safe_map = {s: _yf_safe(s) for s in symbols}
-    safe_tickers = list(safe_map.values())
+    from app.services.market_data import fetch as _md_fetch
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 
-    def _download():
-        import yfinance as yf
+    symbols = list(HALAL_STOCKS_FALLBACK)[:30]
+
+    def _fetch_close(sym: str):
         try:
-            from app.services.market_data import _configure_yfinance_cache
-            _configure_yfinance_cache(yf)
+            df = _md_fetch(sym, period="3mo")
+            if df is not None and not df.empty and "close" in df.columns:
+                return sym, df["close"].astype(float)
         except Exception:
             pass
-        return yf.download(
-            tickers=" ".join(safe_tickers),
-            period="3mo",
-            interval="1d",
-            progress=False,
-            threads=True,
-            group_by="ticker",
-            timeout=8,
-            auto_adjust=True,
-        )
-
-    data = _run_with_timeout(_download, timeout=8.0, fallback=None)
-    if data is None or getattr(data, "empty", True):
-        return {"breadth_pct": None, "above": 0, "total": 0, "error": "no_data"}
+        return sym, None
 
     above = 0
     total = 0
-    for orig_sym in symbols:
-        safe = safe_map[orig_sym]
-        try:
-            if isinstance(data.columns, pd.MultiIndex):
-                closes = data.xs("Close", axis=1, level=1)
-                close = closes[safe].dropna()
-            else:
-                continue
-            if len(close) < 50:
+    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="breadth") as pool:
+        futures = {pool.submit(_fetch_close, sym): sym for sym in symbols}
+        for f in _as_completed(futures):
+            _, close = f.result()
+            if close is None or len(close) < 50:
                 continue
             total += 1
             ema_50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
             if close.iloc[-1] > ema_50:
                 above += 1
-        except Exception:
-            continue
 
-    pct = round(above / total * 100, 1) if total > 0 else 0.0
+    if total == 0:
+        return {"breadth_pct": None, "above": 0, "total": 0, "error": "no_data"}
+
+    pct = round(above / total * 100, 1)
     return {
         "breadth_pct": pct,
         "above": above,
@@ -219,17 +219,24 @@ def get_market_breadth() -> dict:
 
 
 def _yf_etf_df(ticker: str, period: str = "1mo") -> Optional[pd.DataFrame]:
-    """Fetch ETF data directly via yFinance (bypasses Alpaca)."""
+    """Fetch ETF/stock OHLCV via market_data.fetch() (Alpaca-first, yfinance fallback)."""
+    try:
+        from app.services.market_data import fetch as _md_fetch
+        df = _md_fetch(ticker, period=period)
+        if df is not None and not df.empty and "close" in df.columns:
+            return df  # already has lowercase close + volume columns
+    except Exception:
+        pass
+    # Local fallback: yfinance (for indices etc. Alpaca may not cover)
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)
         hist = t.history(period=period)
         if hist is not None and not hist.empty and "Close" in hist.columns:
-            df = pd.DataFrame({
+            return pd.DataFrame({
                 "close": hist["Close"].astype(float),
                 "volume": hist.get("Volume", pd.Series(0, index=hist.index)).astype(float),
             })
-            return df
     except Exception:
         pass
     return None
@@ -399,25 +406,31 @@ def get_market_status(force_refresh: bool = False) -> dict:
 
 def _etf_snapshot(symbol: str, period: str = "5d") -> dict:
     """Return {price, change_pct} for a single ETF ticker."""
-    import yfinance as yf
     try:
+        from app.services.market_data import fetch as _md_fetch
+        df = _md_fetch(symbol, period=period)
+        if df is not None and not df.empty and len(df) >= 2:
+            closes = df["close"].astype(float).values
+            price = float(closes[-1])
+            prev = float(closes[-2])
+            change_pct = round((price / prev - 1) * 100, 2)
+            return {"price": round(price, 2), "change_pct": change_pct}
+        if df is not None and not df.empty:
+            price = float(df["close"].astype(float).values[-1])
+            return {"price": round(price, 2), "change_pct": None}
+    except Exception:
+        pass
+    # Local fallback: yfinance
+    try:
+        import yfinance as yf
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period=period, interval="1d", auto_adjust=True)
-        if hist is None or hist.empty or len(hist) < 2:
-            # Fallback: just get current price
-            info = ticker.info or {}
-            price = info.get("regularMarketPreviousClose") or info.get("previousClose")
-            if price is None:
-                return {"price": None, "change_pct": None}
-            return {"price": round(float(price), 2), "change_pct": None}
-
-        closes = hist["Close"].astype(float).values
-        price = float(closes[-1])
-        prev = float(closes[-2])
-        change_pct = round((price / prev - 1) * 100, 2)
-        return {"price": round(price, 2), "change_pct": change_pct}
+        if hist is not None and not hist.empty and len(hist) >= 2:
+            closes = hist["Close"].astype(float).values
+            return {"price": round(float(closes[-1]), 2), "change_pct": round((float(closes[-1]) / float(closes[-2]) - 1) * 100, 2)}
     except Exception:
-        return {"price": None, "change_pct": None}
+        pass
+    return {"price": None, "change_pct": None}
 
 
 def get_qqq_snapshot() -> dict:

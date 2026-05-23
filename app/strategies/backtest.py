@@ -12,8 +12,6 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
-
 from app.services.execution_costs import apply_costs
 
 SYMBOLS = [
@@ -132,17 +130,14 @@ class BacktestResult:
 def fetch_data(symbol: str) -> Optional[pd.DataFrame]:
     try:
         from app.services.market_context import _run_with_timeout
-        df = _run_with_timeout(lambda: yf.download(symbol, start=START, end=END, progress=False, auto_adjust=True), timeout=30, fallback=None)
+        from app.services.market_data import fetch as _md_fetch
+        df = _run_with_timeout(
+            lambda: _md_fetch(symbol, start=str(START), end=str(END)),
+            timeout=30, fallback=None,
+        )
         if df is None or df.empty or len(df) < 100:
             return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [str(c[0]).lower() for c in df.columns]
-        else:
-            df.columns = [str(c).lower() for c in df.columns]
-        for col in df.columns:
-            if "unnamed" in col.lower():
-                df.drop(columns=[col], inplace=True)
-        df.rename(columns={"adj close": "close"}, inplace=True)
+        # market_data.fetch() already returns lowercase columns
         return df
     except Exception as e:
         print(f"    ⚠️ fetch_data({symbol}) failed: {e}")

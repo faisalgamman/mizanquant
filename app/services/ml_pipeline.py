@@ -942,13 +942,12 @@ def spy_benchmark(
     """
     # Fetch SPY data for the same period
     try:
-        import yfinance as yf
-        spy = yf.download("SPY", start=start_date or "2019-01-01",
-                          end=end_date or datetime.now().strftime("%Y-%m-%d"),
-                          progress=False, auto_adjust=True)
+        from app.services.market_data import fetch as _md_fetch
+        spy = _md_fetch("SPY", start=start_date or "2019-01-01",
+                        end=end_date or datetime.now().strftime("%Y-%m-%d"))
         if spy is None or spy.empty:
             return {"error": "SPY data unavailable"}
-        spy_close = spy["Close"].astype(float)
+        spy_close = spy["close"].astype(float)  # market_data.fetch returns lowercase cols
         spy_returns = spy_close.pct_change().dropna().values
     except Exception as e:
         logger.warning("SPY benchmark fetch failed: %s", e)
