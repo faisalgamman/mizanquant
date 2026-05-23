@@ -249,6 +249,126 @@ async def v1_halal_check(symbol: str = "AAPL"):
     return {"symbol": symbol, "halal": is_halal, "details": {"reason": reason}}
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 — Execution intelligence endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/execution/estimate")
+async def v1_execution_estimate(
+    symbol: str = "AAPL",
+    side: str = "buy",
+    qty: int = 100,
+    price: float = 0.0,
+):
+    """Pre-trade execution cost estimate via ExecutionSimulator (Almgren-Chriss).
+
+    Returns estimated impact, spread, slippage, and total cost in bps/USD.
+    Also indicates whether the trade would be blocked by the liquidity gate
+    (MAX_EXECUTION_IMPACT_BPS threshold).
+    """
+    symbol = validate_symbol(symbol)
+    try:
+        from app.services.execution_cost_estimator import estimate_execution_cost
+        if price <= 0:
+            # Fetch latest price from market data when not supplied
+            from app.services.market_data import fetch as fetch_market_data
+            df = fetch_market_data(symbol, period="5d")
+            if df is not None and not df.empty:
+                col_map = {c.lower(): c for c in df.columns}
+                close_col = col_map.get("close") or col_map.get("adjclose")
+                if close_col:
+                    price = float(df[close_col].dropna().iloc[-1])
+        if price <= 0:
+            return {"error": "Cannot determine price — supply price= param"}
+        estimate = estimate_execution_cost(symbol, side, qty, price)
+        return {
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "reference_price": price,
+            **estimate,
+        }
+    except Exception as exc:
+        logger.exception("execution/estimate failed for %s", symbol)
+        return {"error": str(exc)}
+
+
+@router.get("/execution/tca")
+async def v1_execution_tca(
+    symbol: str | None = None,
+    strategy_id: str | None = None,
+    limit: int = 100,
+):
+    """Aggregate Transaction Cost Analysis from live trade history.
+
+    Groups realized slippage vs pre-trade model estimates by symbol
+    and/or strategy.  Only trades that have a ``signal_details["tca"]``
+    block (i.e. fills processed after Phase 2 deployment) are included.
+    """
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import TradeHistory
+        import json as _json
+
+        db = SessionLocal()
+        rows: list[dict] = []
+        try:
+            q = db.query(TradeHistory).filter(TradeHistory.side == "buy")
+            if symbol:
+                q = q.filter(TradeHistory.symbol == symbol.upper())
+            if strategy_id:
+                q = q.filter(TradeHistory.strategy_id == strategy_id)
+            q = q.order_by(TradeHistory.created_at.desc()).limit(limit)
+            trades = q.all()
+        finally:
+            db.close()
+
+        for t in trades:
+            raw = getattr(t, "signal_details", None) or {}
+            if isinstance(raw, str):
+                try:
+                    raw = _json.loads(raw)
+                except Exception:
+                    raw = {}
+            tca = raw.get("tca")
+            if not tca:
+                continue
+            rows.append({
+                "symbol": t.symbol,
+                "strategy_id": t.strategy_id,
+                "order_id": t.order_id,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "decision_price": tca.get("decision_price"),
+                "filled_avg_price": tca.get("filled_avg_price"),
+                "realized_slippage_bps": tca.get("realized_slippage_bps"),
+                "modeled_bps": tca.get("modeled_bps"),
+                "slippage_vs_model_bps": tca.get("slippage_vs_model_bps"),
+            })
+
+        if not rows:
+            return {"count": 0, "trades": [], "summary": {}}
+
+        # Summary statistics
+        realized = [r["realized_slippage_bps"] for r in rows if r["realized_slippage_bps"] is not None]
+        vs_model = [r["slippage_vs_model_bps"] for r in rows if r["slippage_vs_model_bps"] is not None]
+
+        def _avg(lst):
+            return round(sum(lst) / len(lst), 2) if lst else None
+
+        return {
+            "count": len(rows),
+            "trades": rows,
+            "summary": {
+                "avg_realized_slippage_bps": _avg(realized),
+                "avg_slippage_vs_model_bps": _avg(vs_model),
+                "max_realized_slippage_bps": round(max(realized), 2) if realized else None,
+            },
+        }
+    except Exception as exc:
+        logger.exception("execution/tca query failed")
+        return {"error": str(exc)}
+
+
 @router.get("/halal/universe")
 async def v1_halal_universe():
     redis = await get_redis()

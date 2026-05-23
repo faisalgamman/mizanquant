@@ -62,6 +62,13 @@ def _update_trade_row(strategy_id: str | None, broker_order: dict) -> None:
                     else None
                 )
                 _apply_fill_metrics(trade, filled_qty, filled_avg)
+                # ── 2C: TCA — compute realized slippage vs pre-trade model ──
+                if filled_avg and filled_avg > 0:
+                    try:
+                        from app.services.tca import record_tca_to_trade
+                        record_tca_to_trade(trade, db)
+                    except Exception as _tca_err:
+                        logger.debug("TCA recording skipped: %s", _tca_err)
             db.commit()
         finally:
             db.close()

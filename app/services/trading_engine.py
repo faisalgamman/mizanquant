@@ -458,6 +458,31 @@ def execute_buy(
                 sizing["qty"] = qty
                 sizing["note"] = "Portfolio stop warning: sizing halved"
 
+        # ── 2A: Pre-trade execution cost estimation + illiquidity gate ──────
+        # Store decision_price NOW so fill_watcher can compute TCA later
+        # (fill_watcher._apply_fill_metrics overwrites entry_price with the
+        # actual fill price, making the original decision price unrecoverable
+        # unless we capture it here).
+        signal_payload["decision_price"] = price
+        try:
+            from app.services.execution_cost_estimator import estimate_execution_cost
+            exec_est = estimate_execution_cost(symbol, "buy", qty, price)
+            signal_payload["execution_estimate"] = exec_est
+            if exec_est.get("blocked"):
+                result["reason"] = exec_est["block_reason"]
+                logger.warning(
+                    f"{label} Trade blocked by execution cost gate: {result['reason']}"
+                )
+                _notify_trade(result)
+                return result
+            logger.info(
+                f"{label} Execution estimate for {symbol} x{qty}: "
+                f"impact={exec_est['impact_bps']:.1f} bps, "
+                f"total={exec_est['est_cost_bps']:.1f} bps"
+            )
+        except Exception as _exc_est_err:
+            logger.debug("Execution cost estimation skipped: %s", _exc_est_err)
+
         # Determine stop-loss method from strategy config
         cfg = STRATEGY_CONFIGS.get(strategy_id) if strategy_id else None
         use_trailing = cfg.trailing_stop_enabled if cfg else settings.TRAILING_STOP_ENABLED
@@ -504,6 +529,73 @@ def execute_buy(
             order_payload["stop_loss"] = {
                 "stop_price": str(round(stop_loss, 2)),
             }
+
+        # ── 2B: Smart Order Routing for large entries ────────────────────────
+        # For orders >= SMART_ROUTING_THRESHOLD shares, slice entry into N
+        # tranches and place a single OCO exit covering full filled qty.
+        # Small orders (< threshold) fall through to the normal bracket path.
+        try:
+            from app.services.smart_execution import route_and_submit_entry, should_route
+            if should_route(qty):
+                routing_result = route_and_submit_entry(
+                    symbol=symbol,
+                    qty=qty,
+                    price=price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    strategy_id=strategy_id,
+                    use_trailing=use_trailing,
+                    trail_pct=trail_pct,
+                    client_order_id_prefix=order_payload.get("client_order_id", ""),
+                )
+                if routing_result is not None:
+                    # Smart routing handled this trade
+                    if routing_result["slices_submitted"] == 0:
+                        result["reason"] = routing_result["reason"]
+                        _notify_trade(result)
+                        return result
+                    result["executed"] = True
+                    result["order_id"] = routing_result.get("oco_order_id", "")
+                    result["client_order_id"] = order_payload.get("client_order_id", "")
+                    result["qty"] = qty
+                    result["entry_price"] = price
+                    result["stop_loss"] = stop_loss
+                    result["take_profit"] = take_profit
+                    result["position_value"] = sizing["position_value"]
+                    result["risk_amount"] = sizing["risk_amount"]
+                    result["risk_pct"] = sizing["risk_pct"]
+                    result["confidence"] = confidence
+                    result["reason"] = routing_result["reason"]
+                    result["status"] = "armed"
+                    result["armed_at"] = _utc_now()
+                    result["filled_qty"] = 0
+                    result["filled_avg_price"] = None
+                    result["smart_routing"] = routing_result
+                    signal_payload["smart_routing"] = routing_result
+                    _record_trade(result, signal_payload)
+                    _notify_trade(result)
+                    log_trade_event(
+                        "submitted",
+                        coid=result.get("client_order_id", ""),
+                        strategy=strategy_id,
+                        symbol=symbol,
+                        qty=qty,
+                        price=price,
+                        sl=stop_loss,
+                        tp=take_profit,
+                        regime=sizing.get("regime"),
+                        confidence=confidence,
+                        guards_passed=len(eligibility.get("guards", [])),
+                    )
+                    logger.info(
+                        f"{label} SmartRoute BUY: {symbol} x{qty} via "
+                        f"{routing_result['slices_submitted']} slices + OCO exit"
+                    )
+                    return result
+        except Exception as _exc_sr:
+            logger.warning(
+                "Smart routing failed, falling back to bracket order: %s", _exc_sr
+            )
 
         order = _submit_order(order_payload, strategy_id=strategy_id)
         if not order:
