@@ -2250,8 +2250,9 @@ async def chart_rotation(
 
 
 @app.get("/api/etf/{symbol}/info")
-async def etf_info(symbol: str):
+async def etf_info(symbol: str, force: bool = Query(False)):
     """ETF profile: AUM, expense ratio, inception date, description. Requires FMP_API_KEY."""
+    from app.config import settings as _cfg
     sym = symbol.upper()
     async def compute():
         from app.services.openbb_data import get_etf_info
@@ -2259,54 +2260,105 @@ async def etf_info(symbol: str):
         if data:
             return data
         return {"symbol": sym, "error": "ETF info not available"}
-    return await cached_or_compute(f"etf:info:{sym}", 86400, compute, compute_timeout=20)
+    result = await cached_or_compute(f"etf:info:{sym}", 86400, compute,
+                                     force_refresh=force, compute_timeout=20)
+    # Auto-bust stale cache: if FMP key is set but result is an error stub → force refresh
+    if _cfg.FMP_API_KEY and result.get("error"):
+        result = await cached_or_compute(f"etf:info:{sym}", 86400, compute,
+                                         force_refresh=True, compute_timeout=20)
+    return result
 
 
 @app.get("/api/etf/{symbol}/holdings")
-async def etf_holdings(symbol: str):
+async def etf_holdings(symbol: str, force: bool = Query(False)):
     """Top ETF holdings with weight percentages. Requires FMP_API_KEY."""
+    from app.config import settings as _cfg
     sym = symbol.upper()
     async def compute():
         from app.services.openbb_data import get_etf_holdings
         holdings = await asyncio.to_thread(get_etf_holdings, sym)
         return {"symbol": sym, "count": len(holdings), "holdings": holdings}
-    return await cached_or_compute(f"etf:holdings:{sym}", 86400, compute, compute_timeout=20)
+    result = await cached_or_compute(f"etf:holdings:{sym}", 86400, compute,
+                                     force_refresh=force, compute_timeout=20)
+    # Auto-bust stale cache: if FMP key is set but holdings list is empty → force refresh
+    if _cfg.FMP_API_KEY and not result.get("holdings"):
+        result = await cached_or_compute(f"etf:holdings:{sym}", 86400, compute,
+                                         force_refresh=True, compute_timeout=20)
+    return result
 
 
 @app.get("/api/etf/{symbol}/sectors")
-async def etf_sectors(symbol: str):
+async def etf_sectors(symbol: str, force: bool = Query(False)):
     """ETF sector allocation (weights). Requires FMP_API_KEY."""
+    from app.config import settings as _cfg
     sym = symbol.upper()
     async def compute():
         from app.services.openbb_data import get_etf_sectors
         sectors = await asyncio.to_thread(get_etf_sectors, sym)
         return {"symbol": sym, "sectors": sectors}
-    return await cached_or_compute(f"etf:sectors:{sym}", 86400, compute, compute_timeout=20)
+    result = await cached_or_compute(f"etf:sectors:{sym}", 86400, compute,
+                                     force_refresh=force, compute_timeout=20)
+    # Auto-bust stale cache: if FMP key is set but sectors list is empty → force refresh
+    if _cfg.FMP_API_KEY and not result.get("sectors"):
+        result = await cached_or_compute(f"etf:sectors:{sym}", 86400, compute,
+                                         force_refresh=True, compute_timeout=20)
+    return result
+
+
+@app.post("/api/cache/bust-openbb", include_in_schema=False)
+async def bust_openbb_cache():
+    """Manually clear all OpenBB-related Redis cache keys (macro, ETF, ESG, senate).
+    Call this after adding/changing API keys to force fresh data on next request.
+    """
+    if redis_client is None:
+        return {"cleared": 0, "note": "Redis not available"}
+    patterns = ["macro:*", "etf:*", "stock:esg:*", "stock:segments:*", "stock:senate:*",
+                "rotation:*", "chart:rotation:*"]
+    total = 0
+    for pat in patterns:
+        try:
+            keys = redis_client.keys(pat)
+            if keys:
+                redis_client.delete(*keys)
+                total += len(keys)
+        except Exception:
+            pass
+    return {"cleared": total, "patterns": patterns,
+            "note": "All OpenBB cache keys cleared. Next requests will fetch fresh data."}
 
 
 @app.get("/api/macro/indicators")
-async def macro_indicators():
+async def macro_indicators(force: bool = Query(False, description="Bypass cache and recompute")):
     """Real macroeconomic indicators from FRED.
 
     Returns: CPI YoY %, Fed Funds Rate %, Unemployment %, Yield Spread 10Y-2Y %, HY Spread %.
     All values None when FRED_API_KEY is not configured.
     Source: Federal Reserve Economic Data (FRED).
+    Pass ?force=true to bypass Redis cache (useful after adding FRED_API_KEY).
     """
+    from app.config import settings as _cfg
     async def compute():
         from app.services.openbb_data import get_economic_indicators
         data = await asyncio.to_thread(get_economic_indicators)
         from datetime import datetime, timezone
         return {
-            "t10y2y":      data.get("t10y2y"),      # 10Y-2Y yield spread %
-            "hy_spread":   data.get("hy_spread"),   # ICE BofA HY OAS %
-            "fed_rate":    data.get("fed_rate"),    # Federal Funds Rate %
-            "cpi_yoy":     data.get("cpi_yoy"),     # CPI year-over-year %
-            "unemployment": data.get("unemployment"), # Unemployment Rate %
+            "t10y2y":      data.get("t10y2y"),
+            "hy_spread":   data.get("hy_spread"),
+            "fed_rate":    data.get("fed_rate"),
+            "cpi_yoy":     data.get("cpi_yoy"),
+            "unemployment": data.get("unemployment"),
             "source":      "FRED (Federal Reserve Economic Data)",
             "note":        "Set FRED_API_KEY env var for real data (free at fred.stlouisfed.org)",
             "cached_at":   datetime.now(timezone.utc).isoformat(),
         }
-    return await cached_or_compute("macro:indicators", 1800, compute, compute_timeout=30)
+    # Auto-bust stale cache: if FRED key is now set but cached result is all null → force refresh
+    _FRED_KEYS = ("t10y2y", "hy_spread", "fed_rate", "cpi_yoy", "unemployment")
+    result = await cached_or_compute("macro:indicators", 1800, compute,
+                                     force_refresh=force, compute_timeout=30)
+    if _cfg.FRED_API_KEY and all(result.get(k) is None for k in _FRED_KEYS):
+        result = await cached_or_compute("macro:indicators", 1800, compute,
+                                         force_refresh=True, compute_timeout=30)
+    return result
 
 
 @app.get("/api/stock/senate-trading")
