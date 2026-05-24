@@ -30,6 +30,7 @@ import uvicorn
 import yfinance as yf
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
