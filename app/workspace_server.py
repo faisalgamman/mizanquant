@@ -6264,7 +6264,13 @@ if os.path.isdir(_static_dir):
 
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
-    """Serve the professional trading dashboard."""
+    """Redirect root to the Terminal — the new main entry point."""
+    return RedirectResponse("/terminal", status_code=302)
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def get_dashboard_alt():
+    """Serve the legacy dashboard (accessible for reference)."""
     _base = Path(__file__).resolve().parent / "static"
     for name in ("dashboard.html", "dashboard-legacy.html"):
         p = _base / name
@@ -6273,13 +6279,7 @@ async def get_dashboard():
                 content=p.read_text(encoding="utf-8"),
                 headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
             )
-    return HTMLResponse("<h1>Dashboard not found</h1><p>Run the server from the project root.</p>", status_code=404)
-
-
-@app.get("/dashboard", include_in_schema=False)
-async def get_dashboard_alt():
-    """Alias for the dashboard."""
-    return await get_dashboard()
+    return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
 
 @app.get("/legacy", include_in_schema=False)

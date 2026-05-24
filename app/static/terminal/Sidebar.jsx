@@ -2,10 +2,11 @@
 
 function Sidebar() {
   const sections = [
-    { label: "General",    items: mockNav },
-    { label: "Forecasting",items: mockNavForecast },
-    { label: "Analytics",  items: mockNavAnalytics },
-    { label: "Research",   items: mockNavResearch },
+    { label: "General",     items: mockNav },
+    { label: "Forecasting", items: mockNavForecast },
+    { label: "Analytics",   items: mockNavAnalytics },
+    { label: "Research",    items: mockNavResearch },
+    { label: "Market Data", items: mockNavMarket },
   ];
   return (
     <aside className="sidebar">
@@ -27,7 +28,9 @@ function Sidebar() {
           <React.Fragment key={sec.label}>
             <div className="nav-section">{sec.label}</div>
             {sec.items.map((n, i) => (
-              <a key={n.l + i} className={"nav-item" + (n.active ? " active" : "")}>
+              <a key={n.l + i}
+                 href={n.href || "#"}
+                 className={"nav-item" + (n.active ? " active" : "")}>
                 <i className={"fas " + n.i}></i>
                 <span>{n.l}</span>
                 {n.badge && <span className="nav-badge">{n.badge}</span>}

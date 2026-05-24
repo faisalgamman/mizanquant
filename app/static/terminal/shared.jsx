@@ -186,21 +186,28 @@ const mockConsensusVotes = [
 ];
 
 const mockNav = [
-  { i: "fa-th-large",      l: "Overview",     active: true, badge: "Live" },
+  { i: "fa-th-large",      l: "Overview",        active: true, badge: "Live", href: "/terminal" },
 ];
 const mockNavForecast = [
-  { i: "fa-brain",         l: "Forecast Lab" },
-  { i: "fa-robot",         l: "Trading Lab" },
-  { i: "fa-history",       l: "Backtest" },
+  { i: "fa-brain",         l: "Analysis Lab",    href: "/analysis-lab" },
+  { i: "fa-chart-line",    l: "Forecast Lab",    href: "/forecast" },
+  { i: "fa-robot",         l: "Trading Lab",     href: "/trading-lab" },
+  { i: "fa-history",       l: "Backtest",        href: "/backtest" },
 ];
 const mockNavAnalytics = [
-  { i: "fa-shield-alt",    l: "Risk Desk", badge: "2" },
-  { i: "fa-chart-bar",     l: "Charts" },
+  { i: "fa-shield-alt",    l: "Risk Desk",       badge: "2", href: "/risk-desk-v2" },
+  { i: "fa-chart-bar",     l: "Strategies",      href: "/strategy-dashboard" },
 ];
 const mockNavResearch = [
-  { i: "fa-search-dollar", l: "Research Lab" },
-  { i: "fa-mosque",        l: "Halal Screener" },
-  { i: "fa-robot",         l: "AI Assistant" },
+  { i: "fa-mosque",        l: "Halal Screener",  href: "/halal-screener-v2" },
+  { i: "fa-star",          l: "Insights",        href: "/investors" },
+  { i: "fa-bell",          l: "Alerts",          href: "/alerts" },
+  { i: "fa-robot",         l: "MizanAI",         href: "/assistant" },
+];
+const mockNavMarket = [
+  { i: "fa-landmark",      l: "Macro · FRED",    href: "/macro" },
+  { i: "fa-layer-group",   l: "ETF Explorer",    href: "/etf" },
+  { i: "fa-sync",          l: "Rotation",        href: "/rotation" },
 ];
 
 Object.assign(window, {
@@ -211,5 +218,5 @@ Object.assign(window, {
   // mocks
   mockSignals, mockMarket, mockPortfolio, mockPositions, mockPaper,
   initialPipelineStages, mockGuards, mockSchedule, mockSectors, mockModels,
-  mockConsensusVotes, mockNav, mockNavForecast, mockNavAnalytics, mockNavResearch,
+  mockConsensusVotes, mockNav, mockNavForecast, mockNavAnalytics, mockNavResearch, mockNavMarket,
 });
