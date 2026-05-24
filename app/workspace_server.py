@@ -2500,6 +2500,88 @@ async def api_alerts(
     return {"count": len(rows), "alerts": rows}
 
 
+@app.get("/api/risk/status")
+async def risk_status():
+    """Risk Desk status — posture, market halt, Kelly config, guard blocks, VaR.
+
+    A single read of the platform's risk state, surfaced for the dashboard and as
+    a MizanAI tool so the assistant can answer "would the Risk Desk allow this?".
+    """
+    def _compute_sync() -> dict:
+        out: dict = {}
+        # 1) Posture / regime / gates / VIX from the context bundle
+        try:
+            from app.services.market_context_bundle import get_context_bundle_sync
+            b = get_context_bundle_sync()
+            out.update({
+                "regime":       b.get("regime"),
+                "risk_posture": b.get("risk_posture"),
+                "gates":        b.get("gates"),
+                "vix":          b.get("vix"),
+                "reasons":      b.get("reasons"),
+            })
+        except Exception:
+            pass
+        # 2) Market-level halt (VIX/SPY/regime/system guards)
+        try:
+            from app.services.alert_store import market_risk_gate
+            ok, reason = market_risk_gate("SPY")
+            out["market_halt"] = not ok
+            out["market_halt_reason"] = reason
+        except Exception:
+            pass
+        # 3) Kelly + position-sizing config
+        try:
+            from app.core.config import app_cfg
+            out["kelly"] = {
+                "enabled_after_trades": app_cfg.risk.kelly_enabled_after_trades,
+                "risk_per_trade_pct":   app_cfg.risk.risk_per_trade_pct,
+                "max_positions":        app_cfg.risk.max_positions,
+            }
+        except Exception:
+            pass
+        # 4) Guard blocks (24h), latest portfolio snapshot, simple historical VaR
+        try:
+            from datetime import datetime, timezone, timedelta
+            from app.db.database import SessionLocal
+            from app.db.models import GuardLog, PortfolioSnapshot, TradeHistory
+            db = SessionLocal()
+            try:
+                since = datetime.now(timezone.utc) - timedelta(hours=24)
+                out["guard_blocks_24h"] = (
+                    db.query(GuardLog)
+                      .filter(GuardLog.ts >= since, GuardLog.passed.is_(False))
+                      .count()
+                )
+                snap = (db.query(PortfolioSnapshot)
+                          .order_by(PortfolioSnapshot.created_at.desc()).first())
+                if snap:
+                    pos = snap.positions_json if isinstance(snap.positions_json, list) else []
+                    out["equity"] = snap.total_equity
+                    out["cash"] = snap.cash
+                    out["open_positions"] = len(pos)
+                pnl_rows = (db.query(TradeHistory.pnl_pct)
+                              .filter(TradeHistory.pnl_pct.isnot(None))
+                              .order_by(TradeHistory.created_at.desc()).limit(100).all())
+                pnls = sorted(float(r[0]) for r in pnl_rows)
+                if len(pnls) >= 20:
+                    import math
+                    idx = max(0, int(math.floor(0.05 * len(pnls))) - 1)
+                    out["var_95_pct"] = round(pnls[idx], 2)   # 95% 1-trade historical VaR
+                    out["n_trades_var"] = len(pnls)
+                else:
+                    out["var_95_pct"] = None
+            finally:
+                db.close()
+        except Exception:
+            pass
+        return out
+
+    async def _compute():
+        return await asyncio.to_thread(_compute_sync)
+    return await cached_or_compute("risk:status", 120, _compute, compute_timeout=20)
+
+
 @app.get("/api/stock/senate-trading")
 async def stock_senate_trading(
     symbol: str = Query("", description="Stock symbol (empty = all recent trades)"),

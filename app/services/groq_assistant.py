@@ -34,13 +34,31 @@ Your role:
 - Interpret macro-economic data (FRED)
 - Give concise, data-driven insights
 
+You can orchestrate ACROSS the whole platform via tools. The platform is a unified
+ecosystem driven by one reactive state — the MarketContextBundle (regime + macro +
+sector rotation → a risk_posture of risk_on/neutral/risk_off):
+- get_market_context  → the reactive state. CALL FIRST for any regime/market question.
+- get_sector_rotation → which sectors are leading/lagging (RRG quadrants).
+- get_etf_sectors     → an ETF's sector allocation.
+- screen_stock / get_top_signals → halal-screened opportunities (sector rotation already factored in).
+- get_forecast        → posture-conditioned price direction for a stock.
+- get_risk_status     → would the Risk Desk allow a trade now (posture, halt, VaR, Kelly)?
+- get_backtest_history→ historical strategy performance.
+- get_macro_indicators / get_portfolio / get_etf_holdings.
+
+Orchestration examples:
+- "Best halal pick now?" → get_market_context → get_sector_rotation → get_top_signals → get_risk_status.
+- "Where is AAPL headed?" → get_forecast (note the conditioned_direction vs raw).
+
 Rules:
-- Always call the appropriate tool before answering data questions
+- Always call the appropriate tool before answering data questions. Chain tools when a
+  question spans layers (regime → sector → stock → risk).
 - Be brief and precise — traders value conciseness
 - Format numbers clearly: "$42.50", "3.2%", "+0.8σ"
 - Respond in the same language the user writes in (Arabic or English)
 - End every response with a one-line disclaimer: "⚠ Not financial advice."
 - When discussing halal compliance cite AAOIFI Standard 21 thresholds (5% haram revenue, 30% debt ratio)
+- When the risk_posture is risk_off, say so and be more cautious in recommendations.
 
 Platform stack: FastAPI + OpenBB 4.7.1 + FMP + FRED + RL Agents + ML Ensemble.
 """
@@ -146,6 +164,99 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_market_context",
+            "description": (
+                "Get the unified MarketContextBundle — the platform's reactive state: "
+                "market regime (BULL/BEAR/NEUTRAL), derived risk_posture "
+                "(risk_on/neutral/risk_off), VIX, FRED macro, and the ranked sector "
+                "rotation. CALL THIS FIRST for any 'what's the market doing' or "
+                "regime/posture question — it conditions screening, risk, and forecasting."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sector_rotation",
+            "description": (
+                "Get the sector Relative Rotation Graph: each SPDR sector ETF's "
+                "quadrant (leading/improving/weakening/lagging) vs SPY. Call when asked "
+                "which sectors are strong/rotating, or to pick the best sector."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_etf_sectors",
+            "description": (
+                "Get an ETF's sector allocation (weights). Call when asked how an ETF "
+                "is split across sectors (e.g. SPY, QQQ)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "ETF ticker (e.g. SPY, QQQ, XLK)"},
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_forecast",
+            "description": (
+                "Get a forward price forecast for a stock with posture-conditioned "
+                "direction (up/down/neutral). Uses a fast statistical model by default. "
+                "Call when asked where a stock is headed or for a price prediction."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Stock ticker (e.g. AAPL)"},
+                    "model": {"type": "string", "description": "Model name (default 'arima', fast)"},
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_risk_status",
+            "description": (
+                "Get the Risk Desk status: risk_posture, whether a market halt is "
+                "active, Kelly position-sizing config, 24h guard-block count, and a "
+                "historical VaR estimate. Call to answer 'would the Risk Desk allow a "
+                "trade right now?' or about portfolio risk limits."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_backtest_history",
+            "description": (
+                "Get recent persisted backtest runs (Sharpe, return, drawdown, win rate, "
+                "deflated Sharpe). Call when asked about historical strategy/backtest "
+                "performance. Optional symbol filter."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Optional symbol filter (e.g. AAPL)"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # ── Internal tool execution ────────────────────────────────────────────────────
@@ -158,7 +269,7 @@ async def _execute_tool(name: str, args: dict) -> str:
     base = "http://127.0.0.1:6910"  # internal loopback
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             if name == "get_market_status":
                 r = await client.get(f"{base}/api/market/status")
                 data = r.json()
@@ -227,6 +338,65 @@ async def _execute_tool(name: str, args: dict) -> str:
                         for s in signals[:10]
                     ]
                 }, default=str)
+
+            elif name == "get_market_context":
+                r = await client.get(f"{base}/api/context/bundle")
+                d = r.json()
+                return json.dumps({
+                    "regime":       d.get("regime"),
+                    "risk_posture": d.get("risk_posture"),
+                    "reasons":      d.get("reasons"),
+                    "vix":          d.get("vix"),
+                    "macro":        d.get("macro"),
+                    "top_sectors":  d.get("top_sectors"),
+                    "gates":        d.get("gates"),
+                    "version":      d.get("version"),
+                }, default=str)
+
+            elif name == "get_sector_rotation":
+                r = await client.get(f"{base}/api/chart/rotation")
+                d = r.json()
+                return json.dumps({
+                    "benchmark": d.get("benchmark"),
+                    "data":      d.get("data", []),
+                }, default=str)
+
+            elif name == "get_etf_sectors":
+                sym = args.get("symbol", "SPY").upper()
+                r = await client.get(f"{base}/api/etf/{sym}/sectors")
+                d = r.json()
+                return json.dumps({"symbol": sym, "sectors": d.get("sectors", [])}, default=str)
+
+            elif name == "get_forecast":
+                sym = args.get("symbol", "AAPL").upper()
+                model = args.get("model") or "arima"
+                r = await client.get(f"{base}/api/forecast/{model}?symbol={sym}")
+                d = r.json()
+                res = d.get("results", [])
+                last = res[-1] if res else {}
+                return json.dumps({
+                    "symbol":                sym,
+                    "model":                 d.get("model", model),
+                    "last_predicted":        last.get("predicted"),
+                    "last_actual":           last.get("actual"),
+                    "raw_direction":         d.get("raw_direction"),
+                    "conditioned_direction": d.get("conditioned_direction"),
+                    "context_posture":       d.get("context_posture"),
+                    "metrics":               d.get("metrics"),
+                }, default=str)
+
+            elif name == "get_risk_status":
+                r = await client.get(f"{base}/api/risk/status")
+                return r.text  # already a compact JSON status object
+
+            elif name == "get_backtest_history":
+                sym = (args.get("symbol") or "").upper()
+                url = f"{base}/api/backtest/history?limit=10"
+                if sym:
+                    url += f"&symbol={sym}"
+                r = await client.get(url)
+                d = r.json()
+                return json.dumps({"count": d.get("count", 0), "runs": d.get("runs", [])}, default=str)
 
     except Exception as exc:
         logger.warning("Tool %s failed: %s", name, exc)
