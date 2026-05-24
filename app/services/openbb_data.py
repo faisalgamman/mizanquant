@@ -302,62 +302,92 @@ def get_etf_sectors(symbol: str) -> list[dict]:
     return []
 
 
-# ── OpenBB Fundamental: ESG + Revenue Segments + Transcripts ─────────────────
+# ── Fundamental: ESG + Revenue Segments + Transcripts ────────────────────────
+# NOTE: Direct REST calls (yfinance + FMP REST) replace OpenBB wrappers to
+# avoid the anyio "signal only works in main thread" error on Railway Linux.
 
 def get_esg_score(symbol: str) -> Optional[dict]:
-    """ESG score from yfinance via OpenBB — relevant for halal screening.
+    """ESG score from yfinance directly — relevant for halal screening.
 
     Returns total + environmental + social + governance scores and
     highest_controversy level. Returns None if data not available.
+    Uses yfinance.Ticker.sustainability DataFrame (no OpenBB wrapper).
     """
     try:
-        obb = _get_obb()
-        r = obb.equity.fundamental.esg_score(symbol.upper(), provider="yfinance")
-        if r.results:
-            e = r.results[0]
-            return {
-                "symbol":        symbol.upper(),
-                "total":         getattr(e, "total_esg_score", None),
-                "environmental": getattr(e, "environmental_score", None),
-                "social":        getattr(e, "social_score", None),
-                "governance":    getattr(e, "governance_score", None),
-                "controversy":   getattr(e, "highest_controversy", None),
-                "source":        "yfinance",
-            }
+        import yfinance as yf
+        ticker = yf.Ticker(symbol.upper())
+        sus = ticker.sustainability
+        if sus is None or sus.empty:
+            return None
+        # yfinance sustainability is a DataFrame with columns as metrics
+        # Transpose so metrics are rows, then extract values
+        if hasattr(sus, "T"):
+            df = sus.T if sus.shape[0] == 1 else sus
+        else:
+            df = sus
+        # Try to get values — structure varies by yfinance version
+        def _val(keys: list[str]) -> Optional[float]:
+            for k in keys:
+                try:
+                    v = df.loc[k] if k in df.index else df.get(k)
+                    if v is not None:
+                        fv = float(str(v).replace("nan", "")) if str(v) != "nan" else None
+                        if fv is not None:
+                            return round(fv, 2)
+                except Exception:
+                    pass
+            return None
+
+        return {
+            "symbol":        symbol.upper(),
+            "total":         _val(["totalEsg", "totalEsgScore"]),
+            "environmental": _val(["environmentScore", "environmentalScore"]),
+            "social":        _val(["socialScore"]),
+            "governance":    _val(["governanceScore"]),
+            "controversy":   _val(["highestControversy"]),
+            "source":        "yfinance",
+        }
     except Exception as exc:
         logger.debug("ESG score %s failed: %s", symbol, exc)
     return None
 
 
 def get_revenue_per_segment(symbol: str) -> list[dict]:
-    """Revenue breakdown by business segment from FMP via OpenBB.
+    """Revenue breakdown by business segment from FMP REST API.
 
     Useful for AAOIFI halal screening: identify haram revenue segments.
     Returns [] when FMP_API_KEY not set or data unavailable.
+    FMP endpoint: /api/v4/revenue-product-segmentation?symbol=X&period=annual
     """
+    import httpx
     from app.config import settings
     if not settings.FMP_API_KEY:
         return []
     try:
-        obb = _get_obb()
-        r = obb.equity.fundamental.revenue_per_segment(symbol.upper(), provider="fmp")
-        if not r.results:
+        url = "https://financialmodelingprep.com/api/v4/revenue-product-segmentation"
+        params = {"symbol": symbol.upper(), "period": "annual",
+                  "apikey": settings.FMP_API_KEY}
+        with httpx.Client(timeout=10) as c:
+            r = c.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+        if not isinstance(data, list) or not data:
             return []
+        # Most recent period is the first item
+        latest = data[0]
         segments = []
-        for s in r.results:
-            # Each result row is a period; take the most recent
-            data = s.__dict__ if hasattr(s, "__dict__") else {}
-            period = str(getattr(s, "period_ending", "") or "")
-            for k, v in data.items():
-                if k.startswith("_") or k == "period_ending":
-                    continue
-                if v is not None:
-                    segments.append({
-                        "name":   k,
-                        "value":  v,
-                        "period": period,
-                    })
-            break  # most recent period only
+        # Each item is a dict like {"date": "2024-09-30", "Cloud Services": 100000, ...}
+        period = str(latest.get("date", "") or "")
+        for k, v in latest.items():
+            if k == "date":
+                continue
+            if v is not None:
+                try:
+                    segments.append({"name": k, "value": float(v), "period": period})
+                except (ValueError, TypeError):
+                    pass
+        # Sort by value descending
+        segments.sort(key=lambda x: x["value"], reverse=True)
         return segments
     except Exception as exc:
         logger.debug("Revenue segments %s failed: %s", symbol, exc)
@@ -365,31 +395,37 @@ def get_revenue_per_segment(symbol: str) -> list[dict]:
 
 
 def get_earnings_transcript(symbol: str, year: int, quarter: int) -> Optional[dict]:
-    """Earnings call transcript from FMP via OpenBB.
+    """Earnings call transcript from FMP REST API.
 
     Returns dict with content (truncated to 5000 chars) + full_length.
     Returns None when FMP_API_KEY not set or transcript unavailable.
+    FMP endpoint: /api/v3/earning_call_transcript/{symbol}?year=2024&quarter=4
     """
+    import httpx
     from app.config import settings
     if not settings.FMP_API_KEY:
         return None
     try:
-        obb = _get_obb()
-        r = obb.equity.fundamental.transcript(
-            symbol.upper(), year=year, quarter=quarter, provider="fmp"
-        )
-        if r.results:
-            t = r.results[0]
-            content = getattr(t, "content", "") or ""
-            return {
-                "symbol":      symbol.upper(),
-                "year":        year,
-                "quarter":     quarter,
-                "content":     content[:5000],
-                "full_length": len(content),
-            }
+        url = f"https://financialmodelingprep.com/api/v3/earning_call_transcript/{symbol.upper()}"
+        params = {"year": year, "quarter": quarter, "apikey": settings.FMP_API_KEY}
+        with httpx.Client(timeout=15) as c:
+            r = c.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+        if not isinstance(data, list) or not data:
+            return None
+        t = data[0]
+        content = t.get("content", "") or ""
+        return {
+            "symbol":      symbol.upper(),
+            "year":        year,
+            "quarter":     quarter,
+            "date":        t.get("date", ""),
+            "content":     content[:5000],
+            "full_length": len(content),
+        }
     except Exception as exc:
-        logger.debug("Earnings transcript %s Q%s%d failed: %s", symbol, quarter, year, exc)
+        logger.debug("Earnings transcript %s Q%dY%d failed: %s", symbol, quarter, year, exc)
     return None
 
 
