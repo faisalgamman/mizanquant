@@ -257,6 +257,25 @@ TOOL_DEFINITIONS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_signal",
+            "description": (
+                "Trace the full lineage of a signal by its correlation_id: the "
+                "signal_history → alerts → trades chain (forecast direction, guard "
+                "result, execution). Call when asked 'why did we buy/act on X?' and a "
+                "correlation_id is known."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "correlation_id": {"type": "string", "description": "The signal's correlation_id (uuid)"},
+                },
+                "required": ["correlation_id"],
+            },
+        },
+    },
 ]
 
 # ── Internal tool execution ────────────────────────────────────────────────────
@@ -397,6 +416,11 @@ async def _execute_tool(name: str, args: dict) -> str:
                 r = await client.get(url)
                 d = r.json()
                 return json.dumps({"count": d.get("count", 0), "runs": d.get("runs", [])}, default=str)
+
+            elif name == "explain_signal":
+                cid = args.get("correlation_id", "")
+                r = await client.get(f"{base}/api/signal/lineage/{cid}")
+                return r.text  # {correlation_id, signals[], alerts[], trades[]}
 
     except Exception as exc:
         logger.warning("Tool %s failed: %s", name, exc)

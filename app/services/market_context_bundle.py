@@ -55,6 +55,12 @@ _QUADRANT_SCORE = {"leading": 4, "improving": 3, "weakening": 2, "lagging": 1, "
 # ── Version / posture-flip state (module-level; DB RegimeLog is source of truth) ─
 _lock = threading.Lock()
 _state: dict = {"version": 1, "posture": None}
+# Set True when risk_posture flips; the async accessor clears dependent Redis
+# caches so the UI/pipeline re-derive against the new regime (reactive ecosystem).
+_pending_invalidation: bool = False
+
+# Redis key patterns that depend on the market context and must be busted on a flip.
+_DEPENDENT_KEY_PATTERNS = ("chart:rotation:*", "etf:*", "macro:indicators", "risk:status")
 
 # Sync memo for thread-based callers so the screener doesn't recompute per symbol.
 _sync_cache: dict = {"data": None, "ts": 0.0}
@@ -201,10 +207,12 @@ def compute_context_bundle() -> dict:
     posture, risk_score, reasons = _derive_posture(macro, vix, vix_pctile, regime)
 
     # 5) Version / flip detection
+    global _pending_invalidation
     with _lock:
         prev = _state["posture"]
         if prev is not None and posture != prev:
             _state["version"] += 1
+            _pending_invalidation = True   # async accessor will bust dependent caches
             _log_posture_flip(prev, posture, regime, vix, vix_pctile, macro)
         _state["posture"] = posture
         version = _state["version"]
@@ -252,17 +260,64 @@ def _log_posture_flip(prev: str, new: str, regime: str, vix, vix_pctile, macro: 
 
 # ── Public accessors ──────────────────────────────────────────────────────────
 
+async def invalidate_context_dependents() -> int:
+    """Clear Redis caches that depend on the market context. Returns #keys cleared.
+
+    Called automatically after a risk_posture flip so the dashboard, screener,
+    rotation, and risk views re-derive against the new regime — the reactive
+    half of the ecosystem.
+    """
+    try:
+        from app.services.redis_client import get_redis
+        redis = await get_redis()
+        if redis is None:
+            return 0
+        total = 0
+        for pat in _DEPENDENT_KEY_PATTERNS:
+            try:
+                if "*" in pat:
+                    keys = await redis.keys(pat)
+                    if keys:
+                        await redis.delete(*keys)
+                        total += len(keys)
+                else:
+                    if await redis.delete(pat):
+                        total += 1
+            except Exception:
+                continue
+        if total:
+            logger.info("context flip → cleared %d dependent Redis keys", total)
+        return total
+    except Exception as exc:
+        logger.debug("invalidate_context_dependents failed: %s", exc)
+        return 0
+
+
 async def get_context_bundle(force: bool = False) -> dict:
-    """Async accessor (HTTP endpoint). Redis-cached for 900s."""
+    """Async accessor (HTTP endpoint). Redis-cached for 900s.
+
+    After computing, if a posture flip occurred (sync detection set the pending
+    flag), bust the dependent Redis caches so downstream views react.
+    """
     import asyncio
     from app.services.redis_client import cached_or_compute
 
     async def _compute():
         return await asyncio.to_thread(compute_context_bundle)
 
-    return await cached_or_compute(
+    result = await cached_or_compute(
         "context:bundle", 900, _compute, force_refresh=force, compute_timeout=30
     )
+
+    global _pending_invalidation
+    if _pending_invalidation:
+        with _lock:
+            pending = _pending_invalidation
+            _pending_invalidation = False
+        if pending:
+            await invalidate_context_dependents()
+
+    return result
 
 
 def get_context_bundle_sync(force: bool = False) -> dict:

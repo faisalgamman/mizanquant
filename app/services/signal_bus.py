@@ -121,3 +121,61 @@ def forecast_agrees_with(signal: str, direction: str) -> Optional[bool]:
     if "SELL" in s:
         return direction == "down"
     return None
+
+
+def gather_lineage(correlation_id: str, scan_limit: int = 500) -> dict:
+    """Reconstruct the end-to-end lineage for one signal by correlation_id.
+
+    Walks signal_history (details JSON), alerts (column), and trade_history
+    (signal_details JSON) so you can answer "why did we act on X?". JSON columns
+    are filtered in Python for dialect portability (SQLite + Postgres).
+    """
+    out: dict = {"correlation_id": correlation_id, "signals": [], "alerts": [], "trades": []}
+    if not correlation_id:
+        return out
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import SignalHistory, Alert, TradeHistory
+        db = SessionLocal()
+        try:
+            # signal_history — correlation_id lives in details JSON
+            for r in (db.query(SignalHistory)
+                        .order_by(SignalHistory.created_at.desc()).limit(scan_limit).all()):
+                d = r.details or {}
+                if isinstance(d, dict) and d.get("correlation_id") == correlation_id:
+                    out["signals"].append({
+                        "id": r.id, "symbol": r.symbol, "signal": r.signal,
+                        "signal_type": r.signal_type, "score": r.score,
+                        "confidence": r.confidence,
+                        "forecast_direction": d.get("forecast_direction"),
+                        "forecast_agrees": d.get("forecast_agrees"),
+                        "source_module": d.get("source_module"),
+                        "regime": d.get("regime"), "risk_posture": d.get("risk_posture"),
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                    })
+            # alerts — correlation_id is a column
+            for a in (db.query(Alert)
+                        .filter(Alert.correlation_id == correlation_id)
+                        .order_by(Alert.ts.desc()).all()):
+                out["alerts"].append({
+                    "id": a.id, "symbol": a.symbol, "alert_type": a.alert_type,
+                    "signal": a.signal, "guard_passed": a.guard_passed,
+                    "guard_reason": a.guard_reason, "sent": a.sent,
+                    "ts": a.ts.isoformat() if a.ts else None,
+                })
+            # trade_history — correlation_id lives in signal_details JSON
+            for t in (db.query(TradeHistory)
+                        .order_by(TradeHistory.created_at.desc()).limit(scan_limit).all()):
+                d = t.signal_details or {}
+                if isinstance(d, dict) and d.get("correlation_id") == correlation_id:
+                    out["trades"].append({
+                        "id": t.id, "symbol": t.symbol, "side": t.side, "qty": t.qty,
+                        "entry_price": t.entry_price, "status": t.status,
+                        "pnl_pct": t.pnl_pct, "strategy_id": t.strategy_id,
+                        "created_at": t.created_at.isoformat() if t.created_at else None,
+                    })
+            return out
+        finally:
+            db.close()
+    except Exception:
+        return out

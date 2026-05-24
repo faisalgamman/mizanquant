@@ -670,6 +670,10 @@ class UnifiedPipeline:
                     "risk_amount": sig.risk_amount,
                     "guardian_rejected": sig.guardian_rejected,
                     "guardian_reason": sig.guardian_reason,
+                    # lineage: links trade_history back to signal_history + alerts
+                    "correlation_id": sig.correlation_id,
+                    "forecast_direction": sig.forecast_direction,
+                    "forecast_agrees": sig.forecast_agrees,
                 }
                 result = execute_buy(
                     strategy_id=sig.strategy_id,

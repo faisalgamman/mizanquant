@@ -2582,6 +2582,15 @@ async def risk_status():
     return await cached_or_compute("risk:status", 120, _compute, compute_timeout=20)
 
 
+@app.get("/api/signal/lineage/{correlation_id}")
+async def signal_lineage(correlation_id: str):
+    """End-to-end lineage for one signal: the signal_history → alerts → trades
+    chain linked by correlation_id. Answers 'why did we act on this?'.
+    """
+    from app.services.signal_bus import gather_lineage
+    return await asyncio.to_thread(gather_lineage, correlation_id)
+
+
 @app.get("/api/stock/senate-trading")
 async def stock_senate_trading(
     symbol: str = Query("", description="Stock symbol (empty = all recent trades)"),
