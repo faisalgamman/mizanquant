@@ -145,7 +145,7 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
-    @field_validator("AUTO_TRADE_ENABLED", mode="before")
+    @field_validator("AUTO_TRADE_ENABLED", "CONTEXT_CONDITIONING_LIVE", mode="before")
     @classmethod
     def _strip_bool(cls, v):
         if isinstance(v, str):
