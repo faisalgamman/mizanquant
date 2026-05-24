@@ -2332,10 +2332,10 @@ async def bust_openbb_cache():
 
 @app.get("/api/debug/openbb", include_in_schema=False)
 async def debug_openbb():
-    """Diagnostic: surface the REAL reason OpenBB FMP/FRED calls fail on Railway.
+    """Diagnostic: verify all data providers are working after the OpenBB signal-bug fix.
 
-    Reports key presence, provider import status, and runs live calls capturing
-    the actual exception (normally swallowed by logger.debug).
+    Tests direct REST calls (FRED, FMP, Tiingo) that replaced the broken OpenBB wrappers.
+    Also reports OpenBB provider import status for reference.
     """
     from app.config import settings as _cfg
     out: dict = {
@@ -2346,42 +2346,67 @@ async def debug_openbb():
         },
         "providers": {},
         "live_calls": {},
+        "note": "All data calls now use direct REST (httpx) — OpenBB wrappers bypassed",
     }
 
-    # 1) Which OpenBB providers are importable?
+    # 1) Which OpenBB providers are importable? (informational only — not used for data)
     for prov in ("openbb_fmp", "openbb_fred", "openbb_tiingo"):
         try:
             __import__(prov)
-            out["providers"][prov] = "installed"
+            out["providers"][prov] = "installed (not used — direct REST preferred)"
         except Exception as exc:
-            out["providers"][prov] = f"MISSING: {exc}"
+            out["providers"][prov] = f"not installed: {exc}"
 
-    # 2) Live FMP ETF holdings call — capture real exception
-    def _test_fmp():
+    # 2) FRED direct REST — VIX
+    def _test_fred_rest():
         try:
-            from openbb import obb
-            if _cfg.FMP_API_KEY:
-                obb.user.credentials.fmp_api_key = _cfg.FMP_API_KEY
-            r = obb.etf.holdings("SPY", provider="fmp")
-            n = len(r.results) if r.results else 0
-            return {"ok": True, "holdings_count": n}
+            from app.services.openbb_data import get_vix_current
+            vix = get_vix_current()
+            return {"ok": vix is not None, "vix": vix,
+                    "method": "FRED REST API direct"}
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    # 3) Live FRED call — capture real exception
-    def _test_fred():
+    # 3) FMP direct REST — ETF holdings
+    def _test_fmp_rest():
         try:
-            from openbb import obb
-            if _cfg.FRED_API_KEY:
-                obb.user.credentials.fred_api_key = _cfg.FRED_API_KEY
-            r = obb.economy.fred_series(symbol="VIXCLS", limit=1, provider="fred")
-            val = r.results[-1].value if r.results else None
-            return {"ok": True, "vix": val}
+            from app.services.fmp_client import fmp_client
+            holdings = fmp_client.get_etf_holdings("SPY", limit=5)
+            return {"ok": bool(holdings), "holdings_count": len(holdings),
+                    "sample": holdings[0] if holdings else None,
+                    "method": "FMP REST API direct"}
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    out["live_calls"]["fmp_etf_holdings_SPY"] = await asyncio.to_thread(_test_fmp)
-    out["live_calls"]["fred_vix"] = await asyncio.to_thread(_test_fred)
+    # 4) Tiingo direct REST — OHLCV
+    def _test_tiingo_rest():
+        try:
+            if not _cfg.TIINGO_TOKEN:
+                return {"ok": False, "note": "TIINGO_TOKEN not set"}
+            from app.services.openbb_data import fetch_ohlcv_tiingo
+            df = fetch_ohlcv_tiingo("AAPL", period="1mo")
+            if df is not None and not df.empty:
+                return {"ok": True, "rows": len(df), "latest": str(df["date"].iloc[-1])[:10],
+                        "method": "Tiingo REST API direct"}
+            return {"ok": False, "note": "empty response"}
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    # 5) FRED macro indicators
+    def _test_macro():
+        try:
+            from app.services.openbb_data import get_economic_indicators
+            data = get_economic_indicators()
+            non_null = sum(1 for v in data.values() if v is not None)
+            return {"ok": non_null > 0, "non_null_indicators": non_null,
+                    "data": data, "method": "FRED REST API direct"}
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    out["live_calls"]["fred_vix_rest"]      = await asyncio.to_thread(_test_fred_rest)
+    out["live_calls"]["fmp_etf_rest"]       = await asyncio.to_thread(_test_fmp_rest)
+    out["live_calls"]["tiingo_ohlcv_rest"]  = await asyncio.to_thread(_test_tiingo_rest)
+    out["live_calls"]["fred_macro_rest"]    = await asyncio.to_thread(_test_macro)
     return out
 
 
