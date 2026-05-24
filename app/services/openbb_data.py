@@ -212,38 +212,49 @@ def get_fred_economic_calendar() -> list[dict]:
 
 
 # ── Tiingo: OHLCV ─────────────────────────────────────────────────────────────
+# NOTE: Direct Tiingo REST API (not via OpenBB) to avoid the anyio signal bug
+# on Linux worker threads. Endpoint: https://api.tiingo.com/tiingo/daily/{sym}/prices
+
+_TIINGO_BASE = "https://api.tiingo.com/tiingo/daily"
+
 
 def fetch_ohlcv_tiingo(symbol: str, period: str = "1y") -> Optional[pd.DataFrame]:
-    """Daily OHLCV from Tiingo — works on servers without 401.
+    """Daily OHLCV from Tiingo REST API — works on Railway servers without 401.
 
     Returns DataFrame with columns [date, open, high, low, close, volume]
     or None on failure so the caller falls through to yfinance.
     """
+    import httpx
     from app.config import settings
     if not settings.TIINGO_TOKEN:
         return None
     try:
         days = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730}.get(period, 365)
         start = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
-        obb = _get_obb()
-        r = obb.equity.price.historical(symbol.upper(), start_date=start, provider="tiingo")
-        if not r.results:
+        end   = datetime.now(timezone.utc).date().isoformat()
+        url   = f"{_TIINGO_BASE}/{symbol.upper()}/prices"
+        headers = {"Authorization": f"Token {settings.TIINGO_TOKEN}"}
+        params  = {"startDate": start, "endDate": end, "format": "json"}
+        with httpx.Client(timeout=15) as c:
+            r = c.get(url, headers=headers, params=params)
+            r.raise_for_status()
+            data = r.json()
+        if not isinstance(data, list) or not data:
             return None
-        rows = [
-            {
-                "date":   row.date,
-                "open":   row.open,
-                "high":   row.high,
-                "low":    row.low,
-                "close":  row.close,
-                "volume": row.volume,
-            }
-            for row in r.results
-        ]
+        rows = []
+        for row in data:
+            rows.append({
+                "date":   row.get("date", "")[:10],   # ISO date string
+                "open":   row.get("adjOpen")  or row.get("open"),
+                "high":   row.get("adjHigh")  or row.get("high"),
+                "low":    row.get("adjLow")   or row.get("low"),
+                "close":  row.get("adjClose") or row.get("close"),
+                "volume": row.get("adjVolume") or row.get("volume"),
+            })
         df = pd.DataFrame(rows)
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index().reset_index()
-        logger.debug("Tiingo OHLCV %s: %d rows", symbol, len(df))
+        logger.debug("Tiingo OHLCV %s (REST): %d rows", symbol, len(df))
         return df
     except Exception as exc:
         logger.debug("Tiingo OHLCV %s failed: %s", symbol, exc)
