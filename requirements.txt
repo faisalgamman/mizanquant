@@ -33,4 +33,9 @@ redis>=5.0,<6.0
 
 # ── Phase 2: ML/RL Ops ──
 mlflow>=2.21.0
-openbb-core>=1.6.9,<2.0
+# OpenBB 4.x — core + providers needed on Railway
+openbb-core>=1.6.0,<2.0
+openbb-fred>=1.6.0,<2.0       # FRED: VIX, CPI, yield spread, HY spread, fed rate
+openbb-fmp>=1.6.0,<2.0        # FMP: ETF holdings/sectors/info, revenue segments, transcripts
+openbb-tiingo>=1.6.0,<2.0     # Tiingo: OHLCV (no 401 on Railway like yfinance)
+openbb-yfinance>=1.6.0,<2.0   # yfinance: ESG score + fallback OHLCV
