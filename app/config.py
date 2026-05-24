@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"  # fast + function calling
 
+    # --- Unified ecosystem integration ---
+    # When False (default), the MarketContextBundle conditioning (macro-scaled
+    # risk sizing, rotation sector boost) is computed and logged in SHADOW MODE
+    # only — it never alters live paper-order sizing or stock selection. Flip to
+    # True to let the conditioning drive the live pipeline once validated.
+    CONTEXT_CONDITIONING_LIVE: bool = False
+
     # --- Phase 5: API authentication ---
     # Required for operator/admin/trading endpoints. If left empty, those
     # endpoints fail closed and auto-trading validation will refuse to arm.

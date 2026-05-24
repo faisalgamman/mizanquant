@@ -98,6 +98,7 @@ class UnifiedPipeline:
 
     def __init__(self) -> None:
         self.report = PipelineReport()
+        self.context: dict = {}  # MarketContextBundle snapshot for this run
 
     # ----------------------------------------------------------------
     # Public entry point
@@ -122,6 +123,20 @@ class UnifiedPipeline:
         _m.incr("pipeline_runs")
 
         try:
+            # Stage 0 – refresh the unified MarketContextBundle so every downstream
+            # stage (screener, risk, consensus) conditions on the SAME fresh regime.
+            try:
+                from app.services.market_context_bundle import get_context_bundle_sync
+                self.context = get_context_bundle_sync(force=True)
+                logger.info(
+                    "pipeline context: regime=%s posture=%s version=%s",
+                    self.context.get("regime"), self.context.get("risk_posture"),
+                    self.context.get("version"),
+                )
+            except Exception as _ctx_exc:
+                self.context = {}
+                logger.warning("pipeline context bundle failed: %s", _ctx_exc)
+
             # Stage 1 – collect data
             if "collect" not in skip:
                 self._stage_collect_data()

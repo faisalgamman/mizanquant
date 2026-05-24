@@ -2444,6 +2444,21 @@ async def macro_indicators(force: bool = Query(False, description="Bypass cache 
     return result
 
 
+@app.get("/api/context/bundle")
+async def context_bundle(force: bool = Query(False, description="Bypass cache and recompute")):
+    """The unified MarketContextBundle — the platform's reactive conditioning state.
+
+    Composes regime + FRED macro + sector rotation into one versioned snapshot with
+    a derived risk_posture (risk_on / neutral / risk_off). This is the single source
+    of truth that the screener, risk desk, forecasting, and MizanAI all read so a
+    change in market regime cascades across every layer.
+
+    The `version` integer bumps whenever risk_posture flips (also logged to regime_log).
+    """
+    from app.services.market_context_bundle import get_context_bundle
+    return await get_context_bundle(force=force)
+
+
 @app.get("/api/stock/senate-trading")
 async def stock_senate_trading(
     symbol: str = Query("", description="Stock symbol (empty = all recent trades)"),

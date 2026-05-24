@@ -457,6 +457,16 @@ def _run_signals_scan(label: str = "intraday"):
     from app.services.signals_advisor import scan_and_notify_strong_buys
     from app.services.telegram_alert import send_message as tg_send
 
+    # Refresh the unified context bundle so intraday signals condition on the
+    # current regime/posture (and any posture flip is logged + version-bumped).
+    try:
+        from app.services.market_context_bundle import get_context_bundle_sync
+        _ctx = get_context_bundle_sync(force=True)
+        logger.info("intraday context [%s]: regime=%s posture=%s",
+                    label, _ctx.get("regime"), _ctx.get("risk_posture"))
+    except Exception as _ctx_exc:
+        logger.debug("intraday context bundle failed: %s", _ctx_exc)
+
     # Confidence threshold lowered 70 -> 60 to roughly double the
     # daily signal count. This helps the operator accumulate enough
     # trades without having to expand the universe yet.
