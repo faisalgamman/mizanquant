@@ -363,7 +363,8 @@ async function sendMessage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages: state.messages,
+        // send only role+content — strip UI-only metadata (_toolCalls, _usage)
+        messages: state.messages.map(m => ({ role: m.role, content: m.content })),
         model: state.model,
         use_tools: true,
       }),

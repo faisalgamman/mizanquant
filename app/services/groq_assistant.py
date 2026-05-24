@@ -275,8 +275,21 @@ async def trading_chat(
     groq_model = model or settings.GROQ_MODEL
     client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
+    # Sanitize incoming messages — Groq rejects any non-standard fields
+    # (e.g. the UI's _toolCalls / _usage display metadata). Keep only the
+    # OpenAI/Groq-valid keys.
+    _ALLOWED = ("role", "content", "tool_calls", "tool_call_id", "name")
+    clean_messages: list[dict] = []
+    for m in messages:
+        cm = {k: m[k] for k in _ALLOWED if k in m and m[k] is not None}
+        if "role" not in cm:
+            continue
+        if "content" not in cm:
+            cm["content"] = ""
+        clean_messages.append(cm)
+
     # Build full message list with system prompt
-    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(messages)
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + clean_messages
     tool_log: list[dict] = []
 
     for _round in range(max_tool_rounds + 1):
