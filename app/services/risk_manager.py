@@ -131,6 +131,26 @@ def calculate_position_size(
     if price > available_cash:
         return {"qty": 0, "reason": f"Price ${price:.2f} > available cash ${available_cash:.2f}"}
 
+    # ── Shadow regime conditioning ──────────────────────────────────────────
+    # Scale size by the MarketContextBundle posture (risk_off→0.5, neutral→0.85,
+    # risk_on→1.0). In SHADOW MODE (CONTEXT_CONDITIONING_LIVE=False) qty is left
+    # unchanged and we only surface shadow_size_qty for validation; when the flag
+    # is enabled the multiplier is applied to the live qty.
+    posture = "neutral"
+    ctx_mult = 1.0
+    try:
+        from app.services.market_context_bundle import get_context_bundle_sync, regime_risk_multiplier
+        posture = get_context_bundle_sync().get("risk_posture", "neutral")
+        ctx_mult = regime_risk_multiplier(posture)
+    except Exception:
+        pass
+    shadow_qty = max(1, int(qty * ctx_mult))
+    try:
+        if getattr(settings, "CONTEXT_CONDITIONING_LIVE", False):
+            qty = shadow_qty
+    except Exception:
+        pass
+
     position_value = qty * price
     risk_amount = qty * risk_per_share
     risk_pct_realized = (risk_amount / total_equity) * 100 if total_equity > 0 else 0
@@ -145,6 +165,10 @@ def calculate_position_size(
         "regime": regime.state,
         "effective_risk_pct": round(risk_pct * 100, 4),
         "kelly": kelly_diag,
+        # shadow conditioning (additive)
+        "risk_posture": posture,
+        "regime_risk_multiplier": ctx_mult,
+        "shadow_size_qty": shadow_qty,
     }
 
 

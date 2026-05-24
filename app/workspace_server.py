@@ -820,11 +820,32 @@ async def forecast_model(
 
     metrics = compute_forecast_metrics(fold_results)
 
+    # Shadow posture conditioning — raw predictions are untouched; we add a
+    # context_posture and a conditioned_direction that dampens bullish calls in
+    # a risk_off regime. Display/validation only unless CONTEXT_CONDITIONING_LIVE.
+    context_posture = None
+    raw_direction = conditioned_direction = None
+    try:
+        from app.services.market_context_bundle import get_context_bundle_sync
+        context_posture = get_context_bundle_sync().get("risk_posture")
+        if results:
+            last = results[-1]
+            raw_direction = "up" if last.get("predicted", 0) >= last.get("actual", 0) else "down"
+            if context_posture == "risk_off" and raw_direction == "up":
+                conditioned_direction = "neutral"   # dampen bullish call in risk-off
+            else:
+                conditioned_direction = raw_direction
+    except Exception:
+        pass
+
     return {
         "symbol": symbol,
         "model": model_name,
         "results": results,
         "metrics": metrics,
+        "context_posture": context_posture,
+        "raw_direction": raw_direction,
+        "conditioned_direction": conditioned_direction,
     }
 
 

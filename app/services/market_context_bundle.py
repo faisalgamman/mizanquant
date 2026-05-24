@@ -289,3 +289,77 @@ def regime_risk_multiplier(posture: str) -> float:
     risk_off → 0.5 (halve size), neutral → 0.85, risk_on → 1.0.
     """
     return {"risk_off": 0.5, "neutral": 0.85, "risk_on": 1.0}.get(posture, 0.85)
+
+
+# ── Shadow conditioning for the screener ────────────────────────────────────────
+# Sector boost by RRG quadrant; macro factor by posture. Used to compute a
+# context_adjusted_score WITHOUT touching the live swing_score (shadow mode).
+_QUADRANT_BOOST = {"leading": 1.10, "improving": 1.05, "weakening": 0.97,
+                   "lagging": 0.92, "unknown": 1.0}
+_MACRO_FACTOR = {"risk_on": 1.05, "neutral": 1.0, "risk_off": 0.90}
+
+
+def _sector_to_rank_map(bundle: dict) -> dict:
+    """sector NAME (lowercased) → {quadrant, rank, ...} from bundle sector_ranks."""
+    out: dict = {}
+    for _etf, info in (bundle.get("sector_ranks") or {}).items():
+        name = (info.get("sector") or "").strip().lower()
+        if name:
+            out[name] = info
+    return out
+
+
+def get_symbol_sectors(symbols: list[str]) -> dict:
+    """symbol → sector name, from the Universe table (single query). {} on failure."""
+    try:
+        from app.db.database import SessionLocal
+        from app.db.models import Universe
+        db = SessionLocal()
+        try:
+            ups = [s.upper() for s in symbols if s]
+            if not ups:
+                return {}
+            rows = (db.query(Universe.symbol, Universe.sector)
+                      .filter(Universe.symbol.in_(ups)).all())
+            return {row[0].upper(): row[1] for row in rows if row[1]}
+        finally:
+            db.close()
+    except Exception:
+        return {}
+
+
+def apply_context_shadow(results: list[dict],
+                         symbol_sectors: dict | None = None,
+                         bundle: dict | None = None) -> list[dict]:
+    """Attach SHADOW conditioning fields to screener results (additive only).
+
+    Adds per row: rotation_quadrant, sector_rank, risk_posture,
+    context_adjusted_score = swing_score × sector_boost × macro_factor.
+
+    Does NOT modify swing_score / swing_signal (those drive live trades). When
+    settings.CONTEXT_CONDITIONING_LIVE is True the caller may re-rank by
+    context_adjusted_score; otherwise these fields are display/validation only.
+    """
+    try:
+        if bundle is None:
+            bundle = get_context_bundle_sync()
+        posture = bundle.get("risk_posture", "neutral")
+        macro_factor = _MACRO_FACTOR.get(posture, 1.0)
+        sect_map = _sector_to_rank_map(bundle)
+        symbol_sectors = symbol_sectors or {}
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            sym = (r.get("symbol") or "").upper()
+            sector = (symbol_sectors.get(sym) or "").strip().lower()
+            info = sect_map.get(sector)
+            quad = info["quadrant"] if info else "unknown"
+            boost = _QUADRANT_BOOST.get(quad, 1.0)
+            base = r.get("swing_score") or 0
+            r["rotation_quadrant"] = quad
+            r["sector_rank"] = info["rank"] if info else None
+            r["risk_posture"] = posture
+            r["context_adjusted_score"] = round(base * boost * macro_factor, 1)
+    except Exception as exc:
+        logger.debug("apply_context_shadow failed: %s", exc)
+    return results

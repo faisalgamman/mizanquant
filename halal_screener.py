@@ -500,6 +500,20 @@ def run_screener():
             r = f.result()
             if r: results.append(r)
     results.sort(key=lambda x: x["swing_score"], reverse=True)
+
+    # Shadow conditioning: attach rotation_quadrant / sector_rank /
+    # context_adjusted_score from the MarketContextBundle (additive — does NOT
+    # change swing_score ordering unless CONTEXT_CONDITIONING_LIVE is enabled).
+    try:
+        from app.services.market_context_bundle import apply_context_shadow, get_symbol_sectors
+        from app.config import settings as _cfg
+        syms = [r["symbol"] for r in results if isinstance(r, dict) and r.get("symbol")]
+        apply_context_shadow(results, symbol_sectors=get_symbol_sectors(syms))
+        if getattr(_cfg, "CONTEXT_CONDITIONING_LIVE", False):
+            results.sort(key=lambda x: x.get("context_adjusted_score", x["swing_score"]), reverse=True)
+    except Exception as _ctx_exc:
+        logger.debug("screener context shadow skipped: %s", _ctx_exc)
+
     cache_set("all", results)
     return results
 
