@@ -2459,6 +2459,26 @@ async def context_bundle(force: bool = Query(False, description="Bypass cache an
     return await get_context_bundle(force=force)
 
 
+@app.get("/api/alerts")
+async def api_alerts(
+    limit: int = Query(50, description="Max alerts to return"),
+    symbol: str = Query("", description="Filter by symbol"),
+    alert_type: str = Query("", description="Filter by type (strong_buy, consensus, ...)"),
+    sent_only: bool = Query(False, description="Only alerts actually sent to Telegram"),
+):
+    """Persisted trading-signal alerts from the alerts table.
+
+    Each alert records the regime + risk_posture at emit time and whether it
+    passed the Risk Desk gate — so the alerts page shows a real, auditable feed
+    instead of ephemeral Telegram-only messages.
+    """
+    from app.services.alert_store import recent_alerts
+    rows = await asyncio.to_thread(
+        recent_alerts, limit, symbol, alert_type, sent_only
+    )
+    return {"count": len(rows), "alerts": rows}
+
+
 @app.get("/api/stock/senate-trading")
 async def stock_senate_trading(
     symbol: str = Query("", description="Stock symbol (empty = all recent trades)"),

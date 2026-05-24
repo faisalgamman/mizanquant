@@ -146,6 +146,35 @@ class GuardLog(Base):
     regime = Column(String(20), nullable=True, index=True)
 
 
+class Alert(Base):
+    """Persistent alert log — every signal alert the system emits.
+
+    Replaces the previous ephemeral Telegram-only flow. Each row records whether
+    the alert passed the Risk Desk (17-guard) gate, the regime/posture at the time,
+    and a correlation_id linking it to the originating signal/trade lineage.
+    """
+
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(DateTime, default=_utcnow, index=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    alert_type = Column(String(40), nullable=False, index=True)  # "strong_buy", "consensus", "system", ...
+    signal = Column(String(30), nullable=True)                   # "STRONG BUY", "SELL", ...
+    score = Column(Float, nullable=True)
+    price = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    take_profit = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    regime = Column(String(20), nullable=True, index=True)
+    risk_posture = Column(String(12), nullable=True, index=True)  # risk_on/neutral/risk_off
+    guard_passed = Column(Boolean, default=True, nullable=False, index=True)
+    guard_reason = Column(Text, nullable=True)
+    sent = Column(Boolean, default=False, nullable=False)         # did it reach Telegram?
+    correlation_id = Column(String(36), nullable=True, index=True)
+    payload = Column(JSON, nullable=True)                         # full alert dict for audit
+
+
 class TradeHistory(Base):
     """Auto-trade execution history (Stage 1: Paper Trading)."""
 

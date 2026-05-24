@@ -140,14 +140,36 @@ function fmtTime(ts) {
 async function loadAll() {
   document.getElementById('loadingAlerts').style.display = '';
   document.getElementById('alertsContent').style.display = 'none';
-  const [status, guards, guardSummary] = await Promise.all([
+  const [status, guards, guardSummary, signals] = await Promise.all([
     apiGet('/api/system/status'),
     apiGet('/v1/guards/recent?limit=50'),
     apiGet('/v1/guards/summary'),
+    apiGet('/api/alerts?limit=50'),
   ]);
   document.getElementById('loadingAlerts').style.display = 'none';
   document.getElementById('alertsContent').style.display = '';
   allAlerts = [];
+
+  // Trading-signal alerts (strong_buy / consensus) from the persistent alerts table
+  if (signals && Array.isArray(signals.alerts)) {
+    for (const a of signals.alerts) {
+      const isBuy = (a.signal || '').toUpperCase().includes('BUY');
+      const blocked = a.guard_passed === false;
+      allAlerts.push({
+        type: 'signal',
+        icon: blocked ? '✗' : (isBuy ? '▲' : '▼'),
+        iconClass: blocked ? 'icon-error' : (isBuy ? 'icon-success' : 'icon-warning'),
+        title: `${a.signal || a.alert_type} — ${a.symbol}`,
+        desc: (blocked ? `Suppressed by Risk Desk: ${a.guard_reason || ''} · ` : '')
+              + `${a.price != null ? '$'+Number(a.price).toFixed(2) : ''}`
+              + `${a.score != null ? ' · score '+a.score : ''}`
+              + `${a.regime ? ' · '+a.regime+'/'+(a.risk_posture||'') : ''}`,
+        symbol: a.symbol || '',
+        ts: a.ts || now(),
+        passed: !blocked,
+      });
+    }
+  }
 
   // Build alert list
   if (guards && Array.isArray(guards)) {

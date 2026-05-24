@@ -128,8 +128,8 @@ def send_photo(image_bytes: bytes, caption: str = "") -> bool:
 
 def alert_strong_signal(symbol: str, signal_type: str, score: float,
                         price: float, stop_loss: float, take_profit: float,
-                        details: str = ""):
-    """Send alert for a strong trading signal."""
+                        details: str = "", correlation_id: str = None):
+    """Send alert for a strong trading signal, and persist it to the alerts table."""
     icon = "[BUY]" if "BUY" in signal_type else "[SELL]"
     text = (
         f"{icon} {signal_type} -- {symbol}\n"
@@ -142,7 +142,18 @@ def alert_strong_signal(symbol: str, signal_type: str, score: float,
     if details:
         text += f"\n{details}"
     text += f"\n\n{_BRAND_LINE}\n{_utc_label()} UTC"
-    return send_message(text)
+    sent = send_message(text)
+    try:
+        from app.services.alert_store import record_alert
+        record_alert(
+            symbol, "strong_buy" if "BUY" in signal_type else "strong_sell",
+            signal=signal_type, score=score, price=price, stop_loss=stop_loss,
+            take_profit=take_profit, sent=bool(sent), correlation_id=correlation_id,
+            payload={"details": details} if details else None,
+        )
+    except Exception:
+        pass
+    return sent
 
 
 def alert_consensus(symbol: str, verdict: str, confidence: float,
@@ -173,7 +184,17 @@ def alert_consensus(symbol: str, verdict: str, confidence: float,
         f"\n"
         f"{_BRAND_LINE}\n{_utc_label()} UTC"
     )
-    return send_message(text)
+    sent = send_message(text)
+    try:
+        from app.services.alert_store import record_alert
+        record_alert(
+            symbol, "consensus", signal=verdict, confidence=confidence,
+            price=price, stop_loss=stop_loss, take_profit=tp1, sent=bool(sent),
+            payload={"votes_buy": votes_buy, "votes_sell": votes_sell, "votes_hold": votes_hold},
+        )
+    except Exception:
+        pass
+    return sent
 
 
 def alert_daily_summary(screener_data: list, portfolio_data: dict = None):

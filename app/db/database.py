@@ -61,6 +61,10 @@ def get_db():
 
 def init_db():
     """Create all tables if they don't exist."""
+    # Import models so every ORM table is registered on Base.metadata before
+    # create_all runs — guarantees new tables (e.g. alerts) are created
+    # regardless of import order at startup.
+    from app.db import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _run_schema_migrations()
     logger.info("Database tables initialized.")

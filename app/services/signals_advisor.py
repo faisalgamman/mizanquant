@@ -241,6 +241,25 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
     if dry_run:
         return True
 
+    symbol = row.get("Symbol", "")
+    entry = levels.get("entry")
+    sl = levels.get("sl")
+    tp1 = levels.get("tp1")
+    confidence = float(row.get("Confidence %", 0) or 0)
+
+    # Risk Desk gate — suppress advisory alerts during a market-level halt
+    # (VIX halt / SPY bear halt / regime freeze / system block). Every alert is
+    # persisted to the alerts table with the gate result for audit, whether or
+    # not it actually reaches Telegram.
+    from app.services.alert_store import market_risk_gate, record_alert
+    gate_ok, gate_reason = market_risk_gate(symbol, price=entry or 0.0, stop_loss=sl or 0.0)
+    if not gate_ok:
+        logger.info("alert suppressed by Risk Desk gate: %s — %s", symbol, gate_reason)
+        record_alert(symbol, "strong_buy", signal="STRONG BUY", score=usx_score,
+                     price=entry, stop_loss=sl, take_profit=tp1, confidence=confidence,
+                     guard_passed=False, guard_reason=gate_reason, sent=False)
+        return False
+
     # Try to render chart and send as photo with text as caption.
     image_bytes = None
     try:
@@ -264,16 +283,23 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
         logger.debug("signals_advisor: chart render failed for %s: %s",
                      row.get("Symbol"), exc)
 
+    sent = False
     try:
         from app.services.telegram_alert import send_message as tg_send
         from app.services.telegram_alert import send_photo as tg_send_photo
 
         if image_bytes:
-            return bool(tg_send_photo(image_bytes, caption=text))
-        return bool(tg_send(text))
+            sent = bool(tg_send_photo(image_bytes, caption=text))
+        else:
+            sent = bool(tg_send(text))
     except Exception as exc:  # noqa: BLE001
         logger.warning("signals_advisor: telegram send failed: %s", exc)
-        return False
+        sent = False
+
+    record_alert(symbol, "strong_buy", signal="STRONG BUY", score=usx_score,
+                 price=entry, stop_loss=sl, take_profit=tp1, confidence=confidence,
+                 guard_passed=True, sent=sent)
+    return sent
 
 
 # ---------------------------------------------------------------------------

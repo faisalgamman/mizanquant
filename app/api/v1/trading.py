@@ -433,7 +433,101 @@ async def v1_backtest(
     result = run_backtest(s, start_date, end_date, portfolio, risk_pct, hold_days)
 
     await asyncio.to_thread(_save_backtest_cache, key, result)
+    # Persist to backtest_runs (analytics layer) — fire-and-forget, never blocks the response.
+    await asyncio.to_thread(_persist_backtest, s, start_date, end_date, risk_pct, hold_days, result)
     return result
+
+
+def _persist_backtest(symbol, start_date, end_date, risk_pct, hold_days, result):
+    """Map a run_backtest() result into the backtest_runs table via record_backtest().
+
+    Reuses app/services/backtest_recorder.py so every API backtest is queryable
+    by the analytics layer with a reproducibility seal. Silent on any failure.
+    """
+    try:
+        if not result or not isinstance(result, list):
+            return
+        s0 = result[0]
+        if not isinstance(s0, dict) or "Error" in s0 or "Message" in s0:
+            return
+        summary = {
+            "sharpe":            s0.get("Sharpe Ratio"),
+            "sortino":           s0.get("Sortino Ratio"),
+            "max_drawdown":      s0.get("Max Drawdown %"),
+            "calmar":            s0.get("Calmar Ratio"),
+            "annualized_return": s0.get("Return %"),  # total return % over the window
+            "win_rate":          s0.get("Win Rate %"),
+            "profit_factor":     s0.get("Profit Factor"),
+            "total_trades":      s0.get("Total Trades"),
+            "test_start":        start_date,
+            "test_end":          end_date,
+        }
+        qc = {
+            "deflated_sharpe":    s0.get("Deflated Sharpe"),
+            "permutation_pvalue": s0.get("Permutation p-value"),
+        }
+        from app.services.backtest_recorder import record_backtest
+        record_backtest(
+            strategy_name="manual_swing",
+            symbols=[symbol],
+            summary=summary,
+            qc=qc,
+            profile="api",
+            extra={"risk_pct": risk_pct, "hold_days": hold_days,
+                   "return_pct_is_total": True, "period": s0.get("Period")},
+        )
+    except Exception as exc:
+        logger.debug("backtest persist failed for %s: %s", symbol, exc)
+
+
+@router.get("/backtest/history")
+async def v1_backtest_history(strategy: str = "", symbol: str = "", limit: int = 50):
+    """Recent persisted backtest runs from the backtest_runs table (analytics layer).
+
+    Optional filters: ?strategy=manual_swing  ?symbol=AAPL  ?limit=50
+    """
+    def _query():
+        from app.db.database import SessionLocal
+        from app.db.models import BacktestRun
+        db = SessionLocal()
+        try:
+            q = db.query(BacktestRun).order_by(BacktestRun.created_at.desc())
+            if strategy:
+                q = q.filter(BacktestRun.strategy_name == strategy)
+            rows = q.limit(min(max(limit, 1), 200)).all()
+            out = []
+            for r in rows:
+                syms = r.symbols if isinstance(r.symbols, list) else []
+                if symbol and symbol.upper() not in [str(x).upper() for x in syms]:
+                    continue
+                out.append({
+                    "id":            r.id,
+                    "created_at":    r.created_at.isoformat() if r.created_at else None,
+                    "strategy_name": r.strategy_name,
+                    "symbols":       syms,
+                    "profile":       r.profile,
+                    "sharpe":        r.sharpe,
+                    "sortino":       r.sortino,
+                    "max_drawdown_pct": r.max_drawdown_pct,
+                    "calmar":        r.calmar,
+                    "return_pct":    r.annualized_return_pct,
+                    "win_rate":      r.win_rate,
+                    "profit_factor": r.profit_factor,
+                    "total_trades":  r.total_trades,
+                    "deflated_sharpe":    r.deflated_sharpe,
+                    "permutation_pvalue": r.permutation_pvalue,
+                    "git_sha":       r.git_sha,
+                    "is_dirty":      r.is_dirty,
+                })
+            return out
+        finally:
+            db.close()
+    try:
+        rows = await asyncio.to_thread(_query)
+        return {"count": len(rows), "runs": rows}
+    except Exception as exc:
+        logger.debug("backtest history failed: %s", exc)
+        return {"count": 0, "runs": [], "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
