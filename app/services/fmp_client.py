@@ -398,6 +398,66 @@ class FMPClient:
         return None
 
     # ------------------------------------------------------------------
+    # ETF data (holdings / sector weightings / fund info)
+    # ------------------------------------------------------------------
+
+    def get_etf_holdings(self, symbol: str, limit: int = 25) -> list[dict]:
+        """Top ETF holdings with weight %. Returns [] on failure."""
+        data = self._get("etf/holdings", {"symbol": symbol.upper()})
+        if not isinstance(data, list):
+            return []
+        out = []
+        for h in data[:limit]:
+            w = h.get("weightPercentage", h.get("weight"))
+            try:
+                w = float(str(w).replace("%", "")) if w is not None else None
+            except (ValueError, TypeError):
+                w = None
+            out.append({
+                "symbol": h.get("asset") or h.get("symbol") or "",
+                "name":   h.get("name") or "",
+                "weight": round(w, 2) if w is not None else None,
+            })
+        return out
+
+    def get_etf_sector_weightings(self, symbol: str) -> list[dict]:
+        """ETF sector allocation. Returns [] on failure."""
+        data = self._get("etf/sector-weightings", {"symbol": symbol.upper()})
+        if not isinstance(data, list):
+            return []
+        out = []
+        for s in data:
+            w = s.get("weightPercentage", s.get("weight"))
+            try:
+                w = float(str(w).replace("%", "")) if w is not None else None
+            except (ValueError, TypeError):
+                w = None
+            out.append({
+                "sector": s.get("sector") or "",
+                "weight": round(w, 2) if w is not None else None,
+            })
+        return out
+
+    def get_etf_info(self, symbol: str) -> dict | None:
+        """ETF profile: AUM, expense ratio, inception. Returns None on failure."""
+        data = self._get("etf/info", {"symbol": symbol.upper()})
+        rec = None
+        if isinstance(data, list) and data:
+            rec = data[0]
+        elif isinstance(data, dict):
+            rec = data
+        if not rec:
+            return None
+        return {
+            "symbol":         symbol.upper(),
+            "name":           rec.get("name") or "",
+            "aum":            rec.get("assetsUnderManagement") or rec.get("aum"),
+            "expense_ratio":  rec.get("expenseRatio"),
+            "inception_date": str(rec.get("inceptionDate") or rec.get("inception_date") or ""),
+            "description":    (rec.get("description") or "")[:400],
+        }
+
+    # ------------------------------------------------------------------
     # VIX (index — not available via Alpaca)
     # ------------------------------------------------------------------
 
@@ -412,6 +472,35 @@ class FMPClient:
         except Exception:
             pass
         return None
+
+    def get_price_history(self, symbol: str, period_days: int = 365) -> "pd.Series | None":
+        """Daily close history for any symbol as pd.Series indexed by date."""
+        import pandas as pd
+        from datetime import datetime, timedelta, timezone
+        try:
+            today = datetime.now(timezone.utc).date()
+            start = (today - timedelta(days=period_days)).isoformat()
+            data = self._get(
+                "historical-price-eod/full",
+                {"symbol": symbol.upper(), "from": start, "to": today.isoformat()},
+            )
+            records = None
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                records = data.get("historical") or data.get("historicalStockList", [{}])[0].get("historicalStockList")
+            if not records:
+                return None
+            df = pd.DataFrame(records)
+            if "date" not in df.columns or "close" not in df.columns:
+                return None
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").set_index("date")
+            series = df["close"].astype(float).dropna()
+            return series if len(series) > 0 else None
+        except Exception as exc:
+            logger.debug("FMP price history %s failed: %s", symbol, exc)
+            return None
 
     def get_vix_history(self, period_days: int = 365) -> "pd.Series | None":
         """^VIX daily close history as a pd.Series indexed by date."""

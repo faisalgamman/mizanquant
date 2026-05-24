@@ -52,63 +52,94 @@ def _get_obb():
     return obb
 
 
+# ── FRED REST helper ────────────────────────────────────────────────────────
+# NOTE: We call the FRED REST API directly (httpx) rather than via OpenBB.
+# OpenBB's sync wrapper runs coroutines through anyio.start_blocking_portal(),
+# which raises "signal only works in main thread" on Linux when invoked from a
+# worker thread (our asyncio.to_thread endpoints). Direct REST avoids that
+# entirely and is faster. See get_economic_indicators / get_vix_* below.
+
+_FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
+
+
+def _fred_observations(series_id: str, limit: int | None = None,
+                       start_date: str | None = None,
+                       sort: str = "desc") -> list[tuple[str, float]]:
+    """Fetch observations from FRED REST API.
+
+    Returns list of (date_str, float_value) with missing '.' values dropped.
+    Order follows ``sort`` ("desc" = newest first). [] on any failure.
+    """
+    from app.config import settings
+    import httpx
+
+    if not settings.FRED_API_KEY:
+        return []
+
+    params: dict = {
+        "series_id": series_id,
+        "api_key":   settings.FRED_API_KEY,
+        "file_type": "json",
+        "sort_order": sort,
+    }
+    if limit:
+        params["limit"] = limit
+    if start_date:
+        params["observation_start"] = start_date
+
+    try:
+        with httpx.Client(timeout=10) as c:
+            r = c.get(_FRED_BASE, params=params)
+            r.raise_for_status()
+            obs = r.json().get("observations", [])
+        out: list[tuple[str, float]] = []
+        for o in obs:
+            v = o.get("value")
+            if v in (None, ".", ""):
+                continue
+            try:
+                out.append((o.get("date", ""), float(v)))
+            except (ValueError, TypeError):
+                continue
+        return out
+    except Exception as exc:
+        logger.debug("FRED %s REST failed: %s", series_id, exc)
+        return []
+
+
 # ── FRED: VIX ─────────────────────────────────────────────────────────────────
 
 def get_vix_current() -> Optional[float]:
-    """VIXCLS from FRED — official, free, no rate limit, no 401.
+    """Latest VIXCLS from FRED REST — official, free, no 401.
 
     Returns None when FRED_API_KEY is not set or the request fails,
     so the caller can fall through to FMP / yfinance.
     """
-    from app.config import settings
-    if not settings.FRED_API_KEY:
-        return None
-    try:
-        obb = _get_obb()
-        r = obb.economy.fred_series(symbol="VIXCLS", limit=1, provider="fred")
-        if r.results:
-            val = r.results[-1].value
-            if val is not None:
-                v = float(val)
-                logger.debug("VIX from FRED: %.2f", v)
-                return v
-    except Exception as exc:
-        logger.debug("FRED VIX current failed: %s", exc)
+    obs = _fred_observations("VIXCLS", limit=10, sort="desc")
+    if obs:
+        v = obs[0][1]
+        logger.debug("VIX from FRED: %.2f", v)
+        return v
     return None
 
 
 def get_vix_series(period_days: int = 365) -> Optional[pd.Series]:
-    """VIXCLS historical from FRED as pd.Series(DatetimeIndex → float).
+    """VIXCLS history from FRED REST as pd.Series(DatetimeIndex → float).
 
     Returns None on failure; caller falls back to FMP / yfinance.
     """
-    from app.config import settings
-    if not settings.FRED_API_KEY:
+    start = (datetime.now(timezone.utc).date() - timedelta(days=period_days)).isoformat()
+    obs = _fred_observations("VIXCLS", start_date=start, sort="asc")
+    if not obs:
         return None
-    try:
-        obb = _get_obb()
-        start = (datetime.now(timezone.utc).date() - timedelta(days=period_days)).isoformat()
-        r = obb.economy.fred_series(symbol="VIXCLS", start_date=start, provider="fred")
-        if not r.results:
-            return None
-        records = [
-            (row.date, float(row.value))
-            for row in r.results
-            if row.value is not None
-        ]
-        if not records:
-            return None
-        dates, vals = zip(*records)
-        return pd.Series(vals, index=pd.DatetimeIndex(dates)).sort_index()
-    except Exception as exc:
-        logger.debug("FRED VIX series failed: %s", exc)
-    return None
+    dates, vals = zip(*obs)
+    return pd.Series(vals, index=pd.DatetimeIndex(dates)).sort_index()
 
 
 # ── FRED: Economic Indicators ─────────────────────────────────────────────────
 
 def get_economic_indicators() -> dict:
-    """Real macroeconomic data from FRED.
+    """Real macroeconomic data from FRED REST API.
 
     Returns dict with keys: t10y2y, hy_spread, fed_rate, cpi_yoy, unemployment.
     Each value is float | None. All None when FRED_API_KEY is not set.
@@ -120,8 +151,6 @@ def get_economic_indicators() -> dict:
         CPIAUCSL     — CPI all items → compute YoY %
         UNRATE       — US Unemployment Rate
     """
-    from app.config import settings
-
     result: dict = {
         "t10y2y": None,
         "hy_spread": None,
@@ -130,35 +159,24 @@ def get_economic_indicators() -> dict:
         "unemployment": None,
     }
 
-    if not settings.FRED_API_KEY:
-        return result
+    # Single-value daily/monthly series — fetch a small buffer, take latest valid.
+    for key, series_id in (
+        ("t10y2y",      "T10Y2Y"),
+        ("hy_spread",   "BAMLH0A0HYM2"),
+        ("fed_rate",    "DFF"),
+        ("unemployment", "UNRATE"),
+    ):
+        obs = _fred_observations(series_id, limit=10, sort="desc")
+        if obs:
+            result[key] = round(obs[0][1], 4)
 
-    series_map = {
-        "t10y2y":      ("T10Y2Y",      1),
-        "hy_spread":   ("BAMLH0A0HYM2", 1),
-        "fed_rate":    ("DFF",          1),
-        "cpi_yoy":     ("CPIAUCSL",    13),   # 13 months to compute YoY
-        "unemployment": ("UNRATE",      1),
-    }
-
-    try:
-        obb = _get_obb()
-        for key, (series_id, limit) in series_map.items():
-            try:
-                r = obb.economy.fred_series(symbol=series_id, limit=limit, provider="fred")
-                if not r.results:
-                    continue
-                if key == "cpi_yoy" and len(r.results) >= 13:
-                    latest = float(r.results[-1].value)
-                    year_ago = float(r.results[0].value)
-                    result[key] = round((latest / year_ago - 1) * 100, 2) if year_ago else None
-                else:
-                    val = r.results[-1].value
-                    result[key] = round(float(val), 4) if val is not None else None
-            except Exception as exc:
-                logger.debug("FRED %s failed: %s", series_id, exc)
-    except Exception as exc:
-        logger.debug("FRED indicators batch failed: %s", exc)
+    # CPI YoY — need 13 monthly points (newest + 12-months-ago).
+    cpi = _fred_observations("CPIAUCSL", limit=15, sort="desc")
+    if len(cpi) >= 13:
+        latest = cpi[0][1]
+        year_ago = cpi[12][1]
+        if year_ago:
+            result["cpi_yoy"] = round((latest / year_ago - 1) * 100, 2)
 
     return result
 
@@ -235,68 +253,39 @@ def fetch_ohlcv_tiingo(symbol: str, period: str = "1y") -> Optional[pd.DataFrame
 # ── FMP via OpenBB: ETF Data ──────────────────────────────────────────────────
 
 def get_etf_info(symbol: str) -> Optional[dict]:
-    """ETF profile: AUM, expense ratio, inception date, description."""
+    """ETF profile via FMP REST (fmp_client) — avoids OpenBB thread/signal bug."""
     from app.config import settings
     if not settings.FMP_API_KEY:
         return None
     try:
-        obb = _get_obb()
-        r = obb.etf.info(symbol.upper(), provider="fmp")
-        if r.results:
-            e = r.results[0]
-            return {
-                "symbol":        symbol.upper(),
-                "name":          getattr(e, "name", "") or "",
-                "aum":           getattr(e, "net_assets", None),
-                "expense_ratio": getattr(e, "expense_ratio", None),
-                "inception_date": str(getattr(e, "inception_date", "") or ""),
-                "description":   (getattr(e, "description", "") or "")[:400],
-            }
+        from app.services.fmp_client import fmp_client
+        return fmp_client.get_etf_info(symbol.upper())
     except Exception as exc:
         logger.debug("ETF info %s failed: %s", symbol, exc)
     return None
 
 
 def get_etf_holdings(symbol: str, limit: int = 25) -> list[dict]:
-    """Top ETF holdings with weights from FMP via OpenBB."""
+    """Top ETF holdings via FMP REST (fmp_client) — avoids OpenBB thread/signal bug."""
     from app.config import settings
     if not settings.FMP_API_KEY:
         return []
     try:
-        obb = _get_obb()
-        r = obb.etf.holdings(symbol.upper(), provider="fmp")
-        if not r.results:
-            return []
-        return [
-            {
-                "symbol": getattr(h, "symbol", "") or "",
-                "name":   getattr(h, "name", "") or "",
-                "weight": round(float(h.weight or 0) * 100, 2),
-            }
-            for h in r.results[:limit]
-        ]
+        from app.services.fmp_client import fmp_client
+        return fmp_client.get_etf_holdings(symbol.upper(), limit=limit)
     except Exception as exc:
         logger.debug("ETF holdings %s failed: %s", symbol, exc)
     return []
 
 
 def get_etf_sectors(symbol: str) -> list[dict]:
-    """ETF sector allocation (weights) from FMP via OpenBB."""
+    """ETF sector allocation via FMP REST (fmp_client) — avoids OpenBB thread/signal bug."""
     from app.config import settings
     if not settings.FMP_API_KEY:
         return []
     try:
-        obb = _get_obb()
-        r = obb.etf.sectors(symbol.upper(), provider="fmp")
-        if not r.results:
-            return []
-        return [
-            {
-                "sector": getattr(s, "sector", str(s)),
-                "weight": round(float(getattr(s, "weight", 0) or 0) * 100, 2),
-            }
-            for s in r.results
-        ]
+        from app.services.fmp_client import fmp_client
+        return fmp_client.get_etf_sector_weightings(symbol.upper())
     except Exception as exc:
         logger.debug("ETF sectors %s failed: %s", symbol, exc)
     return []
@@ -422,28 +411,48 @@ def get_relative_rotation(
     if not settings.FMP_API_KEY:
         return []
     try:
-        obb = _get_obb()
-        r = obb.equity.price.relative_rotation(
-            symbols=symbols,
-            benchmark=benchmark,
-            study="price",
-            period=period,
-            provider="fmp",
-        )
-        if not r.results:
+        from app.services.fmp_client import fmp_client
+
+        # Need enough history for a rolling normalization window.
+        days = max(period * 12, 252)
+        bench = fmp_client.get_price_history(benchmark.upper(), period_days=days)
+        if bench is None or len(bench) < period * 3:
             return []
-        return [
-            {
-                "symbol":      getattr(p, "symbol", ""),
-                "rs_ratio":    getattr(p, "rs_ratio", None),
-                "rs_momentum": getattr(p, "rs_momentum", None),
-                "quadrant":    _rrg_quadrant(
-                    getattr(p, "rs_ratio", None),
-                    getattr(p, "rs_momentum", None),
-                ),
-            }
-            for p in r.results
-        ]
+
+        out: list[dict] = []
+        for sym in symbols:
+            try:
+                px = fmp_client.get_price_history(sym.upper(), period_days=days)
+                if px is None or len(px) < period * 3:
+                    continue
+                # Align on common dates
+                df = pd.concat([px.rename("sym"), bench.rename("bench")], axis=1).dropna()
+                if len(df) < period * 3:
+                    continue
+                rs = 100.0 * (df["sym"] / df["bench"])
+                # RS-Ratio: rolling z-score centered at 100
+                win = period
+                mean = rs.rolling(win).mean()
+                std = rs.rolling(win).std()
+                rs_ratio = 100.0 + ((rs - mean) / std).fillna(0)
+                # RS-Momentum: rolling z-score of RS-Ratio's rate of change
+                roc = rs_ratio.diff(win)
+                rmean = roc.rolling(win).mean()
+                rstd = roc.rolling(win).std()
+                rs_mom = 100.0 + ((roc - rmean) / rstd).fillna(0)
+
+                ratio_val = round(float(rs_ratio.iloc[-1]), 2)
+                mom_val = round(float(rs_mom.iloc[-1]), 2)
+                out.append({
+                    "symbol":      sym.upper(),
+                    "rs_ratio":    ratio_val,
+                    "rs_momentum": mom_val,
+                    "quadrant":    _rrg_quadrant(ratio_val, mom_val),
+                })
+            except Exception as exc:
+                logger.debug("RRG %s failed: %s", sym, exc)
+                continue
+        return out
     except Exception as exc:
         logger.debug("Relative rotation failed: %s", exc)
     return []
