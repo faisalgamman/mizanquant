@@ -81,6 +81,28 @@ function renderMarket(market) {
   $("mbCredit").textContent  = credit != null ? Number(credit).toFixed(4) : "—";
   $("mbLiq").textContent     = liq != null ? Number(liq).toFixed(1) + "%" : "—";
 
+  // FRED macro fields embedded in market_context by get_market_status()
+  const cpiEl   = $("mbCpi");
+  const fedEl   = $("mbFedRate");
+  const spdEl   = $("mbSpread");
+  const unempEl = $("mbUnemp");
+  if (cpiEl && market.cpi_yoy != null) {
+    cpiEl.textContent = Number(market.cpi_yoy).toFixed(1) + "%";
+    cpiEl.style.color = market.cpi_yoy > 4 ? "var(--negative)" : market.cpi_yoy > 2.5 ? "var(--warning)" : "var(--positive)";
+  }
+  if (fedEl && market.fed_rate != null) {
+    fedEl.textContent = Number(market.fed_rate).toFixed(2) + "%";
+  }
+  if (spdEl && market.yield_spread != null) {
+    const sp = market.yield_spread;
+    spdEl.textContent = (sp >= 0 ? "+" : "") + Number(sp).toFixed(2) + "%";
+    spdEl.style.color = sp < 0 ? "var(--warning)" : sp < 0.5 ? "var(--accent)" : "var(--positive)";
+  }
+  if (unempEl && market.unemployment != null) {
+    unempEl.textContent = Number(market.unemployment).toFixed(1) + "%";
+    unempEl.style.color = market.unemployment > 5 ? "var(--negative)" : "var(--text-primary)";
+  }
+
   // Bigger MC strip
   const items = [
     { lab: "VIX",     val: vix     != null ? Number(vix).toFixed(2)        : "—", sub: vix != null && vix < 20 ? "calm" : vix != null && vix < 30 ? "elevated" : "stress",
@@ -264,15 +286,27 @@ async function selectSignal(symbol) {
   $("anSubtitle").textContent = symbol + " · loading…";
   $("analyzePanel").innerHTML = `<div class="card"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px;"><i class="fas fa-circle-notch fa-spin" style="font-size:18px;display:block;margin-bottom:6px;"></i>Loading scoring & trade plan…</div></div>`;
 
+  // Primary: scoring + plan + halal (blocking — needed for the main card)
   const [scoring, plan, halal] = await Promise.all([
     api(`/api/v1/scoring/weighted?symbol=${symbol}`),
     api(`/api/v1/trade/plan?symbol=${symbol}`),
     api(`/api/v1/halal/check?symbol=${symbol}`),
   ]);
 
-  state.selectedAnalyze = { symbol, scoring, plan, halal };
+  state.selectedAnalyze = { symbol, scoring, plan, halal, esg: null, segments: null, senate: null };
   renderAnalyze();
   renderConsensusEmpty(symbol);   // Heavy endpoint — only load on explicit click
+
+  // Secondary: ESG + revenue segments + senate (non-blocking enrichment)
+  Promise.all([
+    loadEsgScore(symbol),
+    loadRevenueSegments(symbol),
+    loadSenateTrades(symbol),
+  ]).then(([esg, segments, senate]) => {
+    if (state.selectedSymbol !== symbol) return;  // user already navigated away
+    state.selectedAnalyze = { ...state.selectedAnalyze, esg, segments, senate };
+    renderAnalyze();
+  });
 }
 
 function renderAnalyze() {
@@ -281,7 +315,7 @@ function renderAnalyze() {
     $("analyzePanel").innerHTML = `<div class="analyze-empty"><i class="fas fa-search"></i>Select a signal to analyze</div>`;
     return;
   }
-  const { symbol, scoring, plan, halal } = data;
+  const { symbol, scoring, plan, halal, esg, segments, senate } = data;
   const score = Math.round(scoring?.total ?? scoring?.weighted_score ?? 0);
   const verdict = verdictFromScore(score);
   const price = plan?.current_price ?? plan?.price ?? scoring?.price ?? null;
@@ -314,6 +348,18 @@ function renderAnalyze() {
       <span class="num">${score}</span>
     </div>`;
 
+  // ESG + revenue segments + senate trading (rendered when data arrives)
+  const esgBlock      = renderEsgBlock(esg);
+  const segBlock      = renderSegmentsBlock(segments);
+  const senateBlock   = renderSenateBlock(senate);
+
+  // Loading placeholder for enrichment sections (shown on first render before secondary loads)
+  const enrichLoading = (!esg && !segments && !senate)
+    ? `<div style="margin-top:10px;font-size:9px;color:var(--text-muted);text-align:center;padding:8px 0;border-top:1px solid var(--border-light);">
+         <i class="fas fa-circle-notch fa-spin" style="margin-right:4px;"></i>Loading ESG · Segments · Senate…
+       </div>`
+    : "";
+
   $("analyzePanel").innerHTML = `<div class="card">
     <div class="an-hdr">
       <div>
@@ -341,7 +387,12 @@ function renderAnalyze() {
       <div class="row" style="grid-column:1 / -1;"><span class="l">Strategy</span><span class="v">${strat}</span></div>
     </div>
 
-    <button class="an-trade" onclick="sendToPaperTrade()" ${verdict === "AVOID" ? "disabled" : ""}>
+    ${esgBlock}
+    ${segBlock}
+    ${senateBlock}
+    ${enrichLoading}
+
+    <button class="an-trade" onclick="sendToPaperTrade()" ${verdict === "AVOID" ? "disabled" : ""} style="margin-top:12px;">
       <i class="fas fa-paper-plane"></i> Send to paper trade
     </button>
     <button class="an-trade" style="background:var(--bg-tertiary);color:var(--text-secondary);border-color:var(--border-light);margin-top:6px;" onclick="loadConsensus('${symbol}')">
@@ -746,6 +797,211 @@ async function loadSignals() {
   $("symbolCount").textContent = `${arr.length} symbols`;
 }
 
+/* ─── Macro Indicators (FRED) ─────────────────────────────────── */
+async function loadMacroIndicators() {
+  const data = await api("/api/macro/indicators");
+  if (!data) return;
+
+  // ── Market Bar items ──────────────────────────────────────────
+  const cpiEl    = $("mbCpi");
+  const fedEl    = $("mbFedRate");
+  const spdEl    = $("mbSpread");
+  const unempEl  = $("mbUnemp");
+
+  if (cpiEl) {
+    cpiEl.textContent = data.cpi_yoy != null ? Number(data.cpi_yoy).toFixed(1) + "%" : "—";
+    cpiEl.style.color = data.cpi_yoy != null && data.cpi_yoy > 4
+      ? "var(--negative)" : data.cpi_yoy != null && data.cpi_yoy > 2.5
+      ? "var(--warning)" : "var(--positive)";
+  }
+  if (fedEl) {
+    fedEl.textContent = data.fed_rate != null ? Number(data.fed_rate).toFixed(2) + "%" : "—";
+    fedEl.style.color = "var(--text-primary)";
+  }
+  if (spdEl) {
+    const spread = data.t10y2y;
+    spdEl.textContent = spread != null ? (spread >= 0 ? "+" : "") + Number(spread).toFixed(2) + "%" : "—";
+    // Inverted yield curve = warning
+    spdEl.style.color = spread != null
+      ? (spread < 0 ? "var(--warning)" : spread < 0.5 ? "var(--accent)" : "var(--positive)")
+      : "var(--text-primary)";
+  }
+  if (unempEl) {
+    unempEl.textContent = data.unemployment != null ? Number(data.unemployment).toFixed(1) + "%" : "—";
+    unempEl.style.color = data.unemployment != null && data.unemployment > 5
+      ? "var(--negative)" : "var(--text-primary)";
+  }
+
+  // ── Macro Panel (lower row 4th column) ────────────────────────
+  renderMacroPanel(data);
+}
+
+function renderMacroPanel(data) {
+  const el = $("macroPanelBody");
+  if (!el) return;
+
+  const noData = !data || Object.values({
+    cpi: data.cpi_yoy, fed: data.fed_rate,
+    spread: data.t10y2y, unemp: data.unemployment, hy: data.hy_spread
+  }).every(v => v == null);
+
+  if (noData) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:10px;padding:8px 0;">
+      Set <code>FRED_API_KEY</code> for live data</div>`;
+    return;
+  }
+
+  const rows = [
+    {
+      lab: "CPI YoY", val: data.cpi_yoy,
+      fmt: v => Number(v).toFixed(1) + "%",
+      color: v => v > 4 ? "var(--negative)" : v > 2.5 ? "var(--warning)" : "var(--positive)",
+      hint: "Consumer Price Index, year-over-year",
+    },
+    {
+      lab: "Fed Rate", val: data.fed_rate,
+      fmt: v => Number(v).toFixed(2) + "%",
+      color: () => "var(--text-primary)",
+      hint: "Effective Federal Funds Rate (DFF)",
+    },
+    {
+      lab: "Yield Spread", val: data.t10y2y,
+      fmt: v => (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%",
+      color: v => v < 0 ? "var(--warning)" : v < 0.5 ? "var(--accent)" : "var(--positive)",
+      hint: "10Y−2Y Treasury spread (negative = inversion)",
+      badge: data.t10y2y != null && data.t10y2y < 0 ? "INVERTED" : null,
+    },
+    {
+      lab: "Unemployment", val: data.unemployment,
+      fmt: v => Number(v).toFixed(1) + "%",
+      color: v => v > 5 ? "var(--negative)" : "var(--positive)",
+      hint: "US Unemployment Rate (UNRATE)",
+    },
+    {
+      lab: "HY Spread", val: data.hy_spread,
+      fmt: v => Number(v).toFixed(2) + "%",
+      color: v => v > 5 ? "var(--negative)" : v > 3.5 ? "var(--warning)" : "var(--positive)",
+      hint: "ICE BofA US High Yield Credit Spread",
+    },
+  ];
+
+  el.innerHTML = rows.map(r => {
+    if (r.val == null) return "";
+    const color = r.color(r.val);
+    const badge = r.badge
+      ? `<span style="margin-left:4px;padding:1px 5px;border-radius:4px;font-size:8px;font-weight:700;background:var(--warning-dim,#fbbf2422);color:var(--warning,#fbbf24);border:1px solid var(--warning-dim,#fbbf2444);">${r.badge}</span>`
+      : "";
+    return `<div class="wf-row" title="${r.hint}" style="cursor:default;">
+      <span class="wf-label">${r.lab}</span>
+      <span class="wf-value" style="color:${color};font-family:var(--mono);">${r.fmt(r.val)}${badge}</span>
+    </div>`;
+  }).join("");
+
+  // Source caption
+  el.innerHTML += `<div style="font-size:8px;color:var(--text-muted);padding-top:6px;border-top:1px solid var(--border-light);margin-top:4px;">
+    Source: FRED / Federal Reserve  ·  ${data.source || "FRED"}
+  </div>`;
+}
+
+/* ─── ESG Score ───────────────────────────────────────────────── */
+async function loadEsgScore(symbol) {
+  const data = await api(`/api/stock/esg?symbol=${symbol}`);
+  return data && !data.error ? data : null;
+}
+
+function renderEsgBlock(esg) {
+  if (!esg) return "";
+  const total = esg.total ?? null;
+  const envir = esg.environmental ?? null;
+  const soc   = esg.social ?? null;
+  const gov   = esg.governance ?? null;
+  const cont  = esg.controversy ?? null;
+
+  if (total == null && envir == null) return "";
+
+  const scoreBar = (label, val, max = 100) => {
+    if (val == null) return "";
+    const pct = Math.min((val / max) * 100, 100);
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+      <span style="font-size:9px;color:var(--text-muted);width:72px;flex-shrink:0;">${label}</span>
+      <div style="flex:1;height:4px;background:var(--bg-primary);border-radius:2px;">
+        <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:2px;"></div>
+      </div>
+      <span style="font-size:10px;font-family:var(--mono);color:var(--accent);width:30px;text-align:right;">${Number(val).toFixed(0)}</span>
+    </div>`;
+  };
+
+  const contColor = cont == null ? "var(--text-muted)"
+    : cont <= 1 ? "var(--positive)" : cont <= 3 ? "var(--warning)" : "var(--negative)";
+  const contLabel = cont == null ? "—" : ["None","Low","Moderate","High","Very High","Extreme"][Math.min(cont, 5)] ?? cont;
+
+  return `<div class="an-sect-title" style="margin-top:12px;">ESG Score <span style="font-size:8px;color:var(--text-muted);font-weight:400;"> · yfinance</span></div>
+    ${total != null ? `<div style="font-size:22px;font-family:var(--mono);font-weight:700;color:var(--accent);margin-bottom:6px;">${Number(total).toFixed(0)}<span style="font-size:11px;color:var(--text-muted);font-weight:400;">/100</span></div>` : ""}
+    ${scoreBar("Environment", envir)}
+    ${scoreBar("Social", soc)}
+    ${scoreBar("Governance", gov)}
+    <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+      <span style="font-size:9px;color:var(--text-muted);">Controversy</span>
+      <span style="font-size:10px;font-weight:600;color:${contColor};">${contLabel}</span>
+    </div>`;
+}
+
+/* ─── Revenue Segments ────────────────────────────────────────── */
+async function loadRevenueSegments(symbol) {
+  const data = await api(`/api/stock/revenue-segments?symbol=${symbol}`);
+  return data?.segments?.length ? data.segments : null;
+}
+
+function renderSegmentsBlock(segments) {
+  if (!segments || !segments.length) return "";
+  const total = segments.reduce((s, r) => s + Math.abs(Number(r.value || 0)), 0) || 1;
+  const rows = segments.slice(0, 8).map(r => {
+    const val = Number(r.value || 0);
+    const pct = (Math.abs(val) / total) * 100;
+    const isRisky = pct > 5 && /alcohol|gambling|tobacco|pork|weapon|adult|cannabis|interest|bank|insur/i.test(r.name);
+    const barColor = isRisky ? "var(--negative)" : "var(--accent)";
+    return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;" title="${isRisky ? 'Review for halal compliance' : ''}">
+      <span style="font-size:9px;color:var(--text-secondary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.name}</span>
+      <div style="width:60px;height:4px;background:var(--bg-primary);border-radius:2px;flex-shrink:0;">
+        <div style="width:${Math.min(pct, 100)}%;height:100%;background:${barColor};border-radius:2px;"></div>
+      </div>
+      <span style="font-size:10px;font-family:var(--mono);color:${barColor};width:36px;text-align:right;flex-shrink:0;">${pct.toFixed(1)}%</span>
+      ${isRisky ? `<span style="font-size:8px;color:var(--warning);" title="Review for halal">⚠</span>` : ""}
+    </div>`;
+  });
+
+  return `<div class="an-sect-title" style="margin-top:12px;">Revenue Segments <span style="font-size:8px;color:var(--text-muted);font-weight:400;"> · FMP · AAOIFI 5% rule</span></div>
+    ${rows.join("")}`;
+}
+
+/* ─── Senate Trading ──────────────────────────────────────────── */
+async function loadSenateTrades(symbol) {
+  const data = await api(`/api/stock/senate-trading?symbol=${symbol}`);
+  return data?.trades?.length ? data.trades : null;
+}
+
+function renderSenateBlock(trades) {
+  if (!trades || !trades.length) return "";
+  const rows = trades.slice(0, 5).map(t => {
+    const side = (t.type || t.transaction_type || "").toUpperCase();
+    const isBuy  = /BUY|PURCHASE/.test(side);
+    const isSell = /SELL|SALE/.test(side);
+    const color  = isBuy ? "var(--positive)" : isSell ? "var(--negative)" : "var(--text-secondary)";
+    const date   = t.transaction_date || t.date || "";
+    const name   = (t.first_name || "") + " " + (t.last_name || t.senator || "");
+    const amt    = t.amount_range || t.amount || "—";
+    return `<div style="display:flex;align-items:center;gap:5px;padding:4px 0;border-bottom:1px solid var(--border-light);">
+      <span style="font-size:9px;color:var(--text-muted);width:56px;flex-shrink:0;font-family:var(--mono);">${date.slice(0, 10)}</span>
+      <span style="font-size:9px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name.trim()}</span>
+      <span style="font-size:9px;font-weight:700;color:${color};width:32px;text-align:center;flex-shrink:0;">${isBuy ? "BUY" : isSell ? "SELL" : side || "—"}</span>
+      <span style="font-size:9px;color:var(--text-secondary);font-family:var(--mono);">${amt}</span>
+    </div>`;
+  });
+
+  return `<div class="an-sect-title" style="margin-top:12px;">Senate Trading <span style="font-size:8px;color:var(--text-muted);font-weight:400;"> · STOCK Act · FMP</span></div>
+    ${rows.join("")}`;
+}
+
 /* ─── Master loader ───────────────────────────────────────────── */
 async function loadAll(force = false) {
   const url = `/api/v1/overview${force ? "?force_refresh=true" : ""}`;
@@ -762,6 +1018,7 @@ async function loadAll(force = false) {
 
   // Parallel loads
   loadSignals();
+  loadMacroIndicators();
   api("/api/v1/sectors/performance").then(s => {
     state.sectors = s;
     renderSectors(Array.isArray(s) ? s : s?.sectors || []);

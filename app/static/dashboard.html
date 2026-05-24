@@ -227,6 +227,7 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .mb-val { font-size: 12px; font-weight: 600; font-family: var(--mono); }
 .mb-clock { margin-left: auto; font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.5px; }
 .mb-live { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 600; color: var(--green); }
+.mb-sep { width: 1px; height: 14px; background: var(--border-light); opacity: .5; flex-shrink: 0; }
 
 /* ─── MAIN GRID ───────────────────────────────────────────────── */
 .main {
@@ -1008,6 +1009,11 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   <div class="mb-item"><span class="mb-lab">Breadth</span><span class="mb-val" id="mbBreadth">—</span></div>
   <div class="mb-item"><span class="mb-lab">Credit</span><span class="mb-val" id="mbCredit">—</span></div>
   <div class="mb-item"><span class="mb-lab">Liq</span><span class="mb-val" id="mbLiq">—</span></div>
+  <div class="mb-sep"></div>
+  <div class="mb-item" title="CPI Year-over-Year (FRED)"><span class="mb-lab">CPI</span><span class="mb-val" id="mbCpi">—</span></div>
+  <div class="mb-item" title="Federal Funds Rate (FRED)"><span class="mb-lab">FedRate</span><span class="mb-val" id="mbFedRate">—</span></div>
+  <div class="mb-item" title="10Y-2Y Yield Spread (FRED) — negative = inversion"><span class="mb-lab">Spread</span><span class="mb-val" id="mbSpread">—</span></div>
+  <div class="mb-item" title="Unemployment Rate (FRED)"><span class="mb-lab">Unemp</span><span class="mb-val" id="mbUnemp">—</span></div>
   <div class="mb-clock" id="mbClock">--:--:--</div>
   <div class="mb-live"><span class="dot dot-green pulse"></span>LIVE</div>
 </div>
@@ -1198,6 +1204,20 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
         <div class="wf-body"><div id="consensus">
           <div class="analyze-empty"><i class="fas fa-vote-yea"></i>Select a signal for AI consensus</div>
         </div></div>
+      </div>
+    </div>
+    <div class="col">
+      <!-- ── MACRO PANEL (FRED) ─────────────────────────────── -->
+      <div class="wf-section">
+        <div class="wf-head">
+          <span class="wf-title">Macro</span>
+          <span class="wf-sub">FRED · Federal Reserve</span>
+        </div>
+        <div class="wf-body" id="macroPanelBody">
+          <div style="color:var(--text-muted);font-size:10px;padding:8px 0;">
+            Set <code>FRED_API_KEY</code> for live data
+          </div>
+        </div>
       </div>
     </div>
   </div>
