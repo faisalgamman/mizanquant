@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     # --- Phase 2: Halal screening ---
     FMP_API_KEY: str = ""
 
+    # --- OpenBB data providers (free tier) ---
+    # FRED: federal reserve economic data (VIX, yield spread, CPI, unemployment)
+    # Register free at: https://fred.stlouisfed.org/docs/api/api_key.html
+    FRED_API_KEY: str = ""
+    # Tiingo: OHLCV data that works on servers (no 401 like yfinance)
+    # Register free at: https://api.tiingo.com
+    TIINGO_TOKEN: str = ""
+
     # --- Notifications ---
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""

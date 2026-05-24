@@ -635,7 +635,7 @@ def fetch_ibkr(symbol, period="2y", start=None, end=None):
 
 
 def fetch(symbol, period="2y", start=None, end=None):
-    """Fetch market data. Tries IBKR first, then Alpaca, then yfinance. Caches results."""
+    """Fetch market data. Tries IBKR → Alpaca → Tiingo → yfinance. Caches results."""
     try:
         from app.services.metrics import metrics as _m
     except Exception:
@@ -663,6 +663,21 @@ def fetch(symbol, period="2y", start=None, end=None):
         if _m:
             _m.incr("api_calls_total", provider="alpaca")
         df = fetch_alpaca(symbol, period=period, start=start, end=end)
+
+    # Fallback to Tiingo (works on Railway servers — no 401)
+    if df is None:
+        try:
+            from app.config import settings as _cfg
+            if _cfg.TIINGO_TOKEN:
+                if _m:
+                    _m.incr("api_calls_total", provider="tiingo")
+                from app.services.openbb_data import fetch_ohlcv_tiingo
+                df = fetch_ohlcv_tiingo(symbol, period=period)
+                if df is not None and not df.empty:
+                    logger.debug("Market data for %s: Tiingo (%d rows)", symbol, len(df))
+        except Exception as _e:
+            logger.debug("Tiingo fallback for %s failed: %s", symbol, _e)
+            df = None
 
     # Final fallback to yfinance
     if df is None:

@@ -2151,6 +2151,186 @@ async def stock_dcf(
 
 
 # ---------------------------------------------------------------------------
+# OpenBB Endpoints — ESG, Revenue Segments, Transcripts, Rotation, ETF, Macro
+# (DESIGN.md compliant — all data real, no synthetic values)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/stock/esg")
+async def stock_esg(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+):
+    """ESG score (Environmental / Social / Governance) — relevant for halal screening.
+
+    Returns total_esg_score, component scores, and highest controversy level.
+    Uses yfinance via OpenBB. All values None when data unavailable.
+    """
+    async def compute():
+        from app.services.openbb_data import get_esg_score
+        data = await asyncio.to_thread(get_esg_score, symbol)
+        if data:
+            return data
+        return {"symbol": symbol.upper(), "error": "ESG data not available"}
+    return await cached_or_compute(f"stock:esg:{symbol.upper()}", 86400, compute, compute_timeout=20)
+
+
+@app.get("/api/stock/revenue-segments")
+async def stock_revenue_segments(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+):
+    """Revenue breakdown by business segment (AAOIFI halal screening — 5% threshold).
+
+    Uses FMP via OpenBB. Segments with revenue > 5% of total flagged for review.
+    Requires FMP_API_KEY.
+    """
+    async def compute():
+        from app.services.openbb_data import get_revenue_per_segment
+        segments = await asyncio.to_thread(get_revenue_per_segment, symbol)
+        return {"symbol": symbol.upper(), "segments": segments}
+    return await cached_or_compute(
+        f"stock:revenue_segments:{symbol.upper()}", 86400, compute, compute_timeout=20
+    )
+
+
+@app.get("/api/stock/transcript")
+async def stock_transcript(
+    symbol: str = Query("AAPL", description="Stock symbol"),
+    year: int = Query(2024, description="Fiscal year"),
+    quarter: int = Query(4, description="Quarter (1-4)"),
+):
+    """Earnings call transcript text from FMP.
+
+    Content truncated to 5000 characters. full_length gives the original length.
+    Useful for NLP / management tone analysis. Requires FMP_API_KEY.
+    """
+    async def compute():
+        from app.services.openbb_data import get_earnings_transcript
+        data = await asyncio.to_thread(
+            get_earnings_transcript, symbol, year, quarter
+        )
+        if data:
+            return data
+        return {"symbol": symbol.upper(), "year": year, "quarter": quarter,
+                "error": "transcript not available — check FMP_API_KEY or try a different quarter"}
+    cache_key = f"stock:transcript:{symbol.upper()}:{year}:Q{quarter}"
+    return await cached_or_compute(cache_key, 604800, compute, compute_timeout=30)
+
+
+@app.get("/api/chart/rotation")
+async def chart_rotation(
+    symbols: str = Query(
+        "XLK,XLF,XLV,XLE,XLI,XLP,XLU,XLB,XLRE",
+        description="Comma-separated sector ETF symbols",
+    ),
+    benchmark: str = Query("SPY", description="Benchmark symbol"),
+):
+    """Relative Rotation Graph (Rose Petal chart) — sector momentum vs benchmark.
+
+    Classifies each symbol into: leading / weakening / lagging / improving.
+    Uses FMP via OpenBB. Requires FMP_API_KEY.
+    """
+    async def compute():
+        from app.services.openbb_data import get_relative_rotation
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        data = await asyncio.to_thread(get_relative_rotation, sym_list, benchmark.upper())
+        return {
+            "symbols":   sym_list,
+            "benchmark": benchmark.upper(),
+            "data":      data,
+            "quadrants": {
+                "leading":   "High RS-Ratio, Rising Momentum — buy/hold",
+                "weakening": "High RS-Ratio, Falling Momentum — consider reducing",
+                "lagging":   "Low RS-Ratio, Falling Momentum — avoid",
+                "improving": "Low RS-Ratio, Rising Momentum — watch for entry",
+            },
+        }
+    return await cached_or_compute(
+        f"chart:rotation:{symbols}:{benchmark}", 3600, compute, compute_timeout=30
+    )
+
+
+@app.get("/api/etf/{symbol}/info")
+async def etf_info(symbol: str):
+    """ETF profile: AUM, expense ratio, inception date, description. Requires FMP_API_KEY."""
+    sym = symbol.upper()
+    async def compute():
+        from app.services.openbb_data import get_etf_info
+        data = await asyncio.to_thread(get_etf_info, sym)
+        if data:
+            return data
+        return {"symbol": sym, "error": "ETF info not available"}
+    return await cached_or_compute(f"etf:info:{sym}", 86400, compute, compute_timeout=20)
+
+
+@app.get("/api/etf/{symbol}/holdings")
+async def etf_holdings(symbol: str):
+    """Top ETF holdings with weight percentages. Requires FMP_API_KEY."""
+    sym = symbol.upper()
+    async def compute():
+        from app.services.openbb_data import get_etf_holdings
+        holdings = await asyncio.to_thread(get_etf_holdings, sym)
+        return {"symbol": sym, "count": len(holdings), "holdings": holdings}
+    return await cached_or_compute(f"etf:holdings:{sym}", 86400, compute, compute_timeout=20)
+
+
+@app.get("/api/etf/{symbol}/sectors")
+async def etf_sectors(symbol: str):
+    """ETF sector allocation (weights). Requires FMP_API_KEY."""
+    sym = symbol.upper()
+    async def compute():
+        from app.services.openbb_data import get_etf_sectors
+        sectors = await asyncio.to_thread(get_etf_sectors, sym)
+        return {"symbol": sym, "sectors": sectors}
+    return await cached_or_compute(f"etf:sectors:{sym}", 86400, compute, compute_timeout=20)
+
+
+@app.get("/api/macro/indicators")
+async def macro_indicators():
+    """Real macroeconomic indicators from FRED.
+
+    Returns: CPI YoY %, Fed Funds Rate %, Unemployment %, Yield Spread 10Y-2Y %, HY Spread %.
+    All values None when FRED_API_KEY is not configured.
+    Source: Federal Reserve Economic Data (FRED).
+    """
+    async def compute():
+        from app.services.openbb_data import get_economic_indicators
+        data = await asyncio.to_thread(get_economic_indicators)
+        from datetime import datetime, timezone
+        return {
+            "t10y2y":      data.get("t10y2y"),      # 10Y-2Y yield spread %
+            "hy_spread":   data.get("hy_spread"),   # ICE BofA HY OAS %
+            "fed_rate":    data.get("fed_rate"),    # Federal Funds Rate %
+            "cpi_yoy":     data.get("cpi_yoy"),     # CPI year-over-year %
+            "unemployment": data.get("unemployment"), # Unemployment Rate %
+            "source":      "FRED (Federal Reserve Economic Data)",
+            "note":        "Set FRED_API_KEY env var for real data (free at fred.stlouisfed.org)",
+            "cached_at":   datetime.now(timezone.utc).isoformat(),
+        }
+    return await cached_or_compute("macro:indicators", 1800, compute, compute_timeout=30)
+
+
+@app.get("/api/stock/senate-trading")
+async def stock_senate_trading(
+    symbol: str = Query("", description="Stock symbol (empty = all recent trades)"),
+):
+    """Senate trading disclosures (STOCK Act filings) from FMP.
+
+    Returns recent buy/sell activity by US senators for a given symbol.
+    Requires FMP_API_KEY.
+    """
+    sym = symbol.upper() if symbol.strip() else None
+    cache_key = f"stock:senate:{sym or 'ALL'}"
+    async def compute():
+        trades = await asyncio.to_thread(fmp_client.get_senate_trading, sym)
+        return {
+            "symbol": sym or "ALL",
+            "count":  len(trades) if trades else 0,
+            "trades": trades or [],
+        }
+    return await cached_or_compute(cache_key, 3600, compute, compute_timeout=20)
+
+
+# ---------------------------------------------------------------------------
 # Smart Screener — halal + profitability + fair price scoring (0-100)
 # ---------------------------------------------------------------------------
 
@@ -5626,44 +5806,80 @@ async def dashboard_options_flow():
 
 @app.get("/api/dashboard/whale-portfolio", include_in_schema=False)
 async def dashboard_whale_portfolio():
-    """Top Renaissance Technologies / elite quant fund holdings (synthetic 13F)."""
+    """Institutional 13F holdings — Berkshire Hathaway (Warren Buffett) from FMP.
+    Falls back to synthetic data when FMP_API_KEY is not configured.
+    """
+    try:
+        holdings = await asyncio.to_thread(
+            fmp_client.get_institutional_portfolio, "0001067983"  # Berkshire CIK
+        )
+        if holdings:
+            return {
+                "fund_name":    "Berkshire Hathaway Inc.",
+                "fund_manager": "Warren Buffett",
+                "as_of_date":   str(holdings[0].get("date", ""))[:10] if holdings else "",
+                "source":       "FMP / SEC 13F",
+                "holdings": [
+                    {
+                        "symbol": h.get("symbol", ""),
+                        "name":   h.get("companyName", ""),
+                        "value":  h.get("value"),
+                        "weight": h.get("weight"),
+                    }
+                    for h in holdings[:20]
+                ],
+            }
+    except Exception:
+        pass
+    # Fallback: synthetic (FMP_API_KEY not configured)
     return {
-        "fund_name": "Renaissance Technologies LLC",
-        "fund_manager": "Jim Simons (ret.) / Peter Brown",
-        "as_of_date": "2025-12-31",
-        "aum_billion": 98.5,
+        "fund_name": "Berkshire Hathaway Inc.",
+        "fund_manager": "Warren Buffett",
+        "as_of_date": "",
+        "source": "synthetic — set FMP_API_KEY for real 13F data",
         "holdings": _WHALE_SYMBOLS,
     }
 
 
 @app.get("/api/dashboard/macro-calendar", include_in_schema=False)
 async def dashboard_macro_calendar():
-    """Upcoming US economic indicators with actual/forecast/previous (synthetic)."""
+    """Real US economic indicator values from FRED.
+    Falls back to synthetic data when FRED_API_KEY is not configured.
+    """
+    try:
+        from app.services.openbb_data import get_fred_economic_calendar
+        events = await asyncio.to_thread(get_fred_economic_calendar)
+        if events:
+            return events
+    except Exception:
+        pass
+    # Fallback: synthetic (FRED_API_KEY not configured)
     import random as _r
-    from datetime import datetime, timedelta
+    from datetime import datetime as _dt, timedelta as _td
     _r.seed(42)
-    base = datetime(2026, 5, 22)
-    events = [
-        {"event": "S&P Global Manufacturing PMI", "impact": "high", "unit": "index"},
-        {"event": "Initial Jobless Claims", "impact": "high", "unit": "K"},
-        {"event": "GDP Annualized QoQ", "impact": "high", "unit": "%"},
-        {"event": "Consumer Price Index YoY", "impact": "high", "unit": "%"},
-        {"event": "FOMC Interest Rate Decision", "impact": "high", "unit": "%"},
-        {"event": "Non Farm Payrolls", "impact": "high", "unit": "K"},
-        {"event": "Michigan Consumer Sentiment", "impact": "medium", "unit": "index"},
-        {"event": "Retail Sales MoM", "impact": "medium", "unit": "%"},
+    base = _dt(2026, 5, 22)
+    _fallback_events = [
+        {"event": "S&P Global Manufacturing PMI", "impact": "high",   "unit": "index"},
+        {"event": "Initial Jobless Claims",        "impact": "high",   "unit": "K"},
+        {"event": "GDP Annualized QoQ",            "impact": "high",   "unit": "%"},
+        {"event": "Consumer Price Index YoY",      "impact": "high",   "unit": "%"},
+        {"event": "FOMC Interest Rate Decision",   "impact": "high",   "unit": "%"},
+        {"event": "Non Farm Payrolls",             "impact": "high",   "unit": "K"},
+        {"event": "Michigan Consumer Sentiment",   "impact": "medium", "unit": "index"},
+        {"event": "Retail Sales MoM",              "impact": "medium", "unit": "%"},
     ]
     result = []
-    for i, ev in enumerate(events):
+    for i, ev in enumerate(_fallback_events):
         prev = round(_r.uniform(-1, 6) if "%" in ev["unit"] else _r.uniform(180, 550), 1)
         forecast = round(prev + _r.uniform(-0.8, 0.8), 1)
         result.append({
-            "event": ev["event"],
-            "impact": ev["impact"],
-            "date": (base + timedelta(days=i * 3 + 1)).strftime("%Y-%m-%d"),
+            "event":    ev["event"],
+            "impact":   ev["impact"],
+            "date":     (base + _td(days=i * 3 + 1)).strftime("%Y-%m-%d"),
             "previous": prev,
             "forecast": forecast,
-            "unit": ev["unit"],
+            "unit":     ev["unit"],
+            "source":   "synthetic — set FRED_API_KEY for real data",
         })
     return result
 

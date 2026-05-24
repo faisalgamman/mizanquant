@@ -63,7 +63,17 @@ def _classify_vix(vix: float) -> str:
 
 
 def _fetch_vix_close() -> Optional[float]:
-    """Fetch ^VIX close — FMP primary (works on servers), regime.vix fallback."""
+    """Fetch ^VIX close — FRED primary (free, official), FMP fallback, yfinance last."""
+    # L1: FRED via OpenBB (free Federal Reserve data, no rate limit, no 401)
+    try:
+        from app.services.openbb_data import get_vix_current
+        vix = get_vix_current()
+        if vix is not None and vix > 0:
+            logger.debug("VIX from FRED: %.2f", vix)
+            return vix
+    except Exception:
+        pass
+    # L2: FMP (works on servers, counts against 250/day quota)
     try:
         from app.services.fmp_client import fmp_client
         vix = fmp_client.get_vix()
@@ -71,7 +81,7 @@ def _fetch_vix_close() -> Optional[float]:
             return vix
     except Exception:
         pass
-    # Local fallback: yfinance (works without server restrictions)
+    # L3: yfinance (may 401 on Railway)
     try:
         import yfinance as yf
         ticker = yf.Ticker("^VIX")
@@ -85,7 +95,17 @@ def _fetch_vix_close() -> Optional[float]:
 
 
 def _fetch_vix_series() -> Optional[list[float]]:
-    """Fetch 1y ^VIX close history — FMP primary."""
+    """Fetch 1y ^VIX close history — FRED primary, FMP fallback, yfinance last."""
+    # L1: FRED (free, no rate limit, official Federal Reserve data)
+    try:
+        from app.services.openbb_data import get_vix_series
+        series = get_vix_series(365)
+        if series is not None and len(series) > 30:
+            logger.debug("VIX series from FRED: %d points", len(series))
+            return [float(v) for v in series.values]
+    except Exception:
+        pass
+    # L2: FMP
     try:
         from app.services.fmp_client import fmp_client
         series = fmp_client.get_vix_history(365)
@@ -93,7 +113,7 @@ def _fetch_vix_series() -> Optional[list[float]]:
             return [float(v) for v in series.values]
     except Exception:
         pass
-    # Local fallback: yfinance
+    # L3: yfinance
     try:
         import yfinance as yf
         ticker = yf.Ticker("^VIX")
@@ -397,6 +417,19 @@ def get_market_status(force_refresh: bool = False) -> dict:
         "halt_pipeline": gates.get("halt", False),
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # Enrich with real FRED macro context (non-blocking — failure is silent)
+    try:
+        from app.services.openbb_data import get_economic_indicators
+        macro = get_economic_indicators()
+        result["yield_spread"]   = macro.get("t10y2y")      # 10Y-2Y %
+        result["hy_spread_fred"] = macro.get("hy_spread")   # ICE BofA HY OAS
+        result["fed_rate"]       = macro.get("fed_rate")    # Fed Funds %
+        result["cpi_yoy"]        = macro.get("cpi_yoy")     # CPI YoY %
+        result["unemployment"]   = macro.get("unemployment") # UNRATE %
+    except Exception:
+        pass
+
     _MARKET_STATUS_CACHE = result
     _MARKET_STATUS_TS = now
     return result
