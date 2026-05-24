@@ -2311,21 +2311,78 @@ async def bust_openbb_cache():
     """Manually clear all OpenBB-related Redis cache keys (macro, ETF, ESG, senate).
     Call this after adding/changing API keys to force fresh data on next request.
     """
-    if redis_client is None:
+    from app.services.redis_client import get_redis
+    redis = await get_redis()
+    if redis is None:
         return {"cleared": 0, "note": "Redis not available"}
     patterns = ["macro:*", "etf:*", "stock:esg:*", "stock:segments:*", "stock:senate:*",
                 "rotation:*", "chart:rotation:*"]
     total = 0
     for pat in patterns:
         try:
-            keys = redis_client.keys(pat)
+            keys = await redis.keys(pat)
             if keys:
-                redis_client.delete(*keys)
+                await redis.delete(*keys)
                 total += len(keys)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("cache bust pattern %s failed: %s", pat, exc)
     return {"cleared": total, "patterns": patterns,
             "note": "All OpenBB cache keys cleared. Next requests will fetch fresh data."}
+
+
+@app.get("/api/debug/openbb", include_in_schema=False)
+async def debug_openbb():
+    """Diagnostic: surface the REAL reason OpenBB FMP/FRED calls fail on Railway.
+
+    Reports key presence, provider import status, and runs live calls capturing
+    the actual exception (normally swallowed by logger.debug).
+    """
+    from app.config import settings as _cfg
+    out: dict = {
+        "keys": {
+            "FMP_API_KEY":   bool(_cfg.FMP_API_KEY),
+            "FRED_API_KEY":  bool(_cfg.FRED_API_KEY),
+            "TIINGO_TOKEN":  bool(_cfg.TIINGO_TOKEN),
+        },
+        "providers": {},
+        "live_calls": {},
+    }
+
+    # 1) Which OpenBB providers are importable?
+    for prov in ("openbb_fmp", "openbb_fred", "openbb_tiingo"):
+        try:
+            __import__(prov)
+            out["providers"][prov] = "installed"
+        except Exception as exc:
+            out["providers"][prov] = f"MISSING: {exc}"
+
+    # 2) Live FMP ETF holdings call — capture real exception
+    def _test_fmp():
+        try:
+            from openbb import obb
+            if _cfg.FMP_API_KEY:
+                obb.user.credentials.fmp_api_key = _cfg.FMP_API_KEY
+            r = obb.etf.holdings("SPY", provider="fmp")
+            n = len(r.results) if r.results else 0
+            return {"ok": True, "holdings_count": n}
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    # 3) Live FRED call — capture real exception
+    def _test_fred():
+        try:
+            from openbb import obb
+            if _cfg.FRED_API_KEY:
+                obb.user.credentials.fred_api_key = _cfg.FRED_API_KEY
+            r = obb.economy.fred_series(symbol="VIXCLS", limit=1, provider="fred")
+            val = r.results[-1].value if r.results else None
+            return {"ok": True, "vix": val}
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    out["live_calls"]["fmp_etf_holdings_SPY"] = await asyncio.to_thread(_test_fmp)
+    out["live_calls"]["fred_vix"] = await asyncio.to_thread(_test_fred)
+    return out
 
 
 @app.get("/api/macro/indicators")
