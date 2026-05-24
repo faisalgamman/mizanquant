@@ -410,7 +410,7 @@ async def _execute_tool(name: str, args: dict) -> str:
 
             elif name == "get_backtest_history":
                 sym = (args.get("symbol") or "").upper()
-                url = f"{base}/api/backtest/history?limit=10"
+                url = f"{base}/api/v1/backtest/history?limit=10"
                 if sym:
                     url += f"&symbol={sym}"
                 r = await client.get(url)
