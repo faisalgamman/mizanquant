@@ -2383,6 +2383,67 @@ async def stock_senate_trading(
 
 
 # ---------------------------------------------------------------------------
+# MizanAI — Groq-powered trading assistant (fast LLM + function calling)
+# ---------------------------------------------------------------------------
+
+class ChatRequest(BaseModel):
+    messages: list[dict]                      # [{"role":"user","content":"..."}]
+    model: str | None = None                  # override Groq model
+    use_tools: bool = True                    # enable function calling
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(req: ChatRequest):
+    """MizanAI: Groq-powered assistant with live platform data via function calling.
+
+    Supports: market status, macro indicators, stock screening, portfolio review,
+    ETF holdings, top signals. Models: llama-3.3-70b-versatile (default),
+    moonshotai/kimi-k2-instruct, qwen-qwq-32b.
+    """
+    from app.services.groq_assistant import trading_chat
+    result = await trading_chat(
+        messages=req.messages,
+        model=req.model,
+        use_tools=req.use_tools,
+    )
+    return result
+
+
+@app.get("/api/ai/analyze/{symbol}")
+async def ai_analyze_symbol(symbol: str):
+    """Quick one-shot AI analysis for a stock symbol."""
+    from app.services.groq_assistant import quick_analyze
+    content = await quick_analyze(symbol.upper())
+    return {"symbol": symbol.upper(), "analysis": content}
+
+
+@app.get("/api/ai/models")
+async def ai_models():
+    """List of available Groq models."""
+    from app.config import settings as _cfg
+    return {
+        "configured": bool(_cfg.GROQ_API_KEY),
+        "default": _cfg.GROQ_MODEL,
+        "models": [
+            {"id": "llama-3.3-70b-versatile",             "label": "Llama 3.3 70B",       "speed": "fast",   "tools": True},
+            {"id": "moonshotai/kimi-k2-instruct",          "label": "Kimi K2",             "speed": "medium", "tools": True},
+            {"id": "qwen-qwq-32b",                         "label": "Qwen QwQ 32B",        "speed": "medium", "tools": True},
+            {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "label": "Llama 4 Scout", "speed": "fast",   "tools": True},
+            {"id": "llama-3.1-8b-instant",                 "label": "Llama 3.1 8B",        "speed": "ultra",  "tools": True},
+        ],
+    }
+
+
+@app.get("/assistant", include_in_schema=False)
+async def get_assistant_page():
+    """Serve the MizanAI assistant page."""
+    from fastapi.responses import FileResponse
+    import os
+    p = os.path.join(os.path.dirname(__file__), "static", "assistant.html")
+    return FileResponse(p)
+
+
+# ---------------------------------------------------------------------------
 # Smart Screener — halal + profitability + fair price scoring (0-100)
 # ---------------------------------------------------------------------------
 

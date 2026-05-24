@@ -1,0 +1,352 @@
+"""MizanAI — Groq-powered trading assistant with Function Calling.
+
+Provides:
+  - chat_completion()   : raw Groq API call
+  - trading_chat()      : full agentic loop with platform tool calls
+  - TOOL_DEFINITIONS    : function schemas for Groq function calling
+
+Tools the AI can call (mapped to internal platform APIs):
+  get_market_status    → /api/market/status
+  get_macro_indicators → /api/macro/indicators
+  screen_stock         → /api/v1/screen/{symbol}
+  get_portfolio        → /api/v1/portfolio
+  get_halal_score      → /api/v1/halal/{symbol}
+  get_etf_holdings     → /api/etf/{symbol}/holdings
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+logger = logging.getLogger("screener")
+
+# ── System prompt ──────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """\
+You are MizanAI, an intelligent trading assistant embedded in MizanQuant — \
+a professional Islamic-compliant quantitative trading platform.
+
+Your role:
+- Analyze stocks, portfolios, and market conditions
+- Check Halal compliance (AAOIFI Standard 21)
+- Interpret macro-economic data (FRED)
+- Give concise, data-driven insights
+
+Rules:
+- Always call the appropriate tool before answering data questions
+- Be brief and precise — traders value conciseness
+- Format numbers clearly: "$42.50", "3.2%", "+0.8σ"
+- Respond in the same language the user writes in (Arabic or English)
+- End every response with a one-line disclaimer: "⚠ Not financial advice."
+- When discussing halal compliance cite AAOIFI Standard 21 thresholds (5% haram revenue, 30% debt ratio)
+
+Platform stack: FastAPI + OpenBB 4.7.1 + FMP + FRED + RL Agents + ML Ensemble.
+"""
+
+# ── Tool definitions (Groq function calling) ───────────────────────────────────
+
+TOOL_DEFINITIONS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_market_status",
+            "description": (
+                "Get current market regime (Bull/Bear/Neutral/Volatile), "
+                "VIX level, and overall market health score. "
+                "Call this before any portfolio or market discussion."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_macro_indicators",
+            "description": (
+                "Get live FRED macroeconomic indicators: "
+                "CPI YoY%, Federal Funds Rate, 10Y-2Y Yield Spread, "
+                "Unemployment Rate, High-Yield Credit Spread. "
+                "Call when asked about inflation, interest rates, or recession risk."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "screen_stock",
+            "description": (
+                "Get comprehensive analysis of a stock: quality score (0-100), "
+                "halal compliance status, AI recommendation, technical signals, "
+                "and fundamental metrics. Call for ANY stock-specific question."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker (e.g., AAPL, MSFT, GOOGL, AMZN)",
+                    }
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_portfolio",
+            "description": (
+                "Get current paper trading portfolio: open positions, "
+                "equity value, daily P&L, and win rate. "
+                "Call when asked about the portfolio or performance."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_etf_holdings",
+            "description": (
+                "Get top holdings and sector allocation of an ETF. "
+                "Call when asked about ETF composition (e.g., SPY, QQQ, XLK)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "ETF ticker (e.g., SPY, QQQ, IWM, XLK)",
+                    }
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_top_signals",
+            "description": (
+                "Get the top 10 buy signals from the ML screener right now, "
+                "ranked by composite score. Call when asked for best opportunities."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_score": {
+                        "type": "number",
+                        "description": "Minimum quality score threshold (0-100, default 70)",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+]
+
+# ── Internal tool execution ────────────────────────────────────────────────────
+
+async def _execute_tool(name: str, args: dict) -> str:
+    """Execute a platform tool call and return result as JSON string."""
+    import asyncio
+    import httpx
+
+    base = "http://127.0.0.1:6910"  # internal loopback
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if name == "get_market_status":
+                r = await client.get(f"{base}/api/market/status")
+                data = r.json()
+                return json.dumps({
+                    "regime":     data.get("regime", "Unknown"),
+                    "vix":        data.get("vix"),
+                    "vix_pct":    data.get("vix_percentile"),
+                    "score":      data.get("score"),
+                    "trend":      data.get("trend"),
+                    "yield_spread": data.get("yield_spread"),
+                    "fed_rate":   data.get("fed_rate"),
+                }, default=str)
+
+            elif name == "get_macro_indicators":
+                r = await client.get(f"{base}/api/macro/indicators")
+                data = r.json()
+                return json.dumps({
+                    "cpi_yoy":     data.get("cpi_yoy"),
+                    "fed_rate":    data.get("fed_rate"),
+                    "yield_spread": data.get("t10y2y"),
+                    "unemployment": data.get("unemployment"),
+                    "hy_spread":   data.get("hy_spread"),
+                    "source":      "FRED",
+                }, default=str)
+
+            elif name == "screen_stock":
+                sym = args.get("symbol", "").upper()
+                r = await client.get(f"{base}/api/v1/screen/{sym}")
+                data = r.json()
+                return json.dumps({
+                    "symbol":      sym,
+                    "score":       data.get("composite_score"),
+                    "halal":       data.get("halal_status"),
+                    "recommend":   data.get("recommendation"),
+                    "signals":     data.get("signals", [])[:3],
+                    "price":       data.get("price"),
+                    "pe_ratio":    data.get("pe_ratio"),
+                    "debt_ratio":  data.get("debt_ratio"),
+                }, default=str)
+
+            elif name == "get_portfolio":
+                r = await client.get(f"{base}/api/v1/portfolio")
+                positions = r.json() if isinstance(r.json(), list) else r.json().get("positions", [])
+                return json.dumps({
+                    "positions": positions[:10],
+                    "count":     len(positions),
+                }, default=str)
+
+            elif name == "get_etf_holdings":
+                sym = args.get("symbol", "SPY").upper()
+                r = await client.get(f"{base}/api/etf/{sym}/holdings")
+                data = r.json()
+                return json.dumps({
+                    "symbol":   sym,
+                    "holdings": data.get("holdings", [])[:10],
+                }, default=str)
+
+            elif name == "get_top_signals":
+                min_score = args.get("min_score", 70)
+                r = await client.get(f"{base}/screener?limit=10&min_score={min_score}")
+                signals = r.json() if isinstance(r.json(), list) else []
+                return json.dumps({
+                    "signals": [
+                        {"symbol": s.get("symbol"), "score": s.get("composite_score"),
+                         "halal": s.get("halal_status"), "rec": s.get("recommendation")}
+                        for s in signals[:10]
+                    ]
+                }, default=str)
+
+    except Exception as exc:
+        logger.warning("Tool %s failed: %s", name, exc)
+        return json.dumps({"error": str(exc), "note": "Tool call failed — answer from general knowledge"})
+
+    return json.dumps({"error": "unknown tool"})
+
+
+# ── Main chat function ─────────────────────────────────────────────────────────
+
+async def trading_chat(
+    messages: list[dict],
+    model: str | None = None,
+    use_tools: bool = True,
+    max_tool_rounds: int = 3,
+) -> dict:
+    """Full agentic chat loop with automatic tool calling.
+
+    Args:
+        messages:        List of {"role": "user"|"assistant", "content": "..."}
+        model:           Groq model ID. Defaults to settings.GROQ_MODEL
+        use_tools:       Whether to enable function calling
+        max_tool_rounds: Max tool call iterations to prevent infinite loops
+
+    Returns:
+        {
+          "content":    str,          # final assistant message
+          "model":      str,
+          "tool_calls": list[dict],   # tools that were called + results
+          "usage":      dict,         # token usage
+          "error":      str | None,
+        }
+    """
+    from app.config import settings
+    from groq import AsyncGroq
+
+    if not settings.GROQ_API_KEY:
+        return {
+            "content": "GROQ_API_KEY is not configured. Add it to Railway environment variables.",
+            "model": "none",
+            "tool_calls": [],
+            "usage": {},
+            "error": "missing_api_key",
+        }
+
+    groq_model = model or settings.GROQ_MODEL
+    client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+
+    # Build full message list with system prompt
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(messages)
+    tool_log: list[dict] = []
+
+    for _round in range(max_tool_rounds + 1):
+        try:
+            kwargs: dict[str, Any] = dict(
+                model=groq_model,
+                messages=full_messages,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            if use_tools and _round < max_tool_rounds:
+                kwargs["tools"] = TOOL_DEFINITIONS
+                kwargs["tool_choice"] = "auto"
+
+            response = await client.chat.completions.create(**kwargs)
+            msg = response.choices[0].message
+
+            # If no tool calls → we have the final answer
+            if not getattr(msg, "tool_calls", None):
+                return {
+                    "content":    msg.content or "",
+                    "model":      groq_model,
+                    "tool_calls": tool_log,
+                    "usage":      {
+                        "prompt_tokens":     response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens":      response.usage.total_tokens,
+                    },
+                    "error": None,
+                }
+
+            # Execute all tool calls in this round
+            full_messages.append(msg.model_dump())
+            for tc in msg.tool_calls:
+                fn_name = tc.function.name
+                fn_args = json.loads(tc.function.arguments or "{}")
+                result  = await _execute_tool(fn_name, fn_args)
+                tool_log.append({"tool": fn_name, "args": fn_args, "result": result[:300]})
+                full_messages.append({
+                    "role":         "tool",
+                    "tool_call_id": tc.id,
+                    "content":      result,
+                })
+
+        except Exception as exc:
+            logger.error("Groq chat error (round %d): %s", _round, exc)
+            return {
+                "content":    f"Sorry, an error occurred: {exc}",
+                "model":      groq_model,
+                "tool_calls": tool_log,
+                "usage":      {},
+                "error":      str(exc),
+            }
+
+    # Fallback if max rounds hit
+    return {
+        "content":    "I reached the tool call limit. Please rephrase your question.",
+        "model":      groq_model,
+        "tool_calls": tool_log,
+        "usage":      {},
+        "error":      "max_rounds_exceeded",
+    }
+
+
+# ── Quick helpers ──────────────────────────────────────────────────────────────
+
+async def quick_analyze(symbol: str) -> str:
+    """One-shot: get a brief AI take on a stock."""
+    result = await trading_chat(
+        messages=[{"role": "user", "content": f"Give me a brief analysis of {symbol.upper()}. Check its halal status, quality score, and whether it looks like a buy right now."}],
+        use_tools=True,
+    )
+    return result["content"]

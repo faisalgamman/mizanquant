@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
+    # --- Groq AI (fast LLM inference — trading assistant) ---
+    # Free: 14,400 req/day. Register at: https://console.groq.com
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"  # fast + function calling
+
     # --- Phase 5: API authentication ---
     # Required for operator/admin/trading endpoints. If left empty, those
     # endpoints fail closed and auto-trading validation will refuse to arm.
