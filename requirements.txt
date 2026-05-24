@@ -32,7 +32,7 @@ slowapi>=0.1.9,<1.0
 redis>=5.0,<6.0
 
 # ── Groq AI ──
-groq>=0.13.0,<1.0              # Groq LLM client (OpenAI-compatible, ultra-fast)
+groq>=0.13.0,<2.0              # Groq LLM client (OpenAI-compatible, ultra-fast)
 
 # ── Phase 2: ML/RL Ops ──
 mlflow>=2.21.0

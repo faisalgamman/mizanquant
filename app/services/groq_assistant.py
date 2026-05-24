@@ -309,7 +309,21 @@ async def trading_chat(
                 }
 
             # Execute all tool calls in this round
-            full_messages.append(msg.model_dump())
+            # Build assistant message dict compatible with groq 0.x and 1.x
+            asst_msg: dict = {"role": "assistant", "content": msg.content or ""}
+            if msg.tool_calls:
+                asst_msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name":      tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
+            full_messages.append(asst_msg)
             for tc in msg.tool_calls:
                 fn_name = tc.function.name
                 fn_args = json.loads(tc.function.arguments or "{}")
