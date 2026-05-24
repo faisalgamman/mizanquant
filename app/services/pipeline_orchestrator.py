@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -59,6 +59,10 @@ class Signal:
     executed: bool = False
     execution_order_id: str = ""
     execution_error: str = ""
+    # Lineage + forecast linkage (Phase 4/5 — shadow)
+    correlation_id: str = ""
+    forecast_direction: str = ""
+    forecast_agrees: Optional[bool] = None
 
 
 @dataclass
@@ -437,6 +441,49 @@ class UnifiedPipeline:
                 by_symbol[key] = sig
 
         ranked = sorted(by_symbol.values(), key=lambda s: s.confidence, reverse=True)
+
+        # ── Forecast→Strategy linkage (shadow) ──────────────────────────────
+        # Attach a fast forecast-direction proxy (from cached candidate momentum)
+        # to each signal, mint a lineage correlation_id, record forecast/consensus
+        # agreement, and persist a unified TradingSignal to signal_history. This
+        # does NOT change votes/decisions — it wires the forecasting layer into
+        # the signal lineage for audit and downstream "explain why we bought X".
+        try:
+            from app.services.signal_bus import (
+                TradingSignal, new_correlation_id,
+                quick_forecast_direction, forecast_agrees_with,
+            )
+            cand_by_sym = {c.get("symbol", "").upper(): c for c in candidates}
+            regime = (self.context or {}).get("regime")
+            posture = (self.context or {}).get("risk_posture")
+            agree = disagree = 0
+            for sig in ranked:
+                c = cand_by_sym.get(sig.symbol, {})
+                direction = quick_forecast_direction(
+                    c.get("price", sig.price), c.get("sma50", 0), c.get("chg_1m", 0)
+                )
+                agrees = forecast_agrees_with(sig.verdict, direction)
+                sig.correlation_id = new_correlation_id()
+                sig.forecast_direction = direction
+                sig.forecast_agrees = agrees
+                if agrees is True:
+                    agree += 1
+                elif agrees is False:
+                    disagree += 1
+                TradingSignal(
+                    symbol=sig.symbol, signal=sig.verdict, signal_type="consensus",
+                    score=c.get("context_adjusted_score", c.get("swing_score", 0)) or 0,
+                    price=sig.price, stop_loss=sig.stop_loss, take_profit=sig.take_profit,
+                    confidence=sig.confidence, forecast_direction=direction,
+                    forecast_agrees=agrees, source_module="pipeline.consensus",
+                    correlation_id=sig.correlation_id, regime=regime, risk_posture=posture,
+                    extra={"profile": sig.profile, "strategy_id": sig.strategy_id,
+                           "rotation_quadrant": c.get("rotation_quadrant")},
+                ).persist()
+            stage.details["forecast_agreement"] = {"agree": agree, "disagree": disagree}
+            logger.info("Pipeline stage 4: forecast agreement — agree=%d disagree=%d", agree, disagree)
+        except Exception as _fc_exc:
+            logger.debug("forecast linkage skipped: %s", _fc_exc)
 
         self._cached_signals = ranked
         stage.count_out = len(ranked)
