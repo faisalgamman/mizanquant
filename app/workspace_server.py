@@ -29,7 +29,7 @@ import pandas as pd
 import uvicorn
 import yfinance as yf
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -6429,6 +6429,72 @@ async def get_rotation_page():
         return HTMLResponse(content=p.read_text(encoding="utf-8"),
                             headers={"Cache-Control": "no-store"})
     return HTMLResponse("<h1>Rotation page not found</h1>", status_code=404)
+
+
+# ---------------------------------------------------------------------------
+# Design System — UI Kits (v2) + Public-facing surfaces
+# ---------------------------------------------------------------------------
+
+_STATIC = Path(__file__).resolve().parent / "static"
+
+
+def _static_html(rel_path: str):
+    """Return FileResponse for a static HTML file; 404 if missing."""
+    p = _STATIC / rel_path
+    if p.exists():
+        return FileResponse(str(p))
+    return HTMLResponse(f"<h1>{rel_path} not found</h1>", status_code=404)
+
+
+# ── UI Kits (React/Babel — wired to production APIs) ────────────────────────
+
+@app.get("/halal-screener-v2", include_in_schema=False)
+async def get_halal_screener_v2():
+    """Halal Screener — Design System UI Kit (wired to /screener API)."""
+    return _static_html("halal-screener-v2/index.html")
+
+@app.get("/risk-desk-v2", include_in_schema=False)
+async def get_risk_desk_v2():
+    """Risk Desk — Design System UI Kit (wired to /api/risk/status)."""
+    return _static_html("risk-desk-v2/index.html")
+
+@app.get("/terminal", include_in_schema=False)
+async def get_terminal():
+    """MizanQuant Terminal — 3-column overview kit (wired to /api/v1/overview)."""
+    return _static_html("terminal/index.html")
+
+
+# ── Public-facing surfaces ────────────────────────────────────────────────────
+
+@app.get("/landing", include_in_schema=False)
+async def get_landing():
+    """Institutional landing page with Terminal Access Lock."""
+    return _static_html("public/landing/index.html")
+
+@app.get("/slides", include_in_schema=False)
+async def get_slides():
+    """6-slide investor briefing deck."""
+    return _static_html("public/slides/index.html")
+
+@app.get("/one-pager", include_in_schema=False)
+async def get_one_pager():
+    """A4 print-ready institutional tear-sheet."""
+    return _static_html("public/one-pager/index.html")
+
+@app.get("/onboarding", include_in_schema=False)
+async def get_onboarding():
+    """4-step institutional onboarding (NDA → KYC → Sharia → Credentials)."""
+    return _static_html("public/onboarding/index.html")
+
+@app.get("/email-signature", include_in_schema=False)
+async def get_email_signature():
+    """Bilingual HTML email signature generator."""
+    return _static_html("public/email-signature/index.html")
+
+@app.get("/report/template", include_in_schema=False)
+async def get_report_template():
+    """Bilingual end-of-day report template."""
+    return _static_html("public/report/index.html")
 
 
 # ---------------------------------------------------------------------------

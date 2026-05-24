@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Daily report · 2026-05-24</title>
+<link rel="icon" type="image/svg+xml" href="/static/public/assets/logo-favicon.svg">
+<link rel="stylesheet" href="/static/design-tokens.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+@page { size: A4 portrait; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg-root); color: var(--text-primary); -webkit-font-smoothing: antialiased; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { font-family: var(--font-body); font-size: 13px; line-height: 1.5; padding: 32px 20px 80px; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::selection { background: var(--accent-dim); color: var(--accent); }
+
+.report {
+  max-width: 1080px;
+  margin: 0 auto;
+  background: var(--bg-root);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 36px 44px 44px;
+  position: relative;
+  overflow: hidden;
+}
+.report::before {
+  content: "";
+  position: absolute;
+  top: -250px; right: -160px;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(200,150,62,0.08) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+}
+
+/* ═══ MASTHEAD ═══════════════════════════════════════════════ */
+.masthead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--accent);
+  margin-bottom: 32px;
+  position: relative;
+  z-index: 1;
+}
+.mh-brand { display: flex; align-items: center; gap: 14px; }
+.mh-brand .mark {
+  width: 44px; height: 44px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.mh-brand .wm {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.mh-brand .wm em { font-style: normal; color: var(--accent); }
+.mh-brand .ar {
+  font-family: var(--font-arabic);
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-top: 4px;
+}
+.mh-doc { text-align: right; }
+.mh-doc .kind {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.mh-doc .title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+  margin-bottom: 2px;
+}
+.mh-doc .meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* ═══ HEADLINE ═══════════════════════════════════════════════ */
+.headline {
+  position: relative; z-index: 1;
+  margin-bottom: 32px;
+}
+.headline .kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+.headline h1 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.7px;
+  margin-bottom: 10px;
+}
+.headline h1 em { font-style: normal; color: var(--accent); }
+.headline h1 .pos { color: var(--positive); }
+.headline h1 .neg { color: var(--negative); }
+.headline .lead {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  max-width: 760px;
+}
+
+/* ═══ SECTION ════════════════════════════════════════════════ */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 32px 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-default);
+}
+.sh-title {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.8px;
+  color: var(--text-secondary);
+}
+.sh-title .num {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  margin-right: 8px;
+}
+.sh-aside {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* ═══ SYSTEM HEALTH STRIP ════════════════════════════════════ */
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.sys-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  position: relative;
+}
+.sys-card .lab {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.sys-card .val {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.sys-card .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sys-card .dot.green  { background: var(--positive); box-shadow: 0 0 5px var(--positive); }
+.sys-card .dot.amber  { background: var(--warning);  box-shadow: 0 0 5px var(--warning); }
+.sys-card .dot.red    { background: var(--negative); box-shadow: 0 0 5px var(--negative); }
+.sys-card .sub {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  font-family: var(--font-mono);
+}
+
+/* ═══ KPI ROW ════════════════════════════════════════════════ */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.kpi-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi-card .stripe {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.kpi-card .lab {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  font-weight: 600;
+}
+.kpi-card .v {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
+  margin-top: 10px;
+}
+.kpi-card .v.pos { color: var(--positive); }
+.kpi-card .v.neg { color: var(--negative); }
+.kpi-card .sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+}
+.kpi-card .delta.pos { color: var(--positive); }
+.kpi-card .delta.neg { color: var(--negative); }
+
+/* ═══ SIGNALS TABLE ═════════════════════════════════════════ */
+.sig-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.sig-table th {
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+.sig-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.sig-table tr:last-child td { border-bottom: none; }
+.sig-table .sym { font-weight: 700; }
+.sig-table .mono { font-family: var(--font-mono); }
+.sig-table .pill {
+  display: inline-flex;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.sig-table .pill.buy    { background: var(--positive-dim); color: var(--positive); }
+.sig-table .pill.strong { background: var(--positive); color: var(--bg-root); }
+.sig-table .pill.wait   { background: var(--warning-dim); color: var(--warning); }
+.sig-table .pill.avoid  { background: var(--negative-dim); color: var(--negative); }
+.sig-table .halal-yes { color: var(--positive); font-family: var(--font-mono); font-weight: 700; }
+.sig-table .halal-no  { color: var(--negative); font-family: var(--font-mono); font-weight: 700; }
+.score-bar {
+  display: flex; align-items: center; gap: 8px;
+}
+.score-bar .fill {
+  height: 4px; width: 48px;
+  background: var(--bg-root); border-radius: 2px; overflow: hidden;
+}
+.score-bar .fill div { height: 100%; border-radius: 2px; }
+.score-bar .num { font-family: var(--font-mono); font-weight: 700; font-size: 11px; }
+
+/* ═══ TWO-COL ═══════════════════════════════════════════════ */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+/* ═══ TRADES LIST ═══════════════════════════════════════════ */
+.trades { display: flex; flex-direction: column; gap: 6px; }
+.trade-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+}
+.trade-row .side {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.trade-row .side.buy { background: var(--positive-dim); color: var(--positive); }
+.trade-row .side.sell { background: var(--negative-dim); color: var(--negative); }
+.trade-row .sym {
+  font-weight: 700;
+  width: 50px;
+  font-family: var(--font-display);
+}
+.trade-row .desc { flex: 1; color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; }
+.trade-row .pnl {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  text-align: right;
+}
+.trade-row .pnl.pos { color: var(--positive); }
+.trade-row .pnl.neg { color: var(--negative); }
+.trade-row .time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  width: 44px;
+  text-align: right;
+}
+
+/* ═══ HALAL DIFF ═════════════════════════════════════════════ */
+.diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.diff-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+}
+.diff-card .head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.diff-card .head .h {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+}
+.diff-card .head .h.added i { color: var(--positive); }
+.diff-card .head .h.removed i { color: var(--negative); }
+.diff-card .ct {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.diff-card .ct.pos { color: var(--positive); }
+.diff-card .ct.neg { color: var(--negative); }
+.diff-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.diff-row:last-child { border-bottom: none; }
+.diff-row .sym { font-weight: 700; width: 56px; }
+.diff-row .why { flex: 1; color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
+.diff-row .v { font-family: var(--font-mono); font-size: 10px; font-weight: 700; }
+
+/* ═══ PIPELINE TIMELINE ═════════════════════════════════════ */
+.timeline-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+}
+.timeline-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.timeline-row:last-child { border-bottom: none; }
+.timeline-row .time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  width: 60px;
+  letter-spacing: 0.3px;
+}
+.timeline-row .ico {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.timeline-row .ico.ok { background: var(--positive-dim); color: var(--positive); }
+.timeline-row .ico.skip { background: var(--bg-overlay); color: var(--text-muted); }
+.timeline-row .name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+.timeline-row .stats {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ═══ MODELS LEADERBOARD ════════════════════════════════════ */
+.leaderboard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.leaderboard table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.leaderboard th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--bg-raised);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-default);
+}
+.leaderboard td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.leaderboard tr:last-child td { border-bottom: none; }
+.leaderboard .family {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.leaderboard .name { font-family: var(--font-mono); font-weight: 600; }
+.leaderboard .mono { font-family: var(--font-mono); font-weight: 700; }
+
+/* ═══ ARABIC BLURB ═══════════════════════════════════════════ */
+.arabic-card {
+  background: linear-gradient(180deg, var(--bg-raised) 0%, var(--bg-surface) 100%);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  position: relative;
+  overflow: hidden;
+}
+.arabic-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 14px; right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+.ar-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.ar-head-left {
+  display: flex; align-items: center; gap: 12px;
+}
+.ar-head .ico {
+  width: 32px; height: 32px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.ar-head .titles .en {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.ar-head .titles .ar {
+  font-family: var(--font-arabic);
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-top: 2px;
+}
+.copy-btn {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  color: var(--text-muted);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.copy-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.copy-btn.copied { background: var(--positive-dim); border-color: var(--positive); color: var(--positive); }
+
+.ar-blurb {
+  background: var(--bg-root);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 22px 26px;
+  font-family: var(--font-arabic);
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--text-primary);
+  direction: rtl;
+}
+.ar-blurb .header-line {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--accent);
+  margin-bottom: 12px;
+  letter-spacing: -0.3px;
+}
+.ar-blurb .num { font-family: var(--font-mono); color: var(--accent); font-weight: 700; }
+.ar-blurb .pos { color: var(--positive); }
+.ar-blurb .neg { color: var(--negative); }
+.ar-blurb .divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 14px 0;
+}
+.ar-blurb ul {
+  list-style: none;
+  margin: 8px 0;
+}
+.ar-blurb li {
+  padding: 3px 0;
+  font-size: 14px;
+}
+.ar-blurb li::before {
+  content: "•";
+  color: var(--accent);
+  margin-left: 8px;
+  font-weight: 700;
+}
+.ar-blurb .footer-line {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 14px;
+  font-family: var(--font-arabic);
+}
+.ar-meta {
+  margin-top: 14px;
+  display: flex; justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.ar-meta strong { color: var(--text-secondary); }
+
+/* ═══ FOOTER ════════════════════════════════════════════════ */
+.footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-default);
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+}
+.footer h4 {
+  font-family: var(--font-body);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.footer .body {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.footer .body strong { color: var(--text-primary); font-weight: 600; }
+.disclosure {
+  margin-top: 18px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  letter-spacing: 0.2px;
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.disclosure strong { color: var(--text-secondary); }
+
+/* ═══ PRINT ═════════════════════════════════════════════════ */
+@media print {
+  body { padding: 0; background: var(--bg-root); }
+  .report { border: none; border-radius: 0; box-shadow: none; max-width: 100%; padding: 20mm 16mm; }
+}
+
+@media (max-width: 920px) {
+  .sys-grid { grid-template-columns: 1fr 1fr; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .two-col, .diff-grid, .footer { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="report">
+
+  <!-- ═══ MASTHEAD ═══ -->
+  <div class="masthead">
+    <div class="mh-brand">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.5"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div>
+        <div class="wm">mizan<em>quant</em></div>
+        <div class="ar" dir="rtl" lang="ar">ميزان كوانت</div>
+      </div>
+    </div>
+    <div class="mh-doc">
+      <div class="kind">End-of-day report</div>
+      <div class="title">Daily report · 2026-05-24</div>
+      <div class="meta">
+        Generated 21:08 UTC · Pipeline v2.4.1 · Railway prod<br>
+        Ref · MZN-DR-20260524 · Distribution: partner desks
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ HEADLINE ═══ -->
+  <div class="headline">
+    <div class="kicker">Session verdict · trading day 2026-05-24</div>
+    <h1>Risk-on session closed <em class="pos">+$348.20</em> on <em>halal universe</em>. Sharpe holding at <em>1.84</em>.</h1>
+    <p class="lead">
+      The halal-screened S&amp;P 500 universe rallied with breadth, led by AAPL, NVDA, and MSFT. Two paper exits, four open positions, no guard hits. Sharia board flagged zero new haram inclusions. VaR within bounds. The full audit log is attached.
+    </p>
+  </div>
+
+  <!-- ═══ SYSTEM HEALTH ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">01</span>System health</div>
+    <div class="sh-aside">All gates · 502 symbols scanned</div>
+  </div>
+  <div class="sys-grid">
+    <div class="sys-card">
+      <div class="lab">System status</div>
+      <div class="val"><span class="dot green"></span>Operational</div>
+      <div class="sub">Uptime 99.97% · 30d</div>
+    </div>
+    <div class="sys-card">
+      <div class="lab">Pipeline</div>
+      <div class="val"><span class="dot green"></span>6 / 6 runs</div>
+      <div class="sub">Median 4m 12s · all stages OK</div>
+    </div>
+    <div class="sys-card">
+      <div class="lab">Broker</div>
+      <div class="val"><span class="dot green"></span>Alpaca live</div>
+      <div class="sub">5 of 5 connections · 0 retries</div>
+    </div>
+    <div class="sys-card">
+      <div class="lab">Risk desk</div>
+      <div class="val"><span class="dot green"></span>VaR within</div>
+      <div class="sub">Kill-switch armed · 0 trips</div>
+    </div>
+    <div class="sys-card">
+      <div class="lab">Halal screener</div>
+      <div class="val"><span class="dot green"></span>0 violations</div>
+      <div class="sub">Full universe rescan 10:00 ET</div>
+    </div>
+  </div>
+
+  <!-- ═══ KPI ROW ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">02</span>Performance snapshot</div>
+    <div class="sh-aside">Live book · refreshed 21:08 UTC</div>
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="stripe" style="background: var(--positive);"></div>
+      <div class="lab">Day P&amp;L</div>
+      <div class="v pos">+$348.20</div>
+      <div class="sub"><span class="delta pos">↑ +0.72%</span> on $48,284 equity</div>
+    </div>
+    <div class="kpi-card">
+      <div class="stripe" style="background: var(--accent);"></div>
+      <div class="lab">Sharpe · 30d</div>
+      <div class="v">1.84</div>
+      <div class="sub"><span class="delta pos">↑ +0.15</span> vs 30d avg</div>
+    </div>
+    <div class="kpi-card">
+      <div class="stripe" style="background: var(--negative);"></div>
+      <div class="lab">Portfolio VaR · 95%</div>
+      <div class="v">−2.5%</div>
+      <div class="sub"><span class="delta pos">↓ 0.2%</span> vs yesterday</div>
+    </div>
+    <div class="kpi-card">
+      <div class="stripe" style="background: var(--warning);"></div>
+      <div class="lab">Max DD · MTD</div>
+      <div class="v">−4.1%</div>
+      <div class="sub"><span class="delta pos">↓ 0.6%</span> vs 30d avg</div>
+    </div>
+  </div>
+
+  <!-- ═══ TOP SIGNALS ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">03</span>Top signals · close of session</div>
+    <div class="sh-aside">Ranked by smart-score · halal-screened only</div>
+  </div>
+  <table class="sig-table">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Score</th>
+        <th>Halal</th>
+        <th>Verdict</th>
+        <th>Last</th>
+        <th>Chg</th>
+        <th>Sector</th>
+        <th>Strategy</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="sym">NVDA</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:91%; background: var(--positive);"></div></div><span class="num" style="color: var(--positive);">91</span></div></td>
+        <td class="halal-yes">✓ Pass</td>
+        <td><span class="pill strong">Strong buy</span></td>
+        <td class="mono">$924.10</td>
+        <td class="mono" style="color: var(--positive);">+2.41%</td>
+        <td>Tech</td>
+        <td class="mono" style="color: var(--text-muted);">momentum</td>
+      </tr>
+      <tr>
+        <td class="sym">AAPL</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:88%; background: var(--positive);"></div></div><span class="num" style="color: var(--positive);">88</span></div></td>
+        <td class="halal-yes">✓ Pass</td>
+        <td><span class="pill buy">Buy</span></td>
+        <td class="mono">$182.34</td>
+        <td class="mono" style="color: var(--positive);">+1.84%</td>
+        <td>Tech</td>
+        <td class="mono" style="color: var(--text-muted);">breakout</td>
+      </tr>
+      <tr>
+        <td class="sym">MSFT</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:82%; background: var(--positive);"></div></div><span class="num" style="color: var(--positive);">82</span></div></td>
+        <td class="halal-yes">✓ Pass</td>
+        <td><span class="pill buy">Buy</span></td>
+        <td class="mono">$412.20</td>
+        <td class="mono" style="color: var(--positive);">+0.94%</td>
+        <td>Tech</td>
+        <td class="mono" style="color: var(--text-muted);">momentum</td>
+      </tr>
+      <tr>
+        <td class="sym">AMZN</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:79%; background: var(--positive);"></div></div><span class="num" style="color: var(--positive);">79</span></div></td>
+        <td class="halal-yes">✓ Pass</td>
+        <td><span class="pill buy">Buy</span></td>
+        <td class="mono">$192.80</td>
+        <td class="mono" style="color: var(--positive);">+1.12%</td>
+        <td>Consumer</td>
+        <td class="mono" style="color: var(--text-muted);">breakout</td>
+      </tr>
+      <tr>
+        <td class="sym">GOOGL</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:76%; background: var(--positive);"></div></div><span class="num" style="color: var(--positive);">76</span></div></td>
+        <td class="halal-yes">✓ Pass</td>
+        <td><span class="pill buy">Buy</span></td>
+        <td class="mono">$158.40</td>
+        <td class="mono" style="color: var(--positive);">+0.32%</td>
+        <td>Comms</td>
+        <td class="mono" style="color: var(--text-muted);">trend</td>
+      </tr>
+      <tr>
+        <td class="sym">TSLA</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:64%; background: var(--warning);"></div></div><span class="num" style="color: var(--warning);">64</span></div></td>
+        <td class="halal-yes">✓ Pass</td>
+        <td><span class="pill wait">Wait</span></td>
+        <td class="mono">$248.50</td>
+        <td class="mono" style="color: var(--negative);">−0.62%</td>
+        <td>Auto</td>
+        <td class="mono" style="color: var(--text-muted);">—</td>
+      </tr>
+      <tr>
+        <td class="sym">META</td>
+        <td><div class="score-bar"><div class="fill"><div style="width:71%; background: var(--warning);"></div></div><span class="num" style="color: var(--warning);">71</span></div></td>
+        <td class="halal-no">✗ Fail · industry</td>
+        <td><span class="pill wait">Wait</span></td>
+        <td class="mono">$488.30</td>
+        <td class="mono" style="color: var(--positive);">+0.18%</td>
+        <td>Comms</td>
+        <td class="mono" style="color: var(--text-muted);">blocked</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ═══ TRADES + DIFF ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">04</span>Today's trades &amp; halal-screen diff</div>
+    <div class="sh-aside">2 exits · 4 open · 0 guard hits</div>
+  </div>
+  <div class="two-col">
+    <div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; font-weight: 700; margin-bottom: 8px;">EXECUTED PAPER TRADES · 6</div>
+      <div class="trades">
+        <div class="trade-row">
+          <span class="side buy">Buy</span>
+          <span class="sym">NVDA</span>
+          <span class="desc">3 sh @ $905.00</span>
+          <span class="pnl pos">+$57.30</span>
+          <span class="time">11:48</span>
+        </div>
+        <div class="trade-row">
+          <span class="side buy">Buy</span>
+          <span class="sym">AAPL</span>
+          <span class="desc">12 sh @ $178.50</span>
+          <span class="pnl pos">+$46.08</span>
+          <span class="time">10:14</span>
+        </div>
+        <div class="trade-row">
+          <span class="side buy">Buy</span>
+          <span class="sym">MSFT</span>
+          <span class="desc">6 sh @ $408.00</span>
+          <span class="pnl pos">+$25.20</span>
+          <span class="time">10:02</span>
+        </div>
+        <div class="trade-row">
+          <span class="side buy">Buy</span>
+          <span class="sym">GOOGL</span>
+          <span class="desc">5 sh @ $156.20</span>
+          <span class="pnl pos">+$11.00</span>
+          <span class="time">12:32</span>
+        </div>
+        <div class="trade-row">
+          <span class="side sell">Sell</span>
+          <span class="sym">TSLA</span>
+          <span class="desc">4 sh @ $250.20 → exit</span>
+          <span class="pnl pos">+$6.80</span>
+          <span class="time">09:14</span>
+        </div>
+        <div class="trade-row">
+          <span class="side sell">Sell</span>
+          <span class="sym">XOM</span>
+          <span class="desc">8 sh @ $108.22 → drift stop</span>
+          <span class="pnl neg">−$23.40</span>
+          <span class="time">14:08</span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; font-weight: 700; margin-bottom: 8px;">AAOIFI SCREEN DIFF · 24H</div>
+      <div class="diff-grid">
+        <div class="diff-card">
+          <div class="head">
+            <div class="h added"><i class="fas fa-circle-check"></i>Newly halal</div>
+            <div class="ct pos">+2</div>
+          </div>
+          <div class="diff-row">
+            <span class="sym">UBER</span>
+            <span class="why">debt 30.2% → 28.4%</span>
+            <span class="v" style="color: var(--positive);">Pass</span>
+          </div>
+          <div class="diff-row">
+            <span class="sym">NFLX</span>
+            <span class="why">int. inc. now &lt; 5%</span>
+            <span class="v" style="color: var(--positive);">Pass</span>
+          </div>
+        </div>
+        <div class="diff-card">
+          <div class="head">
+            <div class="h removed"><i class="fas fa-circle-xmark"></i>Removed</div>
+            <div class="ct neg">−1</div>
+          </div>
+          <div class="diff-row">
+            <span class="sym">TGT</span>
+            <span class="why">debt 33.8% → exceeds 33%</span>
+            <span class="v" style="color: var(--negative);">Fail</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); line-height: 1.55;">
+        Universe: 502 symbols · halal-pass: <strong style="color: var(--text-secondary);">387</strong> (77.1%) · qualified (score ≥ 50): <strong style="color: var(--text-secondary);">142</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PIPELINE TIMELINE + RISK ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">05</span>Pipeline timeline &amp; risk snapshot</div>
+    <div class="sh-aside">6 runs · median 4m 12s · 0 failures</div>
+  </div>
+  <div class="two-col">
+    <div class="timeline-card">
+      <div class="timeline-row">
+        <span class="time">06:00 ET</span>
+        <span class="ico ok"><i class="fas fa-check"></i></span>
+        <span class="name">Pre-market scan</span>
+        <span class="stats">502 sym · 3m 48s</span>
+      </div>
+      <div class="timeline-row">
+        <span class="time">09:30 ET</span>
+        <span class="ico ok"><i class="fas fa-check"></i></span>
+        <span class="name">Open · regime update</span>
+        <span class="stats">BULL · VIX 14.82</span>
+      </div>
+      <div class="timeline-row">
+        <span class="time">10:00 ET</span>
+        <span class="ico ok"><i class="fas fa-check"></i></span>
+        <span class="name">Halal screener refresh</span>
+        <span class="stats">+2 added · −1 removed</span>
+      </div>
+      <div class="timeline-row">
+        <span class="time">12:30 ET</span>
+        <span class="ico ok"><i class="fas fa-check"></i></span>
+        <span class="name">Mid-day pipeline run</span>
+        <span class="stats">4m 22s · 4 orders</span>
+      </div>
+      <div class="timeline-row">
+        <span class="time">15:55 ET</span>
+        <span class="ico ok"><i class="fas fa-check"></i></span>
+        <span class="name">EOD risk check</span>
+        <span class="stats">VaR ok · 0 trips</span>
+      </div>
+      <div class="timeline-row">
+        <span class="time">16:30 ET</span>
+        <span class="ico ok"><i class="fas fa-check"></i></span>
+        <span class="name">Daily report · Telegram</span>
+        <span class="stats">Sent · ميزان كوانت ch.</span>
+      </div>
+    </div>
+
+    <div class="timeline-card">
+      <div style="font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; font-weight: 700; margin-bottom: 14px;">RISK DESK · CONTINUOUS KELLY</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div>
+          <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">CVaR · tail</div>
+          <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 6px;">−3.8%</div>
+        </div>
+        <div>
+          <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Open positions</div>
+          <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 6px;">4</div>
+        </div>
+        <div>
+          <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">f * · raw Kelly</div>
+          <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 6px;">18.2%</div>
+        </div>
+        <div>
+          <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">f · effective</div>
+          <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 6px;">9.0%</div>
+        </div>
+      </div>
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); line-height: 1.6;">
+        <strong style="color: var(--accent);">f* = mean(r) / var(r)</strong><br>
+        Half-Kelly · 10% static cap · 25% hard ceiling
+      </div>
+      <div style="margin-top: 14px; padding: 8px 12px; background: var(--positive-dim); border-left: 3px solid var(--positive); border-radius: var(--radius-sm); font-size: 11px; color: var(--text-secondary);">
+        <strong style="color: var(--positive);">No guards engaged today.</strong> Correlation cluster within bounds. Concentration cap headroom 4.2%.
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODEL LEADERBOARD ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">06</span>Forecast model leaderboard</div>
+    <div class="sh-aside">30d window · production strategies only</div>
+  </div>
+  <div class="leaderboard">
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Family</th>
+          <th>Status</th>
+          <th>Sharpe</th>
+          <th>Return · 30d</th>
+          <th>Hit rate</th>
+          <th>Votes today</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="family" style="background: #eab308;"></span><span class="name">transformer</span></td>
+          <td style="color: var(--text-muted);">Transformer</td>
+          <td><span class="pill" style="background: var(--positive-dim); color: var(--positive); padding: 2px 7px;">Production</span></td>
+          <td class="mono" style="color: var(--positive);">1.84</td>
+          <td class="mono" style="color: var(--positive);">+18.4%</td>
+          <td class="mono">64%</td>
+          <td class="mono">7</td>
+        </tr>
+        <tr>
+          <td><span class="family" style="background: #22c55e;"></span><span class="name">ensemble_v3</span></td>
+          <td style="color: var(--text-muted);">Ensemble</td>
+          <td><span class="pill" style="background: var(--positive-dim); color: var(--positive); padding: 2px 7px;">Production</span></td>
+          <td class="mono" style="color: var(--positive);">1.62</td>
+          <td class="mono" style="color: var(--positive);">+14.8%</td>
+          <td class="mono">61%</td>
+          <td class="mono">8</td>
+        </tr>
+        <tr>
+          <td><span class="family" style="background: #a855f7;"></span><span class="name">gru_seq2seq</span></td>
+          <td style="color: var(--text-muted);">RNN · GRU</td>
+          <td><span class="pill" style="background: var(--accent-dim); color: var(--accent); padding: 2px 7px;">Staging</span></td>
+          <td class="mono">1.21</td>
+          <td class="mono" style="color: var(--positive);">+11.2%</td>
+          <td class="mono">58%</td>
+          <td class="mono">5</td>
+        </tr>
+        <tr>
+          <td><span class="family" style="background: #3b82f6;"></span><span class="name">lstm_2path</span></td>
+          <td style="color: var(--text-muted);">RNN · LSTM</td>
+          <td><span class="pill" style="background: var(--positive-dim); color: var(--positive); padding: 2px 7px;">Production</span></td>
+          <td class="mono">1.04</td>
+          <td class="mono" style="color: var(--positive);">+9.6%</td>
+          <td class="mono">54%</td>
+          <td class="mono">6</td>
+        </tr>
+        <tr>
+          <td><span class="family" style="background: #06b6d4;"></span><span class="name">dilated_cnn</span></td>
+          <td style="color: var(--text-muted);">CNN</td>
+          <td><span class="pill" style="background: var(--accent-dim); color: var(--accent); padding: 2px 7px;">Staging</span></td>
+          <td class="mono">0.88</td>
+          <td class="mono" style="color: var(--positive);">+7.4%</td>
+          <td class="mono">51%</td>
+          <td class="mono">4</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ═══ ARABIC TELEGRAM BLURB ═══ -->
+  <div class="section-head">
+    <div class="sh-title"><span class="num">07</span>Telegram-ready summary · <span dir="rtl" lang="ar" style="font-family: var(--font-arabic);">العربية</span></div>
+    <div class="sh-aside">Auto-sent to <span dir="rtl" lang="ar" style="font-family: var(--font-arabic);">ميزان كوانت</span> channel 16:30 ET</div>
+  </div>
+  <div class="arabic-card">
+    <div class="ar-head">
+      <div class="ar-head-left">
+        <div class="ico"><i class="fab fa-telegram"></i></div>
+        <div class="titles">
+          <div class="en">Daily Telegram broadcast</div>
+          <div class="ar" dir="rtl" lang="ar">البث اليومي للقناة المؤسسية</div>
+        </div>
+      </div>
+      <button class="copy-btn" id="copyAr" onclick="copyArabic()">
+        <i class="fas fa-copy" style="font-size: 9px;"></i><span>Copy blurb</span>
+      </button>
+    </div>
+
+    <div class="ar-blurb" id="arBlurb">
+      <div class="header-line">📊 تقرير ميزان كوانت · ٢٠٢٦/٠٥/٢٤</div>
+
+      جلسة <span class="pos">إيجابية</span> في السوق الأمريكي. أُغلقت المحفظة الحلال بربح يومي قدره <span class="num pos">+٣٤٨٫٢٠ دولار</span> (<span class="num pos">+٠٫٧٢٪</span>).
+
+      <div class="divider"></div>
+
+      <strong style="color: var(--accent);">أبرز الإشارات الشرعية:</strong>
+      <ul>
+        <li><strong>NVDA</strong> — شراء قوي · النتيجة <span class="num">٩١</span> · ارتفاع <span class="num pos">+٢٫٤١٪</span></li>
+        <li><strong>AAPL</strong> — شراء · النتيجة <span class="num">٨٨</span> · ارتفاع <span class="num pos">+١٫٨٤٪</span></li>
+        <li><strong>MSFT</strong> — شراء · النتيجة <span class="num">٨٢</span> · ارتفاع <span class="num pos">+٠٫٩٤٪</span></li>
+      </ul>
+
+      <div class="divider"></div>
+
+      <strong style="color: var(--accent);">مؤشرات المخاطر:</strong>
+      شارب <span class="num">١٫٨٤</span> · القيمة المعرضة للخطر (٩٥٪) <span class="num">−٢٫٥٪</span> · أقصى تراجع <span class="num">−٤٫١٪</span>. صفر إنذارات من مكتب المخاطر اليوم.
+
+      <div class="divider"></div>
+
+      <strong style="color: var(--accent);">الفحص الشرعي:</strong>
+      تمت إضافة <strong class="pos">سهمين</strong> (UBER · NFLX) واستبعاد <strong class="neg">سهم واحد</strong> (TGT — تجاوز نسبة الديون). الكون الحلال: <span class="num">٣٨٧</span> من <span class="num">٥٠٢</span> سهمًا.
+
+      <div class="footer-line">
+        🤖 تم إعداد هذا التقرير آليًا · جميع البيانات وفق معايير AAOIFI · للأسئلة: institutional@mizanquant.com
+      </div>
+    </div>
+
+    <div class="ar-meta">
+      <span>Channel · <strong>@mizanquant_official</strong></span>
+      <span>Length · <strong>~580 chars</strong> · within Telegram caption limit</span>
+      <span>Image · spark chart attached</span>
+    </div>
+  </div>
+
+  <!-- ═══ FOOTER ═══ -->
+  <div class="footer">
+    <div>
+      <h4>Distribution</h4>
+      <div class="body">
+        <strong>Partner desks · institutional channel only.</strong><br>
+        Sent to nominated compliance officer + Telegram broadcast at 16:30 ET. Archived 7y (DIFC).
+      </div>
+    </div>
+    <div>
+      <h4>Standards</h4>
+      <div class="body">
+        AAOIFI Standard 21<br>
+        Continuous Kelly · Chan Ch. 7<br>
+        FMP Fundamentals 2026-Q1<br>
+        Telegram + email channels
+      </div>
+    </div>
+    <div>
+      <h4>Generated by</h4>
+      <div class="body">
+        <strong>pipeline_orchestrator.py</strong> · stage 06<br>
+        ai_agent.py · OpenAI fallback<br>
+        telegram_alert.py · v2.4.1
+      </div>
+    </div>
+
+    <div class="disclosure">
+      <strong>Disclosure ·</strong> Past performance is not indicative of future results. All P&amp;L is from the paper-trade book and is gross of fees. Halal verdicts are advisory per AAOIFI Standard 21 and do not replace independent review by your Sharia board. The Telegram broadcast contains a subset of this report; the full audit log lives in the report archive. Confidential — for the named recipient only. <strong style="color: var(--text-muted);">MZN-DR-20260524 · sealed by audit_signals.py · checksum sha256:b6362e82…</strong>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function copyArabic() {
+  const blurb = document.getElementById('arBlurb');
+  // Build a plain-text version (Telegram is plain-text + emoji; no HTML formatting)
+  const plain = `📊 تقرير ميزان كوانت · 2026-05-24
+
+جلسة إيجابية في السوق الأمريكي. أُغلقت المحفظة الحلال بربح يومي قدره +348.20 دولار (+0.72%).
+
+أبرز الإشارات الشرعية:
+• NVDA — شراء قوي · النتيجة 91 · ارتفاع +2.41%
+• AAPL — شراء · النتيجة 88 · ارتفاع +1.84%
+• MSFT — شراء · النتيجة 82 · ارتفاع +0.94%
+
+مؤشرات المخاطر:
+شارب 1.84 · القيمة المعرضة للخطر (95%) −2.5% · أقصى تراجع −4.1%. صفر إنذارات من مكتب المخاطر اليوم.
+
+الفحص الشرعي:
+تمت إضافة سهمين (UBER · NFLX) واستبعاد سهم واحد (TGT — تجاوز نسبة الديون). الكون الحلال: 387 من 502 سهمًا.
+
+🤖 تم إعداد هذا التقرير آليًا · جميع البيانات وفق معايير AAOIFI
+institutional@mizanquant.com`;
+
+  const btn = document.getElementById('copyAr');
+  const span = btn.querySelector('span');
+  const finish = () => {
+    btn.classList.add('copied');
+    span.textContent = 'Copied · paste to Telegram';
+    setTimeout(() => { btn.classList.remove('copied'); span.textContent = 'Copy blurb'; }, 2200);
+  };
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(plain).then(finish).catch(finish);
+  } else {
+    finish();
+  }
+}
+</script>
+
+</body>
+</html>

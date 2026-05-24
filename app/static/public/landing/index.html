@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Sharia-compliant quantitative trading</title>
+<link rel="icon" type="image/svg+xml" href="/static/public/assets/logo-favicon.svg">
+<link rel="stylesheet" href="/static/design-tokens.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg-root); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+body { font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+
+::selection { background: var(--accent-dim); color: var(--accent); }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+a { color: inherit; text-decoration: none; }
+
+.container { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
+
+/* ─── NAV ───────────────────────────────────────────────── */
+.nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(12, 12, 16, 0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.nav-inner {
+  display: flex; align-items: center;
+  height: 72px;
+}
+.nav-brand {
+  display: flex; align-items: center; gap: 12px;
+  margin-right: 48px;
+}
+.nav-brand .mark {
+  width: 32px; height: 32px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.nav-brand .wm {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 800; letter-spacing: -0.3px;
+}
+.nav-brand .wm em { font-style: normal; color: var(--accent); }
+.nav-links {
+  display: flex; gap: 32px;
+  font-size: 13px; font-weight: 500;
+  color: var(--text-secondary);
+}
+.nav-links a { transition: color 0.15s; }
+.nav-links a:hover { color: var(--text-primary); }
+.nav-cta {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 12px;
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+}
+.btn-primary {
+  background: var(--accent); color: var(--bg-root);
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+/* ─── HERO ──────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  padding: 96px 0 120px;
+  overflow: hidden;
+}
+.hero-glow {
+  position: absolute;
+  top: -200px; left: 50%; transform: translateX(-50%);
+  width: 900px; height: 700px;
+  background: radial-gradient(ellipse at center, rgba(200,150,62,0.15) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+.hero-inner {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 64px;
+  align-items: center;
+}
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 2px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  padding: 6px 14px;
+  border-radius: 999px;
+  margin-bottom: 32px;
+}
+.hero-eyebrow .dot {
+  width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
+  animation: pulse 2.5s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -1.8px;
+  margin-bottom: 28px;
+  text-wrap: balance;
+}
+.hero h1 em { font-style: normal; color: var(--accent); font-weight: 700; }
+.hero-ar {
+  font-family: var(--font-arabic);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  line-height: 1.5;
+  letter-spacing: -0.3px;
+}
+.hero-lead {
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  max-width: 540px;
+  margin-bottom: 36px;
+}
+.hero-cta { display: flex; gap: 14px; }
+.hero-meta {
+  margin-top: 36px;
+  display: flex; gap: 32px;
+  font-size: 12px; color: var(--text-muted);
+  align-items: center;
+}
+.hero-meta .item { display: flex; align-items: center; gap: 8px; }
+.hero-meta i { color: var(--accent); font-size: 11px; }
+
+/* Hero visual — concentric mark + orbit */
+.hero-vis {
+  position: relative;
+  height: 480px;
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-mark-wrap {
+  position: relative;
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+.orbit {
+  position: absolute;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+}
+.orbit.o1 { width: 280px; height: 280px; border-color: rgba(200,150,62,0.12); }
+.orbit.o2 { width: 380px; height: 380px; border-color: rgba(200,150,62,0.08); }
+.orbit.o3 { width: 480px; height: 480px; border-color: rgba(200,150,62,0.04); }
+.orbit .node {
+  position: absolute;
+  width: 12px; height: 12px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--accent-glow);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+.orbit.o1 .node { top: 0; left: 50%; transform: translate(-50%, -50%); }
+.orbit.o2 .node { top: 50%; left: 100%; transform: translate(-50%, -50%); width: 8px; height: 8px; background: var(--text-secondary); box-shadow: none; }
+.orbit.o3 .node { top: 100%; left: 30%; transform: translate(-50%, -50%); width: 6px; height: 6px; background: var(--text-muted); box-shadow: none; }
+.hero-mark {
+  position: relative;
+  width: 180px; height: 180px;
+  background: linear-gradient(135deg, var(--bg-raised) 0%, var(--bg-surface) 100%);
+  border: 1px solid var(--accent-glow);
+  border-radius: 24px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 48px rgba(200, 150, 62, 0.18), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.hero-mark svg { color: var(--accent); }
+.hero-mark::after {
+  content: ""; position: absolute; inset: -1px;
+  border-radius: 24px; padding: 1px;
+  background: linear-gradient(135deg, var(--accent), transparent 60%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ─── TRUST STRIP ───────────────────────────────────────── */
+.trust {
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 32px 0;
+  background: var(--bg-surface);
+}
+.trust-inner {
+  display: flex; align-items: center; gap: 48px;
+  flex-wrap: wrap;
+}
+.trust-label {
+  font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 2px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.trust-items {
+  display: flex; gap: 40px; flex-wrap: wrap; align-items: center;
+  flex: 1;
+}
+.trust-item {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  display: flex; align-items: center; gap: 8px;
+}
+.trust-item i { color: var(--accent); font-size: 11px; }
+
+/* ─── SECTION ───────────────────────────────────────────── */
+.section { padding: 120px 0; }
+.section-head {
+  margin-bottom: 64px;
+  max-width: 720px;
+}
+.section-eyebrow {
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 2px;
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+.section h2 {
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.8px;
+  margin-bottom: 18px;
+  text-wrap: balance;
+}
+.section h2 em { font-style: normal; color: var(--accent); }
+.section-lead {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  max-width: 600px;
+}
+
+/* ─── ARCHITECTURE LOOP ─────────────────────────────────── */
+.arch {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.arch-loop {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0;
+  position: relative;
+}
+.arch-step {
+  position: relative;
+  padding: 28px 24px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  margin: 0 -1px;
+}
+.arch-step:hover { border-color: var(--accent-glow); }
+.arch-step .step-no {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 1.5px;
+  margin-bottom: 14px;
+}
+.arch-step .step-ico {
+  width: 36px; height: 36px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+.arch-step .step-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.arch-step .step-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.arch-conn {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  opacity: 0.55;
+}
+.arch-loop-feedback {
+  text-align: center;
+  margin-top: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.arch-loop-feedback span { color: var(--accent); }
+.arch-numbers {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 24px; margin-top: 80px;
+}
+.arch-num-card {
+  border-left: 2px solid var(--accent);
+  padding: 4px 0 4px 18px;
+}
+.arch-num-card .v {
+  font-family: var(--font-mono);
+  font-size: 32px; font-weight: 700;
+  letter-spacing: -0.8px;
+  line-height: 1;
+}
+.arch-num-card .l {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+/* ─── PERFORMANCE ──────────────────────────────────────── */
+.perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.perf-tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  display: flex; flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+.perf-tile.big {
+  grid-column: 1 / -1;
+  padding: 36px 40px;
+}
+.perf-tile .stripe {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 2px; background: var(--accent);
+}
+.perf-tile .head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 24px;
+}
+.perf-tile .ico {
+  width: 32px; height: 32px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  font-size: 13px;
+}
+.perf-tile .lab {
+  font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.8px;
+  font-weight: 600;
+}
+.perf-tile .v {
+  font-family: var(--font-mono);
+  font-size: 48px; font-weight: 700;
+  letter-spacing: -1.5px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.perf-tile .v.signed { color: var(--positive); }
+.perf-tile .sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: auto;
+}
+.perf-tile .sub strong { color: var(--text-primary); font-weight: 500; }
+.perf-tile.big .v { font-size: 64px; }
+
+.kelly-vis {
+  display: flex; align-items: center; gap: 24px;
+  margin-top: 16px;
+}
+.kelly-vis svg { flex-shrink: 0; }
+.kelly-vis .info { flex: 1; }
+.kelly-formula {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  display: inline-block;
+  margin-top: 8px;
+  letter-spacing: 0.3px;
+}
+
+/* ─── COMPLIANCE ────────────────────────────────────────── */
+.compliance {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.comp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: flex-start;
+}
+.comp-screens {
+  display: grid; grid-template-columns: 1fr; gap: 12px;
+}
+.comp-screen {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 18px 22px;
+  display: flex; align-items: center; gap: 18px;
+}
+.comp-screen .num {
+  width: 32px; height: 32px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.comp-screen .info { flex: 1; }
+.comp-screen .name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.comp-screen .formula {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.comp-screen .threshold {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.comp-quote {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 32px 36px;
+  position: relative;
+}
+.comp-quote::before {
+  content: "“";
+  position: absolute; top: -16px; left: 28px;
+  font-family: var(--font-display);
+  font-size: 72px;
+  color: var(--accent);
+  line-height: 1;
+}
+.comp-quote-ar {
+  font-family: var(--font-arabic);
+  font-size: 19px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.comp-quote-en {
+  margin-top: 18px;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.comp-quote-src {
+  margin-top: 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+/* ─── AUDIENCE ─────────────────────────────────────────── */
+.aud-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+}
+.aud-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+}
+.aud-card .ico {
+  width: 44px; height: 44px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  margin-bottom: 22px;
+}
+.aud-card h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: -0.3px;
+}
+.aud-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.aud-card ul {
+  list-style: none;
+  margin-top: 18px;
+}
+.aud-card li {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 5px 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.aud-card li::before {
+  content: "—";
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+/* ─── CTA ──────────────────────────────────────────────── */
+.cta {
+  padding: 120px 0;
+  position: relative;
+  text-align: center;
+}
+.cta-glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, rgba(200,150,62,0.10) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+}
+.cta-inner { position: relative; max-width: 760px; margin: 0 auto; }
+.cta h2 {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1.15;
+  margin-bottom: 18px;
+}
+.cta h2 em { font-style: normal; color: var(--accent); }
+.cta-ar {
+  font-family: var(--font-arabic);
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-bottom: 28px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+.cta-lead {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 36px;
+  line-height: 1.6;
+}
+.cta-buttons {
+  display: flex; gap: 14px; justify-content: center; margin-bottom: 32px;
+}
+.cta-foot {
+  display: flex; justify-content: center; gap: 32px;
+  font-size: 12px; color: var(--text-muted);
+}
+.cta-foot .item { display: flex; align-items: center; gap: 6px; }
+.cta-foot i { color: var(--accent); }
+
+/* ─── FOOTER ───────────────────────────────────────────── */
+.footer {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  padding: 56px 0 32px;
+}
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 48px;
+  margin-bottom: 48px;
+}
+.footer h4 {
+  font-family: var(--font-body);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+.footer-brand .wm {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 800;
+  letter-spacing: -0.3px;
+  margin-bottom: 4px;
+}
+.footer-brand .wm em { font-style: normal; color: var(--accent); }
+.footer-brand .ar {
+  font-family: var(--font-arabic);
+  font-size: 14px;
+  color: var(--accent);
+  margin-bottom: 14px;
+  font-weight: 600;
+}
+.footer-brand p {
+  font-size: 13px; color: var(--text-secondary);
+  max-width: 320px; line-height: 1.55;
+}
+.footer ul { list-style: none; }
+.footer li { margin-bottom: 10px; }
+.footer li a {
+  font-size: 13px; color: var(--text-secondary);
+  transition: color 0.15s;
+}
+.footer li a:hover { color: var(--text-primary); }
+.footer-bottom {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 24px;
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--text-muted);
+}
+.footer-bottom .legal { display: flex; gap: 24px; }
+
+@media (max-width: 980px) {
+  .hero-inner, .comp-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 40px; }
+  .hero-vis { height: 320px; }
+  .arch-loop { grid-template-columns: 1fr; }
+  .aud-grid, .perf-grid { grid-template-columns: 1fr; }
+  .arch-numbers, .footer-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TERMINAL ACCESS LOCK — password vault modal + cinematic unlock
+   =================================================================== */
+@keyframes vaultIn  { from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes shakeX   { 0%, 100% { transform: translate(-50%, -50%); } 20%, 60% { transform: translate(calc(-50% - 8px), -50%); } 40%, 80% { transform: translate(calc(-50% + 8px), -50%); } }
+@keyframes scanline { 0% { top: -2px; } 100% { top: 100%; } }
+@keyframes curtain  { 0% { transform: scaleY(0); } 100% { transform: scaleY(1); } }
+@keyframes spinx    { to { transform: rotate(1turn); } }
+
+.vault-scrim {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: none;
+  align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity 0.25s var(--ease-out);
+}
+.vault-scrim.open { display: flex; opacity: 1; }
+
+.vault {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 520px;
+  background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-root) 100%);
+  border: 1px solid var(--accent-glow);
+  border-radius: 14px;
+  padding: 36px 40px 32px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 64px rgba(200, 150, 62, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  animation: vaultIn 0.28s var(--ease-out);
+  overflow: hidden;
+  z-index: 1001;
+}
+.vault.shake { animation: shakeX 0.35s ease-in-out; }
+.vault::before {
+  content: ""; position: absolute; top: 0; left: 16px; right: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.6;
+}
+.vault::after {
+  content: ""; position: absolute; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(180deg, rgba(200,150,62,0) 0%, rgba(200,150,62,0.18) 50%, rgba(200,150,62,0) 100%);
+  animation: scanline 4s linear infinite;
+  pointer-events: none;
+}
+.vault-head {
+  display: flex; align-items: center; gap: 14px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 22px;
+}
+.vault-head .mark {
+  width: 40px; height: 40px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.vault-head .titles {
+  flex: 1;
+}
+.vault-head .title {
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.vault-head .ar {
+  font-family: var(--font-arabic);
+  font-size: 13px; color: var(--accent);
+  font-weight: 600;
+  margin-top: 2px;
+}
+.vault-close {
+  width: 28px; height: 28px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+.vault-close:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+.vault-status {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.vault-status .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.vault-prompt {
+  font-size: 14px; color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+.vault-field {
+  position: relative;
+  margin-bottom: 14px;
+}
+.vault-field input {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 4px;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.vault-field input::placeholder { color: var(--text-disabled); letter-spacing: 2px; }
+.vault-field input:focus { border-color: var(--accent); background: var(--bg-overlay); }
+.vault-field.error input { border-color: var(--negative); }
+.vault-field .reveal {
+  position: absolute; right: 12px; top: 50%;
+  transform: translateY(-50%);
+  background: transparent; border: none;
+  color: var(--text-muted); cursor: pointer; padding: 4px;
+  font-size: 13px;
+}
+.vault-field .reveal:hover { color: var(--text-secondary); }
+
+.vault-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 22px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+}
+.vault-meta .hint { color: var(--accent); }
+.vault-error {
+  display: none;
+  background: var(--negative-dim);
+  border: 1px solid var(--negative);
+  border-left: 3px solid var(--negative);
+  color: var(--negative);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+.vault-error.show { display: block; }
+
+.vault-submit {
+  width: 100%;
+  background: var(--accent);
+  color: var(--bg-root);
+  border: none;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  transition: background 0.15s;
+}
+.vault-submit:hover { background: var(--accent-hover); }
+.vault-submit:disabled { opacity: 0.7; cursor: wait; }
+.vault-submit i { font-size: 11px; }
+
+.vault-foot {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+}
+.vault-foot a { color: var(--accent); }
+
+/* CURTAIN — cinematic transition on success */
+.curtain {
+  position: fixed; inset: 0;
+  background: var(--bg-root);
+  z-index: 2000;
+  display: none;
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 20px;
+}
+.curtain.run { display: flex; transform-origin: bottom; animation: curtain 0.7s var(--ease-in-out) forwards; }
+.curtain-glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at center, rgba(200,150,62,0.22) 0%, rgba(200,150,62,0) 55%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s var(--ease-out);
+}
+.curtain.show .curtain-glow { opacity: 1; }
+.curtain-mark {
+  width: 96px; height: 96px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.4s 0.6s, transform 0.5s 0.6s;
+  box-shadow: 0 0 48px rgba(200, 150, 62, 0.30);
+}
+.curtain-mark svg { color: var(--accent); }
+.curtain.show .curtain-mark { opacity: 1; transform: scale(1); }
+.curtain-status {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.4s 0.85s;
+  display: flex; align-items: center; gap: 12px;
+}
+.curtain.show .curtain-status { opacity: 1; }
+.curtain-status .spinner {
+  width: 12px; height: 12px;
+  border: 2px solid var(--accent-glow);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spinx 0.7s linear infinite;
+}
+.curtain-sub {
+  font-family: var(--font-display);
+  font-size: 28px; font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-top: 12px;
+  opacity: 0;
+  transition: opacity 0.4s 1.05s;
+  text-align: center;
+}
+.curtain.show .curtain-sub { opacity: 1; }
+.curtain-sub em { font-style: normal; color: var(--accent); }
+.curtain-ar {
+  font-family: var(--font-arabic);
+  font-size: 17px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.4s 1.25s;
+  font-weight: 600;
+}
+.curtain.show .curtain-ar { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- ═══ NAV ═══ -->
+<nav class="nav">
+  <div class="container nav-inner">
+    <div class="nav-brand">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div class="wm">mizan<em>quant</em></div>
+    </div>
+    <div class="nav-links">
+      <a href="#architecture">Architecture</a>
+      <a href="#performance">Performance</a>
+      <a href="#compliance">Compliance</a>
+      <a href="#audience">For institutions</a>
+    </div>
+    <div class="nav-cta">
+      <a href="#" class="btn btn-ghost" onclick="openVault(event)"><i class="fas fa-lock" style="font-size: 10px;"></i>Terminal access</a>
+      <a href="#cta" class="btn btn-primary">Request a briefing</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="container hero-inner">
+    <div>
+      <div class="hero-eyebrow"><span class="dot"></span>Halal Trading Suite · AAOIFI Standard 21</div>
+      <h1>The convergence of <em>Sharia governance</em> and <em>algorithmic alpha.</em></h1>
+      <div class="hero-ar" dir="rtl" lang="ar">حيث تلتقي حوكمة الشريعة بمنطق الخوارزميات.</div>
+      <p class="hero-lead">
+        MizanQuant is an institutional-grade quantitative platform built from the ground up around AAOIFI compliance. Four-screen halal gates, a 14-model forecast consensus, continuous-Kelly position sizing, and an always-on risk desk — engineered for sovereign wealth funds, Sharia-compliant asset managers, and family offices across the Gulf and MENA.
+      </p>
+      <div class="hero-cta">
+        <a href="#cta" class="btn btn-primary">Request a private briefing <i class="fas fa-arrow-right" style="font-size: 11px;"></i></a>
+        <a href="#" class="btn btn-ghost" onclick="openVault(event)"><i class="fas fa-lock" style="font-size: 10px;"></i>Terminal access</a>
+      </div>
+      <div class="hero-meta">
+        <div class="item"><i class="fas fa-shield-halved"></i>Risk-desk supervised</div>
+        <div class="item"><i class="fas fa-mosque"></i>AAOIFI-screened universe</div>
+        <div class="item"><i class="fas fa-brain"></i>14-model consensus</div>
+      </div>
+    </div>
+    <div class="hero-vis">
+      <div class="hero-mark-wrap">
+        <div class="orbit o3"><div class="node"></div></div>
+        <div class="orbit o2"><div class="node"></div></div>
+        <div class="orbit o1"><div class="node"></div></div>
+        <div class="hero-mark">
+          <svg viewBox="0 0 64 64" width="84" height="84" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TRUST STRIP ═══ -->
+<section class="trust">
+  <div class="container trust-inner">
+    <div class="trust-label">Standards · Brokers · Data</div>
+    <div class="trust-items">
+      <div class="trust-item"><i class="fas fa-check"></i>AAOIFI Standard 21</div>
+      <div class="trust-item"><i class="fas fa-check"></i>Alpaca Markets</div>
+      <div class="trust-item"><i class="fas fa-check"></i>Interactive Brokers</div>
+      <div class="trust-item"><i class="fas fa-check"></i>FRED · Macro</div>
+      <div class="trust-item"><i class="fas fa-check"></i>FMP Fundamentals</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ ARCHITECTURE ═══ -->
+<section class="section arch" id="architecture">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Architecture</div>
+      <h2>A five-layer loop, supervised by a <em>standing risk desk</em>.</h2>
+      <p class="section-lead">
+        Every trade begins as a halal-screened candidate and ends as a stress-tested position with a Kelly-sized risk budget. The loop runs end-to-end six times a day, with the risk desk standing alongside it as a continuous guard.
+      </p>
+    </div>
+
+    <div class="arch-loop">
+      <div class="arch-step">
+        <div class="step-no">01 / GATE</div>
+        <div class="step-ico"><i class="fas fa-mosque"></i></div>
+        <div class="step-name">Halal screener</div>
+        <div class="step-desc">AAOIFI four-screen gate. Debt · interest income · cash & receivables · haram industries. Re-scanned on a 24h cycle against FMP fundamentals.</div>
+      </div>
+      <div class="arch-step">
+        <div class="step-no">02 / SIGNAL</div>
+        <div class="step-ico"><i class="fas fa-chart-line"></i></div>
+        <div class="step-name">Forecast lab</div>
+        <div class="step-desc">14 models — transformer · BiGRU seq2seq · dilated CNN · vanilla / 2-path RNNs · classical ensemble — vote per symbol, per session.</div>
+      </div>
+      <div class="arch-step">
+        <div class="step-no">03 / CONSENSUS</div>
+        <div class="step-ico"><i class="fas fa-vote-yea"></i></div>
+        <div class="step-name">AI consensus</div>
+        <div class="step-desc">Model votes pass through a confidence-weighted aggregator. STRONG BUY requires both score ≥ 90 and ≥ 11 of 14 BUY votes.</div>
+      </div>
+      <div class="arch-step">
+        <div class="step-no">04 / SIZE</div>
+        <div class="step-ico"><i class="fas fa-percentage"></i></div>
+        <div class="step-name">Kelly allocator</div>
+        <div class="step-desc">Continuous Kelly with sample-size shrinkage and a hard 25% ceiling. Half-Kelly default. Static budget overrides Kelly when conservative.</div>
+      </div>
+      <div class="arch-step">
+        <div class="step-no">05 / EXECUTE</div>
+        <div class="step-ico"><i class="fas fa-arrow-right-arrow-left"></i></div>
+        <div class="step-name">Risk desk · execute</div>
+        <div class="step-desc">Pre-trade VaR check, guard pass, kill-switch arm, broker handoff (Alpaca / IBKR), fill watcher, Telegram alert, daily report.</div>
+      </div>
+    </div>
+
+    <div class="arch-loop-feedback">
+      <span>↻</span>  Feedback to forecast lab: realized PnL drift, model accuracy, regime updates  <span>↻</span>
+    </div>
+
+    <div class="arch-numbers">
+      <div class="arch-num-card">
+        <div class="v">502</div>
+        <div class="l">Symbols scanned daily — S&P 500 universe, post-AAOIFI gate</div>
+      </div>
+      <div class="arch-num-card">
+        <div class="v">14</div>
+        <div class="l">Forecast models voting per session, across 5 architecture families</div>
+      </div>
+      <div class="arch-num-card">
+        <div class="v">6×</div>
+        <div class="l">Pipeline runs per day — pre-market, mid-day, EOD, post-close, plus two ad-hoc</div>
+      </div>
+      <div class="arch-num-card">
+        <div class="v">&lt; 250ms</div>
+        <div class="l">Pre-trade guard latency — VaR · halal re-verify · correlation cap · concurrent</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PERFORMANCE ═══ -->
+<section class="section" id="performance">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Performance & analytics</div>
+      <h2>Institutional-grade risk controls — built-in, <em>never bolted on.</em></h2>
+      <p class="section-lead">
+        Position sizing is mathematical. Risk is monitored continuously. Every value below is computed live from the trade log and refreshed on the 30-second tick.
+      </p>
+    </div>
+
+    <div class="perf-grid">
+      <div class="perf-tile big">
+        <div class="stripe"></div>
+        <div class="head">
+          <div>
+            <div class="lab">Continuous Kelly · position sizing</div>
+            <div class="kelly-formula">f* = mean(r) / var(r)</div>
+          </div>
+          <div class="ico"><i class="fas fa-percentage"></i></div>
+        </div>
+        <div class="kelly-vis">
+          <svg width="160" height="160" viewBox="0 0 160 160">
+            <circle cx="80" cy="80" r="64" fill="none" stroke="var(--bg-raised)" stroke-width="14"></circle>
+            <circle cx="80" cy="80" r="64" fill="none" stroke="var(--accent)" stroke-width="14"
+                    stroke-dasharray="74 402" stroke-linecap="round"
+                    transform="rotate(-90 80 80)"></circle>
+            <text x="80" y="78" text-anchor="middle" fill="var(--accent)" font-family="JetBrains Mono" font-size="28" font-weight="800" letter-spacing="-1">9.0%</text>
+            <text x="80" y="98" text-anchor="middle" fill="var(--text-muted)" font-family="DM Sans" font-size="9" font-weight="600" letter-spacing="0.8" text-transform="uppercase">f effective</text>
+          </svg>
+          <div class="info">
+            <div class="v" style="font-size: 36px;">f* = <span style="color: var(--accent);">18.2%</span></div>
+            <div class="sub" style="margin-top: 12px;">
+              Raw Kelly fraction across the live strategy book. Fractional setting <strong>0.50</strong> (half-Kelly). Capped by <strong>10%</strong> static budget and a hard <strong>25%</strong> ceiling. Strategies with &lt; 10 trades return 0.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="perf-tile">
+        <div class="stripe" style="background: var(--negative);"></div>
+        <div class="head">
+          <div class="lab">Portfolio VaR · 95%</div>
+          <div class="ico"><i class="fas fa-shield-halved"></i></div>
+        </div>
+        <div class="v">−2.5%</div>
+        <div class="sub">One-day Value-at-Risk on the live book. <strong>CVaR (tail) −3.8%</strong>. Recomputed every 30 seconds.</div>
+      </div>
+
+      <div class="perf-tile">
+        <div class="stripe" style="background: var(--positive);"></div>
+        <div class="head">
+          <div class="lab">Sharpe · 30-day rolling</div>
+          <div class="ico"><i class="fas fa-chart-line"></i></div>
+        </div>
+        <div class="v signed">1.84</div>
+        <div class="sub">Across the live strategy book — A (breakout), B (mean-reversion), C (momentum). <strong>+0.15</strong> vs 30-day average.</div>
+      </div>
+
+      <div class="perf-tile">
+        <div class="stripe" style="background: var(--warning);"></div>
+        <div class="head">
+          <div class="lab">Max drawdown</div>
+          <div class="ico"><i class="fas fa-wave-square"></i></div>
+        </div>
+        <div class="v" style="color: var(--text-primary);">−8.2%</div>
+        <div class="sub">Realized peak-to-trough since paper start. <strong>Kill-switch armed</strong> at −15%; auto-reduce at −10%.</div>
+      </div>
+
+      <div class="perf-tile">
+        <div class="stripe" style="background: var(--info);"></div>
+        <div class="head">
+          <div class="lab">Pre-trade guards · today</div>
+          <div class="ico"><i class="fas fa-filter"></i></div>
+        </div>
+        <div class="v">14</div>
+        <div class="sub">Signals rejected before execution. <strong>Halal-fail 3 · concentration 4 · liquidity 2 · drift 5.</strong></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ COMPLIANCE ═══ -->
+<section class="section compliance" id="compliance">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Sharia compliance</div>
+      <h2>Compliance is the <em>first gate</em>, not a footnote.</h2>
+      <p class="section-lead">
+        Every symbol the platform sees must pass AAOIFI's four-screen test before it can become a candidate signal. No model output, no AI rationale, no override path bypasses this gate.
+      </p>
+    </div>
+
+    <div class="comp-grid">
+      <div class="comp-screens">
+        <div class="comp-screen">
+          <div class="num">1</div>
+          <div class="info">
+            <div class="name">Debt screen</div>
+            <div class="formula">Total Debt / Market Cap</div>
+          </div>
+          <div class="threshold">&lt; 33%</div>
+        </div>
+        <div class="comp-screen">
+          <div class="num">2</div>
+          <div class="info">
+            <div class="name">Interest income</div>
+            <div class="formula">Interest Income / Revenue</div>
+          </div>
+          <div class="threshold">&lt; 5%</div>
+        </div>
+        <div class="comp-screen">
+          <div class="num">3</div>
+          <div class="info">
+            <div class="name">Cash & receivables</div>
+            <div class="formula">(Cash + AR) / Market Cap</div>
+          </div>
+          <div class="threshold">&lt; 33%</div>
+        </div>
+        <div class="comp-screen">
+          <div class="num">4</div>
+          <div class="info">
+            <div class="name">Haram industries</div>
+            <div class="formula">Excluded sector list · AAOIFI</div>
+          </div>
+          <div class="threshold">Excluded</div>
+        </div>
+      </div>
+
+      <div class="comp-quote">
+        <div class="comp-quote-ar" dir="rtl" lang="ar">
+          منصة ميزان كوانت ليست محايدة شرعياً. الفحص الشرعي لا يأتي بعد الإشارة — بل قبلها. كل قرار تداول يبدأ بحد متوافق مع المعايير الشرعية لـ AAOIFI، وينتهي بتقرير قابل للتدقيق.
+        </div>
+        <div class="comp-quote-en">
+          MizanQuant is not Sharia-neutral. The halal screen does not run after the signal — it runs first. Every trade decision begins with an AAOIFI-compliant gate and ends with an audit-grade report.
+        </div>
+        <div class="comp-quote-src">— Design principle · embedded in pipeline_orchestrator.py</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ AUDIENCE ═══ -->
+<section class="section" id="audience">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">For institutions</div>
+      <h2>Built for the desks that <em>can't compromise</em> on either side.</h2>
+      <p class="section-lead">
+        Most quantitative platforms treat halal compliance as an opt-in filter. Most Sharia-compliant managers don't have institutional-grade quant infrastructure. MizanQuant is built for the desks that need both.
+      </p>
+    </div>
+
+    <div class="aud-grid">
+      <div class="aud-card">
+        <div class="ico"><i class="fas fa-landmark" style="font-size: 16px;"></i></div>
+        <h3>Sovereign wealth funds</h3>
+        <p>Deploy a Sharia-compliant systematic sleeve alongside discretionary mandates, with the audit trail and risk controls a sovereign book requires.</p>
+        <ul>
+          <li>AAOIFI-screened universe by default</li>
+          <li>Per-position VaR & correlation caps</li>
+          <li>Daily report — auditor-ready</li>
+          <li>Telegram + email alert channels</li>
+        </ul>
+      </div>
+      <div class="aud-card">
+        <div class="ico"><i class="fas fa-building-columns" style="font-size: 16px;"></i></div>
+        <h3>Sharia-compliant asset managers</h3>
+        <p>Institutional-grade backtesting, walk-forward optimization, and continuous-Kelly sizing — without giving up your existing compliance committee or fatwa structure.</p>
+        <ul>
+          <li>Per-strategy halal verdict log</li>
+          <li>Purification calculator on dividends</li>
+          <li>Custom haram-industry overlay</li>
+          <li>Fatwa-export per quarter</li>
+        </ul>
+      </div>
+      <div class="aud-card">
+        <div class="ico"><i class="fas fa-users-gear" style="font-size: 16px;"></i></div>
+        <h3>Family offices</h3>
+        <p>A turn-key Sharia-compliant systematic strategy that the family principal can monitor, supervise, and pause from a single dashboard.</p>
+        <ul>
+          <li>Single-screen Overview</li>
+          <li>One-click kill switch</li>
+          <li>Bilingual alerts · EN + العربية</li>
+          <li>Paper-trade book before live</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ CTA ═══ -->
+<section class="cta" id="cta">
+  <div class="cta-glow"></div>
+  <div class="container cta-inner">
+    <h2>Schedule a <em>private briefing.</em></h2>
+    <div class="cta-ar" dir="rtl" lang="ar">احجز جلسة استشارية خاصة مع فريقنا المؤسسي.</div>
+    <p class="cta-lead">
+      We onboard a small number of institutional partners each quarter. A briefing runs 60 minutes — live demo of the Overview, Risk Desk, and Halal Screener, followed by an open discussion of how MizanQuant fits your mandate.
+    </p>
+    <div class="cta-buttons">
+      <a href="mailto:institutional@mizanquant.com" class="btn btn-primary">Request a briefing <i class="fas fa-arrow-right" style="font-size: 11px;"></i></a>
+      <a href="#architecture" class="btn btn-ghost">Download the deck</a>
+    </div>
+    <div class="cta-foot">
+      <div class="item"><i class="fas fa-shield-halved"></i>NDA on request</div>
+      <div class="item"><i class="fas fa-clock"></i>60-minute briefing</div>
+      <div class="item"><i class="fas fa-globe"></i>EN · العربية</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══ -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="wm">mizan<em>quant</em></div>
+        <div class="ar" dir="rtl" lang="ar">ميزان كوانت</div>
+        <p>Sharia-compliant quantitative trading and forecasting. Built for institutional desks across the Gulf and MENA. AAOIFI-aligned by design.</p>
+      </div>
+      <div>
+        <h4>Platform</h4>
+        <ul>
+          <li><a href="#architecture">Architecture</a></li>
+          <li><a href="#performance">Performance</a></li>
+          <li><a href="#compliance">Compliance</a></li>
+          <li><a href="#cta">Pricing</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Research</h4>
+        <ul>
+          <li><a href="#">Forecast methodology</a></li>
+          <li><a href="#">Kelly criterion · Chan Ch. 7</a></li>
+          <li><a href="#">AAOIFI Standard 21</a></li>
+          <li><a href="#">Daily reports archive</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="#">About</a></li>
+          <li><a href="#">Shariah board</a></li>
+          <li><a href="#">Press</a></li>
+          <li><a href="mailto:institutional@mizanquant.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>© 2026 MizanQuant. All rights reserved. Past performance does not guarantee future results.</div>
+      <div class="legal">
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+        <a href="#">Risk disclosure</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- ═══ TERMINAL ACCESS LOCK ═══ -->
+<div class="vault-scrim" id="vaultScrim" onclick="if (event.target === this) closeVault()">
+  <div class="vault" id="vault" role="dialog" aria-modal="true" aria-labelledby="vaultTitle">
+    <div class="vault-head">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div class="titles">
+        <div class="title" id="vaultTitle">Terminal access</div>
+        <div class="ar" dir="rtl" lang="ar">دخول مؤسسي مشفّر</div>
+      </div>
+      <button class="vault-close" onclick="closeVault()" aria-label="Close">
+        <i class="fas fa-xmark" style="font-size: 12px;"></i>
+      </button>
+    </div>
+
+    <div class="vault-status">
+      <span class="dot"></span>
+      <span>session · awaiting credential</span>
+      <span style="margin-left: auto;">tls · 1.3</span>
+    </div>
+
+    <div class="vault-prompt">
+      This vault routes authenticated partners directly to the live MizanQuant terminal. Credentials are issued by the client desk after onboarding.
+    </div>
+
+    <form onsubmit="submitVault(event)" autocomplete="off">
+      <div class="vault-field" id="vaultField">
+        <input id="vaultPwd" type="password" placeholder="············" autocomplete="off" maxlength="32" required>
+        <button class="reveal" type="button" onclick="toggleReveal()" aria-label="Reveal">
+          <i id="vaultEye" class="fas fa-eye"></i>
+        </button>
+      </div>
+
+      <div class="vault-meta">
+        <span>partner-id · MZN-INST-2026</span>
+        <span class="hint">demo · type <strong>mizan2026</strong></span>
+      </div>
+
+      <div class="vault-error" id="vaultError">
+        <i class="fas fa-triangle-exclamation" style="margin-right: 6px;"></i>
+        <span id="vaultErrorMsg">Credential rejected.</span>
+      </div>
+
+      <button class="vault-submit" id="vaultSubmit" type="submit">
+        <i class="fas fa-lock-open"></i>
+        Access terminal
+      </button>
+    </form>
+
+    <div class="vault-foot">
+      <span>SSO · SAML 2.0 available</span>
+      <a href="mailto:institutional@mizanquant.com">Request credentials</a>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CINEMATIC UNLOCK CURTAIN ═══ -->
+<div class="curtain" id="curtain" aria-hidden="true">
+  <div class="curtain-glow"></div>
+  <div class="curtain-mark">
+    <svg viewBox="0 0 64 64" width="48" height="48" aria-hidden="true">
+      <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3"></circle>
+      <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+      <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+    </svg>
+  </div>
+  <div class="curtain-status">
+    <span class="spinner"></span>
+    <span id="curtainStatusText">Verifying credential · 02 of 04</span>
+  </div>
+  <div class="curtain-sub">Terminal handshake <em>established.</em></div>
+  <div class="curtain-ar" dir="rtl" lang="ar">تم التحقق من الهوية. جارٍ توجيه الجلسة.</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ─── demo credential. In production, this round-trips through SAML / WebAuthn. ───
+  var DEMO_PASSWORD = 'mizan2026';
+  var TERMINAL_URL  = '../ui_kits/mizanquant_terminal/index.html';
+
+  var scrim   = document.getElementById('vaultScrim');
+  var vault   = document.getElementById('vault');
+  var pwd     = document.getElementById('vaultPwd');
+  var eye     = document.getElementById('vaultEye');
+  var field   = document.getElementById('vaultField');
+  var error   = document.getElementById('vaultError');
+  var errMsg  = document.getElementById('vaultErrorMsg');
+  var submit  = document.getElementById('vaultSubmit');
+  var curtain = document.getElementById('curtain');
+  var status  = document.getElementById('curtainStatusText');
+
+  window.openVault = function (e) {
+    if (e) e.preventDefault();
+    scrim.classList.add('open');
+    setTimeout(function () { pwd.focus(); }, 200);
+  };
+
+  window.closeVault = function () {
+    scrim.classList.remove('open');
+    pwd.value = '';
+    field.classList.remove('error');
+    error.classList.remove('show');
+  };
+
+  window.toggleReveal = function () {
+    var isPwd = pwd.type === 'password';
+    pwd.type = isPwd ? 'text' : 'password';
+    eye.className = isPwd ? 'fas fa-eye-slash' : 'fas fa-eye';
+  };
+
+  window.submitVault = function (e) {
+    e.preventDefault();
+    var value = (pwd.value || '').trim();
+    error.classList.remove('show');
+    field.classList.remove('error');
+
+    if (value !== DEMO_PASSWORD) {
+      field.classList.add('error');
+      errMsg.textContent = 'Credential rejected. Contact the client desk to refresh your access token.';
+      error.classList.add('show');
+      vault.classList.add('shake');
+      setTimeout(function () { vault.classList.remove('shake'); }, 400);
+      return;
+    }
+
+    // SUCCESS — run cinematic unlock
+    submit.disabled = true;
+    submit.innerHTML = '<i class="fas fa-spinner" style="animation: spinx 0.7s linear infinite;"></i> Verifying…';
+
+    setTimeout(function () {
+      curtain.classList.add('run', 'show');
+      var steps = [
+        'Verifying credential · 02 of 04',
+        'Checking risk-desk posture · 03 of 04',
+        'Routing to terminal · 04 of 04'
+      ];
+      var i = 0;
+      var stepTimer = setInterval(function () {
+        if (i < steps.length) {
+          status.textContent = steps[i++];
+        } else {
+          clearInterval(stepTimer);
+        }
+      }, 520);
+
+      setTimeout(function () {
+        window.location.href = TERMINAL_URL;
+      }, 2200);
+    }, 500);
+  };
+
+  // Esc closes vault
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && scrim.classList.contains('open')) {
+      closeVault();
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

@@ -2,18 +2,104 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/fontawesome/all.min.css">
+<link rel="stylesheet" href="/static/design-tokens.css">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Assistant — MizanQuant</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0a0908; --surface: #121009; --card: #1a1612; --border: #2a2420;
-  --text: #eceae4; --muted: #a8a39d; --accent: #3b82f6; --green: #3ecf8e;
-  --red: #e05252; --yellow: #d4963c; --radius: 6px;
+  --bg-root:        #0c0c10;
+  --bg-surface:     #14141a;
+  --bg-raised:      #1c1c26;
+  --bg-overlay:     #242430;
+  --bg:             #0c0c10;
+  --surface:        #14141a;
+  --card:           #1c1c26;
+  --bg-card:        #1c1c26;
+  --bg-hover:       #242430;
+  --surface-raised: #1c1c26;
+  --border-subtle:  rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-strong:  rgba(255, 255, 255, 0.10);
+  --border:         rgba(255, 255, 255, 0.06);
+  --border-light:   rgba(255, 255, 255, 0.04);
+  --border-hi:      rgba(255, 255, 255, 0.10);
+  --text-primary:   #e4e4ec;
+  --text-secondary: #9494a0;
+  --text-muted:     #5c5c6a;
+  --text-disabled:  #3c3c48;
+  --text:           #e4e4ec;
+  --txt:            #e4e4ec;
+  --txt2:           #9494a0;
+  --txt3:           #5c5c6a;
+  --muted:          #5c5c6a;
+  --accent:         #c8963e;
+  --accent-hover:   #d4a853;
+  --accent-dim:     rgba(200, 150, 62, 0.10);
+  --accent-glow:    rgba(200, 150, 62, 0.18);
+  --positive:       #4ade80;
+  --positive-dim:   rgba(74, 222, 128, 0.10);
+  --negative:       #f87171;
+  --negative-dim:   rgba(248, 113, 113, 0.10);
+  --warning:        #fbbf24;
+  --warning-dim:    rgba(251, 191, 36, 0.10);
+  --info:           #60a5fa;
+  --info-dim:       rgba(96, 165, 250, 0.10);
+  --green:          #4ade80;
+  --green-dim:      rgba(74, 222, 128, 0.10);
+  --red:            #f87171;
+  --red-dim:        rgba(248, 113, 113, 0.10);
+  --yellow:         #fbbf24;
+  --amber:          #fbbf24;
+  --amber-dim:      rgba(251, 191, 36, 0.10);
+  --orange:         #fb923c;
+  --gold:           #c8963e;
+  --accent-green:   #4ade80;
+  --accent-red:     #f87171;
+  --accent-orange:  #fb923c;
+  --accent-purple:  #a78bfa;
+  --accent2:        #a78bfa;
+  --fam-transformer: #eab308;
+  --fam-rnn:         #a855f7;
+  --fam-lstm:        var(--accent);
+  --fam-cnn:         #06b6d4;
+  --fam-ensemble:    #22c55e;
+  --fam-classic:     #64748b;
+  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --font-arabic:  'Cairo', 'Tahoma', 'Geeza Pro', system-ui, sans-serif;
+  --mono:         'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --text-xs:   0.625rem;
+  --text-sm:   0.75rem;
+  --text-base: 0.8125rem;
+  --text-md:   0.9375rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.375rem;
+  --text-2xl:  1.625rem;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius:    5px;
+  --r:         5px;
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
+  --sidebar-w:  56px;
+  --cmd-h:      48px;
+  --market-h:   36px;
+  --status-h:   28px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font: 14px/1.5 "Inter", -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; height: 100vh; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+body { font: 13px/1.5 var(--font-body); background: var(--bg); color: var(--text); padding: 20px; height: 100vh; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
 .header h1 { font-size: 22px; font-weight: 600; }
 .header h1 span { color: var(--accent); }
@@ -314,5 +400,6 @@ async function loadConsensus() {
 // Load defaults
 loadConsensus();
 </script>
+<script src="/static/ecosystem-strip.js" defer></script>
 </body>
 </html>

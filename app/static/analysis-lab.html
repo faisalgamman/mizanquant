@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/fontawesome/all.min.css">
+<link rel="stylesheet" href="/static/design-tokens.css">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Analysis Lab — Mizanquant</title>
 <script src="/static/chart.umd.min.js"></script>
@@ -10,22 +15,90 @@
    ANALYSIS LAB — Unified Forecast + Trading Intelligence
    ═══════════════════════════════════════════════════════════════ */
 :root {
-  --bg:          #0b0d12;
-  --bg-card:     #111520;
-  --bg-raised:   #181d28;
-  --bg-hover:    #1e2434;
-  --border:      rgba(255,255,255,.07);
-  --border-hi:   rgba(255,255,255,.14);
-  --txt:         #e2e5ed;
-  --txt2:        #7c8499;
-  --txt3:        #4a5066;
-  --accent:      #4f8ef7;
-  --accent2:     #7c6af4;
-  --green:       #3ecf8e;
-  --red:         #f25252;
-  --orange:      #f0a04b;
-  --gold:        #f5c842;
-  --r:           8px;
+  --bg-root:        #0c0c10;
+  --bg-surface:     #14141a;
+  --bg-raised:      #1c1c26;
+  --bg-overlay:     #242430;
+  --bg:             #0c0c10;
+  --surface:        #14141a;
+  --card:           #1c1c26;
+  --bg-card:        #1c1c26;
+  --bg-hover:       #242430;
+  --surface-raised: #1c1c26;
+  --border-subtle:  rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-strong:  rgba(255, 255, 255, 0.10);
+  --border:         rgba(255, 255, 255, 0.06);
+  --border-light:   rgba(255, 255, 255, 0.04);
+  --border-hi:      rgba(255, 255, 255, 0.10);
+  --text-primary:   #e4e4ec;
+  --text-secondary: #9494a0;
+  --text-muted:     #5c5c6a;
+  --text-disabled:  #3c3c48;
+  --text:           #e4e4ec;
+  --txt:            #e4e4ec;
+  --txt2:           #9494a0;
+  --txt3:           #5c5c6a;
+  --muted:          #5c5c6a;
+  --accent:         #c8963e;
+  --accent-hover:   #d4a853;
+  --accent-dim:     rgba(200, 150, 62, 0.10);
+  --accent-glow:    rgba(200, 150, 62, 0.18);
+  --positive:       #4ade80;
+  --positive-dim:   rgba(74, 222, 128, 0.10);
+  --negative:       #f87171;
+  --negative-dim:   rgba(248, 113, 113, 0.10);
+  --warning:        #fbbf24;
+  --warning-dim:    rgba(251, 191, 36, 0.10);
+  --info:           #60a5fa;
+  --info-dim:       rgba(96, 165, 250, 0.10);
+  --green:          #4ade80;
+  --green-dim:      rgba(74, 222, 128, 0.10);
+  --red:            #f87171;
+  --red-dim:        rgba(248, 113, 113, 0.10);
+  --yellow:         #fbbf24;
+  --amber:          #fbbf24;
+  --amber-dim:      rgba(251, 191, 36, 0.10);
+  --orange:         #fb923c;
+  --gold:           #c8963e;
+  --accent-green:   #4ade80;
+  --accent-red:     #f87171;
+  --accent-orange:  #fb923c;
+  --accent-purple:  #a78bfa;
+  --accent2:        #a78bfa;
+  --fam-transformer: #eab308;
+  --fam-rnn:         #a855f7;
+  --fam-lstm:        var(--accent);
+  --fam-cnn:         #06b6d4;
+  --fam-ensemble:    #22c55e;
+  --fam-classic:     #64748b;
+  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --font-arabic:  'Cairo', 'Tahoma', 'Geeza Pro', system-ui, sans-serif;
+  --mono:         'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --text-xs:   0.625rem;
+  --text-sm:   0.75rem;
+  --text-base: 0.8125rem;
+  --text-md:   0.9375rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.375rem;
+  --text-2xl:  1.625rem;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius:    5px;
+  --r:         5px;
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
+  --sidebar-w:  56px;
+  --cmd-h:      48px;
+  --market-h:   36px;
+  --status-h:   28px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{font-size:15px;-webkit-font-smoothing:antialiased}
@@ -55,13 +128,13 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
 .chip-warn{background:rgba(240,160,75,.15);color:var(--orange)}
 .btn{padding:7px 16px;border:none;border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
 .btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover{background:#3a7be0}
+.btn-primary:hover{background:var(--accent-hover)}
 .btn-primary:disabled{opacity:.45;cursor:not-allowed}
 .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--txt2)}
 .btn-ghost:hover{border-color:var(--border-hi);color:var(--txt)}
 .btn-sm{padding:5px 12px;font-size:12px}
 .btn-run{padding:4px 10px;font-size:11px;font-weight:700;border:none;border-radius:5px;cursor:pointer;background:var(--accent);color:#fff;transition:.12s;white-space:nowrap}
-.btn-run:hover{background:#3a7be0}
+.btn-run:hover{background:var(--accent-hover)}
 .btn-run:disabled{opacity:.4;cursor:not-allowed}
 .btn-run.running{background:#7c6af4}
 
@@ -469,7 +542,7 @@ var agRunning = 0, agTotal = 0;
       document.getElementById('fcGrid').innerHTML =
         '<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:#f59e0b;">' +
         '⚠️ لم يتم تحميل قائمة النماذج. قد يكون PyTorch غير متاح أو الذاكرة غير كافية.<br>' +
-        '<button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;">↻ إعادة المحاولة</button>' +
+        '<button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;">↻ إعادة المحاولة</button>' +
         '</div>';
       document.getElementById('agGrid').innerHTML = '';
       document.getElementById('fcProgress').textContent = '0 / 0';
@@ -1175,5 +1248,6 @@ function showToast(msg) {
   _toastTimer = setTimeout(() => t && t.remove(), 4000);
 }
 </script>
+<script src="/static/ecosystem-strip.js" defer></script>
 </body>
 </html>

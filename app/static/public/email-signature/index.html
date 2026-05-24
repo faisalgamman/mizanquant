@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Email signature</title>
+<link rel="icon" type="image/svg+xml" href="/static/public/assets/logo-favicon.svg">
+<link rel="stylesheet" href="/static/design-tokens.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg-root); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+body { font-family: var(--font-body); font-size: 14px; line-height: 1.55; padding: 48px 24px 80px; }
+
+.wrap { max-width: 1080px; margin: 0 auto; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::selection { background: var(--accent-dim); color: var(--accent); }
+
+.header {
+  text-align: center;
+  margin-bottom: 56px;
+}
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+.eyebrow .dot {
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+h1 {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  line-height: 1.15;
+  margin-bottom: 14px;
+}
+h1 em { font-style: normal; color: var(--accent); }
+.lead {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Variant block */
+.variant {
+  margin-bottom: 40px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.variant-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.variant-name {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display);
+  font-size: 14px; font-weight: 600;
+  color: var(--text-primary);
+}
+.variant-name .swatch {
+  width: 14px; height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+}
+.variant-name .swatch.dark { background: var(--bg-root); }
+.variant-name .swatch.light { background: #ffffff; border-color: #c8963e; }
+.variant-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.variant-meta strong { color: var(--text-secondary); }
+
+/* Faux email-client chrome */
+.client-frame {
+  padding: 30px 32px 24px;
+  background: var(--bg-raised);
+}
+.client-frame.light-canvas {
+  background: #f3eee2;   /* slightly warm so the white sig pops */
+}
+.client-frame .from {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border-default);
+}
+.client-frame.light-canvas .from { color: #9c968a; border-bottom-color: #d9cfb4; }
+.client-frame .from strong { color: var(--text-secondary); }
+.client-frame.light-canvas .from strong { color: #1d1d22; }
+.client-frame .body {
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+.client-frame.light-canvas .body { color: #5e5e68; }
+.client-frame .sign-off {
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.client-frame.light-canvas .sign-off { color: #9c968a; }
+
+/* Action bar */
+.variant-actions {
+  display: flex; gap: 10px; align-items: center;
+  padding: 14px 24px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-primary {
+  background: var(--accent); color: var(--bg-root);
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary.copied { background: var(--positive); }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.btn-ghost:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.action-hint {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* Customize panel */
+.custom-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  margin-bottom: 40px;
+}
+.custom-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.custom-title {
+  font-family: var(--font-display);
+  font-size: 14px; font-weight: 700;
+}
+.custom-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+}
+.custom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+}
+.field-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 5px;
+  display: block;
+}
+.field-input {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.field-input:focus { border-color: var(--accent); }
+.full { grid-column: 1 / -1; }
+
+/* Install instructions */
+.install {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+.install-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 22px 24px;
+}
+.install-card .icon {
+  width: 36px; height: 36px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.install-card h3 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+  margin-bottom: 12px;
+}
+.install-card ol {
+  list-style: none;
+  counter-reset: step;
+}
+.install-card li {
+  counter-increment: step;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding: 6px 0 6px 26px;
+  position: relative;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.install-card li:last-child { border-bottom: none; }
+.install-card li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0; top: 6px;
+  width: 18px; height: 18px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.install-card kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+}
+
+/* HTML source preview */
+.source-block {
+  display: none;
+  margin-top: 14px;
+}
+.source-block.open { display: block; }
+.source-block pre {
+  background: var(--bg-root);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  max-height: 240px;
+  overflow: auto;
+  letter-spacing: 0.2px;
+}
+
+@media (max-width: 920px) {
+  .custom-grid, .install { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="header">
+    <div class="eyebrow"><span class="dot"></span>Brand &middot; Email signature</div>
+    <h1>Bilingual <em>institutional</em> email signature</h1>
+    <p class="lead">A table-based, inline-styled signature that drops directly into Gmail, Outlook, and Apple Mail without breaking. Dark variant for the Bloomberg-terminal vibe; light variant when an in-thread dark card feels too heavy. Both bilingual (EN · العربية), both ~540px wide.</p>
+  </div>
+
+  <!-- ═══ CUSTOMIZE PANEL ═══ -->
+  <div class="custom-panel">
+    <div class="custom-head">
+      <div class="custom-title">Personalise · live preview updates below</div>
+      <div class="custom-sub">EDITS ARE LOCAL · STORED IN BROWSER ONLY</div>
+    </div>
+    <div class="custom-grid">
+      <div>
+        <label class="field-label">Full name</label>
+        <input class="field-input" id="fName" value="Faisal Al-Mansouri">
+      </div>
+      <div>
+        <label class="field-label">Arabic name</label>
+        <input class="field-input" id="fNameAr" value="فيصل المنصوري" dir="rtl" lang="ar" style="font-family: 'Cairo', sans-serif;">
+      </div>
+      <div>
+        <label class="field-label">Title</label>
+        <input class="field-input" id="fTitle" value="Founder · Institutional Partnerships">
+      </div>
+      <div>
+        <label class="field-label">Partner ID</label>
+        <input class="field-input" id="fPid" value="MZN-INST-026Q2" style="font-family: var(--font-mono);">
+      </div>
+      <div>
+        <label class="field-label">Email</label>
+        <input class="field-input" id="fEmail" value="faisal@mizanquant.com">
+      </div>
+      <div>
+        <label class="field-label">Phone</label>
+        <input class="field-input" id="fPhone" value="+971 4 555 0142">
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ DARK VARIANT ═══ -->
+  <div class="variant">
+    <div class="variant-head">
+      <div class="variant-name">
+        <span class="swatch dark"></span>
+        Dark · primary
+      </div>
+      <div class="variant-meta">540px · <strong>Recommended</strong> · For dark-themed inboxes &amp; institutional vibe</div>
+    </div>
+    <div class="client-frame">
+      <div class="from">
+        <strong>Faisal Al-Mansouri</strong> &lt;faisal@mizanquant.com&gt; &middot; <span style="color:var(--text-disabled);">to: institutional@swf.example</span>
+      </div>
+      <div class="body">
+        Thank you for the introduction. Attached please find our institutional fact sheet and a calendar link for a 60-minute private briefing next week.
+      </div>
+      <div class="sign-off">Kind regards,</div>
+      <div id="sigDarkSlot"></div>
+    </div>
+    <div class="variant-actions">
+      <button class="btn btn-primary" onclick="copySig('dark', this)"><i class="fas fa-copy" style="font-size:10px;"></i><span>Copy HTML</span></button>
+      <a class="btn btn-ghost" href="signature-dark.html" target="_blank"><i class="fas fa-arrow-up-right-from-square" style="font-size:10px;"></i>Open source</a>
+      <button class="btn btn-ghost" onclick="toggleSource('darkSource')"><i class="fas fa-code" style="font-size:10px;"></i>View HTML</button>
+      <span class="action-hint">Paste straight into Gmail / Outlook / Apple Mail</span>
+    </div>
+    <div class="source-block" id="darkSource"><pre id="darkSourceText"></pre></div>
+  </div>
+
+  <!-- ═══ LIGHT VARIANT ═══ -->
+  <div class="variant">
+    <div class="variant-head">
+      <div class="variant-name">
+        <span class="swatch light"></span>
+        Light · fallback
+      </div>
+      <div class="variant-meta">540px · For default-light Gmail · same content, white canvas</div>
+    </div>
+    <div class="client-frame light-canvas">
+      <div class="from">
+        <strong>Faisal Al-Mansouri</strong> &lt;faisal@mizanquant.com&gt; &middot; <span style="color:#bcb6a8;">to: family-office@example</span>
+      </div>
+      <div class="body">
+        As discussed on the call, here is the architecture overview and the AAOIFI four-screen specimen. Happy to walk the Sharia board through it on Tuesday.
+      </div>
+      <div class="sign-off">Best,</div>
+      <div id="sigLightSlot"></div>
+    </div>
+    <div class="variant-actions">
+      <button class="btn btn-primary" onclick="copySig('light', this)"><i class="fas fa-copy" style="font-size:10px;"></i><span>Copy HTML</span></button>
+      <a class="btn btn-ghost" href="signature-light.html" target="_blank"><i class="fas fa-arrow-up-right-from-square" style="font-size:10px;"></i>Open source</a>
+      <button class="btn btn-ghost" onclick="toggleSource('lightSource')"><i class="fas fa-code" style="font-size:10px;"></i>View HTML</button>
+      <span class="action-hint">Paste straight into Gmail / Outlook / Apple Mail</span>
+    </div>
+    <div class="source-block" id="lightSource"><pre id="lightSourceText"></pre></div>
+  </div>
+
+  <!-- ═══ INSTALL ═══ -->
+  <div class="install">
+    <div class="install-card">
+      <div class="icon"><i class="fab fa-google"></i></div>
+      <h3>Gmail</h3>
+      <ol>
+        <li>Click <kbd>Copy HTML</kbd> above for the variant you want.</li>
+        <li>Open Gmail &rarr; Settings (⚙) &rarr; <kbd>See all settings</kbd>.</li>
+        <li>Scroll to <kbd>Signature</kbd> &rarr; <kbd>Create new</kbd>.</li>
+        <li>Click in the signature editor, then <kbd>⌘+V</kbd> (or <kbd>Ctrl+V</kbd>) to paste.</li>
+        <li>Scroll down &rarr; <kbd>Save Changes</kbd>.</li>
+      </ol>
+    </div>
+    <div class="install-card">
+      <div class="icon"><i class="fab fa-microsoft"></i></div>
+      <h3>Outlook</h3>
+      <ol>
+        <li>Open the variant's <kbd>signature-*.html</kbd> file in your browser.</li>
+        <li>Select the whole rendered signature &amp; copy (<kbd>⌘+A</kbd> &rarr; <kbd>⌘+C</kbd>).</li>
+        <li>Outlook &rarr; <kbd>File</kbd> &rarr; <kbd>Options</kbd> &rarr; <kbd>Mail</kbd> &rarr; <kbd>Signatures…</kbd>.</li>
+        <li>Click <kbd>New</kbd>, name it <em>MizanQuant</em>, paste into the editor.</li>
+        <li>Set default signature &rarr; <kbd>OK</kbd>.</li>
+      </ol>
+    </div>
+    <div class="install-card">
+      <div class="icon"><i class="fab fa-apple"></i></div>
+      <h3>Apple Mail</h3>
+      <ol>
+        <li>Open the variant's <kbd>signature-*.html</kbd> file in Safari.</li>
+        <li>Select all (<kbd>⌘+A</kbd>) &amp; copy.</li>
+        <li>Mail &rarr; <kbd>Settings</kbd> &rarr; <kbd>Signatures</kbd> &rarr; <kbd>+</kbd>.</li>
+        <li>Paste; uncheck <kbd>Always match my default message font</kbd>.</li>
+        <li>Drag your new signature onto the relevant account.</li>
+      </ol>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// =============================================================
+// Inline signature builders — keep in sync with signature-*.html
+// (we rebuild from a single template so the live preview updates
+//  as the user edits the form fields)
+// =============================================================
+const LOGO_URL = "/static/public/assets/logo-monogram.svg";
+
+function buildDark(d) {
+  return `<table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;font-family:'DM Sans',Arial,Helvetica,sans-serif;width:540px;background-color:#0c0c10;border:1px solid rgba(200,150,62,0.35);border-radius:8px;color:#e4e4ec;">
+  <tr><td style="padding:18px 22px 16px;border-bottom:1px solid rgba(255,255,255,0.06);">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;"><tr>
+      <td style="vertical-align:middle;width:200px;">
+        <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;"><tr>
+          <td style="width:36px;height:36px;background:#241e10;border:1px solid rgba(200,150,62,0.35);border-radius:7px;text-align:center;vertical-align:middle;padding:6px;">
+            <img src="${LOGO_URL}" alt="mizanquant" width="22" height="22" style="display:block;margin:0 auto;border:0;outline:0;">
+          </td>
+          <td style="padding-left:10px;vertical-align:middle;">
+            <div style="font-family:'DM Sans',Arial,sans-serif;font-size:15px;font-weight:800;letter-spacing:-0.3px;color:#e4e4ec;line-height:1.1;">mizan<span style="color:#c8963e;">quant</span></div>
+            <div style="font-family:'Cairo',Tahoma,Geneva,sans-serif;font-size:11px;font-weight:700;color:#c8963e;margin-top:1px;direction:rtl;" dir="rtl" lang="ar">ميزان كوانت</div>
+          </td>
+        </tr></table>
+      </td>
+      <td align="right" style="vertical-align:middle;">
+        <span style="display:inline-block;padding:3px 9px;background:#241e10;border:1px solid rgba(200,150,62,0.35);border-radius:11px;color:#c8963e;font-family:'DM Sans',Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">AAOIFI Std 21 · Compliant</span>&nbsp;
+        <span style="display:inline-block;padding:3px 9px;background:#102415;border:1px solid rgba(74,222,128,0.35);border-radius:11px;color:#4ade80;font-family:'DM Sans',Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Risk-desk supervised</span>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:16px 22px 12px;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;"><tr>
+      <td style="vertical-align:top;">
+        <div style="font-family:'DM Sans',Arial,sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.4px;color:#e4e4ec;line-height:1.1;">${d.name}</div>
+        <div style="font-family:'Cairo',Tahoma,Geneva,sans-serif;font-size:13px;color:#c8963e;font-weight:700;margin-top:3px;direction:rtl;" dir="rtl" lang="ar">${d.nameAr}</div>
+        <div style="font-family:'DM Sans',Arial,sans-serif;font-size:12px;color:#9494a0;margin-top:6px;line-height:1.4;">${d.title}</div>
+      </td>
+      <td align="right" style="vertical-align:top;width:160px;">
+        <div style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:9px;color:#5c5c6a;letter-spacing:0.6px;text-transform:uppercase;font-weight:600;">Partner ID</div>
+        <div style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:12px;color:#c8963e;font-weight:700;margin-top:3px;letter-spacing:0.5px;">${d.pid}</div>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:0 22px 16px;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;border-top:1px solid rgba(255,255,255,0.06);padding-top:10px;"><tr>
+      <td style="padding-top:12px;">
+        <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;"><tr>
+          <td style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:11px;color:#9494a0;padding-right:14px;"><span style="color:#c8963e;font-weight:700;">M</span>&nbsp;<a href="mailto:${d.email}" style="color:#e4e4ec;text-decoration:none;">${d.email}</a></td>
+          <td style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:11px;color:#9494a0;padding-right:14px;"><span style="color:#c8963e;font-weight:700;">T</span>&nbsp;<span style="color:#e4e4ec;">${d.phone}</span></td>
+          <td style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:11px;color:#9494a0;"><span style="color:#c8963e;font-weight:700;">W</span>&nbsp;<a href="https://mizanquant.com" style="color:#e4e4ec;text-decoration:none;">mizanquant.com</a></td>
+        </tr></table>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="background:#14141a;padding:10px 22px;border-top:1px solid rgba(255,255,255,0.06);border-radius:0 0 8px 8px;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;"><tr>
+      <td style="font-family:'DM Sans',Arial,sans-serif;font-size:10px;color:#5c5c6a;"><span style="color:#9494a0;">Halal Trading Suite</span> &middot; DIFC, Dubai &middot; Confidential — for the named recipient only</td>
+      <td align="right" style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:9px;color:#5c5c6a;letter-spacing:0.5px;">EN · العربية</td>
+    </tr></table>
+  </td></tr>
+</table>`;
+}
+
+function buildLight(d) {
+  return `<table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;font-family:'DM Sans',Arial,Helvetica,sans-serif;width:540px;background-color:#ffffff;border:1px solid #e7e1d3;border-left:4px solid #c8963e;border-radius:6px;color:#1d1d22;">
+  <tr><td style="padding:16px 22px 14px;border-bottom:1px solid #f1ebdb;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;"><tr>
+      <td style="vertical-align:middle;width:220px;">
+        <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;"><tr>
+          <td style="width:36px;height:36px;background:#fbf3df;border:1px solid #e6cc8c;border-radius:7px;text-align:center;vertical-align:middle;padding:6px;">
+            <img src="${LOGO_URL}" alt="mizanquant" width="22" height="22" style="display:block;margin:0 auto;border:0;outline:0;">
+          </td>
+          <td style="padding-left:10px;vertical-align:middle;">
+            <div style="font-family:'DM Sans',Arial,sans-serif;font-size:15px;font-weight:800;letter-spacing:-0.3px;color:#1d1d22;line-height:1.1;">mizan<span style="color:#c8963e;">quant</span></div>
+            <div style="font-family:'Cairo',Tahoma,Geneva,sans-serif;font-size:11px;font-weight:700;color:#c8963e;margin-top:1px;direction:rtl;" dir="rtl" lang="ar">ميزان كوانت</div>
+          </td>
+        </tr></table>
+      </td>
+      <td align="right" style="vertical-align:middle;">
+        <span style="display:inline-block;padding:3px 9px;background:#fbf3df;border:1px solid #e6cc8c;border-radius:11px;color:#9a6f1f;font-family:'DM Sans',Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">AAOIFI Std 21 · Compliant</span>&nbsp;
+        <span style="display:inline-block;padding:3px 9px;background:#ecf9ef;border:1px solid #b6e6c1;border-radius:11px;color:#2c8244;font-family:'DM Sans',Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;">Risk-desk supervised</span>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:14px 22px 10px;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;"><tr>
+      <td style="vertical-align:top;">
+        <div style="font-family:'DM Sans',Arial,sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.4px;color:#1d1d22;line-height:1.1;">${d.name}</div>
+        <div style="font-family:'Cairo',Tahoma,Geneva,sans-serif;font-size:13px;color:#c8963e;font-weight:700;margin-top:3px;direction:rtl;" dir="rtl" lang="ar">${d.nameAr}</div>
+        <div style="font-family:'DM Sans',Arial,sans-serif;font-size:12px;color:#5e5e68;margin-top:6px;">${d.title}</div>
+      </td>
+      <td align="right" style="vertical-align:top;width:160px;">
+        <div style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:9px;color:#9c968a;letter-spacing:0.6px;text-transform:uppercase;font-weight:600;">Partner ID</div>
+        <div style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:12px;color:#9a6f1f;font-weight:700;margin-top:3px;letter-spacing:0.5px;">${d.pid}</div>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:0 22px 14px;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;border-top:1px solid #f1ebdb;padding-top:8px;"><tr>
+      <td style="padding-top:10px;">
+        <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;"><tr>
+          <td style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:11px;color:#5e5e68;padding-right:14px;"><span style="color:#9a6f1f;font-weight:700;">M</span>&nbsp;<a href="mailto:${d.email}" style="color:#1d1d22;text-decoration:none;">${d.email}</a></td>
+          <td style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:11px;color:#5e5e68;padding-right:14px;"><span style="color:#9a6f1f;font-weight:700;">T</span>&nbsp;<span style="color:#1d1d22;">${d.phone}</span></td>
+          <td style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:11px;color:#5e5e68;"><span style="color:#9a6f1f;font-weight:700;">W</span>&nbsp;<a href="https://mizanquant.com" style="color:#1d1d22;text-decoration:none;">mizanquant.com</a></td>
+        </tr></table>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="background:#fbf8ee;padding:8px 22px;border-top:1px solid #f1ebdb;border-radius:0 0 4px 4px;">
+    <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="100%" style="border-collapse:collapse;"><tr>
+      <td style="font-family:'DM Sans',Arial,sans-serif;font-size:10px;color:#9c968a;"><span style="color:#5e5e68;">Halal Trading Suite</span> &middot; DIFC, Dubai &middot; Confidential — for the named recipient only</td>
+      <td align="right" style="font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-size:9px;color:#9c968a;letter-spacing:0.5px;">EN · العربية</td>
+    </tr></table>
+  </td></tr>
+</table>`;
+}
+
+function readForm() {
+  return {
+    name:   document.getElementById('fName').value || 'Faisal Al-Mansouri',
+    nameAr: document.getElementById('fNameAr').value || 'فيصل المنصوري',
+    title:  document.getElementById('fTitle').value || 'Founder · Institutional Partnerships',
+    pid:    document.getElementById('fPid').value || 'MZN-INST-026Q2',
+    email:  document.getElementById('fEmail').value || 'faisal@mizanquant.com',
+    phone:  document.getElementById('fPhone').value || '+971 4 555 0142',
+  };
+}
+
+let darkHtml = '', lightHtml = '';
+
+function refresh() {
+  const d = readForm();
+  darkHtml  = buildDark(d);
+  lightHtml = buildLight(d);
+  document.getElementById('sigDarkSlot').innerHTML  = darkHtml;
+  document.getElementById('sigLightSlot').innerHTML = lightHtml;
+  document.getElementById('darkSourceText').textContent  = darkHtml;
+  document.getElementById('lightSourceText').textContent = lightHtml;
+}
+
+function copySig(which, btn) {
+  const html = which === 'dark' ? darkHtml : lightHtml;
+  const span = btn.querySelector('span');
+  if (navigator.clipboard && window.ClipboardItem) {
+    const blob = new Blob([html], { type: 'text/html' });
+    const plain = new Blob([html], { type: 'text/plain' });
+    navigator.clipboard.write([new ClipboardItem({ 'text/html': blob, 'text/plain': plain })])
+      .then(() => done())
+      .catch(() => fallback());
+  } else {
+    fallback();
+  }
+  function fallback() {
+    navigator.clipboard.writeText(html).then(done).catch(() => {});
+  }
+  function done() {
+    btn.classList.add('copied');
+    span.textContent = 'Copied';
+    setTimeout(() => { btn.classList.remove('copied'); span.textContent = 'Copy HTML'; }, 1600);
+  }
+}
+
+function toggleSource(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+// React to form edits
+document.querySelectorAll('.field-input').forEach((el) =>
+  el.addEventListener('input', refresh)
+);
+refresh();
+</script>
+
+</body>
+</html>
