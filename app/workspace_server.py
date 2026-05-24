@@ -6058,6 +6058,36 @@ async def get_investors_page():
     return HTMLResponse("<h1>Investors Insights not found</h1>", status_code=404)
 
 
+@app.get("/macro", include_in_schema=False)
+async def get_macro_page():
+    """Serve the Macro · FRED indicators page."""
+    p = Path(__file__).resolve().parent / "static" / "macro.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
+    return HTMLResponse("<h1>Macro page not found</h1>", status_code=404)
+
+
+@app.get("/etf", include_in_schema=False)
+async def get_etf_page():
+    """Serve the ETF Explorer page."""
+    p = Path(__file__).resolve().parent / "static" / "etf.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
+    return HTMLResponse("<h1>ETF Explorer not found</h1>", status_code=404)
+
+
+@app.get("/rotation", include_in_schema=False)
+async def get_rotation_page():
+    """Serve the Sector Rotation (RRG) page."""
+    p = Path(__file__).resolve().parent / "static" / "rotation.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
+    return HTMLResponse("<h1>Rotation page not found</h1>", status_code=404)
+
+
 # ---------------------------------------------------------------------------
 # Strategies Backtest Data — /api/strategies/backtest-data
 # ---------------------------------------------------------------------------
