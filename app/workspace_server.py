@@ -201,9 +201,9 @@ def _make_session_token() -> str:
 # ---------------------------------------------------------------------------
 
 @app.get("/login", include_in_schema=False)
-async def login_page(next: str = "/dashboard"):
-    """Show the login form. Default post-login destination = Stock Intelligence."""
-    safe_next = next if next.startswith("/") else "/dashboard"
+async def login_page(next: str = "/terminal"):
+    """Show the login form. Default post-login destination = the single terminal."""
+    safe_next = next if next.startswith("/") else "/terminal"
     html = LOGIN_HTML.replace('action="/login"', f'action="/login"').replace(
         '<input type="text" name="username"',
         f'<input type="hidden" name="next" value="{safe_next}"><input type="text" name="username"'
@@ -218,9 +218,9 @@ async def login_post(request: Request):
         form = await request.form()
         username = str(form.get("username") or "")
         password = str(form.get("password") or "")
-        next_url = str(form.get("next") or "/dashboard")
+        next_url = str(form.get("next") or "/terminal")
         if not next_url.startswith("/"):
-            next_url = "/dashboard"
+            next_url = "/terminal"
 
         # Compute sha256 of entered password (lowercase hex)
         pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -6394,15 +6394,22 @@ async def get_onboarding():
 
 @app.get("/dashboard", include_in_schema=False)
 async def get_dashboard_alt():
-    """Serve the legacy dashboard (accessible for reference)."""
-    _base = Path(__file__).resolve().parent / "static"
-    for name in ("dashboard.html", "dashboard-legacy.html"):
-        p = _base / name
-        if p.exists():
-            return HTMLResponse(
-                content=p.read_text(encoding="utf-8"),
-                headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
-            )
+    """Consolidated → the single dashboard is now /terminal.
+
+    dashboard.html is retired (its layout broke and it duplicated /terminal);
+    everyone is sent to the one clean terminal. The legacy file remains in the
+    repo for reference at /dashboard-legacy.
+    """
+    return RedirectResponse("/terminal", status_code=302)
+
+
+@app.get("/dashboard-legacy-html", include_in_schema=False)
+async def get_dashboard_legacy_html():
+    """Legacy dashboard.html kept for reference only."""
+    p = Path(__file__).resolve().parent / "static" / "dashboard.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-store"})
     return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
 

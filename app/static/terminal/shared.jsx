@@ -187,7 +187,6 @@ const mockConsensusVotes = [
 
 const mockNav = [
   { i: "fa-th-large",      l: "Overview",        active: true, badge: "Live", href: "/terminal" },
-  { i: "fa-gauge-high",    l: "Stock Intel",     href: "/dashboard" },
 ];
 const mockNavForecast = [
   { i: "fa-brain",         l: "Analysis Lab",    href: "/analysis-lab" },
