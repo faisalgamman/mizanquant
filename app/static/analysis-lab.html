@@ -418,6 +418,9 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
         <div class="consensus-title">🎯 Combined Signal — <span id="csymbol">AAPL</span></div>
         <div id="signalBadge" class="signal-badge signal-WAIT">WAIT</div>
       </div>
+      <div style="font-size:10px;color:var(--txt3);margin:-4px 2px 10px;line-height:1.5">
+        Research view. Forecast direction is <strong>skill-weighted by real out-of-sample accuracy</strong> — coin-flip models do not move the signal. Agents with zero trades are excluded. Not investment advice; validate on the paper track record before acting.
+      </div>
       <div class="consensus-grid">
         <div class="c-metric"><div class="c-metric-label">Overall Signal</div><div class="c-metric-val" id="csignal" style="color:var(--txt2)">—</div></div>
         <div class="c-metric"><div class="c-metric-label" title="Avg FQ Score: (100−MAPE)/20 — not a real Sharpe ratio.">Avg Forecast FQ</div><div class="c-metric-val" id="cfc_sharpe">—</div></div>
@@ -863,7 +866,7 @@ function refreshAll() {
 
 // ═══ RESULT PROCESSORS ═══
 function processFcResult(name, data, id) {
-  let direction = 'FLAT', sharpe = 0, conf = 0, sparkData = [];
+  let direction = 'FLAT', sharpe = 0, conf = 0, dirAcc = null, sparkData = [];
   if (data && data.results && data.results.length > 0) {
     const r = data.results;
     sparkData = r.map(x => x.predicted||0);
@@ -872,9 +875,13 @@ function processFcResult(name, data, id) {
     direction = last > first ? 'UP' : last < first ? 'DOWN' : 'FLAT';
     const mapePct = data.metrics && data.metrics.mape != null ? data.metrics.mape * 100 : null;
     sharpe = mapePct != null ? Math.max(0, 100 - mapePct) / 20 : 0;
-    conf = mapePct != null ? Math.max(0, 100 - mapePct) : 0;
+    // REAL out-of-sample directional accuracy — the honest "edge" metric.
+    dirAcc = data.metrics && data.metrics.directional_accuracy != null
+      ? data.metrics.directional_accuracy * 100 : null;
+    // Honest confidence = how far directional accuracy beats a coin-flip.
+    conf = dirAcc != null ? Math.round(Math.abs(dirAcc - 50) * 2) : 0;
   }
-  fcResults[name] = {data, direction, sharpe, conf};
+  fcResults[name] = {data, direction, sharpe, conf, dirAcc};
 
   // Update card
   const isUp = direction==='UP';
@@ -883,7 +890,16 @@ function processFcResult(name, data, id) {
   document.getElementById('met-sharpe-'+id).className = 'm-metric-val '+(sharpe>1.5?'up':sharpe>0.5?'neutral':'down');
   document.getElementById('met-extra-'+id).textContent = direction === 'UP' ? '↑ Bullish' : direction==='DOWN'?'↓ Bearish':'→ Flat';
   document.getElementById('met-extra-'+id).className = 'm-metric-val '+(isUp?'up':'down');
-  document.getElementById('status-'+id).textContent = direction + ' · conf ' + conf.toFixed(0)+'%';
+  // Win-rate slot now shows the REAL out-of-sample directional accuracy.
+  if (dirAcc != null) {
+    const wrEl = document.getElementById('met-wr-'+id);
+    if (wrEl) {
+      wrEl.textContent = dirAcc.toFixed(0)+'%';
+      wrEl.className = 'm-metric-val '+(dirAcc>55?'up':dirAcc>=45?'neutral':'down');
+    }
+  }
+  const accStr = dirAcc != null ? ' · acc ' + dirAcc.toFixed(0)+'%' : '';
+  document.getElementById('status-'+id).textContent = direction + accStr;
   document.getElementById('status-'+id).className = 'm-status '+(isUp?'done-up':'done-down');
 
   if (sparkData.length > 2) {
@@ -895,9 +911,12 @@ function processAgResult(name, data, id) {
   let sharpe=0, winRate=0, totalRet=0, sparkData=[];
   if (data && data.summary) {
     const s = data.summary;
-    // Silent failure: no trades and all zeros → mark as error
-    if (s.n_trades === 0 && s.sharpe_ratio === 0 && s.total_return === 0 && s.win_rate === 0) {
-      setCardError(id, 'Agent returned no trades');
+    // An agent that places ZERO trades has no opinion — its Sharpe/return are
+    // degenerate artifacts of a flat equity curve. Exclude it entirely so it
+    // never pollutes the Combined Signal (this is what made many agents show
+    // identical meaningless numbers).
+    if (!s.n_trades || s.n_trades === 0) {
+      setCardError(id, 'No trades — excluded from signal');
       return;
     }
     sharpe = s.sharpe_ratio||0;
@@ -993,11 +1012,18 @@ function updateConsensus() {
   const total = fcDone.length + agDone.length;
   if (total === 0) return;
 
-  // Signal score: 0-100
+  // Average REAL directional accuracy across forecast models (skill measure).
+  const fcAccVals = fcDone.map(r => r.dirAcc).filter(v => v != null);
+  const fcAccAvg = fcAccVals.length ? fcAccVals.reduce((s,v)=>s+v,0)/fcAccVals.length : 50;
+  // Skill factor: 0 when accuracy ≈ coin-flip (50%), 1 at 75%+. Coin-flip
+  // forecasts therefore contribute NOTHING to the signal (no fake edge).
+  const fcSkill = Math.max(0, Math.min(1, (fcAccAvg - 50) / 25));
+
+  // Signal score: 0-100 — forecast direction is skill-weighted; agents are
+  // already filtered to those that actually traded.
   let score = 50;
-  if (fcDone.length) score += (fcUp - fcDown) / fcDone.length * 20;
+  if (fcDone.length) score += (fcUp - fcDown) / fcDone.length * 20 * fcSkill;
   if (agRetAvg != null) score += Math.max(-20, Math.min(20, agRetAvg));
-  if (fcSharpeAvg != null) score += Math.max(-10, Math.min(10, (fcSharpeAvg-1)*5));
   if (agSharpeAvg != null) score += Math.max(-10, Math.min(10, (agSharpeAvg-1)*5));
   score = Math.max(0, Math.min(100, score));
 
