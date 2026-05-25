@@ -1162,17 +1162,17 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
       <table class="intel-table">
         <thead><tr>
           <th>#</th>
-          <th>Symbol</th>
-          <th>Score</th>
-          <th title="Technical: RS vs SPY + EMA + MACD + ADX + Volume">T</th>
-          <th title="Fundamental: Profitability + Valuation + Growth">F</th>
+          <th class="intel-th-sort" onclick="setIntelSort('symbol')" style="cursor:pointer;">Symbol <span class="sort-caret" data-k="symbol"></span></th>
+          <th class="intel-th-sort" onclick="setIntelSort('composite_score')" style="cursor:pointer;">Score <span class="sort-caret" data-k="composite_score"></span></th>
+          <th class="intel-th-sort" onclick="setIntelSort('score_tech')" style="cursor:pointer;" title="Technical: RS vs SPY + EMA + MACD + ADX + Volume">T <span class="sort-caret" data-k="score_tech"></span></th>
+          <th class="intel-th-sort" onclick="setIntelSort('score_fund')" style="cursor:pointer;" title="Fundamental: Profitability + Valuation + Growth">F <span class="sort-caret" data-k="score_fund"></span></th>
           <th title="Sentiment: News VADER + Analyst Consensus">S</th>
-          <th title="AI/ML: Forecast model + agent consensus">AI</th>
+          <th class="intel-th-sort" onclick="setIntelSort('score_ai')" style="cursor:pointer;" title="AI/ML: Forecast model + agent consensus">AI <span class="sort-caret" data-k="score_ai"></span></th>
           <th>Grade</th>
           <th>Sentiment</th>
           <th>Analyst</th>
-          <th>Price</th>
-          <th>Chg</th>
+          <th class="intel-th-sort" onclick="setIntelSort('price')" style="cursor:pointer;">Price <span class="sort-caret" data-k="price"></span></th>
+          <th class="intel-th-sort" onclick="setIntelSort('change_pct')" style="cursor:pointer;">Chg <span class="sort-caret" data-k="change_pct"></span></th>
           <th>Signal</th>
           <th>Sector</th>
         </tr></thead>

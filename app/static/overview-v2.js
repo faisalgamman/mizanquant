@@ -1276,6 +1276,7 @@ function areaChartSvg(values, color) {
 /* ─── Stock Intelligence ──────────────────────────────────────── */
 var _intelData = null;
 var _intelFilter = "all";
+var _intelSort = { key: "composite_score", dir: -1 };  // default: score desc
 
 async function loadDeepPicks(forceRefresh = false) {
   const tbody = $("intelTableBody");
@@ -1320,8 +1321,17 @@ async function loadDeepPicks(forceRefresh = false) {
   const scanMeta = $("intelScanMeta");
   if (scanMeta && data.screener_ts) {
     const ts = new Date(data.screener_ts);
+    const ageMin = Math.max(0, Math.round((Date.now() - ts.getTime()) / 60000));
+    // Fresh < 15m (green), stale < 60m (amber), old ≥ 60m (red)
+    const color = ageMin < 15 ? "var(--positive)" : ageMin < 60 ? "var(--warning)" : "var(--negative)";
+    const ageStr = ageMin < 1 ? "just now" : ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`;
     const hhMM = ts.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    scanMeta.textContent = `Last scan ${hhMM}`;
+    scanMeta.innerHTML =
+      `<span style="display:inline-flex;align-items:center;gap:5px;">
+         <span style="width:6px;height:6px;border-radius:50%;background:${color};"></span>
+         <span style="color:${color};">${ageStr}</span>
+         <span style="color:var(--text-muted);">· ${hhMM}</span>
+       </span>`;
   }
 }
 
@@ -1336,6 +1346,20 @@ function _renderIntelTable(data) {
   if (_intelFilter === "buy")     rows = rows.filter(r => ["STRONG BUY","BUY"].includes(r.signal_composite));
   if (_intelFilter === "bullish") rows = rows.filter(r => r.sentiment_label === "bullish");
   if (_intelFilter === "upside")  rows = rows.filter(r => (r.analyst_upside || 0) > 10);
+
+  // Apply sort (stable, nulls last)
+  const sk = _intelSort.key, sd = _intelSort.dir;
+  rows.sort((a, b) => {
+    let av = a[sk], bv = b[sk];
+    if (sk === "symbol") { av = av || ""; bv = bv || ""; return sd * String(av).localeCompare(String(bv)); }
+    av = (av == null ? -Infinity : Number(av));
+    bv = (bv == null ? -Infinity : Number(bv));
+    return sd * (av - bv);
+  });
+  // Reflect active sort in the header carets
+  document.querySelectorAll(".sort-caret").forEach(c => {
+    c.textContent = (c.getAttribute("data-k") === sk) ? (sd < 0 ? "▾" : "▴") : "";
+  });
 
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="14" class="intel-empty">
@@ -1427,6 +1451,14 @@ function setIntelFilter(f, btn) {
   if (_intelData) _renderIntelTable(_intelData);
 }
 
+function setIntelSort(key) {
+  // Toggle direction if same column; new column defaults to descending
+  // (ascending for the alphabetic Symbol column).
+  if (_intelSort.key === key) _intelSort.dir *= -1;
+  else _intelSort = { key, dir: key === "symbol" ? 1 : -1 };
+  if (_intelData) _renderIntelTable(_intelData);
+}
+
 function refreshDeepPicks() {
   loadDeepPicks(true);
 }
@@ -1441,5 +1473,6 @@ window.closeDrawer = closeDrawer;
 window.dismissAlert = dismissAlert;
 window.handleAlertAction = handleAlertAction;
 window.setIntelFilter = setIntelFilter;
+window.setIntelSort = setIntelSort;
 window.refreshDeepPicks = refreshDeepPicks;
 window.toggleWatch = toggleWatch;
