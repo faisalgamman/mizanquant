@@ -3858,6 +3858,118 @@ async def selection_backtest(
     return report
 
 
+@app.get("/api/diagnose/data-sources")
+async def diagnose_data_sources(
+    symbol: str = Query("SPY", description="Symbol to test data sources against"),
+):
+    """Test each market-data provider for a given symbol and report what works.
+
+    Useful for diagnosing the Alpaca Data API 401 and confirming fallbacks.
+    """
+    import time as _time
+    from app.services.market_data import fetch_alpaca, fetch_yf, fetch_ibkr
+
+    diag: dict = {"symbol": symbol.upper(), "providers": {}}
+
+    # 1) Test Alpaca Data API directly (not through fetch() which caches)
+    try:
+        t0 = _time.time()
+        _dk, _ds = None, None
+        try:
+            from app.services.market_data import _alpaca_data_creds
+            _dk, _ds = _alpaca_data_creds()
+        except Exception:
+            pass
+        if _dk and _ds:
+            import httpx
+            headers = {"APCA-API-KEY-ID": _dk, "APCA-API-SECRET-KEY": _ds}
+            import datetime as _dt
+            end = _dt.datetime.now(_dt.timezone.utc)
+            start = end - _dt.timedelta(days=30)
+            resp = httpx.get(
+                "https://data.alpaca.markets/v2/stocks/bars",
+                headers=headers,
+                params={"symbols": symbol.upper(), "timeframe": "1Day",
+                        "start": start.strftime("%Y-%m-%d"),
+                        "end": end.strftime("%Y-%m-%d"), "limit": 5, "feed": "iex"},
+                timeout=15,
+            )
+            elapsed = round(_time.time() - t0, 2)
+            if resp.status_code == 200:
+                diag["providers"]["alpaca_data"] = {
+                    "status": "OK", "elapsed_s": elapsed,
+                    "bars_returned": len((resp.json().get("bars") or {}).get(symbol.upper(), [])),
+                }
+            else:
+                diag["providers"]["alpaca_data"] = {
+                    "status": "FAIL", "http": resp.status_code,
+                    "body": resp.text[:400], "elapsed_s": elapsed,
+                    "fix": "Generate separate Data-feed keys from Alpaca Dashboard → Paper Trading → API Keys. "
+                           "The trading keys (PKYX...) DO NOT work on data.alpaca.markets.",
+                }
+        else:
+            diag["providers"]["alpaca_data"] = {"status": "SKIP", "reason": "No credentials found (ALPACA_DATA_KEY empty)"}
+    except Exception as exc:
+        diag["providers"]["alpaca_data"] = {"status": "ERROR", "detail": str(exc)[:300]}
+
+    # 2) Test fetch() with caching bypass
+    try:
+        t0 = _time.time()
+        df = fetch_alpaca(symbol.upper(), period="1y")
+        elapsed = round(_time.time() - t0, 2)
+        if df is not None and len(df) >= 40:
+            diag["providers"]["fetch_alpaca"] = {"status": "OK", "rows": len(df), "elapsed_s": elapsed}
+        else:
+            diag["providers"]["fetch_alpaca"] = {"status": "FAIL", "elapsed_s": elapsed,
+                                                  "detail": "returned None or <40 rows"}
+    except Exception as exc:
+        diag["providers"]["fetch_alpaca"] = {"status": "ERROR", "detail": str(exc)[:300]}
+
+    # 3) Test yfinance
+    try:
+        t0 = _time.time()
+        df = fetch_yf(symbol.upper(), period="1y")
+        elapsed = round(_time.time() - t0, 2)
+        if df is not None and len(df) >= 40:
+            diag["providers"]["yfinance"] = {"status": "OK", "rows": len(df), "elapsed_s": elapsed}
+        else:
+            diag["providers"]["yfinance"] = {"status": "FAIL", "elapsed_s": elapsed}
+    except Exception as exc:
+        diag["providers"]["yfinance"] = {"status": "ERROR", "detail": str(exc)[:300]}
+
+    # 4) Test Tiingo
+    try:
+        from app.config import settings as _tcfg
+        if _tcfg.TIINGO_TOKEN:
+            t0 = _time.time()
+            from app.services.openbb_data import fetch_ohlcv_tiingo
+            df = fetch_ohlcv_tiingo(symbol.upper(), period="1y")
+            elapsed = round(_time.time() - t0, 2)
+            if df is not None and not df.empty:
+                diag["providers"]["tiingo"] = {"status": "OK", "rows": len(df), "elapsed_s": elapsed}
+            else:
+                diag["providers"]["tiingo"] = {"status": "FAIL", "elapsed_s": elapsed}
+        else:
+            diag["providers"]["tiingo"] = {"status": "SKIP", "reason": "TIINGO_TOKEN not configured"}
+    except Exception as exc:
+        diag["providers"]["tiingo"] = {"status": "ERROR", "detail": str(exc)[:300]}
+
+    # 5) Check env for credential presence
+    from app.config import settings as _env
+    diag["env"] = {
+        "ALPACA_API_KEY": bool(_env.ALPACA_API_KEY),
+        "ALPACA_DATA_KEY": bool(_env.ALPACA_DATA_KEY),
+        "ALPACA_DATA_KEY_EQ_TRADING": _env.ALPACA_DATA_KEY == _env.ALPACA_API_KEY if _env.ALPACA_DATA_KEY and _env.ALPACA_API_KEY else None,
+        "TIINGO_TOKEN": bool(_env.TIINGO_TOKEN),
+        "FMP_API_KEY": bool(_env.FMP_API_KEY),
+        "FRED_API_KEY": bool(_env.FRED_API_KEY),
+    }
+
+    working = [k for k, v in diag["providers"].items() if v.get("status") == "OK"]
+    diag["summary"] = f"{len(working)}/{len(diag['providers'])} providers working: {', '.join(working) or 'NONE'}"
+    return diag
+
+
 def _run_screener_bg(scan_symbols: list):
     """Run screener scan in background thread, store results in cache."""
     cache_key = "smart_screener"

@@ -284,6 +284,14 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
                             continue
 
                         page_retry = 0
+                        if resp.status_code in (401, 403):
+                            body = resp.text
+                            logger.error(
+                                "Alpaca auth error for %s: HTTP %d — %s. "
+                                "ALPACA_DATA_KEY/ALPACA_DATA_SECRET likely missing or wrong. "
+                                "Data keys must be generated from Alpaca Dashboard (separate from trading keys).",
+                                symbol, resp.status_code, body[:500],
+                            )
                         resp.raise_for_status()
                         data = resp.json()
 
@@ -408,6 +416,14 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
                         time.sleep(wait)
                         break  # retry the whole chunk
 
+                    if resp.status_code in (401, 403):
+                        body = resp.text
+                        logger.error(
+                            "Alpaca batch auth error (chunk %d–%d): HTTP %d — %s. "
+                            "ALPACA_DATA_KEY/ALPACA_DATA_SECRET likely missing or wrong. "
+                            "Generate separate data-feed keys from Alpaca Dashboard.",
+                            i, i + len(batch), resp.status_code, body[:500],
+                        )
                     resp.raise_for_status()
                     data = resp.json()
                     for sym, sym_bars in (data.get("bars") or {}).items():
