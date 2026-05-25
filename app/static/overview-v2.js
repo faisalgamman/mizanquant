@@ -1032,6 +1032,45 @@ async function loadAll(force = false) {
   loadModels();
   loadEquityCurve();
   loadDeepPicks();
+  loadAccuracy();
+}
+
+/* ─── Track record — REAL signal accuracy (credibility layer) ──── */
+async function loadAccuracy() {
+  const el = $("intelTrackRecord");
+  if (!el) return;
+  // /signals/accuracy returns a list; first row Source==="OVERALL".
+  const rows = await api("/signals/accuracy?period=30");
+  const overall = Array.isArray(rows) ? rows.find(r => r && r.Source === "OVERALL") : null;
+
+  if (!overall) {
+    // Honest empty state — signals need ~5 days to mature.
+    el.style.display = "flex";
+    el.innerHTML = `<span style="color:var(--text-muted)">
+      <i class="fas fa-clock" style="margin-right:6px;"></i>
+      Track record building — evaluated signals appear after they mature (~5d). No fabricated stats.
+    </span>`;
+    return;
+  }
+
+  const wr   = overall["Win Rate %"];
+  const avg  = overall["Avg Return %"];
+  const pf   = overall["Profit Factor"];
+  const tot  = overall["Total Signals"];
+  const wrColor  = wr >= 55 ? "var(--positive)" : wr >= 45 ? "var(--warning)" : "var(--negative)";
+  const avgColor = avg >= 0 ? "var(--positive)" : "var(--negative)";
+  const cell = (label, val, color) =>
+    `<span><span style="color:var(--text-muted)">${label}</span>
+       <strong style="color:${color || 'var(--text-primary)'};margin-left:5px;">${val}</strong></span>`;
+
+  el.style.display = "flex";
+  el.innerHTML =
+    `<span style="color:var(--accent);font-weight:700;letter-spacing:0.5px;">TRACK RECORD · 30d</span>` +
+    cell("Win rate", (wr ?? 0) + "%", wrColor) +
+    cell("Avg return", ((avg ?? 0) >= 0 ? "+" : "") + (avg ?? 0) + "%", avgColor) +
+    cell("Profit factor", pf ?? "—") +
+    cell("Evaluated", tot ?? 0) +
+    `<span style="margin-left:auto;color:var(--text-muted);font-size:9px;">real outcomes · matured signals only</span>`;
 }
 
 /* ─── Boot ────────────────────────────────────────────────────── */
