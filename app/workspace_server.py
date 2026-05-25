@@ -4654,6 +4654,17 @@ async def get_info():
     # Use _ALL_MODEL_NAMES for display so all 19 cards appear in the UI even on
     # Railway where only ARIMA can actually run.  The `available` field tells the
     # frontend whether the model can be executed right now.
+    # HONEST metadata only — no fabricated Sharpe/win-rate/champion. Performance
+    # numbers are null until the user runs the model/agent (real out-of-sample
+    # results then populate the cards). Status reflects real availability:
+    #   model  → "production" if a trained checkpoint exists, else availability
+    #   agent  → real tier from _AGENT_TIERS (trades=production, RL=staging)
+    def _model_status(name: str) -> str:
+        has_ckpt = (_MODELS_DIR / name / "20260519.pt").exists() or (_MODELS_DIR / name / "20260519.pkl").exists()
+        if has_ckpt:
+            return "production"
+        return "staging" if name in _RUNNABLE_MODEL_NAMES else "idle"
+
     model_items = []
     for m in sorted(_ALL_MODEL_NAMES):
         cat = _model_category(m)
@@ -4661,26 +4672,27 @@ async def get_info():
             "name": m,
             "category": cat,
             "family": cat,
-            "status": _mock_status(m),
-            "last_trained": _mock_last_trained(m),
-            "sharpe": _mock_sharpe(m),
-            "win_rate": _mock_win_rate(m),
-            "is_champion": _mock_is_champion(m),
+            "status": _model_status(m),
+            "last_trained": None,
+            "sharpe": None,        # populated by a real run, not fabricated
+            "win_rate": None,
+            "is_champion": False,
             "available": m in _RUNNABLE_MODEL_NAMES,
         })
     agent_items = []
     for a in sorted(_ALL_AGENT_NAMES):
         cat = _agent_category(a)
+        tier = _agent_tier(a)
         agent_items.append({
             "name": a,
             "category": cat,
             "family": cat,
-            "tier": _agent_tier(a),
-            "status": _mock_status(a),
-            "last_trained": _mock_last_trained(a),
-            "sharpe": _mock_sharpe(a),
-            "win_rate": _mock_win_rate(a),
-            "is_champion": _mock_is_champion(a),
+            "tier": tier,
+            "status": tier if tier == "production" else ("staging" if a in _RUNNABLE_AGENT_NAMES else "idle"),
+            "last_trained": None,
+            "sharpe": None,        # populated by a real run, not fabricated
+            "win_rate": None,
+            "is_champion": False,
             "available": a in _RUNNABLE_AGENT_NAMES,
         })
     dashboard = _live_or_mock_dashboard()
@@ -4903,14 +4915,21 @@ AGENT_CATEGORIES: dict[str, list[str]] = {
 # Production: Sharpe >= 1.5 AND Win Rate >= 55% on 2015–2026 backtest
 # Staging: everything else
 _AGENT_TIERS: dict[str, str] = {
-    # Production — promoted per OpenBB Roadmap 1.7
-    "turtle": "production",                # Sharpe 2.54, WR 64%
-    "neuro_evolution_novelty": "production",  # Sharpe 1.85, WR 77%
-    "evolution_strategy": "production",    # Sharpe 2.00, WR 76%
-    "moving_average": "production",        # Sharpe 2.41, WR 61%
-    "abcd_strategy": "production",         # Sharpe 1.50+, WR 75%
-    # Staging — experimental / below threshold
-    "actor_critic": "staging",             # Sharpe 2.50 but WR 44% — demoted
+    # Tiers are classified by EMPIRICAL trade activity, not aspirational numbers.
+    # Production = deterministic, rule-based strategies that actually place trades
+    # and execute reliably. Profitability varies by symbol/period (that is honest).
+    "turtle": "production",          # rule-based breakout — trades
+    "moving_average": "production",  # MA crossover — trades
+    "signal_rolling": "production",  # rolling-signal strategy — trades
+    "abcd_strategy": "production",   # ABCD pattern — trades
+    # Experimental (staging) — RL/evolutionary agents. As shipped they place ~0
+    # trades on out-of-sample data (tabular/under-trained); their Sharpe/return
+    # are degenerate artifacts of a flat curve. Kept for research only until a
+    # proper training + validation pipeline gives them a real, verified edge.
+    "evolution_strategy": "staging",          # 0 trades as shipped
+    "neuro_evolution": "staging",
+    "neuro_evolution_novelty": "staging",     # 0 trades (was falsely "production")
+    "actor_critic": "staging",
     "actor_critic_duel": "staging",
     "actor_critic_recurrent": "staging",
     "double_dqn": "staging",
@@ -4919,11 +4938,9 @@ _AGENT_TIERS: dict[str, str] = {
     "double_q_learning": "staging",
     "recurrent_q_learning": "staging",
     "duel_q_learning": "staging",
-    "double_duel_q_learning": "staging",
+    "double_duel_q_learning": "staging",      # empty subclass of duel_q_learning
     "curiosity_q_learning": "staging",
-    "recurrent_curiosity_q_learning": "staging",
-    "signal_rolling": "staging",
-    "neuro_evolution": "staging",
+    "recurrent_curiosity_q_learning": "staging",  # empty subclass of curiosity
 }
 
 
