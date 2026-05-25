@@ -6276,8 +6276,13 @@ def _html(rel: str):
 
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
-    """Root → Terminal Overview kit (all paths are absolute, no redirect needed)."""
-    return _html("terminal/index.html")
+    """Root → rich Stock Intelligence dashboard (dashboard.html + overview-v2.js).
+
+    Restored as the homepage by user request — it carries the full T/F/S/AI score
+    breakdown, Grade, Analyst-upside, Sentiment, Models/Consensus/Sectors tabs.
+    The design-system Terminal kit remains available at /terminal.
+    """
+    return _html("dashboard.html")
 
 @app.get("/terminal", include_in_schema=False)
 @app.get("/terminal/", include_in_schema=False)
