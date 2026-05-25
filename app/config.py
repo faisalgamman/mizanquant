@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     ALPACA_SECRET_KEY: str = ""
     ALPACA_BASE_URL: str = "https://paper-api.alpaca.markets"
 
+    # --- Alpaca market-DATA credentials (data.alpaca.markets) ---
+    # The data feed often requires DIFFERENT credentials than the trading API.
+    # When set, market_data.py uses these for bar/quote requests and falls back
+    # to the trading key only if these are empty. Using the trading key against
+    # the data endpoint is a common cause of 401 Unauthorized on /v2/stocks/bars.
+    ALPACA_DATA_KEY: str = ""
+    ALPACA_DATA_SECRET: str = ""
+
     # --- Multi-Strategy Alpaca accounts ---
     # Strategy A: Momentum Alpha
     ALPACA_API_KEY_A: str = ""

@@ -165,6 +165,20 @@ def _alpaca_rate_limit():
         _alpaca_last_call = time.time()
 
 
+def _alpaca_data_creds():
+    """Return (key, secret) for the Alpaca MARKET-DATA API (data.alpaca.markets).
+
+    Prefers dedicated ALPACA_DATA_KEY / ALPACA_DATA_SECRET (the data-feed
+    entitlement) and falls back to the trading key only when those are unset.
+    The data endpoint frequently requires different credentials than the
+    trading API — authenticating to it with the trading key returns 401.
+    """
+    from app.config import settings
+    key = getattr(settings, "ALPACA_DATA_KEY", "") or settings.ALPACA_API_KEY
+    secret = getattr(settings, "ALPACA_DATA_SECRET", "") or settings.ALPACA_SECRET_KEY
+    return key, secret
+
+
 # ---------------------------------------------------------------------------
 # Symbol validation
 # ---------------------------------------------------------------------------
@@ -205,15 +219,15 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
         return None
 
     try:
-        from app.config import settings
-        if not settings.ALPACA_API_KEY or not settings.ALPACA_SECRET_KEY:
+        _dk, _ds = _alpaca_data_creds()
+        if not _dk or not _ds:
             return None
 
         import httpx
 
         headers = {
-            "APCA-API-KEY-ID": settings.ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
+            "APCA-API-KEY-ID": _dk,
+            "APCA-API-SECRET-KEY": _ds,
         }
 
         # Convert period to start/end dates
@@ -332,8 +346,8 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
         return {}
 
     try:
-        from app.config import settings
-        if not settings.ALPACA_API_KEY or not settings.ALPACA_SECRET_KEY:
+        _dk, _ds = _alpaca_data_creds()
+        if not _dk or not _ds:
             return {}
     except Exception:
         return {}
@@ -344,8 +358,8 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
         return {}
 
     headers = {
-        "APCA-API-KEY-ID":     settings.ALPACA_API_KEY,
-        "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
+        "APCA-API-KEY-ID":     _dk,
+        "APCA-API-SECRET-KEY": _ds,
     }
 
     end_dt   = _utc_now()
@@ -448,14 +462,14 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
         return cached
 
     try:
-        from app.config import settings
-        if not settings.ALPACA_API_KEY or not settings.ALPACA_SECRET_KEY:
+        _dk, _ds = _alpaca_data_creds()
+        if not _dk or not _ds:
             return None
 
         import httpx
         headers = {
-            "APCA-API-KEY-ID": settings.ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
+            "APCA-API-KEY-ID": _dk,
+            "APCA-API-SECRET-KEY": _ds,
         }
 
         end_dt = _utc_now() if end is None else pd.Timestamp(end).to_pydatetime()
