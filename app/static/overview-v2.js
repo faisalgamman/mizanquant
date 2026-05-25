@@ -1254,26 +1254,29 @@ function _renderIntelTable(data) {
 
     // Sub-score bars (T/F/S/AI)
     const subBars = [
-      { v: r.score_tech      ?? 0, max: 30, c: "#60a5fa", l: "T" },
-      { v: r.score_fund      ?? 0, max: 25, c: "#c8963e", l: "F" },
-      { v: r.score_sentiment ?? 0, max: 20, c: "#a78bfa", l: "S" },
-      { v: r.score_ai        ?? 0, max: 15, c: "#34d399", l: "AI" },
+      { v: r.score_tech      ?? 0,  max: 30, c: "#60a5fa", l: "T" },
+      { v: r.score_fund      ?? 0,  max: 25, c: "#c8963e", l: "F" },
+      { v: r.score_sentiment,       max: 20, c: "#a78bfa", l: "S" },  // null when no real data
+      { v: r.score_ai        ?? 0,  max: 15, c: "#34d399", l: "AI" },
     ].map(s => {
-      const pct = Math.round(s.v / s.max * 100);
-      return `<div class="intel-sub" title="${s.l}: ${s.v}/${s.max}">
+      const na = s.v == null;
+      const pct = na ? 0 : Math.round(s.v / s.max * 100);
+      return `<div class="intel-sub" title="${s.l}: ${na ? 'n/a — no data' : s.v + '/' + s.max}">
         <div class="intel-sub-bar-wrap">
-          <div class="intel-sub-bar" style="height:${pct}%;background:${s.c};"></div>
+          <div class="intel-sub-bar" style="height:${pct}%;background:${na ? 'var(--text-muted)' : s.c};opacity:${na ? 0.25 : 1};"></div>
         </div>
         <span class="intel-sub-lbl">${s.l}</span>
       </div>`;
     }).join("");
 
-    const sent = r.sentiment_label || "neutral";
-    const sentIcon = sent === "bullish" ? "▲" : sent === "bearish" ? "▼" : "●";
-    const upside = r.analyst_upside ?? 0;
-    const upsideClass = upside > 10 ? "upside-pos" : upside < -5 ? "upside-neg" : "upside-neu";
-    const upsideStr = upside !== 0 ? `${upside > 0 ? "+" : ""}${upside.toFixed(1)}%` : "—";
-    const rating = (r.analyst_rating || "").replace(/_/g, " ").toUpperCase() || "—";
+    const sentNA = r.sentiment_available === false || r.sentiment_label === "n/a";
+    const sent = sentNA ? "neutral" : (r.sentiment_label || "neutral");
+    const sentDisplay = sentNA ? "n/a" : sent;
+    const sentIcon = sentNA ? "" : sent === "bullish" ? "▲" : sent === "bearish" ? "▼" : "●";
+    const upside = r.analyst_upside;
+    const upsideClass = (upside != null && upside > 10) ? "upside-pos" : (upside != null && upside < -5) ? "upside-neg" : "upside-neu";
+    const upsideStr = (upside != null && upside !== 0) ? `${upside > 0 ? "+" : ""}${upside.toFixed(1)}%` : "—";
+    const rating = r.analyst_rating ? r.analyst_rating.replace(/_/g, " ").toUpperCase() : "—";
 
     const sig = (r.signal_composite || "WATCH").replace(/ /g, "_");
     const chgPct = r.change_pct ?? 0;
@@ -1295,10 +1298,10 @@ function _renderIntelTable(data) {
       </td>
       <td><span style="font-family:var(--mono);font-size:11px;color:#60a5fa">${r.score_tech ?? 0}</span></td>
       <td><span style="font-family:var(--mono);font-size:11px;color:#c8963e">${r.score_fund ?? 0}</span></td>
-      <td><span style="font-family:var(--mono);font-size:11px;color:#a78bfa">${r.score_sentiment ?? 0}</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:${r.score_sentiment == null ? 'var(--text-muted)' : '#a78bfa'}">${r.score_sentiment ?? "—"}</span></td>
       <td><span style="font-family:var(--mono);font-size:11px;color:#34d399">${r.score_ai ?? 0}</span></td>
       <td><span class="f-grade ${r.f_grade || "D"}">${r.f_grade || "D"}</span></td>
-      <td><span class="sent-badge ${sent}">${sentIcon} ${sent}</span></td>
+      <td><span class="sent-badge ${sentNA ? 'neutral' : sent}" style="${sentNA ? 'opacity:0.5' : ''}">${sentIcon} ${sentDisplay}</span></td>
       <td>
         <div style="line-height:1.3">
           <span class="${upsideClass}" style="font-size:11px">${upsideStr}</span>

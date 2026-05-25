@@ -3186,14 +3186,36 @@ def _sentiment_score(symbol: str, info: dict | None = None) -> dict:
         details["analyst_error"] = str(_e)[:60]
 
     total = min(20, score)
-    if total >= 14:
+
+    # Honesty: only call sentiment "available" if REAL data backed it. With no
+    # news headlines and no analyst opinions the score is just the neutral
+    # default (~10) — that is not a real reading, so we flag it unavailable and
+    # the caller drops it from the composite instead of showing a fake "neutral".
+    news_available = (details.get("headlines_analyzed", 0) or 0) > 0
+    analyst_available = (
+        ((details.get("num_opinions") or 0) > 0)
+        or (details.get("target_mean") is not None)
+        or (details.get("rec_key") not in (None, "", "unknown"))
+    )
+    available = bool(news_available or analyst_available)
+
+    if not available:
+        label = "n/a"
+    elif total >= 14:
         label = "bullish"
     elif total >= 7:
         label = "neutral"
     else:
         label = "bearish"
 
-    return {"score": total, "label": label, "details": details}
+    return {
+        "score": total,
+        "label": label,
+        "available": available,
+        "news_available": news_available,
+        "analyst_available": analyst_available,
+        "details": details,
+    }
 
 
 def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.DataFrame | None = None) -> dict | None:
@@ -3550,18 +3572,27 @@ async def screener_deep_picks(
         info = _get_smart_info(symbol)  # FMP primary, yfinance fallback
 
         sent = _sentiment_score(symbol, info)
+        sent_available = sent.get("available", False)
 
         # Rescale sub-scores to composite denominator
         tech   = min(30, r.get("momentum_score", 0) + max(0, r.get("strategy_score", 0) - 50))
         fund40 = r.get("fundamental_score", 0)                       # original 0-40
         fund   = int(fund40 * 25 / 40)                               # → 0-25
-        sent_s = sent["score"]                                        # 0-20
+        sent_s = sent["score"] if sent_available else None            # 0-20 or None
         fc30   = r.get("forecast_score", r.get("forecast_proxy", 0)) # original 0-30
         ai     = int(fc30 * 15 / 30)                                  # → 0-15
         screens = r.get("halal_screens", 0)
         halal_s = int(screens / 4 * 10) if screens else (10 if r.get("is_halal") else 0)
 
-        composite = min(100, tech + fund + sent_s + ai + halal_s)
+        # Composite over AVAILABLE components only, rescaled to 0-100. When
+        # sentiment has no real data it is excluded (not counted as a constant),
+        # so the score reflects only signals we can actually stand behind.
+        parts = [(tech, 30), (fund, 25), (ai, 15), (halal_s, 10)]
+        if sent_available:
+            parts.append((sent_s, 20))
+        got_pts = sum(v for v, _ in parts)
+        max_pts = sum(m for _, m in parts)
+        composite = min(100, round(got_pts / max_pts * 100)) if max_pts else 0
 
         # Fundamental grade
         if fund >= 22: f_grade = "A"
@@ -3579,15 +3610,18 @@ async def screener_deep_picks(
         else:
             sig_composite = "AVOID"
 
+        _adet = sent["details"]
+        _an_av = sent.get("analyst_available", False)
         return {
             **r,
-            # Sentiment layer
+            # Sentiment layer — null (→ "—" in UI) when no real data backs it
             "sentiment_score":    sent_s,
             "sentiment_label":    sent["label"],
-            "sentiment_compound": sent["details"].get("news_compound", 0.0),
-            "analyst_upside":     sent["details"].get("upside_pct", 0.0),
-            "analyst_rating":     sent["details"].get("rec_key", ""),
-            "analyst_target":     sent["details"].get("target_mean"),
+            "sentiment_available": sent_available,
+            "sentiment_compound": _adet.get("news_compound") if sent.get("news_available") else None,
+            "analyst_upside":     _adet.get("upside_pct") if _an_av else None,
+            "analyst_rating":     (_adet.get("rec_key") or None) if _an_av else None,
+            "analyst_target":     _adet.get("target_mean") if _an_av else None,
             # Composite breakdown
             "composite_score":    composite,
             "score_tech":         tech,
