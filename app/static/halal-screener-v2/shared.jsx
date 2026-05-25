@@ -42,22 +42,30 @@ async function fetchUniverse() {
     name:      row.company_name || row.company || row.name || row.symbol || '?',
     sector:    row.sector || '—',
     mcap:      row.market_cap || row.mcap || 0,
-    chg:       row.chg_pct || row.change_pct || row.chg || 0,
+    chg:       row.chg_1w || row.chg_pct || row.change_pct || row.chg || 0,
     score:     row.swing_score || row.score || 0,
     rsi:       row.rsi || 0,
     vol:       row.volume_ratio || row.vol || 0,
     adx:       row.adx || 0,
-    signal:    row.signal || row.verdict || 'WAIT',
+    signal:    row.swing_signal || row.signal || row.verdict || 'WAIT',
     strategy:  row.strategy_id || row.strategy || '—',
     // AAOIFI fields (may come from halal_status or be pre-computed)
     debt:      row.debt_ratio != null ? row.debt_ratio * 100 : null,
     interest:  row.interest_ratio != null ? row.interest_ratio * 100 : null,
     cashRecv:  row.cash_ratio != null ? row.cash_ratio * 100 : null,
     haramFlag: row.haram_sector || false,
-    screens:   row.screens || [
-      row.debt_ok !== false, row.interest_ok !== false,
-      row.cash_ok !== false, !row.haram_sector,
-    ],
+    // screens: 4 AAOIFI booleans. Backend may not return them individually;
+    // if halal="Yes" all 4 passed. Detail panel can call /halal_status for breakdown.
+    screens:   row.screens || (
+      row.halal === "Yes"
+        ? [true, true, true, true]
+        : [
+            row.debt_ok !== false,
+            row.interest_ok !== false,
+            row.cash_ok !== false,
+            !row.haram_sector,
+          ]
+    ),
   }));
 }
 

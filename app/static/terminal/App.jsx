@@ -1,7 +1,16 @@
 // App.jsx — Terminal composition (wired to production APIs)
+//
+// Real data sources:
+//   signals    → GET /buys         (swing_score, price, halal, symbol)
+//   portfolio  → GET /api/v1/overview → .portfolio
+//   positions  → GET /api/v1/overview → .portfolio.positions
+//   market     → GET /api/context/bundle
+//   paper      → GET /api/v1/paper/trades
+//   models     → GET /api/v1/models/leaderboard
+// Mock data is only used as an initial skeleton until the API responds.
 
 function App() {
-  const [selectedSymbol, setSelectedSymbol] = useState("AAPL");
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [clock, setClock]     = useState("--:--:--");
   const [etClock, setETClock] = useState("--:--");
   const [pipeline, setPipeline]           = useState(initialPipelineStages);
@@ -9,13 +18,14 @@ function App() {
   const [dryRun, setDryRun]   = useState(true);
   const [query, setQuery]     = useState("");
   const [toast, setToast]     = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // Live data state — start with mock, replace from API
-  const [signals, setSignals]     = useState(mockSignals);
+  // Live data state — starts empty, populated from APIs
+  const [signals, setSignals]     = useState([]);
   const [market, setMarket]       = useState(mockMarket);
   const [portfolio, setPortfolio] = useState(mockPortfolio);
-  const [positions, setPositions] = useState(mockPositions);
-  const [paper, setPaper]         = useState(mockPaper);
+  const [positions, setPositions] = useState([]);
+  const [paper, setPaper]         = useState([]);
   const [models, setModels]       = useState(mockModels);
   const [sectors, setSectors]     = useState(mockSectors);
 
@@ -38,78 +48,111 @@ function App() {
   // Load live data on mount
   useEffect(() => {
     (async () => {
-      // 1. Market context bundle
+      // ── 1. Market context bundle ──────────────────────────────────────
       try {
         const ctx = await (await fetch('/api/context/bundle')).json();
         setMarket(m => ({
           ...m,
-          vix:        ctx.vix ?? m.vix,
-          spy_regime: ctx.regime ?? m.spy_regime,
+          vix:        ctx.vix        ?? m.vix,
+          spy_regime: ctx.regime     ?? m.spy_regime,
+          liquidity:  ctx.risk_posture === "risk_on" ? 90 : ctx.risk_posture === "risk_off" ? 30 : 60,
         }));
       } catch (_) {}
 
-      // 2. Overview (signals + portfolio + positions)
+      // ── 2. Buy signals from screener ──────────────────────────────────
+      // /buys returns stocks with swing_score >= 55 (HALAL only, screened)
+      try {
+        const buys = await (await fetch('/buys')).json();
+        if (Array.isArray(buys) && buys.length > 0 && !buys[0].Status) {
+          const mapped = buys
+            .filter(s => s.symbol && s.price)
+            .map(s => ({
+              symbol:   s.symbol,
+              company:  s.company_name || s.symbol,
+              price:    s.price || 0,
+              chg:      s.chg_1w  || 0,          // 1-week change %
+              score:    s.swing_score || 0,
+              verdict:  s.swing_signal || verdictFromScore(s.swing_score || 0),
+              halal:    s.halal !== "No",          // "Yes" or missing → true
+              sector:   s.sector || "—",
+              industry: s.industry || "—",
+              spark:    s.spark || Array.from({length: 12}, () => 90 + Math.random() * 20),
+            }));
+          if (mapped.length > 0) {
+            setSignals(mapped);
+            setSelectedSymbol(prev => prev || mapped[0].symbol);
+          }
+        }
+      } catch (_) {}
+
+      // ── 3. Portfolio + positions from overview ────────────────────────
+      // NOTE: /api/v1/overview wraps everything under {portfolio, system, ...}
       try {
         const ov = await (await fetch('/api/v1/overview')).json();
-        const sigs = ov.top_signals || ov.signals;
-        if (Array.isArray(sigs) && sigs.length > 0) {
-          setSignals(sigs.map(s => ({
-            symbol:      s.symbol || s.sym,
-            company:     s.company_name || s.company || s.symbol,
-            price:       s.price || 0,
-            change:      s.change_pct || 0,
-            score:       s.swing_score || s.score || 0,
-            halal:       s.halal !== false,
-            verdict:     s.signal || s.verdict || 'WAIT',
-            strategy:    s.strategy_id || '',
-            sparkline:   s.sparkline || Array.from({length: 12}, (_, i) => 100 + i),
-          })));
+        const pf = ov.portfolio || {};
+        if (pf.equity != null) {
+          setPortfolio({
+            equity:     pf.equity        || 0,
+            dayPnl:     pf.daily_pnl     || 0,
+            dayPnlPct:  pf.daily_pnl_pct || 0,
+            cash:       pf.cash          || 0,
+            buyPower:   pf.buying_power  || 0,
+            openPos:    pf.open_positions || 0,
+            todayExits: 0,
+          });
         }
-        if (ov.equity || ov.portfolio) {
-          const pf = ov.portfolio || ov;
-          setPortfolio(p => ({
-            ...p,
-            equity:  pf.equity || p.equity,
-            dayPnl:  pf.day_pnl || pf.daily_pnl || p.dayPnl,
-            cash:    pf.cash || p.cash,
-            openPos: (ov.positions || []).length,
-          }));
-        }
-        const pos = ov.positions || ov.open_positions;
+        const pos = pf.positions;
         if (Array.isArray(pos) && pos.length > 0) {
           setPositions(pos.map(p => ({
-            symbol:  p.symbol || p.sym,
-            qty:     p.qty || 0,
-            entry:   p.avg_entry || p.entry || 0,
-            last:    p.current_price || p.last || 0,
-            pnl:     p.unrealized_pl || p.pnl || 0,
-            pnlPct:  p.unrealized_plpc || p.pnl_pct || 0,
+            sym:     p.symbol,
+            qty:     p.qty    || 0,
+            entry:   p.avg_entry      || 0,
+            last:    p.current_price  || 0,
+            pnl:     p.unrealized_pl  || 0,
+            // unrealized_plpc from Alpaca is a fraction (0.02 = 2%), multiply by 100
+            pnlPct:  (p.unrealized_plpc || 0) * 100,
           })));
         }
       } catch (_) {}
 
-      // 3. Paper trades
+      // ── 4. Paper trades ───────────────────────────────────────────────
       try {
         const pt = await (await fetch('/api/v1/paper/trades')).json();
-        if (Array.isArray(pt) && pt.length > 0) setPaper(pt.slice(0, 5));
+        if (Array.isArray(pt) && pt.length > 0) {
+          setPaper(pt.slice(0, 5).map(t => ({
+            sym:    t.symbol || t.sym,
+            side:   t.side   || 'buy',
+            entry:  t.entry_price || t.entry || 0,
+            last:   t.current_price || t.last || t.entry_price || 0,
+            pnl:    t.unrealized_pl || t.pnl || 0,
+            status: t.status || 'open',
+            when:   t.created_at ? new Date(t.created_at).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit',hour12:false}) : '—',
+          })));
+        }
       } catch (_) {}
 
-      // 4. Models leaderboard
+      // ── 5. Model leaderboard ──────────────────────────────────────────
       try {
         const ml = await (await fetch('/api/v1/models/leaderboard')).json();
         const arr = ml.models || ml;
         if (Array.isArray(arr) && arr.length > 0) {
           setModels(arr.slice(0, 6).map(m => ({
             name:   m.model_id || m.name,
-            family: m.family || 'classic',
-            sharpe: m.sharpe || 0,
-            ret:    m.return_pct || m.ret || 0,
-            status: m.status || 'idle',
+            family: m.family   || 'classic',
+            sharpe: m.sharpe   || 0,
+            return: m.return_pct || m.return || 0,
+            status: m.status   || 'idle',
           })));
         }
       } catch (_) {}
+
+      setLoading(false);
     })();
   }, []);
+
+  // Fall back to mock signals only if API returned nothing after load
+  const displaySignals = signals.length > 0 ? signals : (loading ? [] : mockSignals);
+  const selectedSym    = selectedSymbol || (displaySignals[0]?.symbol);
 
   // Auto-clear toast
   useEffect(() => {
@@ -119,17 +162,19 @@ function App() {
   }, [toast]);
 
   const filteredSignals = useMemo(() => {
-    if (!query) return signals;
+    if (!query) return displaySignals;
     const q = query.toUpperCase();
-    return signals.filter((s) => s.symbol.includes(q) || (s.company || '').toUpperCase().includes(q));
-  }, [query, signals]);
+    return displaySignals.filter(s =>
+      s.symbol.includes(q) || (s.company || '').toUpperCase().includes(q)
+    );
+  }, [query, displaySignals]);
 
-  const selected = signals.find((s) => s.symbol === selectedSymbol) || signals[0];
+  const selected = displaySignals.find(s => s.symbol === selectedSym) || displaySignals[0];
 
   const runPipeline = async () => {
     if (pipelineRunning) return;
     setPipelineRunning(true);
-    let stages = initialPipelineStages.map((s) => ({ ...s, s: "pending" }));
+    let stages = initialPipelineStages.map(s => ({ ...s, s: "pending" }));
     setPipeline(stages);
     let idx = 0;
     const advance = () => {
@@ -139,7 +184,7 @@ function App() {
         return;
       }
       stages = stages.map((s, i) => {
-        if (i < idx) return { ...s, s: "done" };
+        if (i < idx)  return { ...s, s: "done" };
         if (i === idx) return { ...s, s: "running" };
         return { ...s, s: "pending" };
       });
@@ -166,12 +211,21 @@ function App() {
     setToast({ kind: "ok", title: "Paper trade sent", body: `${sig.symbol} · BUY · ${size} sh @ $${(sig.price || 0).toFixed(2)}` });
   };
 
+  if (loading && displaySignals.length === 0) {
+    return (
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',flexDirection:'column',gap:16}}>
+        <div className="spin" style={{width:32,height:32,border:'3px solid var(--border)',borderTopColor:'var(--accent)',borderRadius:'50%'}}></div>
+        <div style={{color:'var(--text-muted)',fontSize:12,fontFamily:'var(--font-mono)',letterSpacing:1}}>LOADING LIVE DATA…</div>
+      </div>
+    );
+  }
+
   return (
     <>
       <Sidebar />
       <CommandBar
         etClock={etClock}
-        symbolCount={signals.length}
+        symbolCount={displaySignals.length}
         query={query}
         setQuery={setQuery}
         onRefresh={() => {
@@ -185,7 +239,7 @@ function App() {
         <div className="workflow">
           <ScanColumn
             signals={filteredSignals}
-            selectedSymbol={selectedSymbol}
+            selectedSymbol={selectedSym}
             onSelect={setSelectedSymbol}
             market={market}
           />

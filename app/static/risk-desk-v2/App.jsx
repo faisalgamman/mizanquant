@@ -61,19 +61,25 @@ function App() {
         } catch (_) {/* silent fallback to mockAlerts */}
 
         // 3. Overview positions for position risk table
+        // NOTE: /api/v1/overview wraps under {portfolio: {positions: [...]}}
         try {
           const ovRes = await fetch('/api/v1/overview');
           if (ovRes.ok) {
             const ov = await ovRes.json();
-            const pos = ov.positions || ov.open_positions;
+            const pf  = ov.portfolio || {};
+            const pos = pf.positions || ov.positions || [];
             if (Array.isArray(pos) && pos.length > 0) {
+              const equity = pf.equity || 1;
               setPositions(pos.map(p => ({
-                sym:       p.symbol || p.sym,
-                weight:    p.market_value_pct || p.weight || 0,
+                sym:        p.symbol || p.sym,
+                // weight as % of portfolio equity
+                weight:     p.market_value != null
+                              ? Math.round((p.market_value / equity) * 1000) / 10
+                              : (p.market_value_pct || p.weight || 0),
                 varContrib: p.var_contrib || 0,
-                corr:      p.correlation || 0,
-                beta:      p.beta || 1,
-                mDD:       Math.abs(p.max_drawdown_pct || p.mdd || 0),
+                corr:       p.correlation || 0,
+                beta:       p.beta || 1,
+                mDD:        Math.abs(p.max_drawdown_pct || p.mdd || 0),
               })));
             }
           }
