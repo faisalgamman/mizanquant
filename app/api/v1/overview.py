@@ -310,3 +310,48 @@ async def v1_overview(force_refresh: bool = False):
     return await memory_cache.get_or_compute(
         "overview:aggregated", 30, _compute, force_refresh=force_refresh
     )
+
+
+@router.get("/consensus/{symbol}")
+async def v1_consensus(symbol: str):
+    """Latest real consensus decision for a symbol (from consensus_log).
+
+    Returns aggregate vote buckets + verdict + confidence written by the
+    pipeline's AI-consensus stage. No fabricated per-model votes — if the
+    details JSON carries a model breakdown it is surfaced, otherwise only the
+    real aggregate is returned. {available:false} when nothing is recorded yet.
+    """
+    sym = (symbol or "").upper().strip()
+
+    def _fetch():
+        from app.db.database import SessionLocal as SyncSessionLocal
+        from app.db.models import ConsensusLog
+        db = SyncSessionLocal()
+        try:
+            row = (
+                db.query(ConsensusLog)
+                .filter(ConsensusLog.symbol == sym)
+                .order_by(ConsensusLog.created_at.desc())
+                .first()
+            )
+            if not row:
+                return {"available": False, "symbol": sym}
+            return {
+                "available": True,
+                "symbol": sym,
+                "verdict": row.verdict,
+                "confidence": row.confidence,
+                "votes_buy": row.votes_buy or 0,
+                "votes_sell": row.votes_sell or 0,
+                "votes_hold": row.votes_hold or 0,
+                "price": row.price,
+                "details": row.details,
+                "ts": row.created_at.isoformat() if row.created_at else None,
+            }
+        finally:
+            db.close()
+
+    try:
+        return await asyncio.to_thread(_fetch)
+    except Exception:
+        return {"available": False, "symbol": sym}

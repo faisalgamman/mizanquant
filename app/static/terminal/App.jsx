@@ -29,6 +29,7 @@ function App() {
   const [paper, setPaper]         = useState([]);
   const [models, setModels]       = useState(mockModels);
   const [sectors, setSectors]     = useState(mockSectors);
+  const [consensus, setConsensus] = useState(null);
 
   // Fetch /buys, map real rows. Returns true once real signals are loaded.
   const loadBuys = async () => {
@@ -194,6 +195,22 @@ function App() {
     return () => clearTimeout(id);
   }, [toast]);
 
+  // Fetch real consensus for the selected symbol (no fabricated votes)
+  useEffect(() => {
+    if (!selectedSym) { setConsensus(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/v1/consensus/' + encodeURIComponent(selectedSym));
+        const j = await r.json();
+        if (!cancelled) setConsensus(j);
+      } catch (_) {
+        if (!cancelled) setConsensus({ available: false, symbol: selectedSym });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedSym]);
+
   const filteredSignals = useMemo(() => {
     if (!query) return displaySignals;
     const q = query.toUpperCase();
@@ -298,7 +315,7 @@ function App() {
           models={models}
           sectors={sectors}
           signal={selected}
-          votes={mockConsensusVotes}
+          consensus={consensus}
         />
       </main>
 
