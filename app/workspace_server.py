@@ -6502,7 +6502,9 @@ _LEGACY_REDIRECTS: dict[str, str] = {
     "/dashboard-legacy":  "/terminal",
     "/halal-screener":    "/halal-screener-v2",
     "/risk-desk":         "/risk-desk-v2",
-    "/screener":          "/halal-screener-v2",
+    # NOTE: "/screener" intentionally NOT redirected — it is a JSON data endpoint
+    # (app/routers/screener.py) the halal-screener-v2 kit fetches. Redirecting it
+    # would shadow the data API. Navigate to /halal-screener-v2 directly for the page.
     "/trading":           "/terminal",
     "/trading-lab":       "/terminal",
     "/ai-assistant":      "/assistant",
