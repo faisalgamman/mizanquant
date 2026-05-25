@@ -92,6 +92,9 @@ function PipelineFlow({ stages, running, dryRun, setDryRun, onRun }) {
 }
 
 function GuardsList({ guards }) {
+  if (!guards || guards.length === 0) {
+    return <div style={{ fontSize: 10, color: "var(--text-muted)", padding: "8px 2px" }}>No guard rejections today</div>;
+  }
   const max = Math.max(3, ...guards.map((g) => g.hits));
   return (
     <div className="guard-list">
@@ -107,6 +110,9 @@ function GuardsList({ guards }) {
 }
 
 function Schedule({ items }) {
+  if (!items || items.length === 0) {
+    return <div style={{ fontSize: 10, color: "var(--text-muted)", padding: "8px 2px" }}>Schedule loading…</div>;
+  }
   return (
     <div>
       {items.map((it) => (

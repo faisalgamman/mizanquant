@@ -30,6 +30,8 @@ function App() {
   const [models, setModels]       = useState([]);   // real leaderboard or honest empty
   const [sectors, setSectors]     = useState(mockSectors);
   const [consensus, setConsensus] = useState(null);
+  const [guards, setGuards]       = useState([]);    // real guard rejections (no mock)
+  const [schedule, setSchedule]   = useState([]);    // real daily schedule (no mock)
 
   // Fetch /buys, map real rows. Returns true once real signals are loaded.
   const loadBuys = async () => {
@@ -146,6 +148,19 @@ function App() {
               halal: !haram.test(s.name || s.ticker || ''),
             }));
           if (mappedSecs.length > 0) setSectors(mappedSecs);
+        }
+        // Real guards (today's rejections) — guards_recent = {guard_name: count}
+        const gr = ov.guards_recent || {};
+        const gRows = Object.entries(gr).map(([name, hits]) => ({
+          name,
+          hits: hits || 0,
+          color: (hits || 0) === 0 ? "var(--positive)" : (hits || 0) < 3 ? "var(--warning)" : "var(--negative)",
+        }));
+        setGuards(gRows);
+        // Real daily schedule — pipeline.schedule = [{time, task, type}]
+        const sch = ov.pipeline && ov.pipeline.schedule;
+        if (Array.isArray(sch) && sch.length > 0) {
+          setSchedule(sch.map(s => ({ time: s.time, label: s.task || s.label || "" })));
         }
       } catch (_) {}
 
@@ -307,8 +322,8 @@ function App() {
             dryRun={dryRun}
             setDryRun={setDryRun}
             onRunPipeline={runPipeline}
-            guards={mockGuards}
-            schedule={mockSchedule}
+            guards={guards}
+            schedule={schedule}
           />
         </div>
         <LowerRow
