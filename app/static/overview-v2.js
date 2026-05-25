@@ -190,6 +190,9 @@ function badgeClassFor(verdict) {
 }
 
 function renderSignals() {
+  // The redundant top Signals block was removed from /dashboard (Stock
+  // Intelligence is the single signal table). No-op if its elements are absent.
+  if (!$("signalsFeatured")) return;
   const arr = state.signals;
   const top3 = arr.slice(0, 3);
   const rest = arr.slice(3);
@@ -238,6 +241,7 @@ function gradientSpark(score) {
 }
 
 function renderSignalTable() {
+  if (!$("signalTableBody") || !$("fSignal")) return;  // block removed on /dashboard
   const sFilter = $("fSignal").value;
   const scoreMin = Number($("fScore").value);
   const halalOnly = $("fHalal").checked;
