@@ -6467,31 +6467,53 @@ def _static_html(rel_path: str):
 
 # ── Public-facing surfaces ────────────────────────────────────────────────────
 
-@app.get("/landing", include_in_schema=False)
-async def get_landing():
-    """Institutional landing page with Terminal Access Lock."""
-    return _static_html("public/landing/index.html")
+@app.get("/landing",          include_in_schema=False)
+async def get_landing():          return _static_html("public/landing/index.html")
 
-@app.get("/slides", include_in_schema=False)
-async def get_slides():
-    """6-slide investor briefing deck."""
-    return _static_html("public/slides/index.html")
+@app.get("/slides",           include_in_schema=False)
+async def get_slides():           return _static_html("public/slides/index.html")
 
-@app.get("/one-pager", include_in_schema=False)
-async def get_one_pager():
-    """A4 print-ready institutional tear-sheet."""
-    return _static_html("public/one-pager/index.html")
+@app.get("/one-pager",        include_in_schema=False)
+async def get_one_pager():        return _static_html("public/one-pager/index.html")
+
+@app.get("/email-signature",  include_in_schema=False)
+async def get_email_signature():  return _static_html("public/email-signature/index.html")
+
+@app.get("/report/template",  include_in_schema=False)
+async def get_report_template():  return _static_html("public/report/index.html")
+
+@app.get("/terms",            include_in_schema=False)
+async def get_terms():            return _static_html("public/terms/index.html")
+
+@app.get("/press",            include_in_schema=False)
+async def get_press():            return _static_html("public/press/index.html")
+
+@app.get("/brand",            include_in_schema=False)
+async def get_brand_vault():      return _static_html("public/index.html")
 
 
-@app.get("/email-signature", include_in_schema=False)
-async def get_email_signature():
-    """Bilingual HTML email signature generator."""
-    return _static_html("public/email-signature/index.html")
+# ── Legacy page redirects (301 permanent) ────────────────────────────────────
+# Old blue-accent pages are replaced by v2 kits or rebranded equivalents.
 
-@app.get("/report/template", include_in_schema=False)
-async def get_report_template():
-    """Bilingual end-of-day report template."""
-    return _static_html("public/report/index.html")
+_LEGACY_REDIRECTS: dict[str, str] = {
+    "/dashboard-legacy":  "/terminal",
+    "/halal-screener":    "/halal-screener-v2",
+    "/risk-desk":         "/risk-desk-v2",
+    "/screener":          "/halal-screener-v2",
+    "/trading":           "/terminal",
+    "/trading-lab":       "/terminal",
+    "/ai-assistant":      "/assistant",
+    "/analysis-lab":      "/assistant",
+    "/backtest":          "/terminal",
+    "/etf":               "/macro",
+    "/investors":         "/landing",
+    "/alerts":            "/alerts",        # keep — has real API backend
+}
+
+for _old, _new in _LEGACY_REDIRECTS.items():
+    if _old != _new:                       # skip self-redirect
+        _fn = (lambda n: lambda: RedirectResponse(n, status_code=301))(_new)
+        app.add_api_route(_old, _fn, include_in_schema=False)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Press kit &amp; brand portal</title>
+<link rel="icon" type="image/svg+xml" href="/static/public/assets/logo-favicon.svg">
+<link rel="stylesheet" href="/static/design-tokens.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg-root); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+body { font-family: var(--font-body); font-size: 14px; line-height: 1.55; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::selection { background: var(--accent-dim); color: var(--accent); }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 32px; }
+a { color: inherit; text-decoration: none; }
+
+/* ═══ TOP BAR ═══════════════════════════════════════════ */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(12, 12, 16, 0.88);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.topbar-inner {
+  display: flex; align-items: center;
+  height: 64px;
+}
+.topbar-brand { display: flex; align-items: center; gap: 12px; margin-right: 28px; }
+.topbar-brand .mark {
+  width: 30px; height: 30px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.topbar-brand .wm {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 800; letter-spacing: -0.3px;
+}
+.topbar-brand .wm em { font-style: normal; color: var(--accent); }
+.topbar-brand .sep {
+  width: 1px; height: 16px; background: var(--border-default); margin: 0 6px;
+}
+.topbar-brand .title {
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 500; color: var(--text-secondary);
+}
+.topbar-meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  display: flex; align-items: center; gap: 18px;
+}
+.topbar-meta a {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+}
+.topbar-meta a:hover { background: var(--accent); color: var(--bg-root); }
+
+/* ═══ HERO ══════════════════════════════════════════════ */
+.hero {
+  padding: 80px 0 60px;
+  position: relative;
+  overflow: hidden;
+}
+.hero-glow {
+  position: absolute;
+  top: -200px; right: -100px;
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(200,150,62,0.10) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+}
+.hero-inner { position: relative; z-index: 1; max-width: 820px; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  margin-bottom: 18px;
+  font-weight: 700;
+}
+.eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+h1 {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -1.2px;
+  line-height: 1.1;
+  margin-bottom: 20px;
+  text-wrap: balance;
+}
+h1 em { font-style: normal; color: var(--accent); }
+.hero-lead {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 28px;
+}
+.hero-ar {
+  font-family: var(--font-arabic);
+  font-size: 18px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 28px;
+  letter-spacing: -0.3px;
+}
+.hero-actions { display: flex; gap: 12px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 20px;
+  border-radius: 5px;
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-primary { background: var(--accent); color: var(--bg-root); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-ghost { background: transparent; border-color: var(--border-strong); color: var(--text-secondary); }
+.btn-ghost:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+/* ═══ SECTION ═══════════════════════════════════════════ */
+section { padding: 56px 0; border-top: 1px solid var(--border-subtle); }
+.section-head { margin-bottom: 32px; max-width: 760px; }
+.section-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 2px; font-weight: 700;
+  margin-bottom: 10px;
+}
+.section-title {
+  font-family: var(--font-display);
+  font-size: 28px; font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+.section-title em { font-style: normal; color: var(--accent); }
+.section-lead {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* ═══ MARK GRID ═════════════════════════════════════════ */
+.mark-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+.mark-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.mark-canvas {
+  height: 220px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.mark-canvas.dark { background: var(--bg-root); border-bottom: 1px solid var(--border-subtle); }
+.mark-canvas.light { background: #ffffff; }
+.mark-canvas.checker {
+  background-image:
+    linear-gradient(45deg, var(--bg-overlay) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-overlay) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-overlay) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-overlay) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, 8px 0px;
+  background-color: var(--bg-raised);
+}
+.mark-meta {
+  padding: 14px 18px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.mark-name {
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 700;
+  letter-spacing: -0.1px;
+  margin-bottom: 2px;
+}
+.mark-spec {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.mark-dl {
+  display: flex; gap: 6px;
+}
+.mark-dl a {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  transition: color 0.12s, border-color 0.12s;
+}
+.mark-dl a:hover { color: var(--accent); border-color: var(--accent); }
+.mark-dl a i { font-size: 9px; }
+
+/* ═══ COLOR TOKENS ══════════════════════════════════════ */
+.color-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.color-block {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+}
+.color-block-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.color-rows { display: flex; flex-direction: column; gap: 10px; }
+.color-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.color-row:last-child { border-bottom: none; }
+.color-swatch {
+  width: 56px; height: 40px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  flex-shrink: 0;
+}
+.color-info { flex: 1; min-width: 0; }
+.color-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.color-token {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  letter-spacing: 0.3px;
+}
+.color-hex {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+
+/* ═══ TYPE HIERARCHY ════════════════════════════════════ */
+.type-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.type-card .specimen {
+  padding: 28px 32px;
+  display: flex; align-items: center; gap: 24px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.type-card .specimen .text {
+  flex: 1;
+  line-height: 1.05;
+}
+.type-card .specimen .info {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.type-card .specimen .info strong { color: var(--text-secondary); font-weight: 600; }
+.type-card .meta {
+  padding: 12px 32px;
+  display: flex; justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+}
+.type-card .meta strong { color: var(--text-secondary); }
+
+/* ═══ DO / DONT ═════════════════════════════════════════ */
+.dodont-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+}
+.dodont-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  position: relative;
+}
+.dodont-card .label {
+  position: absolute;
+  top: 12px; left: 14px;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.dodont-card.do .label { background: var(--positive-dim); color: var(--positive); border: 1px solid var(--positive); }
+.dodont-card.dont .label { background: var(--negative-dim); color: var(--negative); border: 1px solid var(--negative); }
+.dodont-stage {
+  height: 180px;
+  display: flex; align-items: center; justify-content: center;
+  border-bottom: 1px solid var(--border-subtle);
+  position: relative;
+  padding: 24px;
+  overflow: hidden;
+}
+.dodont-stage.dark-canvas { background: var(--bg-root); }
+.dodont-stage.light-canvas { background: #ffffff; }
+.dodont-stage.warn-canvas { background: linear-gradient(135deg, #2a1e0e 0%, #16110a 100%); }
+.dodont-stage.colored-bg {
+  background: linear-gradient(135deg, #2c2855 0%, #1a1a30 100%);
+}
+.dodont-caption {
+  padding: 14px 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.dodont-caption strong { color: var(--text-primary); font-weight: 600; }
+
+/* ═══ PRESS CONTACT ═════════════════════════════════════ */
+.contact-card {
+  background: linear-gradient(180deg, var(--bg-raised) 0%, var(--bg-surface) 100%);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-lg);
+  padding: 36px 40px;
+  position: relative;
+  overflow: hidden;
+}
+.contact-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 14px; right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+.contact-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 32px;
+}
+.contact-block .label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.contact-block .name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin-bottom: 6px;
+}
+.contact-block .role {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.contact-block .email {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.contact-block .meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  line-height: 1.55;
+}
+
+/* ═══ FOOTER ════════════════════════════════════════════ */
+footer {
+  border-top: 1px solid var(--border-subtle);
+  padding: 36px 0 48px;
+  margin-top: 32px;
+}
+.footer-grid {
+  display: flex; justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.footer-grid a { color: var(--text-secondary); }
+.footer-grid a:hover { color: var(--accent); }
+
+@media (max-width: 920px) {
+  .mark-grid, .color-section, .dodont-grid, .contact-grid { grid-template-columns: 1fr; }
+  h1 { font-size: 32px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ TOP BAR ═══ -->
+<nav class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="topbar-brand">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="18" height="18" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div class="wm">mizan<em>quant</em></div>
+      <div class="sep"></div>
+      <div class="title">Press kit &amp; brand portal</div>
+    </div>
+    <div class="topbar-meta">
+      <span>Version 2026.Q2 · last updated 2026-05-24</span>
+      <a href="#press">Press contact</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<section class="hero" style="border-top: none;">
+  <div class="hero-glow"></div>
+  <div class="wrap hero-inner">
+    <div class="eyebrow"><span class="dot"></span>Press kit &middot; brand portal</div>
+    <h1>The <em>MizanQuant</em> brand &mdash; everything press, partners, and counsel need.</h1>
+    <div class="hero-ar" dir="rtl" lang="ar">حقيبة الإعلام لمنصة ميزان كوانت</div>
+    <p class="hero-lead">
+      Logo marks, color tokens, typographic hierarchy, usage do's and don'ts, and direct contacts for the press desk. All assets are downloadable below; please follow the usage rules outlined to protect the brand's institutional integrity.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#marks">
+        <i class="fas fa-download" style="font-size: 11px;"></i>
+        Download all marks (ZIP)
+      </a>
+      <a class="btn btn-ghost" href="#press">
+        <i class="fas fa-envelope" style="font-size: 11px;"></i>
+        Press contact
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ LOGO MARKS ═══ -->
+<section id="marks">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-eyebrow">01 &middot; Logo marks</div>
+      <h2 class="section-title">The <em>mīm-trace</em> &mdash; four canonical variants.</h2>
+      <p class="section-lead">
+        The mark is a circle (lens / scale weight / Arabic letter mīm) connected by a chart-line path to an ascending dot. Always reproduce with adequate clear-space &mdash; minimum padding equal to the height of the circle on all four sides.
+      </p>
+    </div>
+
+    <div class="mark-grid">
+      <!-- 1: Gold mark on dark -->
+      <div class="mark-card">
+        <div class="mark-canvas dark">
+          <svg viewBox="0 0 64 64" width="120" height="120" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="#c8963e" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#c8963e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="#c8963e"></circle>
+          </svg>
+        </div>
+        <div class="mark-meta">
+          <div>
+            <div class="mark-name">Mark · gold on dark</div>
+            <div class="mark-spec">Canonical · use on warm-dark canvas</div>
+          </div>
+          <div class="mark-dl">
+            <a href="/static/public/assets/logo-monogram.svg" download="mizanquant-mark-gold-dark.svg">
+              <i class="fas fa-download"></i> SVG
+            </a>
+            <a href="#" onclick="exportPng('mark-gold-dark', '#c8963e', '#0c0c10'); return false;">
+              <i class="fas fa-download"></i> PNG
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2: Dark mark on light -->
+      <div class="mark-card">
+        <div class="mark-canvas light">
+          <svg viewBox="0 0 64 64" width="120" height="120" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="#0c0c10" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#0c0c10" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="#0c0c10"></circle>
+          </svg>
+        </div>
+        <div class="mark-meta">
+          <div>
+            <div class="mark-name">Mark · dark on light</div>
+            <div class="mark-spec">Inverse · for print &amp; document headers</div>
+          </div>
+          <div class="mark-dl">
+            <a href="#" onclick="exportSvg('mark-dark-light', '#0c0c10'); return false;">
+              <i class="fas fa-download"></i> SVG
+            </a>
+            <a href="#" onclick="exportPng('mark-dark-light', '#0c0c10', '#ffffff'); return false;">
+              <i class="fas fa-download"></i> PNG
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3: Mark on checker (transparent demo) -->
+      <div class="mark-card">
+        <div class="mark-canvas checker">
+          <svg viewBox="0 0 64 64" width="120" height="120" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="#c8963e" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#c8963e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="#c8963e"></circle>
+          </svg>
+        </div>
+        <div class="mark-meta">
+          <div>
+            <div class="mark-name">Mark · gold transparent</div>
+            <div class="mark-spec">For overlays · favicons · in-product</div>
+          </div>
+          <div class="mark-dl">
+            <a href="/static/public/assets/logo-monogram.svg" download="mizanquant-mark-transparent.svg">
+              <i class="fas fa-download"></i> SVG
+            </a>
+            <a href="#" onclick="exportPng('mark-transparent', '#c8963e', null); return false;">
+              <i class="fas fa-download"></i> PNG
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4: Wordmark dark -->
+      <div class="mark-card" style="grid-column: 1 / span 2;">
+        <div class="mark-canvas dark">
+          <svg viewBox="0 0 280 80" width="380" height="108" aria-hidden="true">
+            <rect width="280" height="80" rx="10" fill="#0c0c10"></rect>
+            <rect x="16" y="16" width="48" height="48" rx="10" fill="rgba(200,150,62,0.15)"></rect>
+            <g transform="translate(16 16) scale(0.75)">
+              <circle cx="18" cy="34" r="9.5" fill="none" stroke="#c8963e" stroke-width="3.2"></circle>
+              <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#c8963e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="54" cy="22" r="3" fill="#c8963e"></circle>
+            </g>
+            <text x="80" y="44" font-family="'DM Sans', Inter, sans-serif" font-size="22" font-weight="800" letter-spacing="-0.3" fill="#e4e4ec">mizan<tspan fill="#c8963e">quant</tspan></text>
+            <text x="80" y="60" font-family="'DM Sans', Inter, sans-serif" font-size="9" font-weight="600" letter-spacing="2.6" fill="#5c5c6a">HALAL  TRADING  SUITE</text>
+          </svg>
+        </div>
+        <div class="mark-meta">
+          <div>
+            <div class="mark-name">Wordmark · primary lockup · 280×80</div>
+            <div class="mark-spec">Horizontal lockup · always use mark + wordmark together</div>
+          </div>
+          <div class="mark-dl">
+            <a href="/static/public/assets/logo-wordmark.svg" download="mizanquant-wordmark.svg">
+              <i class="fas fa-download"></i> SVG
+            </a>
+            <a href="#" onclick="exportWordmarkPng(); return false;">
+              <i class="fas fa-download"></i> PNG
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5: Favicon set -->
+      <div class="mark-card">
+        <div class="mark-canvas dark" style="gap: 16px; flex-wrap: wrap; padding: 24px;">
+          <div style="width:64px;height:64px;background:#0c0c10;border-radius:12px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-default);">
+            <svg viewBox="0 0 32 32" width="38" height="38" aria-hidden="true">
+              <rect width="32" height="32" rx="6" fill="#0c0c10"></rect>
+              <circle cx="10" cy="20" r="5.2" fill="none" stroke="#c8963e" stroke-width="2.2"></circle>
+              <path d="M15 22 L20 17 L24 19.5 L29 12" fill="none" stroke="#c8963e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="29" cy="12" r="1.8" fill="#c8963e"></circle>
+            </svg>
+          </div>
+          <div style="width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+              <rect width="32" height="32" rx="6" fill="#0c0c10"></rect>
+              <circle cx="10" cy="20" r="5.2" fill="none" stroke="#c8963e" stroke-width="2.2"></circle>
+              <path d="M15 22 L20 17 L24 19.5 L29 12" fill="none" stroke="#c8963e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="29" cy="12" r="1.8" fill="#c8963e"></circle>
+            </svg>
+          </div>
+          <div style="width:16px;height:16px;border-radius:3px;display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 32 32" width="16" height="16" aria-hidden="true">
+              <rect width="32" height="32" rx="6" fill="#0c0c10"></rect>
+              <circle cx="10" cy="20" r="5.2" fill="none" stroke="#c8963e" stroke-width="2.2"></circle>
+              <path d="M15 22 L20 17 L24 19.5 L29 12" fill="none" stroke="#c8963e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="29" cy="12" r="1.8" fill="#c8963e"></circle>
+            </svg>
+          </div>
+        </div>
+        <div class="mark-meta">
+          <div>
+            <div class="mark-name">Favicon · 64 / 32 / 16</div>
+            <div class="mark-spec">Simplified geometry · readable at 16px</div>
+          </div>
+          <div class="mark-dl">
+            <a href="/static/public/assets/logo-favicon.svg" download="mizanquant-favicon.svg">
+              <i class="fas fa-download"></i> SVG
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ COLOR TOKENS ═══ -->
+<section id="color">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-eyebrow">02 &middot; Color tokens</div>
+      <h2 class="section-title">Warm near-black canvas &middot; <em>#c8963e</em> warm gold accent.</h2>
+      <p class="section-lead">
+        The palette is intentionally tight. One accent. Four-tier dark canvas. Four-tier text ramp. Semantic green/red/amber/blue used only for directional state &mdash; never decoratively. Treat every other color as off-brand.
+      </p>
+    </div>
+
+    <div class="color-section">
+      <!-- Brand accent + canvas -->
+      <div class="color-block">
+        <div class="color-block-title">Brand &middot; canvas</div>
+        <div class="color-rows">
+          <div class="color-row">
+            <div class="color-swatch" style="background: #c8963e;"></div>
+            <div class="color-info">
+              <div class="color-name">Warm gold &middot; accent</div>
+              <div class="color-token">--accent</div>
+            </div>
+            <div class="color-hex">#C8963E</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #d4a853;"></div>
+            <div class="color-info">
+              <div class="color-name">Gold hover</div>
+              <div class="color-token">--accent-hover</div>
+            </div>
+            <div class="color-hex">#D4A853</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #0c0c10;"></div>
+            <div class="color-info">
+              <div class="color-name">Root canvas</div>
+              <div class="color-token">--bg-root</div>
+            </div>
+            <div class="color-hex">#0C0C10</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #14141a;"></div>
+            <div class="color-info">
+              <div class="color-name">Surface</div>
+              <div class="color-token">--bg-surface</div>
+            </div>
+            <div class="color-hex">#14141A</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #1c1c26;"></div>
+            <div class="color-info">
+              <div class="color-name">Raised</div>
+              <div class="color-token">--bg-raised</div>
+            </div>
+            <div class="color-hex">#1C1C26</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #242430;"></div>
+            <div class="color-info">
+              <div class="color-name">Overlay</div>
+              <div class="color-token">--bg-overlay</div>
+            </div>
+            <div class="color-hex">#242430</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Semantic + text ramp -->
+      <div class="color-block">
+        <div class="color-block-title">Semantic &middot; text ramp</div>
+        <div class="color-rows">
+          <div class="color-row">
+            <div class="color-swatch" style="background: #4ade80;"></div>
+            <div class="color-info">
+              <div class="color-name">Positive &middot; buy / pass / OK</div>
+              <div class="color-token">--positive</div>
+            </div>
+            <div class="color-hex">#4ADE80</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #f87171;"></div>
+            <div class="color-info">
+              <div class="color-name">Negative &middot; sell / fail / loss</div>
+              <div class="color-token">--negative</div>
+            </div>
+            <div class="color-hex">#F87171</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #fbbf24;"></div>
+            <div class="color-info">
+              <div class="color-name">Warning &middot; wait / caution</div>
+              <div class="color-token">--warning</div>
+            </div>
+            <div class="color-hex">#FBBF24</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #60a5fa;"></div>
+            <div class="color-info">
+              <div class="color-name">Info &middot; neutral metric</div>
+              <div class="color-token">--info</div>
+            </div>
+            <div class="color-hex">#60A5FA</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #e4e4ec;"></div>
+            <div class="color-info">
+              <div class="color-name">Text primary</div>
+              <div class="color-token">--text-primary</div>
+            </div>
+            <div class="color-hex">#E4E4EC</div>
+          </div>
+          <div class="color-row">
+            <div class="color-swatch" style="background: #9494a0;"></div>
+            <div class="color-info">
+              <div class="color-name">Text secondary</div>
+              <div class="color-token">--text-secondary</div>
+            </div>
+            <div class="color-hex">#9494A0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TYPE HIERARCHY ═══ -->
+<section id="type">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-eyebrow">03 &middot; Typography</div>
+      <h2 class="section-title">DM Sans &middot; <em>Cairo</em> &middot; JetBrains Mono.</h2>
+      <p class="section-lead">
+        DM Sans carries every English UI title and the wordmark. Cairo is reserved for Arabic surface &mdash; it pairs cleanly with DM Sans on bilingual pages. JetBrains Mono handles every numeric value, ticker, and timestamp. Body copy stays on the system stack for native chrome feel.
+      </p>
+    </div>
+
+    <div class="type-card">
+      <div class="specimen">
+        <div class="text" style="font-family: 'DM Sans', sans-serif; font-size: 48px; font-weight: 700; letter-spacing: -1px;">The convergence of <em style="color: var(--accent); font-style: normal;">Sharia governance</em></div>
+        <div class="info"><strong>DM Sans</strong><br>Display · 700<br>−1.0px tracking</div>
+      </div>
+      <div class="meta">
+        <span>Page titles &middot; hero copy &middot; wordmark</span>
+        <span><strong>Free</strong> &middot; Google Fonts &middot; Variable</span>
+      </div>
+    </div>
+
+    <div class="type-card">
+      <div class="specimen">
+        <div class="text" style="font-family: 'Cairo', sans-serif; font-size: 36px; font-weight: 800; color: var(--accent); direction: rtl;" dir="rtl" lang="ar">ميزان كوانت &middot; حوكمة وذكاء</div>
+        <div class="info"><strong>Cairo</strong><br>Arabic · 800<br>−0.5px tracking</div>
+      </div>
+      <div class="meta">
+        <span>All Arabic surface &middot; reports &middot; alerts</span>
+        <span><strong>Free</strong> &middot; Google Fonts &middot; designed by Mohamed Gaber</span>
+      </div>
+    </div>
+
+    <div class="type-card">
+      <div class="specimen">
+        <div class="text" style="font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700; letter-spacing: -0.5px;">$48,284 · +1.84% · Sharpe 1.84</div>
+        <div class="info"><strong>JetBrains Mono</strong><br>Mono · 700<br>tabular-nums on</div>
+      </div>
+      <div class="meta">
+        <span>Every numeric value · ticker · timestamp · code</span>
+        <span><strong>Free</strong> &middot; Google Fonts &middot; OFL</span>
+      </div>
+    </div>
+
+    <div class="type-card">
+      <div class="specimen">
+        <div class="text" style="font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 18px; line-height: 1.55; color: var(--text-secondary); letter-spacing: 0;">
+          Body copy stays on the platform's native system stack &mdash; chrome-native by design. At 13px on dark, the product reads like a terminal, not a marketing page.
+        </div>
+        <div class="info"><strong>System UI</strong><br>Body · 400 / 500<br>1.5 line-height</div>
+      </div>
+      <div class="meta">
+        <span>All body copy &middot; chat &middot; descriptions</span>
+        <span><strong>System</strong> &middot; never load a webfont for body</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ DO / DON'T ═══ -->
+<section id="usage">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-eyebrow">04 &middot; Usage</div>
+      <h2 class="section-title">Six rules that <em>preserve the brand</em>.</h2>
+      <p class="section-lead">
+        The brand earns its premium feel through discipline, not decoration. These six examples cover the deviations we see most often in submitted assets.
+      </p>
+    </div>
+
+    <div class="dodont-grid">
+
+      <!-- DO 1: Mark on warm-dark -->
+      <div class="dodont-card do">
+        <div class="dodont-stage dark-canvas">
+          <span class="label"><i class="fas fa-check" style="font-size: 8px;"></i> Do</span>
+          <svg viewBox="0 0 64 64" width="86" height="86" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="#c8963e" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#c8963e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="#c8963e"></circle>
+          </svg>
+        </div>
+        <div class="dodont-caption">
+          <strong>Use gold-on-warm-dark.</strong> The canonical pairing. Adequate clear-space all around. The mark always faces upward.
+        </div>
+      </div>
+
+      <!-- DO 2: Inverse on light -->
+      <div class="dodont-card do">
+        <div class="dodont-stage light-canvas">
+          <span class="label"><i class="fas fa-check" style="font-size: 8px;"></i> Do</span>
+          <svg viewBox="0 0 64 64" width="86" height="86" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="#0c0c10" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#0c0c10" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="#0c0c10"></circle>
+          </svg>
+        </div>
+        <div class="dodont-caption">
+          <strong>Use dark-on-light for print.</strong> Inverse the mark to charcoal-on-paper for institutional documents and statements.
+        </div>
+      </div>
+
+      <!-- DO 3: Bilingual pairing -->
+      <div class="dodont-card do">
+        <div class="dodont-stage dark-canvas">
+          <span class="label"><i class="fas fa-check" style="font-size: 8px;"></i> Do</span>
+          <div style="text-align: center;">
+            <div style="font-family: 'DM Sans', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.4px;">mizan<span style="color: var(--accent);">quant</span></div>
+            <div style="font-family: 'Cairo', sans-serif; font-size: 18px; color: var(--accent); font-weight: 800; margin-top: 4px;" dir="rtl" lang="ar">ميزان كوانت</div>
+          </div>
+        </div>
+        <div class="dodont-caption">
+          <strong>Pair DM Sans + Cairo for bilingual.</strong> EN above, AR below. Always show both together on bilingual surfaces.
+        </div>
+      </div>
+
+      <!-- DONT 1: Wrong color -->
+      <div class="dodont-card dont">
+        <div class="dodont-stage colored-bg">
+          <span class="label"><i class="fas fa-xmark" style="font-size: 8px;"></i> Don't</span>
+          <svg viewBox="0 0 64 64" width="86" height="86" aria-hidden="true">
+            <circle cx="18" cy="34" r="9.5" fill="none" stroke="#a855f7" stroke-width="3"></circle>
+            <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#a855f7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+            <circle cx="54" cy="22" r="3" fill="#a855f7"></circle>
+          </svg>
+        </div>
+        <div class="dodont-caption">
+          <strong>Don't retint the mark.</strong> Only gold (#c8963e), charcoal (#0c0c10), or white are valid. No purples, blues, or gradients.
+        </div>
+      </div>
+
+      <!-- DONT 2: Decorative emoji / drop shadow -->
+      <div class="dodont-card dont">
+        <div class="dodont-stage dark-canvas">
+          <span class="label"><i class="fas fa-xmark" style="font-size: 8px;"></i> Don't</span>
+          <div style="text-align: center;">
+            <div style="font-family: 'DM Sans', sans-serif; font-size: 22px; font-weight: 800; letter-spacing: -0.3px; text-shadow: 0 4px 18px rgba(200,150,62,0.7);">mizan<span style="color: var(--accent);">quant</span></div>
+            <div style="font-family: serif; font-size: 16px; color: #c8963e; font-style: italic; margin-top: 8px;">— elevate your portfolio 🚀</div>
+          </div>
+        </div>
+        <div class="dodont-caption">
+          <strong>Don't add taglines, glows, or emoji.</strong> The brand is institutional, not consumer. No marketing flourishes, drop shadows, or 🚀 / 💰 anywhere.
+        </div>
+      </div>
+
+      <!-- DONT 3: Cramped clear-space -->
+      <div class="dodont-card dont">
+        <div class="dodont-stage warn-canvas" style="overflow: hidden;">
+          <span class="label"><i class="fas fa-xmark" style="font-size: 8px;"></i> Don't</span>
+          <div style="background: var(--bg-root); padding: 4px; border-radius: 4px; display: inline-flex; align-items: center; gap: 0;">
+            <svg viewBox="0 0 64 64" width="48" height="48" aria-hidden="true">
+              <circle cx="18" cy="34" r="9.5" fill="none" stroke="#c8963e" stroke-width="3"></circle>
+              <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="#c8963e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="54" cy="22" r="3" fill="#c8963e"></circle>
+            </svg>
+            <div style="background: rgba(248,113,113,0.5); padding: 2px 6px; font-family: var(--font-mono); font-size: 11px; color: white; border-radius: 3px;">NEW 2026!</div>
+          </div>
+        </div>
+        <div class="dodont-caption">
+          <strong>Don't crowd the mark.</strong> Reserve clear-space equal to the height of the ring on all sides. Never abut promo banners or stickers.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PRESS CONTACT ═══ -->
+<section id="press">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-eyebrow">05 &middot; Press contact</div>
+      <h2 class="section-title">For interviews, briefings, and <em>institutional inquiries</em>.</h2>
+      <p class="section-lead">
+        We respond to journalist and partner queries within one business day. For Sharia-board questions, please email the dedicated Sharia inbox &mdash; routed directly to the board secretary.
+      </p>
+    </div>
+
+    <div class="contact-card">
+      <div class="contact-grid">
+        <div class="contact-block">
+          <div class="label">Press &middot; communications</div>
+          <div class="name">Faisal Al-Mansouri</div>
+          <div class="role">Founder · Institutional Partnerships<br>EN · العربية · Arabic media coverage</div>
+          <div class="email">press@mizanquant.com</div>
+          <div class="meta">+971 4 555 0142 &middot; DIFC, Dubai</div>
+        </div>
+        <div class="contact-block">
+          <div class="label">Sharia &middot; fatwa committee</div>
+          <div class="name">Sharia board secretary</div>
+          <div class="role">Routed to Dr. Khalid Al-Rashid<br>AAOIFI-related queries only</div>
+          <div class="email">sharia@mizanquant.com</div>
+          <div class="meta">Response &lt; 48 hours<br>Quarterly fatwa renewals</div>
+        </div>
+        <div class="contact-block">
+          <div class="label">Investor relations</div>
+          <div class="name">Client desk</div>
+          <div class="role">Onboarding &middot; LP statements &middot; due-diligence packs</div>
+          <div class="email">institutional@mizanquant.com</div>
+          <div class="meta">60-min private briefing &middot; NDA on request</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>&copy; 2026 MizanQuant FZE &middot; DIFC, Dubai &middot; All marks reserved</div>
+      <div style="display: flex; gap: 24px;">
+        <a href="../landing/index.html">Landing</a>
+        <a href="../one-pager/index.html">Fact sheet</a>
+        <a href="../terms/index.html">Terms sheet</a>
+        <a href="../slides/index.html">Investor deck</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+// ─── PNG exporter — rasterise a mark variant client-side ─────────────
+function exportPng(name, strokeColor, bgColor) {
+  const size = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  if (bgColor) {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, size, size);
+  }
+
+  // Scale 64 → 1024 = 16x
+  const s = size / 64;
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = 3 * s;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Ring
+  ctx.beginPath();
+  ctx.arc(18 * s, 34 * s, 9.5 * s, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Chart segments
+  const pts = [[27, 40], [36, 30], [44, 36], [54, 22]];
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0] * s, pts[0][1] * s);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * s, pts[i][1] * s);
+  ctx.stroke();
+
+  // Terminal dot
+  ctx.fillStyle = strokeColor;
+  ctx.beginPath();
+  ctx.arc(54 * s, 22 * s, 3 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  canvas.toBlob((blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mizanquant-' + name + '.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+}
+
+function exportSvg(name, strokeColor) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <circle cx="18" cy="34" r="9.5" fill="none" stroke="${strokeColor}" stroke-width="3"/>
+  <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="${strokeColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="54" cy="22" r="3" fill="${strokeColor}"/>
+</svg>`;
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'mizanquant-' + name + '.svg';
+  a.click();
+}
+
+function exportWordmarkPng() {
+  const w = 1120, h = 320;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0c0c10';
+  ctx.fillRect(0, 0, w, h);
+  // Rounded badge
+  ctx.fillStyle = 'rgba(200,150,62,0.15)';
+  roundRect(ctx, 64, 64, 192, 192, 40);
+  ctx.fill();
+  // Mark (scaled)
+  const s = 144 / 64;  // scale factor for 144px mark
+  const ox = 64 + (192 - 144) / 2;
+  const oy = 64 + (192 - 144) / 2;
+  ctx.strokeStyle = '#c8963e';
+  ctx.fillStyle = '#c8963e';
+  ctx.lineWidth = 3.2 * s;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.arc(ox + 18 * s, oy + 34 * s, 9.5 * s, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ox + 27 * s, oy + 40 * s);
+  ctx.lineTo(ox + 36 * s, oy + 30 * s);
+  ctx.lineTo(ox + 44 * s, oy + 36 * s);
+  ctx.lineTo(ox + 54 * s, oy + 22 * s);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(ox + 54 * s, oy + 22 * s, 3 * s, 0, Math.PI * 2); ctx.fill();
+  // Wordmark
+  ctx.font = '800 88px "DM Sans", Inter, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e4e4ec';
+  ctx.fillText('mizan', 320, 172);
+  ctx.fillStyle = '#c8963e';
+  ctx.fillText('quant', 320 + ctx.measureText('mizan').width, 172);
+  // Tagline
+  ctx.font = '600 36px "DM Sans", Inter, sans-serif';
+  ctx.fillStyle = '#5c5c6a';
+  ctx.fillText('HALAL    TRADING    SUITE', 320, 240);
+
+  c.toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'mizanquant-wordmark.png';
+    a.click();
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+</script>
+
+</body>
+</html>
