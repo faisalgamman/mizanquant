@@ -6261,25 +6261,44 @@ _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
-# Mount UI kits + public surfaces as StaticFiles with html=True so that:
-#   /terminal → auto-redirect to /terminal/ → index.html + assets served correctly
-#   All relative href/src in each kit resolve under the same prefix.
-_kit_mounts = [
-    ("/terminal",          "terminal"),
-    ("/halal-screener-v2", "halal-screener-v2"),
-    ("/risk-desk-v2",      "risk-desk-v2"),
-    ("/onboarding",        "public/onboarding"),  # React/Babel kit with relative assets
-]
-for _prefix, _subdir in _kit_mounts:
-    _kit_dir = os.path.join(_static_dir, _subdir)
-    if os.path.isdir(_kit_dir):
-        app.mount(_prefix, StaticFiles(directory=_kit_dir, html=True), name=_subdir.replace("/", "-"))
+_STATIC = Path(__file__).resolve().parent / "static"
 
+def _html(rel: str):
+    """Return an HTMLResponse for a static file, stripping SRI so CDN scripts always load."""
+    p = _STATIC / rel
+    if not p.exists():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": f"Not found: {rel}"}, status_code=404)
+    return HTMLResponse(
+        content=p.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
-    """Redirect root to the Terminal — the new main entry point."""
-    return RedirectResponse("/terminal", status_code=302)
+    """Root → Terminal Overview kit (all paths are absolute, no redirect needed)."""
+    return _html("terminal/index.html")
+
+@app.get("/terminal", include_in_schema=False)
+@app.get("/terminal/", include_in_schema=False)
+async def get_terminal():
+    """Terminal Overview kit — served directly so auth gate works correctly."""
+    return _html("terminal/index.html")
+
+@app.get("/halal-screener-v2", include_in_schema=False)
+@app.get("/halal-screener-v2/", include_in_schema=False)
+async def get_halal_screener_v2():
+    return _html("halal-screener-v2/index.html")
+
+@app.get("/risk-desk-v2", include_in_schema=False)
+@app.get("/risk-desk-v2/", include_in_schema=False)
+async def get_risk_desk_v2():
+    return _html("risk-desk-v2/index.html")
+
+@app.get("/onboarding", include_in_schema=False)
+@app.get("/onboarding/", include_in_schema=False)
+async def get_onboarding():
+    return _html("public/onboarding/index.html")
 
 
 @app.get("/dashboard", include_in_schema=False)
@@ -6446,50 +6465,34 @@ async def get_rotation_page():
 
 
 # ---------------------------------------------------------------------------
-# Design System — UI Kits (v2) + Public-facing surfaces
+# Design System — Public-facing surfaces  (UI kits served above via _html())
 # ---------------------------------------------------------------------------
-
-_STATIC = Path(__file__).resolve().parent / "static"
-
-
-def _static_html(rel_path: str):
-    """Return FileResponse for a static HTML file; 404 if missing."""
-    p = _STATIC / rel_path
-    if p.exists():
-        return FileResponse(str(p))
-    return HTMLResponse(f"<h1>{rel_path} not found</h1>", status_code=404)
-
-
-# ── UI Kits: served via StaticFiles mounts (see bottom of file) ──────────────
-# /terminal, /halal-screener-v2, /risk-desk-v2 are handled by StaticFiles mounts
-# with html=True, which auto-redirects /kit → /kit/ so relative asset paths work.
-
 
 # ── Public-facing surfaces ────────────────────────────────────────────────────
 
 @app.get("/landing",          include_in_schema=False)
-async def get_landing():          return _static_html("public/landing/index.html")
+async def get_landing():          return _html("public/landing/index.html")
 
 @app.get("/slides",           include_in_schema=False)
-async def get_slides():           return _static_html("public/slides/index.html")
+async def get_slides():           return _html("public/slides/index.html")
 
 @app.get("/one-pager",        include_in_schema=False)
-async def get_one_pager():        return _static_html("public/one-pager/index.html")
+async def get_one_pager():        return _html("public/one-pager/index.html")
 
 @app.get("/email-signature",  include_in_schema=False)
-async def get_email_signature():  return _static_html("public/email-signature/index.html")
+async def get_email_signature():  return _html("public/email-signature/index.html")
 
 @app.get("/report/template",  include_in_schema=False)
-async def get_report_template():  return _static_html("public/report/index.html")
+async def get_report_template():  return _html("public/report/index.html")
 
 @app.get("/terms",            include_in_schema=False)
-async def get_terms():            return _static_html("public/terms/index.html")
+async def get_terms():            return _html("public/terms/index.html")
 
 @app.get("/press",            include_in_schema=False)
-async def get_press():            return _static_html("public/press/index.html")
+async def get_press():            return _html("public/press/index.html")
 
 @app.get("/brand",            include_in_schema=False)
-async def get_brand_vault():      return _static_html("public/index.html")
+async def get_brand_vault():      return _html("public/index.html")
 
 
 # ── Legacy page redirects (301 permanent) ────────────────────────────────────
