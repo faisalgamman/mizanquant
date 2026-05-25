@@ -6261,18 +6261,19 @@ _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
-# Mount UI kits as StaticFiles with html=True so that:
-#   /terminal  → auto-redirect to /terminal/ → index.html + assets served
-#   /terminal/styles.css, /terminal/shared.jsx, etc. → correct relative-path resolution
+# Mount UI kits + public surfaces as StaticFiles with html=True so that:
+#   /terminal → auto-redirect to /terminal/ → index.html + assets served correctly
+#   All relative href/src in each kit resolve under the same prefix.
 _kit_mounts = [
     ("/terminal",          "terminal"),
     ("/halal-screener-v2", "halal-screener-v2"),
     ("/risk-desk-v2",      "risk-desk-v2"),
+    ("/onboarding",        "public/onboarding"),  # React/Babel kit with relative assets
 ]
 for _prefix, _subdir in _kit_mounts:
     _kit_dir = os.path.join(_static_dir, _subdir)
     if os.path.isdir(_kit_dir):
-        app.mount(_prefix, StaticFiles(directory=_kit_dir, html=True), name=_subdir)
+        app.mount(_prefix, StaticFiles(directory=_kit_dir, html=True), name=_subdir.replace("/", "-"))
 
 
 @app.get("/", include_in_schema=False)
@@ -6481,10 +6482,6 @@ async def get_one_pager():
     """A4 print-ready institutional tear-sheet."""
     return _static_html("public/one-pager/index.html")
 
-@app.get("/onboarding", include_in_schema=False)
-async def get_onboarding():
-    """4-step institutional onboarding (NDA → KYC → Sharia → Credentials)."""
-    return _static_html("public/onboarding/index.html")
 
 @app.get("/email-signature", include_in_schema=False)
 async def get_email_signature():
