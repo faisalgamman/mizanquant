@@ -129,12 +129,38 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
   );
 }
 
+function ScanEmpty({ status }) {
+  const computing = status === "computing";
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      gap: 12, padding: "48px 16px", textAlign: "center",
+    }}>
+      {computing && (
+        <div className="spin" style={{
+          width: 26, height: 26, border: "3px solid var(--border)",
+          borderTopColor: "var(--accent)", borderRadius: "50%",
+        }}></div>
+      )}
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>
+        {computing ? "Scanning the halal universe…" : "No buy signals right now"}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: 0.4 }}>
+        {computing
+          ? "Screening ~650 symbols across AAOIFI gates · 1–2 min"
+          : "Nothing scored ≥ 55 this cycle · check the watchlist"}
+      </div>
+    </div>
+  );
+}
+
 function ScanColumn(props) {
-  const { signals, selectedSymbol, onSelect, market } = props;
+  const { signals, selectedSymbol, onSelect, market, signalsStatus } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
   const top3 = signals.slice(0, 3);
+  const empty = signals.length === 0;
   return (
     <div className="col col-scan">
       <div className="wf-section">
@@ -156,19 +182,25 @@ function ScanColumn(props) {
           <span className="wf-title">Signals</span>
           <span className="wf-sub">High-conviction opportunities</span>
         </div>
-        <div className="signals-featured">
-          {top3.map((s) => (
-            <SignalHeroCard key={s.symbol} signal={s} selected={s.symbol === selectedSymbol} onSelect={onSelect} />
-          ))}
-        </div>
-        <SignalTable
-          signals={signals}
-          selectedSymbol={selectedSymbol}
-          onSelect={onSelect}
-          filterSignal={filterSignal} setFilterSignal={setFilterSignal}
-          filterScore={filterScore} setFilterScore={setFilterScore}
-          halalOnly={halalOnly} setHalalOnly={setHalalOnly}
-        />
+        {empty ? (
+          <ScanEmpty status={signalsStatus} />
+        ) : (
+          <>
+            <div className="signals-featured">
+              {top3.map((s) => (
+                <SignalHeroCard key={s.symbol} signal={s} selected={s.symbol === selectedSymbol} onSelect={onSelect} />
+              ))}
+            </div>
+            <SignalTable
+              signals={signals}
+              selectedSymbol={selectedSymbol}
+              onSelect={onSelect}
+              filterSignal={filterSignal} setFilterSignal={setFilterSignal}
+              filterScore={filterScore} setFilterScore={setFilterScore}
+              halalOnly={halalOnly} setHalalOnly={setHalalOnly}
+            />
+          </>
+        )}
       </div>
     </div>
   );

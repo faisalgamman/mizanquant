@@ -7,7 +7,7 @@
 //   market     → GET /api/context/bundle
 //   paper      → GET /api/v1/paper/trades
 //   models     → GET /api/v1/models/leaderboard
-// Mock data is only used as an initial skeleton until the API responds.
+// NO MOCK FALLBACK — signals are real or show an honest "scanning…" state.
 
 function App() {
   const [selectedSymbol, setSelectedSymbol] = useState(null);
@@ -20,14 +20,48 @@ function App() {
   const [toast, setToast]     = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Live data state — starts empty, populated from APIs
+  // Live data state — starts empty, populated from APIs (no fake data)
   const [signals, setSignals]     = useState([]);
+  const [signalsStatus, setSignalsStatus] = useState("computing"); // computing | ready | empty
   const [market, setMarket]       = useState(mockMarket);
   const [portfolio, setPortfolio] = useState(mockPortfolio);
   const [positions, setPositions] = useState([]);
   const [paper, setPaper]         = useState([]);
   const [models, setModels]       = useState(mockModels);
   const [sectors, setSectors]     = useState(mockSectors);
+
+  // Fetch /buys, map real rows. Returns true once real signals are loaded.
+  const loadBuys = async () => {
+    try {
+      const buys = await (await fetch('/buys')).json();
+      // Cold cache → [{Status:"Computing…"}] placeholder; keep "computing".
+      if (!Array.isArray(buys) || buys.length === 0 || buys[0].Status) {
+        setSignalsStatus("computing");
+        return false;
+      }
+      const mapped = buys
+        .filter(s => s.symbol && s.price)
+        .map(s => ({
+          symbol:   s.symbol,
+          company:  s.company_name || s.symbol,
+          price:    s.price || 0,
+          chg:      s.chg_1w || 0,
+          score:    s.swing_score || 0,
+          verdict:  s.swing_signal || verdictFromScore(s.swing_score || 0),
+          halal:    s.halal !== "No",
+          sector:   s.sector || "—",
+          industry: s.industry || "—",
+          spark:    s.spark || Array.from({ length: 12 }, () => 90 + Math.random() * 20),
+        }));
+      setSignals(mapped);
+      setSignalsStatus(mapped.length > 0 ? "ready" : "empty");
+      if (mapped.length > 0) setSelectedSymbol(prev => prev || mapped[0].symbol);
+      return mapped.length > 0;
+    } catch (_) {
+      setSignalsStatus("computing");
+      return false;
+    }
+  };
 
   // Clock tick (ET)
   useEffect(() => {
@@ -59,31 +93,17 @@ function App() {
         }));
       } catch (_) {}
 
-      // ── 2. Buy signals from screener ──────────────────────────────────
-      // /buys returns stocks with swing_score >= 55 (HALAL only, screened)
-      try {
-        const buys = await (await fetch('/buys')).json();
-        if (Array.isArray(buys) && buys.length > 0 && !buys[0].Status) {
-          const mapped = buys
-            .filter(s => s.symbol && s.price)
-            .map(s => ({
-              symbol:   s.symbol,
-              company:  s.company_name || s.symbol,
-              price:    s.price || 0,
-              chg:      s.chg_1w  || 0,          // 1-week change %
-              score:    s.swing_score || 0,
-              verdict:  s.swing_signal || verdictFromScore(s.swing_score || 0),
-              halal:    s.halal !== "No",          // "Yes" or missing → true
-              sector:   s.sector || "—",
-              industry: s.industry || "—",
-              spark:    s.spark || Array.from({length: 12}, () => 90 + Math.random() * 20),
-            }));
-          if (mapped.length > 0) {
-            setSignals(mapped);
-            setSelectedSymbol(prev => prev || mapped[0].symbol);
-          }
-        }
-      } catch (_) {}
+      // ── 2. Buy signals from screener (real, with polling if cache cold) ──
+      const got = await loadBuys();
+      if (!got) {
+        // Screener cache is warming (scans ~650 symbols, 1–2 min). Poll until ready.
+        let tries = 0;
+        const poll = setInterval(async () => {
+          tries += 1;
+          const ok = await loadBuys();
+          if (ok || tries >= 12) clearInterval(poll);  // stop after ~3 min
+        }, 15000);
+      }
 
       // ── 3. Portfolio + positions from overview ────────────────────────
       // NOTE: /api/v1/overview wraps everything under {portfolio, system, ...}
@@ -112,6 +132,19 @@ function App() {
             // unrealized_plpc from Alpaca is a fraction (0.02 = 2%), multiply by 100
             pnlPct:  (p.unrealized_plpc || 0) * 100,
           })));
+        }
+        // Real sector performance (perf_1d is already a percentage, e.g. 1.84)
+        const secs = ov.market_context && ov.market_context._sectors;
+        if (Array.isArray(secs) && secs.length > 0) {
+          const haram = /financ|reit|real estate|bank|insur/i;
+          const mappedSecs = secs
+            .filter(s => s.available !== false && s.perf_1d != null)
+            .map(s => ({
+              name:  s.name || s.ticker,
+              chg:   s.perf_1d,
+              halal: !haram.test(s.name || s.ticker || ''),
+            }));
+          if (mappedSecs.length > 0) setSectors(mappedSecs);
         }
       } catch (_) {}
 
@@ -150,8 +183,8 @@ function App() {
     })();
   }, []);
 
-  // Fall back to mock signals only if API returned nothing after load
-  const displaySignals = signals.length > 0 ? signals : (loading ? [] : mockSignals);
+  // Real signals only — never fabricate. Empty → ScanColumn shows scanning state.
+  const displaySignals = signals;
   const selectedSym    = selectedSymbol || (displaySignals[0]?.symbol);
 
   // Auto-clear toast
@@ -242,6 +275,7 @@ function App() {
             selectedSymbol={selectedSym}
             onSelect={setSelectedSymbol}
             market={market}
+            signalsStatus={signalsStatus}
           />
           <AnalyzeColumn
             signal={selected}

@@ -201,9 +201,9 @@ def _make_session_token() -> str:
 # ---------------------------------------------------------------------------
 
 @app.get("/login", include_in_schema=False)
-async def login_page(next: str = "/"):
-    """Show the login form."""
-    safe_next = next if next.startswith("/") else "/"
+async def login_page(next: str = "/dashboard"):
+    """Show the login form. Default post-login destination = Stock Intelligence."""
+    safe_next = next if next.startswith("/") else "/dashboard"
     html = LOGIN_HTML.replace('action="/login"', f'action="/login"').replace(
         '<input type="text" name="username"',
         f'<input type="hidden" name="next" value="{safe_next}"><input type="text" name="username"'
@@ -218,9 +218,9 @@ async def login_post(request: Request):
         form = await request.form()
         username = str(form.get("username") or "")
         password = str(form.get("password") or "")
-        next_url = str(form.get("next") or "/")
+        next_url = str(form.get("next") or "/dashboard")
         if not next_url.startswith("/"):
-            next_url = "/"
+            next_url = "/dashboard"
 
         # Compute sha256 of entered password (lowercase hex)
         pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -443,12 +443,22 @@ class DashboardAuthMiddleware(BaseHTTPMiddleware):
     """
 
     _EXEMPT_PREFIXES = ("/login", "/logout", "/health", "/livez", "/readyz",
-                        "/favicon", "/ws/")
+                        "/favicon", "/ws/",
+                        # Public-facing marketing surfaces — institutional visitors
+                        # must reach these WITHOUT a login (the gated terminal lives
+                        # behind /login via the landing's Terminal Access vault).
+                        "/landing", "/slides", "/one-pager", "/email-signature",
+                        "/report", "/terms", "/press", "/brand")
+    # Public pages matched EXACTLY (not by prefix) — the root landing cover.
+    _EXEMPT_EXACT = ("/",)
 
     async def dispatch(self, request, call_next):
         path = request.url.path
         # Allow static assets (JS/CSS/fonts/images) but NOT .html files directly
         if path.startswith("/static/") and not path.endswith(".html"):
+            return await call_next(request)
+        # Public landing root (exact match)
+        if path in self._EXEMPT_EXACT:
             return await call_next(request)
         # Always let other exempt paths through
         if any(path.startswith(p) for p in self._EXEMPT_PREFIXES):
@@ -6276,13 +6286,15 @@ def _html(rel: str):
 
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
-    """Root → rich Stock Intelligence dashboard (dashboard.html + overview-v2.js).
+    """Root → PUBLIC institutional landing cover (no auth).
 
-    Restored as the homepage by user request — it carries the full T/F/S/AI score
-    breakdown, Grade, Analyst-upside, Sentiment, Models/Consensus/Sectors tabs.
-    The design-system Terminal kit remains available at /terminal.
+    Entry flow: visitor sees the landing (explains the platform) → clicks
+    "Terminal access" → vault posts real credentials to /login → on success
+    the session cookie is set and they are routed to /dashboard (the rich
+    Stock Intelligence interface). The Terminal kit is reachable from the
+    sidebar at /terminal.
     """
-    return _html("dashboard.html")
+    return _html("public/landing/index.html")
 
 @app.get("/terminal", include_in_schema=False)
 @app.get("/terminal/", include_in_schema=False)
