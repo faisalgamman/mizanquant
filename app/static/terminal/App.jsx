@@ -326,6 +326,7 @@ function App() {
             schedule={schedule}
           />
         </div>
+        <StockIntel />
         <LowerRow
           models={models}
           sectors={sectors}

@@ -509,3 +509,40 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 @media (max-width: 1400px) {
   .workflow { grid-template-columns: 2.5fr 1.8fr 1.8fr; }
 }
+
+/* ─── STOCK INTELLIGENCE (terminal) ─────────────────────────── */
+.si-section { margin: 14px 0 0; }
+.si-toolbar { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.si-filter {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 11px; padding: 4px 10px;
+  border-radius: 6px; cursor: pointer;
+}
+.si-filter.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+.si-scan {
+  margin-left: auto; background: var(--accent-dim); color: var(--accent);
+  border: 1px solid var(--accent); font-size: 11px; font-weight: 600;
+  padding: 4px 12px; border-radius: 6px; cursor: pointer;
+}
+.si-scan:disabled { opacity: 0.6; cursor: default; }
+.si-track {
+  display: flex; align-items: center; gap: 18px; padding: 8px 12px; margin: 8px 0;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 6px; font-family: var(--font-mono); font-size: 11px; flex-wrap: wrap;
+}
+.si-empty { text-align: center; padding: 36px 16px; color: var(--text-muted); font-size: 12px; }
+.si-table-wrap { overflow-x: auto; }
+.si-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.si-table th {
+  text-align: left; padding: 6px 8px; color: var(--text-muted);
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-root);
+}
+.si-table td { padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.si-table tbody tr:hover { background: var(--bg-raised); }
+.si-rank { color: var(--text-muted); font-family: var(--font-mono); }
+.si-co { font-size: 9px; color: var(--text-muted); }
+.si-gauge { display: flex; align-items: center; gap: 6px; }
+.si-gauge-bar { width: 54px; height: 4px; background: var(--bg-root); border-radius: 2px; overflow: hidden; }
+.si-gauge-bar > div { height: 100%; border-radius: 2px; }
+.si-sig { font-weight: 700; font-size: 10px; }
