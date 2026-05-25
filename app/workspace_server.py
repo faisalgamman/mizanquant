@@ -3631,6 +3631,26 @@ async def screener_deep_picks(
 
     raw_results: list[dict] = screener_data.get("results", [])[:limit * 2]
 
+    # ── Conviction inputs computed ONCE (not per row) ──────────────────────────
+    # Point-in-time-irrelevant here (this is the live path): use the current
+    # context bundle + trailing accuracy weights. Both degrade to neutral on error.
+    try:
+        from app.services.market_context_bundle import get_context_bundle_sync
+        _ctx_bundle = get_context_bundle_sync()
+    except Exception:
+        _ctx_bundle = {}
+    _acc_weights = {}
+    try:
+        from app.services.model_weights import get_source_weights
+        _acc_weights = get_source_weights()
+    except Exception:
+        _acc_weights = {}
+    try:
+        from app.config import settings as _sel_cfg
+        _static_risk_pct = float(getattr(_sel_cfg, "TRADE_RISK_PCT", 1.5))
+    except Exception:
+        _static_risk_pct = 1.5
+
     def _enrich_one(r: dict) -> dict:
         symbol = r.get("symbol", "")
         info = _get_smart_info(symbol)  # FMP primary, yfinance fallback
@@ -3676,7 +3696,7 @@ async def screener_deep_picks(
 
         _adet = sent["details"]
         _an_av = sent.get("analyst_available", False)
-        return {
+        out = {
             **r,
             # Sentiment layer — null (→ "—" in UI) when no real data backs it
             "sentiment_score":    sent_s,
@@ -3696,6 +3716,24 @@ async def screener_deep_picks(
             "f_grade":            f_grade,
             "signal_composite":   sig_composite,
         }
+        # ── Conviction layer (additive; same pure code the backtest uses) ──────
+        # Computes context_adjusted_score, confirmations, conviction_score,
+        # rank_value, and a multi-confirmation STRONG BUY gate. The fields are
+        # ALWAYS attached (display/validation); whether they RE-RANK the live
+        # list is gated by flags at the sort step below.
+        try:
+            from app.services.conviction_engine import (
+                compute_conviction, apply_strong_buy_gate, suggested_position_size,
+            )
+            conv = compute_conviction(out, _ctx_bundle, _acc_weights)
+            out.update(conv)
+            out["signal_composite"] = apply_strong_buy_gate(out["signal_composite"], conv)
+            out["suggested_size"] = suggested_position_size(
+                conv["conviction_score"], static_risk_pct=_static_risk_pct,
+            )
+        except Exception as _conv_exc:
+            logger.debug("conviction layer failed for %s: %s", symbol, _conv_exc)
+        return out
 
     enriched: list[dict] = []
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -3706,10 +3744,29 @@ async def screener_deep_picks(
             except Exception:
                 pass
 
-    # Keep halal only, sort by composite
+    # Keep halal only. Ranking key is flag-gated so live behavior is unchanged
+    # until a flag is flipped (and only after the backtest validates ENHANCED):
+    #   CONVICTION_SIZING_LIVE      → rank by rank_value (risk-adjusted conviction)
+    #   SELECTION_CONDITIONING_LIVE → rank by context_adjusted_score (market-aware)
+    #   neither (default)           → rank by raw composite_score (current behavior)
+    try:
+        from app.config import settings as _rank_cfg
+        if getattr(_rank_cfg, "CONVICTION_SIZING_LIVE", False):
+            _rank_key = lambda x: x.get("rank_value", 0)
+            _ranking_mode = "rank_value"
+        elif getattr(_rank_cfg, "SELECTION_CONDITIONING_LIVE", False):
+            _rank_key = lambda x: x.get("context_adjusted_score", x.get("composite_score", 0))
+            _ranking_mode = "context_adjusted"
+        else:
+            _rank_key = lambda x: x.get("composite_score", 0)
+            _ranking_mode = "composite"
+    except Exception:
+        _rank_key = lambda x: x.get("composite_score", 0)
+        _ranking_mode = "composite"
+
     top = sorted(
         [r for r in enriched if r.get("is_halal", False)],
-        key=lambda x: x.get("composite_score", 0),
+        key=_rank_key,
         reverse=True,
     )[:limit]
 
@@ -3722,11 +3779,83 @@ async def screener_deep_picks(
         "halt_pipeline": screener_data.get("halt_pipeline", False),
         "composite_max": 100,
         "score_breakdown": {"tech": 30, "fund": 25, "sentiment": 20, "ai": 15, "halal": 10},
+        "ranking_mode": _ranking_mode,
+        "risk_posture": _ctx_bundle.get("risk_posture", "neutral"),
         "results": top,
         "screener_ts": screener_data.get("timestamp", ""),
     }
     _cache_set(cache_key_dp, result)
     return result
+
+
+@app.get("/api/selection/backtest")
+async def selection_backtest(
+    lookback_days: int = Query(120, description="Calendar days of as_of grid"),
+    hold_days: int = Query(5, description="Forward holding window per pick"),
+    step_days: int = Query(5, description="Days between as_of dates"),
+    top_n: int = Query(15, description="Top-N picks scored per as_of date"),
+    max_symbols: int = Query(80, description="Cap universe size for runtime"),
+):
+    """Point-in-time validation harness — paired CURRENT vs ENHANCED selection.
+
+    Proves whether market-context-conditioned ranking (ENHANCED) beats raw
+    technical ranking (CURRENT) on out-of-sample forward returns BEFORE any live
+    flag is flipped. Technical + market-context legs ONLY (fundamentals / ML /
+    sentiment excluded to avoid look-ahead). Returns Deflated Sharpe, permutation
+    p-value and a bootstrap lower bound for both variants plus an acceptance gate.
+
+    Cached 6 h (the run is heavy: it fetches bars for the whole universe).
+    """
+    import asyncio as _asyncio
+
+    cache_key_bt = f"selection_backtest_{lookback_days}_{hold_days}_{step_days}_{top_n}_{max_symbols}"
+    cached = _cache_get(cache_key_bt, max_age=21600)  # 6 h
+    if cached:
+        return {**cached, "source": "cache"}
+
+    def _resolve_sector_map(universe: list) -> dict:
+        """symbol → sector. DB Universe table first; FMP company profiles as
+        fallback (cached 7d). Without sectors the ENHANCED variant can't
+        differentiate from CURRENT (every name maps to 'unknown')."""
+        from app.services.market_context_bundle import get_symbol_sectors
+        smap = get_symbol_sectors(universe) or {}
+        missing = [s for s in universe if s.upper() not in smap]
+        if missing:
+            cached_sec = _cache_get("backtest_sector_map", max_age=604800) or {}
+            still = [s for s in missing if s.upper() not in cached_sec]
+            if still:
+                try:
+                    from app.services.fmp_client import fmp_client
+                    for s in still:
+                        try:
+                            prof = fmp_client.get_profile(s)
+                            if prof and prof.get("sector"):
+                                cached_sec[s.upper()] = prof["sector"]
+                        except Exception:
+                            continue
+                    _cache_set("backtest_sector_map", cached_sec)
+                except Exception:
+                    pass
+            smap = {**cached_sec, **smap}
+        return smap
+
+    def _run() -> dict:
+        from app.services.validation_harness import run_selection_backtest
+        universe = list(_SMART_UNIVERSE)[:max_symbols]
+        sector_map = _resolve_sector_map(universe)
+        return run_selection_backtest(
+            universe, lookback_days=lookback_days, hold_days=hold_days,
+            step_days=step_days, top_n=top_n, max_symbols=max_symbols,
+            sector_map=sector_map,
+        )
+
+    try:
+        report = await _asyncio.wait_for(_asyncio.to_thread(_run), timeout=600.0)
+    except _asyncio.TimeoutError:
+        return {"status": "timeout", "message": "Backtest exceeded 600s; lower max_symbols or lookback_days."}
+    if report.get("status") == "ready":
+        _cache_set(cache_key_bt, report)
+    return report
 
 
 def _run_screener_bg(scan_symbols: list):

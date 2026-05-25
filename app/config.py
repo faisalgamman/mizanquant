@@ -94,6 +94,24 @@ class Settings(BaseSettings):
     # True to let the conditioning drive the live pipeline once validated.
     CONTEXT_CONDITIONING_LIVE: bool = False
 
+    # --- Conviction Engine: independent selection toggles ---
+    # These are SEPARATE from CONTEXT_CONDITIONING_LIVE (which scopes risk
+    # sizing + rotation). Each governs one selection behavior so they can be
+    # shipped / rolled back independently. All default OFF — none alters the
+    # live buy list until flipped, and only after the validation harness
+    # (/api/selection/backtest) shows ENHANCED beats CURRENT.
+    #
+    #  SELECTION_CONDITIONING_LIVE — re-rank deep-picks by context_adjusted
+    #      score (promote leading-sector names in risk_on, demote lagging in
+    #      risk_off) instead of raw composite_score.
+    #  CONVICTION_SIZING_LIVE — surface a risk-adjusted rank (upside/ATR) and a
+    #      Kelly-lite suggested position size; when on, ranking uses rank_value.
+    #  ADAPTIVE_GATES_LIVE — let the performance governor tighten min/strong
+    #      gates when the trailing 30d win rate drops below the floor.
+    SELECTION_CONDITIONING_LIVE: bool = False
+    CONVICTION_SIZING_LIVE: bool = False
+    ADAPTIVE_GATES_LIVE: bool = False
+
     # --- Phase 5: API authentication ---
     # Required for operator/admin/trading endpoints. If left empty, those
     # endpoints fail closed and auto-trading validation will refuse to arm.
@@ -145,7 +163,11 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
-    @field_validator("AUTO_TRADE_ENABLED", "CONTEXT_CONDITIONING_LIVE", mode="before")
+    @field_validator(
+        "AUTO_TRADE_ENABLED", "CONTEXT_CONDITIONING_LIVE",
+        "SELECTION_CONDITIONING_LIVE", "CONVICTION_SIZING_LIVE", "ADAPTIVE_GATES_LIVE",
+        mode="before",
+    )
     @classmethod
     def _strip_bool(cls, v):
         if isinstance(v, str):

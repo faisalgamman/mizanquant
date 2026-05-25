@@ -398,6 +398,22 @@ def get_market_status(force_refresh: bool = False) -> dict:
     else:
         regime_state = "NEUTRAL"
 
+    # Adaptive performance governor (Phase 5) — tighten gates when the LIVE track
+    # record is weak. Behind ADAPTIVE_GATES_LIVE; hysteresis + min-sample live
+    # inside adaptive_gate_delta() so this can only nudge, never whipsaw.
+    gate_governor = {"applied": 0}
+    if not gates.get("halt"):
+        try:
+            from app.config import settings as _gov_cfg
+            if getattr(_gov_cfg, "ADAPTIVE_GATES_LIVE", False):
+                from app.services.model_weights import adaptive_gate_delta
+                gdelta, gate_governor = adaptive_gate_delta()
+                if gdelta:
+                    gates["min_gate"]    = int(max(0, min(99, gates["min_gate"]    + gdelta)))
+                    gates["strong_gate"] = int(max(0, min(99, gates["strong_gate"] + gdelta)))
+        except Exception as _ge:
+            logger.debug("adaptive gate governor failed: %s", _ge)
+
     logger.info(
         "Regime-calibrated gates: status=%s regime=%s → min_gate=%d strong_gate=%d",
         status, regime_state, gates["min_gate"], gates["strong_gate"],
@@ -415,6 +431,7 @@ def get_market_status(force_refresh: bool = False) -> dict:
         "min_gate": gates["min_gate"],
         "strong_gate": gates["strong_gate"],
         "halt_pipeline": gates.get("halt", False),
+        "gate_governor": gate_governor,
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
 
