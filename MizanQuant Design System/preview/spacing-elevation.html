@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Elevation — ramp + hairline, no shadows</title>
+<link rel="stylesheet" href="_base.css"></head><body><div class="card-wrap">
+<div style="display:flex;gap:14px;align-items:flex-end;">
+
+  <div style="flex:1;">
+    <div style="background:var(--bg-root);border:1px solid rgba(255,255,255,0.06);border-radius:8px;height:60px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:11px;font-weight:600;">z=0</div>
+    <div style="margin-top:8px;"><div style="font-weight:600;font-size:12px;">flat</div><div class="muted" style="font-size:10px;margin-top:2px;">background</div></div>
+  </div>
+  <div style="flex:1;">
+    <div style="background:var(--bg-surface);border:1px solid rgba(255,255,255,0.06);border-radius:8px;height:68px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:11px;font-weight:600;">z=1</div>
+    <div style="margin-top:8px;"><div style="font-weight:600;font-size:12px;">surface</div><div class="muted" style="font-size:10px;margin-top:2px;">card</div></div>
+  </div>
+  <div style="flex:1;">
+    <div style="background:var(--bg-raised);border:1px solid rgba(255,255,255,0.06);border-radius:8px;height:76px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:11px;font-weight:600;">z=2</div>
+    <div style="margin-top:8px;"><div style="font-weight:600;font-size:12px;">raised</div><div class="muted" style="font-size:10px;margin-top:2px;">inner panel</div></div>
+  </div>
+  <div style="flex:1;">
+    <div style="background:var(--bg-overlay);border:1px solid rgba(255,255,255,0.06);border-radius:8px;height:84px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:11px;font-weight:600;">z=3</div>
+    <div style="margin-top:8px;"><div style="font-weight:600;font-size:12px;">overlay</div><div class="muted" style="font-size:10px;margin-top:2px;">modal</div></div>
+  </div>
+</div>
+<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">Elevation comes from the background ramp + a 6% white hairline. Cards do <strong>not</strong> use box-shadow. (Toast / modal overlay is the one exception: 0 8px 24px rgba(0,0,0,0.4).)</div></div></body></html>

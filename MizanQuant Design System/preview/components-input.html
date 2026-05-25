@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Inputs & selects</title>
+<link rel="stylesheet" href="_base.css"></head><body><div class="card-wrap">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+  <div style="display:flex;align-items:center;gap:6px;background:var(--bg-raised);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:6px 12px;">
+    <i class="fas fa-search" style="font-size:11px;color:var(--text-muted);"></i>
+    <input value="AAPL" style="background:none;border:none;outline:none;color:var(--text-primary);font-family:inherit;font-size:12px;width:100%;" readonly>
+    <span class="mono" style="font-size:9px;color:var(--text-muted);background:var(--bg-overlay);padding:1px 5px;border-radius:3px;">⌘K</span>
+  </div>
+  <select style="padding:6px 12px;border-radius:6px;border:1px solid #c8963e;background:var(--bg-raised);color:var(--text-primary);font-size:12px;font-family:inherit;outline:none;"><option>Signal: STRONG BUY</option></select>
+  <input placeholder="Search symbol…" style="padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:var(--bg-raised);color:var(--text-disabled);font-size:12px;font-family:inherit;outline:none;">
+  <div style="display:flex;gap:8px;align-items:center;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" checked style="accent-color:#c8963e;"> Halal</label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" style="accent-color:#c8963e;"> Auto-trade</label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" checked style="accent-color:#c8963e;"> Dry-run</label>
+  </div>
+</div>
+<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">All inputs share: 5–6px radius, bg-raised fill, 6% border, gold border on focus/select, accent-color gold on checkboxes.</div></div></body></html>

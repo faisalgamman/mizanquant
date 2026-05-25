@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Institutional Terms Sheet</title>
+<link rel="icon" type="image/svg+xml" href="../assets/logo-favicon.svg">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+@page { size: A4 portrait; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: #232328;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+body {
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  font-size: 9pt;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.sheet {
+  width: 210mm;
+  height: 297mm;
+  background: var(--bg-root);
+  position: relative;
+  padding: 14mm 14mm 12mm;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+
+.sheet::before {
+  content: "";
+  position: absolute;
+  top: -120mm; right: -80mm;
+  width: 240mm; height: 240mm;
+  background: radial-gradient(circle, rgba(200, 150, 62, 0.10) 0%, rgba(200, 150, 62, 0) 60%);
+  pointer-events: none;
+}
+
+/* ═══ MASTHEAD ═══════════════════════════════════════════ */
+.masthead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 8mm;
+  border-bottom: 0.5pt solid var(--accent);
+  position: relative; z-index: 1;
+}
+.mh-brand { display: flex; align-items: center; gap: 4mm; }
+.mh-brand .mark {
+  width: 12mm; height: 12mm;
+  background: var(--accent-dim);
+  border: 0.5pt solid var(--accent-glow);
+  border-radius: 2mm;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.mh-brand .wm {
+  font-family: var(--font-display);
+  font-size: 18pt; font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.mh-brand .wm em { font-style: normal; color: var(--accent); }
+.mh-brand .ar {
+  font-family: var(--font-arabic);
+  font-size: 10pt; color: var(--accent);
+  font-weight: 700;
+  margin-top: 1mm;
+}
+.mh-meta {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.mh-meta .label { color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* ═══ HEADLINE ═══════════════════════════════════════════ */
+.headline {
+  margin-top: 6mm;
+  position: relative; z-index: 1;
+}
+.headline .kicker {
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 3mm;
+  font-weight: 700;
+}
+.headline h1 {
+  font-family: var(--font-display);
+  font-size: 22pt;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.6px;
+  max-width: 170mm;
+  text-wrap: balance;
+}
+.headline h1 em { font-style: normal; color: var(--accent); }
+.headline .lead {
+  margin-top: 3mm;
+  font-size: 9pt;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 170mm;
+}
+.headline .ar {
+  margin-top: 2mm;
+  font-family: var(--font-arabic);
+  font-size: 10pt;
+  color: var(--text-secondary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* ═══ SECTION ════════════════════════════════════════════ */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 6mm 0 3mm;
+  padding-bottom: 1.5mm;
+  border-bottom: 0.5pt solid var(--border-default);
+  position: relative; z-index: 1;
+}
+.section-title {
+  font-family: var(--font-body);
+  font-size: 7pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+}
+.section-title .num {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  margin-right: 6px;
+}
+.section-aside {
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* ═══ FEE TABLE ══════════════════════════════════════════ */
+.terms-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--border-default);
+  border-radius: 1.5mm;
+  overflow: hidden;
+  position: relative; z-index: 1;
+}
+.terms-table th {
+  text-align: left;
+  padding: 2.5mm 3mm;
+  background: var(--bg-raised);
+  border-bottom: 0.5pt solid var(--border-default);
+  font-family: var(--font-body);
+  font-size: 6.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+.terms-table td {
+  padding: 2.5mm 3mm;
+  border-bottom: 0.5pt solid var(--border-subtle);
+  vertical-align: top;
+}
+.terms-table tr:last-child td { border-bottom: none; }
+.terms-table .term-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 9pt;
+  color: var(--text-primary);
+  width: 38mm;
+}
+.terms-table .term-name .ar {
+  display: block;
+  margin-top: 0.5mm;
+  font-family: var(--font-arabic);
+  font-size: 8pt;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.terms-table .term-val {
+  font-family: var(--font-mono);
+  font-size: 12pt;
+  font-weight: 700;
+  color: var(--accent);
+  width: 28mm;
+  letter-spacing: -0.3px;
+  line-height: 1.15;
+}
+.terms-table .term-desc {
+  font-size: 7.5pt;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.terms-table .term-desc strong { color: var(--text-primary); font-weight: 600; }
+.terms-table .term-desc .formula {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  background: var(--bg-raised);
+  border: 0.4pt solid var(--border-subtle);
+  border-radius: 1mm;
+  padding: 0.3mm 1.5mm;
+  margin-top: 0.8mm;
+  color: var(--accent);
+}
+
+/* ═══ TIERED REDEMPTION SCHEDULE ═════════════════════════ */
+.redemption-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2mm;
+  position: relative; z-index: 1;
+}
+.red-tier {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--border-default);
+  border-top: 1.5pt solid var(--accent);
+  border-radius: 1.5mm;
+  padding: 3mm 3.5mm;
+}
+.red-tier .when {
+  font-family: var(--font-mono);
+  font-size: 6.5pt;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 1mm;
+  text-transform: uppercase;
+}
+.red-tier .penalty {
+  font-family: var(--font-mono);
+  font-size: 16pt;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  line-height: 1;
+  margin-bottom: 1.5mm;
+}
+.red-tier .penalty.zero { color: var(--positive); }
+.red-tier .penalty.high { color: var(--negative); }
+.red-tier .penalty.mid  { color: var(--warning); }
+.red-tier .desc {
+  font-size: 6.5pt;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* ═══ SHARIA AUDIT TRANSPARENCY ══════════════════════════ */
+.sharia-card {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--accent-glow);
+  border-left: 1.5pt solid var(--accent);
+  border-radius: 1.5mm;
+  padding: 3mm 4mm;
+  display: flex; gap: 4mm;
+  align-items: flex-start;
+  position: relative; z-index: 1;
+}
+.sharia-seal {
+  width: 14mm; height: 14mm;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-dim) 0%, var(--bg-raised) 80%);
+  border: 0.6pt solid var(--accent);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.sharia-seal .ic { font-size: 7pt; margin-bottom: 0.3mm; }
+.sharia-seal .t {
+  font-family: var(--font-mono);
+  font-size: 4.5pt;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+.sharia-body { flex: 1; }
+.sharia-body h3 {
+  font-family: var(--font-display);
+  font-size: 9pt;
+  font-weight: 700;
+  margin-bottom: 1.5mm;
+  letter-spacing: -0.2px;
+}
+.sharia-body p {
+  font-size: 7pt;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 2mm;
+}
+.sharia-fees {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2mm;
+  margin-top: 2mm;
+}
+.sharia-fee {
+  background: var(--bg-raised);
+  border: 0.4pt solid var(--border-subtle);
+  border-radius: 1mm;
+  padding: 1.8mm 2.5mm;
+}
+.sharia-fee .lab {
+  font-family: var(--font-mono);
+  font-size: 5.5pt;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 0.5mm;
+}
+.sharia-fee .val {
+  font-family: var(--font-mono);
+  font-size: 10pt;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+.sharia-fee .sub {
+  font-size: 6pt;
+  color: var(--text-muted);
+  margin-top: 0.5mm;
+}
+
+/* ═══ SUBSCRIPTION TIERS ═════════════════════════════════ */
+.tier-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 2mm;
+  position: relative; z-index: 1;
+}
+.tier-card {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--border-default);
+  border-radius: 1.5mm;
+  padding: 3mm 3.5mm;
+  position: relative;
+}
+.tier-card.flagship {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(200,150,62,0.04) 0%, var(--bg-surface) 100%);
+}
+.tier-card.flagship::before {
+  content: "Most subscribed";
+  position: absolute;
+  top: -0.5mm; right: 3mm;
+  background: var(--accent);
+  color: var(--bg-root);
+  font-family: var(--font-mono);
+  font-size: 5.5pt;
+  font-weight: 700;
+  padding: 0.7mm 2.5mm;
+  border-radius: 0 0 1mm 1mm;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.tier-card .name {
+  font-family: var(--font-display);
+  font-size: 10pt;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin-bottom: 0.5mm;
+}
+.tier-card .min {
+  font-family: var(--font-mono);
+  font-size: 6.5pt;
+  color: var(--text-muted);
+  margin-bottom: 2mm;
+}
+.tier-card .fee {
+  font-family: var(--font-mono);
+  font-size: 13pt;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.4px;
+  line-height: 1;
+  margin-bottom: 2mm;
+}
+.tier-card .perks {
+  list-style: none;
+  font-size: 6.5pt;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.tier-card .perks li {
+  padding: 0.4mm 0;
+  display: flex; align-items: flex-start; gap: 1.5mm;
+}
+.tier-card .perks li::before {
+  content: "—";
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ═══ FOOTER ═════════════════════════════════════════════ */
+.foot {
+  margin-top: auto;
+  padding-top: 4mm;
+  border-top: 0.5pt solid var(--border-default);
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 5mm;
+}
+.foot-block h5 {
+  font-size: 6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+  margin-bottom: 1.5mm;
+}
+.foot-block .body {
+  font-size: 6.5pt;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.foot-block .body strong { color: var(--text-primary); font-weight: 600; }
+.foot-disclosure {
+  margin-top: 3mm;
+  font-size: 5.5pt;
+  line-height: 1.45;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.2px;
+  grid-column: 1 / -1;
+}
+.foot-disclosure strong { color: var(--text-secondary); }
+.foot-stamp {
+  position: absolute;
+  bottom: 12mm; right: 14mm;
+  font-family: var(--font-mono);
+  font-size: 5.5pt;
+  color: var(--text-disabled);
+  letter-spacing: 1px;
+}
+
+@media print {
+  html, body { background: var(--bg-root); padding: 0; }
+  body { display: block; }
+  .sheet {
+    width: 100%; height: 100%;
+    box-shadow: none; margin: 0;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ═══ MASTHEAD ═══ -->
+  <div class="masthead">
+    <div class="mh-brand">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.5"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div>
+        <div class="wm">mizan<em>quant</em></div>
+        <div class="ar" dir="rtl" lang="ar">ميزان كوانت</div>
+      </div>
+    </div>
+    <div class="mh-meta">
+      <div class="label">Institutional Terms Sheet</div>
+      <div>Q2 2026 · Confidential · NDA on file</div>
+      <div>Document ref · MZN-TS-26Q2-003</div>
+    </div>
+  </div>
+
+  <!-- ═══ HEADLINE ═══ -->
+  <div class="headline">
+    <div class="kicker">Institutional fee schedule · subscription terms · redemption mechanics</div>
+    <h1>Transparent, <em>fatwa-aligned</em> terms. No hidden cost lines.</h1>
+    <p class="lead">A summary of standard institutional terms. All fees are disclosed gross, including the Sharia audit pass-through cost. Lock-up and redemption schedules are aligned to the platform's six-times-a-day rebalance cadence and the Sharia board's quarterly fatwa-renewal cycle.</p>
+    <div class="ar" dir="rtl" lang="ar">شروط مؤسسية شفافة ومتوافقة مع الفتوى. تتضمن رسوم التدقيق الشرعي بشكل صريح، دون أي بنود مخفية.</div>
+  </div>
+
+  <!-- ═══ FEE SCHEDULE ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">01</span>Fee schedule · standard institutional terms</div>
+    <div class="section-aside">Custom MFN terms available · $25M+ mandates</div>
+  </div>
+  <table class="terms-table">
+    <thead>
+      <tr>
+        <th style="width:38mm;">Term</th>
+        <th style="width:28mm;">Headline</th>
+        <th>Mechanism</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="term-name">Management fee<span class="ar" dir="rtl" lang="ar">رسم الإدارة</span></td>
+        <td class="term-val">2.00% pa</td>
+        <td class="term-desc">Charged <strong>quarterly in arrears</strong> on the average daily net asset value of the partner's sleeve. Pro-rated for partial quarters. Net of all platform infrastructure costs.</td>
+      </tr>
+      <tr>
+        <td class="term-name">Performance fee<span class="ar" dir="rtl" lang="ar">رسم الأداء</span></td>
+        <td class="term-val">20% NNP</td>
+        <td class="term-desc">Twenty percent of <strong>net new profits</strong> above the high-water mark, crystallised <strong>annually</strong> on 31-December. Computed in USD, net of management fees. <span class="formula">NNP = NAV<sub>end</sub> − max(HWM, NAV<sub>start</sub>) − mgmt</span></td>
+      </tr>
+      <tr>
+        <td class="term-name">High-water mark<span class="ar" dir="rtl" lang="ar">حد العلامة المائية</span></td>
+        <td class="term-val">Perpetual</td>
+        <td class="term-desc">A perpetual high-water mark per partner — no reset on losses. The performance fee only applies to NAV above the all-time peak NAV (less prior fee accruals). Loss-recovery quarters carry zero performance fee.</td>
+      </tr>
+      <tr>
+        <td class="term-name">Hurdle rate<span class="ar" dir="rtl" lang="ar">معدل العائد المطلوب</span></td>
+        <td class="term-val">4.00% pa</td>
+        <td class="term-desc"><strong>Soft hurdle</strong>, indexed to the 3-month US Treasury yield (currently 4.18%) with a 4.00% floor. Once the hurdle is cleared, the 20% performance fee applies to the entire NNP — not just the excess.</td>
+      </tr>
+      <tr>
+        <td class="term-name">Subscription window<span class="ar" dir="rtl" lang="ar">نافذة الاكتتاب</span></td>
+        <td class="term-val">Monthly</td>
+        <td class="term-desc">Subscriptions accepted on the <strong>first business day</strong> of each calendar month with 5 business days' notice. Pre-funding required by close of business one day prior. Minimum subscription: $1,000,000.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ═══ LOCK-UP & REDEMPTION ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">02</span>Lock-up &amp; early redemption schedule</div>
+    <div class="section-aside">12-month initial lock · tiered redemption thereafter</div>
+  </div>
+  <div class="redemption-grid">
+    <div class="red-tier">
+      <div class="when">Months 0 – 12</div>
+      <div class="penalty high">5.00%</div>
+      <div class="desc">Initial lock-up. Redemptions require written waiver by the GP. Penalty redirected to the platform reserve, not the GP.</div>
+    </div>
+    <div class="red-tier">
+      <div class="when">Months 13 – 24</div>
+      <div class="penalty mid">2.00%</div>
+      <div class="desc">Quarterly redemption window — 90 day notice. Penalty applied to gross redemption value, returned to remaining LPs pro-rata.</div>
+    </div>
+    <div class="red-tier">
+      <div class="when">Months 25 – 36</div>
+      <div class="penalty mid">1.00%</div>
+      <div class="desc">Quarterly redemption window — 60 day notice. Penalty applied to gross redemption value. No GP discretion required.</div>
+    </div>
+    <div class="red-tier">
+      <div class="when">Month 37+</div>
+      <div class="penalty zero">0.00%</div>
+      <div class="desc">Free redemption. Monthly window — 30 day notice. Mandatory partial-NAV-in-kind option for &gt; $10M tickets.</div>
+    </div>
+  </div>
+
+  <!-- ═══ SHARIA AUDIT TRANSPARENCY ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">03</span>Sharia audit · pass-through transparency</div>
+    <div class="section-aside">Fully disclosed · independent of management fee</div>
+  </div>
+  <div class="sharia-card">
+    <div class="sharia-seal">
+      <div class="ic"><i class="fas fa-mosque"></i></div>
+      <div class="t">SHARIA</div>
+      <div class="t" style="margin-top:0.3mm;">AUDIT</div>
+    </div>
+    <div class="sharia-body">
+      <h3>The Sharia audit is a pass-through cost, not a margin line.</h3>
+      <p>MizanQuant retains a five-member independent Sharia board (AAOIFI-accredited) plus an external annual audit firm. Their fees pass through to LPs at cost. We never mark them up. The breakdown below is published in every quarterly statement and reconciled in the annual fund audit.</p>
+      <div class="sharia-fees">
+        <div class="sharia-fee">
+          <div class="lab">Sharia board · retainer</div>
+          <div class="val">$48,000 pa</div>
+          <div class="sub">Fixed · 5 members · 4 quarterly reviews</div>
+        </div>
+        <div class="sharia-fee">
+          <div class="lab">AAOIFI external audit</div>
+          <div class="val">$22,000 pa</div>
+          <div class="sub">Annual · published with year-end statement</div>
+        </div>
+        <div class="sharia-fee">
+          <div class="lab">LP allocation</div>
+          <div class="val">~0.07% pa</div>
+          <div class="sub">Allocated pro-rata · capped at 0.10%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SUBSCRIPTION TIERS ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">04</span>Subscription tiers · custom MFN above $25M</div>
+    <div class="section-aside">Limited to 5 institutional partners per quarter</div>
+  </div>
+  <div class="tier-grid">
+    <div class="tier-card">
+      <div class="name">Founder</div>
+      <div class="min">Minimum · $1M – $5M</div>
+      <div class="fee">2 / 20</div>
+      <ul class="perks">
+        <li>Standard terms · 12-mo lock</li>
+        <li>Monthly NAV statement</li>
+        <li>Quarterly Sharia attestation</li>
+        <li>Telegram channel · EN</li>
+      </ul>
+    </div>
+    <div class="tier-card flagship">
+      <div class="name">Institutional</div>
+      <div class="min">Minimum · $5M – $25M</div>
+      <div class="fee">1.75 / 18</div>
+      <ul class="perks">
+        <li>Reduced mgmt + perf fees</li>
+        <li>Bi-weekly NAV statement</li>
+        <li>Direct fatwa-committee access</li>
+        <li>Telegram channel · EN + AR</li>
+        <li>Quarterly briefing call</li>
+      </ul>
+    </div>
+    <div class="tier-card">
+      <div class="name">Anchor</div>
+      <div class="min">Minimum · $25M+</div>
+      <div class="fee">MFN</div>
+      <ul class="perks">
+        <li>Most-favoured-nation pricing</li>
+        <li>Custom lock-up · negotiable</li>
+        <li>Dedicated client desk</li>
+        <li>Quarterly on-site review</li>
+        <li>Co-naming on Sharia board</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══ FOOTER ═══ -->
+  <div class="foot">
+    <div class="foot-block">
+      <h5>Onboarding · contact</h5>
+      <div class="body">
+        <strong>institutional@mizanquant.com</strong><br>
+        Subscription docs &amp; fund offering memorandum issued post-KYC. Onboarding flow: NDA → KYC → Sharia review → terminal credentials (median 6 business days).
+      </div>
+    </div>
+    <div class="foot-block">
+      <h5>Governing terms</h5>
+      <div class="body">
+        DIFC Courts · exclusive jurisdiction<br>
+        AAOIFI Standard 21 · governance<br>
+        AIFMD / SCA Cat 4 · regulatory<br>
+        Quarterly fatwa-renewal cycle
+      </div>
+    </div>
+    <div class="foot-block">
+      <h5>Issued by</h5>
+      <div class="body">
+        MizanQuant FZE · DIFC, Dubai<br>
+        Q2 2026 · Document MZN-TS-26Q2-003<br>
+        Counter-signed by GP · Faisal Al-Mansouri<br>
+        Sealed · subscriptions@mizanquant.com
+      </div>
+    </div>
+
+    <div class="foot-disclosure">
+      <strong>Disclosure ·</strong> This document is a summary of standard institutional terms only. It does not constitute an offer, solicitation, or recommendation to subscribe. Full subscription is governed by the Limited Partnership Agreement (LPA), Private Placement Memorandum (PPM), and Subscription Agreement, which prevail in the event of any conflict with this summary. Past performance does not guarantee future results. The Sharia audit cost is a pass-through; it is not retained by the GP. All fees are indicative and subject to change in subsequent vintages. Confidential — for the named recipient only.
+    </div>
+  </div>
+
+  <div class="foot-stamp">MZN · 2026Q2 · 003 · TS</div>
+
+</div>
+
+</body>
+</html>

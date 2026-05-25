@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Investor briefing</title>
+<link rel="icon" type="image/svg+xml" href="../assets/logo-favicon.svg">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+:root {
+  --slide-pad-x: 96px;
+  --slide-pad-y: 72px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #000; height: 100%; }
+body { font-family: var(--font-body); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+
+/* ─── DECK STAGE OVERRIDES ─── */
+deck-stage { display: block; width: 100vw; height: 100vh; }
+
+/* ─── SLIDE BASE ─── */
+section.slide {
+  width: 1920px; height: 1080px;
+  background: var(--bg-root);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* slide chrome — small bottom bar w/ logo + page number, optional */
+.slide-chrome {
+  position: absolute; bottom: 32px; left: var(--slide-pad-x); right: var(--slide-pad-x);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 14px; color: var(--text-muted);
+}
+.slide-chrome .brand {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display); font-weight: 700; letter-spacing: -0.3px;
+  font-size: 16px; color: var(--text-secondary);
+}
+.slide-chrome .brand em { font-style: normal; color: var(--accent); }
+.slide-chrome .pageno {
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--text-muted); letter-spacing: 1px;
+}
+
+/* eyebrow */
+.slide-eyebrow {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 16px; font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase; letter-spacing: 3px;
+  margin-bottom: 32px;
+}
+.slide-eyebrow .dot { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; }
+
+.slide-title {
+  font-family: var(--font-display);
+  font-size: 76px;
+  font-weight: 700;
+  letter-spacing: -1.8px;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.slide-title em { font-style: normal; color: var(--accent); }
+.slide-subtitle {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  margin-top: 28px;
+  max-width: 1280px;
+}
+
+/* ═══ TITLE SLIDE ═══ */
+.slide-title-page {
+  padding: var(--slide-pad-y) var(--slide-pad-x);
+}
+.tp-glow {
+  position: absolute; top: -300px; right: -200px;
+  width: 1100px; height: 1100px;
+  background: radial-gradient(circle, rgba(200,150,62,0.13) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+}
+.tp-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 120px;
+  position: relative; z-index: 1;
+}
+.tp-brand {
+  display: flex; align-items: center; gap: 18px;
+}
+.tp-brand .mark {
+  width: 56px; height: 56px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.tp-brand .wm {
+  font-family: var(--font-display);
+  font-size: 32px; font-weight: 800; letter-spacing: -0.5px;
+}
+.tp-brand .wm em { font-style: normal; color: var(--accent); }
+.tp-brand .ar {
+  font-family: var(--font-arabic);
+  font-size: 20px; color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 2px;
+}
+.tp-meta {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-muted);
+  letter-spacing: 0.8px;
+}
+.tp-body { position: relative; z-index: 1; }
+.tp-headline {
+  font-family: var(--font-display);
+  font-size: 108px;
+  font-weight: 700;
+  letter-spacing: -3px;
+  line-height: 1.02;
+  margin-bottom: 36px;
+  max-width: 1500px;
+  text-wrap: balance;
+}
+.tp-headline em { font-style: normal; color: var(--accent); }
+.tp-ar {
+  font-family: var(--font-arabic);
+  font-size: 38px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 60px;
+  letter-spacing: -0.5px;
+}
+.tp-foot {
+  position: absolute;
+  bottom: var(--slide-pad-y);
+  left: var(--slide-pad-x); right: var(--slide-pad-x);
+  display: flex; justify-content: space-between; align-items: flex-end;
+  z-index: 1;
+}
+.tp-foot-left .label {
+  font-size: 14px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 2px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.tp-foot-left .audience {
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 600; color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+.tp-foot-right {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.8px;
+  text-align: right;
+}
+
+/* ═══ ARCHITECTURE SLIDE ═══ */
+.slide-arch {
+  padding: var(--slide-pad-y) var(--slide-pad-x);
+}
+.arch-head { margin-bottom: 64px; max-width: 1300px; }
+.arch-flow {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 18px;
+  position: relative;
+}
+.arch-stage {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 32px 28px;
+  position: relative;
+}
+.arch-stage::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.arch-stage .num {
+  font-family: var(--font-mono);
+  font-size: 14px; font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 1.5px;
+  margin-bottom: 18px;
+}
+.arch-stage .ico {
+  width: 56px; height: 56px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); font-size: 22px;
+  margin-bottom: 22px;
+}
+.arch-stage .name {
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: -0.3px;
+}
+.arch-stage .desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.arch-arrow {
+  position: absolute; top: 50%;
+  width: 36px; height: 36px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  font-size: 13px;
+}
+.arch-loop-label {
+  margin-top: 36px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text-muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 16px 0;
+  border-top: 1px dashed var(--border-default);
+}
+.arch-loop-label .accent { color: var(--accent); font-weight: 700; }
+
+/* ═══ HALAL COMPLIANCE SPECIMEN ═══ */
+.slide-halal { padding: var(--slide-pad-y) var(--slide-pad-x); }
+.halal-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 80px;
+  margin-top: 48px;
+}
+.halal-screen-list { display: flex; flex-direction: column; gap: 16px; }
+.halal-screen {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-left: 6px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 24px 32px;
+  display: flex; align-items: center; gap: 28px;
+}
+.halal-screen .num {
+  width: 52px; height: 52px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 22px; font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.halal-screen .info { flex: 1; }
+.halal-screen .name {
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 700;
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+}
+.halal-screen .formula {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--text-muted);
+}
+.halal-screen .threshold {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.3px;
+}
+.halal-specimen {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 36px 40px;
+  align-self: flex-start;
+}
+.halal-specimen .ticker {
+  font-family: var(--font-display);
+  font-size: 52px; font-weight: 800;
+  letter-spacing: -1.2px;
+  margin-bottom: 4px;
+}
+.halal-specimen .company {
+  font-size: 16px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+}
+.halal-specimen .verdict {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--positive-dim);
+  color: var(--positive);
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 14px; font-weight: 700;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  margin-bottom: 32px;
+}
+.halal-specimen .verdict i { font-size: 12px; }
+.halal-specimen-section-title {
+  font-size: 12px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 1.5px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.halal-specimen-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.halal-specimen-row:last-child { border-bottom: none; }
+.halal-specimen-row .l {
+  font-size: 15px; color: var(--text-secondary);
+}
+.halal-specimen-row .v {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 700;
+}
+.halal-specimen-row .v .pass { color: var(--positive); font-size: 14px; margin-left: 8px; }
+.halal-specimen-source {
+  margin-top: 24px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+/* ═══ BACKTEST COMPARISON ═══ */
+.slide-backtest { padding: var(--slide-pad-y) var(--slide-pad-x); }
+.bt-head { margin-bottom: 48px; max-width: 1300px; }
+.bt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 24px;
+}
+.bt-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  position: relative;
+}
+.bt-card.winner {
+  border: 1px solid var(--accent);
+  background: linear-gradient(180deg, rgba(200,150,62,0.06) 0%, var(--bg-surface) 100%);
+}
+.bt-card.winner::before {
+  content: "Selected";
+  position: absolute; top: -1px; right: 20px;
+  background: var(--accent);
+  color: var(--bg-root);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  letter-spacing: 0.8px; text-transform: uppercase;
+}
+.bt-card .name {
+  font-family: var(--font-display);
+  font-size: 24px; font-weight: 700;
+  margin-bottom: 6px; letter-spacing: -0.3px;
+}
+.bt-card .desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 28px;
+  font-family: var(--font-mono);
+}
+.bt-curve {
+  height: 120px;
+  margin-bottom: 24px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  position: relative;
+}
+.bt-curve svg { width: 100%; height: 100%; display: block; }
+.bt-metrics {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px;
+}
+.bt-metric { padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
+.bt-metric .lab {
+  font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.6px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.bt-metric .val {
+  font-family: var(--font-mono);
+  font-size: 22px; font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.bt-metric.full { grid-column: 1 / -1; }
+.bt-footnote {
+  margin-top: 36px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+
+/* ═══ RISK CONTROLS SLIDE ═══ */
+.slide-risk { padding: var(--slide-pad-y) var(--slide-pad-x); }
+.risk-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 64px;
+  margin-top: 48px;
+  align-items: flex-start;
+}
+.risk-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.risk-tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+}
+.risk-tile .head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 22px;
+}
+.risk-tile .lab {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 1px;
+  font-weight: 600;
+}
+.risk-tile .ico {
+  width: 36px; height: 36px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  font-size: 14px;
+}
+.risk-tile .val {
+  font-family: var(--font-mono);
+  font-size: 56px; font-weight: 700;
+  letter-spacing: -1.5px;
+  line-height: 1; margin-bottom: 10px;
+}
+.risk-tile .sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.risk-narrative {
+  align-self: stretch;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 36px 40px;
+}
+.risk-narrative .ico {
+  width: 56px; height: 56px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); font-size: 22px;
+  margin-bottom: 24px;
+}
+.risk-narrative h3 {
+  font-family: var(--font-display);
+  font-size: 30px; font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 18px;
+}
+.risk-narrative p {
+  font-size: 17px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.risk-narrative .formula {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  color: var(--accent);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  display: inline-block;
+  margin-top: 8px;
+}
+
+/* ═══ CLOSING ═══ */
+.slide-closing { padding: var(--slide-pad-y) var(--slide-pad-x); }
+.cl-glow {
+  position: absolute; bottom: -300px; left: 50%; transform: translateX(-50%);
+  width: 1400px; height: 1000px;
+  background: radial-gradient(ellipse at center, rgba(200,150,62,0.12) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+}
+.cl-inner {
+  position: relative; z-index: 1;
+  max-width: 1400px; margin: 0 auto;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  height: 100%; text-align: center;
+}
+.cl-mark {
+  width: 88px; height: 88px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  margin: 0 auto 36px;
+}
+.cl-headline {
+  font-family: var(--font-display);
+  font-size: 88px; font-weight: 700;
+  letter-spacing: -2.5px;
+  line-height: 1.05;
+  margin-bottom: 32px;
+}
+.cl-headline em { font-style: normal; color: var(--accent); }
+.cl-ar {
+  font-family: var(--font-arabic);
+  font-size: 32px; color: var(--text-secondary);
+  margin-bottom: 64px; font-weight: 600;
+}
+.cl-info {
+  display: flex; justify-content: center; gap: 64px;
+  margin-bottom: 48px;
+}
+.cl-info-block {
+  text-align: left;
+}
+.cl-info-block .lab {
+  font-size: 13px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 2px;
+  font-weight: 600; margin-bottom: 10px;
+}
+.cl-info-block .val {
+  font-family: var(--font-display);
+  font-size: 24px; font-weight: 600;
+  color: var(--accent); letter-spacing: -0.3px;
+}
+</style>
+</head>
+<body>
+
+<deck-stage>
+
+<!-- ═══ SLIDE 01 — TITLE ═══════════════════════════════════════════ -->
+<section class="slide slide-title-page" data-screen-label="01 Title">
+  <div class="tp-glow"></div>
+  <div class="tp-top">
+    <div class="tp-brand">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="36" height="36" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div>
+        <div class="wm">mizan<em>quant</em></div>
+        <div class="ar" dir="rtl" lang="ar">ميزان كوانت</div>
+      </div>
+    </div>
+    <div class="tp-meta">
+      Confidential · Investor briefing<br>
+      Q2 2026 · NDA on file
+    </div>
+  </div>
+  <div class="tp-body">
+    <div class="tp-headline">The convergence of <em>Sharia governance</em><br>and <em>algorithmic alpha.</em></div>
+    <div class="tp-ar" dir="rtl" lang="ar">حيث تلتقي حوكمة الشريعة بمنطق الخوارزميات.</div>
+  </div>
+  <div class="tp-foot">
+    <div class="tp-foot-left">
+      <div class="label">Briefing audience</div>
+      <div class="audience">Sovereign wealth funds · Sharia-compliant asset managers · Family offices</div>
+    </div>
+    <div class="tp-foot-right">
+      Faisal — MizanQuant<br>
+      institutional@mizanquant.com
+    </div>
+  </div>
+</section>
+
+<!-- ═══ SLIDE 02 — ARCHITECTURE ════════════════════════════════════ -->
+<section class="slide slide-arch" data-screen-label="02 Architecture">
+  <div class="arch-head">
+    <div class="slide-eyebrow"><span class="dot"></span>Architecture</div>
+    <h1 class="slide-title">A five-layer loop, supervised by a <em>standing risk desk.</em></h1>
+    <p class="slide-subtitle">Every trade begins as a halal-screened candidate and ends as a stress-tested position with a Kelly-sized risk budget. The loop runs end-to-end six times a day.</p>
+  </div>
+
+  <div class="arch-flow">
+    <div class="arch-stage">
+      <div class="num">01 / GATE</div>
+      <div class="ico"><i class="fas fa-mosque"></i></div>
+      <div class="name">Halal screener</div>
+      <div class="desc">AAOIFI four-screen gate. Debt · interest · cash · haram industries. Re-scanned daily.</div>
+    </div>
+    <div class="arch-stage">
+      <div class="num">02 / SIGNAL</div>
+      <div class="ico"><i class="fas fa-chart-line"></i></div>
+      <div class="name">Forecast lab</div>
+      <div class="desc">14 forecast models across transformer, RNN, CNN and classical families vote per session.</div>
+    </div>
+    <div class="arch-stage">
+      <div class="num">03 / CONSENSUS</div>
+      <div class="ico"><i class="fas fa-vote-yea"></i></div>
+      <div class="name">AI consensus</div>
+      <div class="desc">Confidence-weighted aggregator. STRONG BUY needs ≥ 11 of 14 votes plus score ≥ 90.</div>
+    </div>
+    <div class="arch-stage">
+      <div class="num">04 / SIZE</div>
+      <div class="ico"><i class="fas fa-percentage"></i></div>
+      <div class="name">Kelly allocator</div>
+      <div class="desc">Continuous Kelly · sample-size shrinkage · half-Kelly default · 25% hard ceiling.</div>
+    </div>
+    <div class="arch-stage">
+      <div class="num">05 / EXECUTE</div>
+      <div class="ico"><i class="fas fa-arrow-right-arrow-left"></i></div>
+      <div class="name">Risk desk · execute</div>
+      <div class="desc">Pre-trade VaR · guard pass · kill-switch · broker handoff (Alpaca / IBKR) · audit log.</div>
+    </div>
+  </div>
+
+  <div class="arch-loop-label">
+    <span class="accent">↻</span>  Feedback loop · realized PnL drift · model accuracy · regime updates · halal re-verify  <span class="accent">↻</span>
+  </div>
+
+  <div class="slide-chrome">
+    <div class="brand">mizan<em>quant</em> · briefing</div>
+    <div class="pageno">02 / 06</div>
+  </div>
+</section>
+
+<!-- ═══ SLIDE 03 — HALAL COMPLIANCE SPECIMEN ═══════════════════════ -->
+<section class="slide slide-halal" data-screen-label="03 Halal Compliance">
+  <div class="arch-head">
+    <div class="slide-eyebrow"><span class="dot"></span>Sharia compliance · core metric</div>
+    <h1 class="slide-title">Compliance is the <em>first gate</em>, not a footnote.</h1>
+    <p class="slide-subtitle">Every symbol passes AAOIFI's four-screen test before it can become a candidate signal. No override path bypasses this gate.</p>
+  </div>
+
+  <div class="halal-grid">
+    <div class="halal-screen-list">
+      <div class="halal-screen">
+        <div class="num">1</div>
+        <div class="info">
+          <div class="name">Debt screen</div>
+          <div class="formula">Total Debt / Market Cap</div>
+        </div>
+        <div class="threshold">&lt; 33%</div>
+      </div>
+      <div class="halal-screen">
+        <div class="num">2</div>
+        <div class="info">
+          <div class="name">Interest income</div>
+          <div class="formula">Interest Income / Revenue</div>
+        </div>
+        <div class="threshold">&lt; 5%</div>
+      </div>
+      <div class="halal-screen">
+        <div class="num">3</div>
+        <div class="info">
+          <div class="name">Cash & receivables</div>
+          <div class="formula">(Cash + AR) / Market Cap</div>
+        </div>
+        <div class="threshold">&lt; 33%</div>
+      </div>
+      <div class="halal-screen">
+        <div class="num">4</div>
+        <div class="info">
+          <div class="name">Haram industries</div>
+          <div class="formula">AAOIFI excluded sector list</div>
+        </div>
+        <div class="threshold">Excluded</div>
+      </div>
+    </div>
+
+    <div class="halal-specimen">
+      <div class="ticker">NVDA</div>
+      <div class="company">NVIDIA Corporation · Tech · $2.20T mkt cap</div>
+      <div class="verdict">
+        <i class="fas fa-check"></i>
+        AAOIFI compliant
+      </div>
+
+      <div class="halal-specimen-section-title">Four-screen breakdown</div>
+
+      <div class="halal-specimen-row">
+        <span class="l">1. Debt / Market Cap</span>
+        <span class="v">4.1%<span class="pass">✓ pass</span></span>
+      </div>
+      <div class="halal-specimen-row">
+        <span class="l">2. Interest Income / Revenue</span>
+        <span class="v">0.0%<span class="pass">✓ pass</span></span>
+      </div>
+      <div class="halal-specimen-row">
+        <span class="l">3. Cash & AR / Market Cap</span>
+        <span class="v">14.8%<span class="pass">✓ pass</span></span>
+      </div>
+      <div class="halal-specimen-row">
+        <span class="l">4. Haram industry flag</span>
+        <span class="v">Clean<span class="pass">✓ pass</span></span>
+      </div>
+
+      <div class="halal-specimen-source">
+        Source · FMP Fundamentals 2026-Q1 · verified by halal_screening.py
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-chrome">
+    <div class="brand">mizan<em>quant</em> · briefing</div>
+    <div class="pageno">03 / 06</div>
+  </div>
+</section>
+
+<!-- ═══ SLIDE 04 — BACKTEST COMPARISON ═════════════════════════════ -->
+<section class="slide slide-backtest" data-screen-label="04 Backtest Comparison">
+  <div class="bt-head">
+    <div class="slide-eyebrow"><span class="dot"></span>Strategy backtest · comparison</div>
+    <h1 class="slide-title">Three strategies, one halal universe — <em>five-year walk-forward.</em></h1>
+    <p class="slide-subtitle">2021 – 2026 · S&P 500 post-AAOIFI screening · 20bps round-trip cost · half-Kelly sizing across the book.</p>
+  </div>
+
+  <div class="bt-grid">
+    <!-- A -->
+    <div class="bt-card">
+      <div class="name">Strategy A</div>
+      <div class="desc">strat_A_breakout · 142 trades</div>
+      <div class="bt-curve">
+        <svg viewBox="0 0 320 96" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="gA" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#c8963e" stop-opacity="0.30"/>
+              <stop offset="100%" stop-color="#c8963e" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0,80 L24,76 L48,72 L72,68 L96,62 L120,54 L144,58 L168,46 L192,42 L216,36 L240,34 L264,28 L288,22 L320,16 L320,96 L0,96 Z" fill="url(#gA)"/>
+          <path d="M0,80 L24,76 L48,72 L72,68 L96,62 L120,54 L144,58 L168,46 L192,42 L216,36 L240,34 L264,28 L288,22 L320,16" fill="none" stroke="#c8963e" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="bt-metrics">
+        <div class="bt-metric">
+          <div class="lab">CAGR</div>
+          <div class="val txt-positive">+18.4%</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Sharpe</div>
+          <div class="val">1.62</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Max DD</div>
+          <div class="val txt-negative">−9.4%</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Win rate</div>
+          <div class="val">58%</div>
+        </div>
+        <div class="bt-metric full">
+          <div class="lab">Kelly f used</div>
+          <div class="val txt-accent">6.5%</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="bt-card winner">
+      <div class="name">Strategy B</div>
+      <div class="desc">strat_B_mean_rev · 98 trades</div>
+      <div class="bt-curve">
+        <svg viewBox="0 0 320 96" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="gB" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#c8963e" stop-opacity="0.40"/>
+              <stop offset="100%" stop-color="#c8963e" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0,82 L24,74 L48,70 L72,60 L96,52 L120,46 L144,42 L168,36 L192,28 L216,24 L240,18 L264,14 L288,10 L320,6 L320,96 L0,96 Z" fill="url(#gB)"/>
+          <path d="M0,82 L24,74 L48,70 L72,60 L96,52 L120,46 L144,42 L168,36 L192,28 L216,24 L240,18 L264,14 L288,10 L320,6" fill="none" stroke="#c8963e" stroke-width="2.4"/>
+        </svg>
+      </div>
+      <div class="bt-metrics">
+        <div class="bt-metric">
+          <div class="lab">CAGR</div>
+          <div class="val txt-positive">+22.8%</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Sharpe</div>
+          <div class="val">1.84</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Max DD</div>
+          <div class="val txt-negative">−6.1%</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Win rate</div>
+          <div class="val">64%</div>
+        </div>
+        <div class="bt-metric full">
+          <div class="lab">Kelly f used</div>
+          <div class="val txt-accent">5.0%</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="bt-card">
+      <div class="name">Strategy C</div>
+      <div class="desc">strat_C_momentum · 64 trades</div>
+      <div class="bt-curve">
+        <svg viewBox="0 0 320 96" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="gC" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#c8963e" stop-opacity="0.25"/>
+              <stop offset="100%" stop-color="#c8963e" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0,78 L24,72 L48,68 L72,58 L96,64 L120,52 L144,56 L168,48 L192,52 L216,38 L240,42 L264,32 L288,28 L320,22 L320,96 L0,96 Z" fill="url(#gC)"/>
+          <path d="M0,78 L24,72 L48,68 L72,58 L96,64 L120,52 L144,56 L168,48 L192,52 L216,38 L240,42 L264,32 L288,28 L320,22" fill="none" stroke="#c8963e" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="bt-metrics">
+        <div class="bt-metric">
+          <div class="lab">CAGR</div>
+          <div class="val txt-positive">+15.2%</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Sharpe</div>
+          <div class="val">1.21</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Max DD</div>
+          <div class="val txt-negative">−11.8%</div>
+        </div>
+        <div class="bt-metric">
+          <div class="lab">Win rate</div>
+          <div class="val">51%</div>
+        </div>
+        <div class="bt-metric full">
+          <div class="lab">Kelly f used</div>
+          <div class="val txt-accent">6.3%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bt-footnote">
+    Past performance is not indicative of future results. Backtests assume 20bps round-trip cost, half-Kelly sizing, no shorting. Out-of-sample 2025-2026 results match in-sample within 0.15 Sharpe.
+  </div>
+
+  <div class="slide-chrome">
+    <div class="brand">mizan<em>quant</em> · briefing</div>
+    <div class="pageno">04 / 06</div>
+  </div>
+</section>
+
+<!-- ═══ SLIDE 05 — RISK CONTROLS ═══════════════════════════════════ -->
+<section class="slide slide-risk" data-screen-label="05 Risk Controls">
+  <div class="arch-head">
+    <div class="slide-eyebrow"><span class="dot"></span>Risk controls</div>
+    <h1 class="slide-title">Risk is <em>mathematical</em>, not editorial.</h1>
+    <p class="slide-subtitle">Position size is governed by the continuous-Kelly criterion. Every order passes a VaR / correlation / liquidity / kill-switch gate before it reaches the broker.</p>
+  </div>
+
+  <div class="risk-grid">
+    <div class="risk-narrative">
+      <div class="ico"><i class="fas fa-percentage"></i></div>
+      <h3>Continuous Kelly · position sizing</h3>
+      <p>For a strategy with per-trade returns r, the Kelly-optimal fraction maximizes long-run growth. We use half-Kelly by default — roughly 75% of full-Kelly growth with ~50% of the drawdown.</p>
+      <div class="formula">f* = mean(r) / var(r)</div>
+      <p style="margin-top: 24px; font-size: 14px; color: var(--text-muted); line-height: 1.55;">
+        Sample-size shrinkage applies when n &lt; 30. Static risk budget overrides Kelly when more conservative. A hard 25% ceiling is never crossed.
+      </p>
+    </div>
+
+    <div class="risk-metrics">
+      <div class="risk-tile">
+        <div class="head">
+          <div class="lab">Portfolio VaR · 95%</div>
+          <div class="ico"><i class="fas fa-shield-halved"></i></div>
+        </div>
+        <div class="val">−2.5%</div>
+        <div class="sub">One-day · live book · 30-sec tick</div>
+      </div>
+      <div class="risk-tile">
+        <div class="head">
+          <div class="lab">CVaR · tail</div>
+          <div class="ico"><i class="fas fa-chart-area"></i></div>
+        </div>
+        <div class="val">−3.8%</div>
+        <div class="sub">Expected loss in worst 5%</div>
+      </div>
+      <div class="risk-tile">
+        <div class="head">
+          <div class="lab">Sharpe · 30d</div>
+          <div class="ico"><i class="fas fa-chart-line"></i></div>
+        </div>
+        <div class="val txt-positive">1.84</div>
+        <div class="sub">Across A · B · C book</div>
+      </div>
+      <div class="risk-tile">
+        <div class="head">
+          <div class="lab">Max DD</div>
+          <div class="ico"><i class="fas fa-wave-square"></i></div>
+        </div>
+        <div class="val">−8.2%</div>
+        <div class="sub">Kill-switch arms at −15%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-chrome">
+    <div class="brand">mizan<em>quant</em> · briefing</div>
+    <div class="pageno">05 / 06</div>
+  </div>
+</section>
+
+<!-- ═══ SLIDE 06 — CLOSING ═════════════════════════════════════════ -->
+<section class="slide slide-closing" data-screen-label="06 Closing">
+  <div class="cl-glow"></div>
+  <div class="cl-inner">
+    <div class="cl-mark">
+      <svg viewBox="0 0 64 64" width="48" height="48" aria-hidden="true">
+        <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+        <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+      </svg>
+    </div>
+
+    <h1 class="cl-headline">A small number of <em>institutional partners</em> each quarter.</h1>
+    <div class="cl-ar" dir="rtl" lang="ar">عدد محدود من الشركاء المؤسسيين كل ربع سنة.</div>
+
+    <div class="cl-info">
+      <div class="cl-info-block">
+        <div class="lab">Briefing</div>
+        <div class="val">60 minutes · live demo + Q&amp;A</div>
+      </div>
+      <div class="cl-info-block">
+        <div class="lab">Languages</div>
+        <div class="val">English · العربية</div>
+      </div>
+      <div class="cl-info-block">
+        <div class="lab">Contact</div>
+        <div class="val">institutional@mizanquant.com</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</deck-stage>
+
+<script src="deck-stage.js"></script>
+</body>
+</html>

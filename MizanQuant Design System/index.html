@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Brand vault &middot; index</title>
+<link rel="icon" type="image/svg+xml" href="assets/logo-favicon.svg">
+<link rel="stylesheet" href="colors_and_type.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg-root); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+body { font-family: var(--font-body); font-size: 14px; line-height: 1.55; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::selection { background: var(--accent-dim); color: var(--accent); }
+
+a { color: inherit; text-decoration: none; }
+
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
+
+/* ═══ TOP BAR ═══ */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(12,12,16,0.88);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.topbar-inner {
+  display: flex; align-items: center;
+  height: 64px;
+}
+.brand-tb { display: flex; align-items: center; gap: 12px; }
+.brand-tb .mark {
+  width: 30px; height: 30px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.brand-tb .wm {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 800;
+  letter-spacing: -0.3px;
+}
+.brand-tb .wm em { font-style: normal; color: var(--accent); }
+.brand-tb .sep { width: 1px; height: 16px; background: var(--border-default); margin: 0 6px; }
+.brand-tb .title { font-family: var(--font-display); font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+.tb-right {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+.tb-right .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* ═══ HERO ═══ */
+.hero {
+  padding: 64px 0 48px;
+  position: relative;
+  overflow: hidden;
+}
+.hero-glow {
+  position: absolute;
+  top: -200px; left: 50%; transform: translateX(-50%);
+  width: 1100px; height: 800px;
+  background: radial-gradient(ellipse, rgba(200,150,62,0.10) 0%, rgba(200,150,62,0) 60%);
+  pointer-events: none;
+}
+.hero-inner { position: relative; z-index: 1; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  margin-bottom: 16px;
+  font-weight: 700;
+}
+.eyebrow .dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; }
+
+h1 {
+  font-family: var(--font-display);
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -1.2px;
+  line-height: 1.08;
+  margin-bottom: 16px;
+  max-width: 920px;
+  text-wrap: balance;
+}
+h1 em { font-style: normal; color: var(--accent); }
+.hero-ar {
+  font-family: var(--font-arabic);
+  font-size: 20px;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 22px;
+  letter-spacing: -0.3px;
+}
+.hero-lead {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  max-width: 700px;
+  margin-bottom: 28px;
+}
+.hero-meta {
+  display: flex; gap: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+  flex-wrap: wrap;
+}
+.hero-meta .item { display: flex; align-items: center; gap: 6px; }
+.hero-meta i { color: var(--accent); font-size: 10px; }
+.hero-meta strong { color: var(--text-secondary); font-weight: 600; }
+
+/* ═══ SECTION ═══ */
+section { padding: 48px 0; border-top: 1px solid var(--border-subtle); }
+.section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 24px;
+}
+.section-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+.section-title .num {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  margin-right: 10px;
+}
+.section-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* ═══ CARD GRID ═══ */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.card-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 24px 26px 22px;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  position: relative;
+}
+.card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.card.featured {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(200,150,62,0.05) 0%, var(--bg-surface) 100%);
+}
+.card.featured::before {
+  content: "Most-used";
+  position: absolute;
+  top: -1px; right: 24px;
+  background: var(--accent);
+  color: var(--bg-root);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.card-ico {
+  width: 40px; height: 40px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  font-size: 15px;
+}
+.card-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+.card-tag.web { color: var(--accent); border-color: var(--accent-glow); background: var(--accent-dim); }
+.card-tag.print { color: var(--info); border-color: rgba(96,165,250,0.30); background: var(--info-dim); }
+.card-tag.app { color: var(--positive); border-color: rgba(74,222,128,0.30); background: var(--positive-dim); }
+.card-tag.code { color: var(--warning); border-color: rgba(251,191,36,0.30); background: var(--warning-dim); }
+.card h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin-bottom: 6px;
+  line-height: 1.2;
+}
+.card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 18px;
+  flex: 1;
+}
+.card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+.card-path {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-open {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.card:hover .card-open { color: var(--accent-hover); }
+.card-open i { font-size: 10px; }
+
+/* ═══ SMALL CARD ═══ (for system / reference files) */
+.small-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  display: flex; align-items: center; gap: 14px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.small-card:hover { border-color: var(--accent); }
+.small-card .ico {
+  width: 32px; height: 32px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.small-card:hover .ico { color: var(--accent); border-color: var(--accent-glow); background: var(--accent-dim); }
+.small-card .info { flex: 1; min-width: 0; }
+.small-card .name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.small-card .desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.2px;
+}
+.small-card i.fa-arrow-up-right-from-square {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ═══ FOOTER ═══ */
+footer {
+  border-top: 1px solid var(--border-default);
+  padding: 32px 0;
+  margin-top: 24px;
+}
+.foot-grid {
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.foot-grid .ar {
+  font-family: var(--font-arabic);
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (max-width: 1024px) {
+  .card-grid { grid-template-columns: repeat(2, 1fr); }
+  .card-grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+  h1 { font-size: 36px; }
+}
+@media (max-width: 700px) {
+  .card-grid, .card-grid.cols-2, .card-grid.cols-4 { grid-template-columns: 1fr; }
+  h1 { font-size: 28px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ TOP BAR ═══ -->
+<nav class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand-tb">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="18" height="18" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.2"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div class="wm">mizan<em>quant</em></div>
+      <div class="sep"></div>
+      <div class="title">Brand vault &middot; index</div>
+    </div>
+    <div class="tb-right">
+      <span class="dot"></span>
+      <span>13 surfaces &middot; sealed Q2 2026</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<section class="hero" style="border-top: none;">
+  <div class="hero-glow"></div>
+  <div class="wrap hero-inner">
+    <div class="eyebrow"><span class="dot"></span>Brand vault &middot; complete identity index</div>
+    <h1>Every <em>MizanQuant</em> surface in one place.</h1>
+    <div class="hero-ar" dir="rtl" lang="ar">خزينة العلامة التجارية &middot; كل صفحات ميزان كوانت في مكان واحد</div>
+    <p class="hero-lead">
+      The full institutional identity &mdash; public-facing marketing, the live trading product, operational tools, and reference assets. Click any card to open the surface. All artifacts share the same canonical tokens (<code style="font-family: var(--font-mono); color: var(--accent); font-size: 13px;">colors_and_type.css</code>) and the warm-dark + gold aesthetic.
+    </p>
+    <div class="hero-meta">
+      <div class="item"><i class="fas fa-shield-halved"></i><strong>13</strong>&nbsp; surfaces</div>
+      <div class="item"><i class="fas fa-language"></i><strong>Bilingual</strong>&nbsp; EN &middot; العربية</div>
+      <div class="item"><i class="fas fa-mosque"></i><strong>AAOIFI</strong>&nbsp; Standard 21</div>
+      <div class="item"><i class="fas fa-palette"></i><strong>#c8963e</strong>&nbsp; warm gold accent</div>
+      <div class="item"><i class="fas fa-calendar"></i><strong>Q2 2026</strong>&nbsp; vintage</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PUBLIC-FACING ═══ -->
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-title"><span class="num">01</span>Public-facing &middot; marketing &amp; investor materials</div>
+      <div class="section-sub">For external distribution &middot; LP outreach &middot; press</div>
+    </div>
+    <div class="card-grid">
+      <a class="card featured" href="landing/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-globe"></i></div>
+          <span class="card-tag web">Web</span>
+        </div>
+        <h3>Institutional landing page</h3>
+        <p>Premium single-page site for Gulf/MENA capital. Hero, 5-layer architecture, performance metrics, AAOIFI compliance, CTA. Includes the gated <strong>Terminal Access Lock</strong> &mdash; demo password <code style="font-family: var(--font-mono); color: var(--accent);">mizan2026</code>.</p>
+        <div class="card-foot">
+          <span class="card-path">landing/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="slides/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-presentation-screen"></i></div>
+          <span class="card-tag web">1920 &times; 1080</span>
+        </div>
+        <h3>Investor briefing deck</h3>
+        <p>6-slide HTML deck. Title &middot; Architecture &middot; Halal compliance specimen &middot; Backtest comparison &middot; Risk controls &middot; Closing. Arrow keys navigate. Export to PPTX from <code style="font-family: var(--font-mono); color: var(--accent); font-size: 11px;">export/</code>.</p>
+        <div class="card-foot">
+          <span class="card-path">slides/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="press/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-newspaper"></i></div>
+          <span class="card-tag web">Portal</span>
+        </div>
+        <h3>Press kit &middot; brand portal</h3>
+        <p>Downloadable brand marks (SVG + PNG generated client-side), canonical color tokens, type hierarchy, do/don't usage grid, and press contact cards. The single source for journalists and partners.</p>
+        <div class="card-foot">
+          <span class="card-path">press/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="one-pager/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-file-lines"></i></div>
+          <span class="card-tag print">A4 print</span>
+        </div>
+        <h3>Institutional fact sheet</h3>
+        <p>A4 portrait tear-sheet. Architecture row, AAOIFI badge with embedded seal, performance KPI strip, audience tiles. Print directly from Chrome with default margins. Doc ref <code style="font-family: var(--font-mono); color: var(--accent); font-size: 11px;">MZN-IFS-26Q2-002</code>.</p>
+        <div class="card-foot">
+          <span class="card-path">one-pager/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="terms/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-file-contract"></i></div>
+          <span class="card-tag print">A4 print</span>
+        </div>
+        <h3>Pricing &amp; terms sheet</h3>
+        <p>A4 portrait. Fee schedule (2/20, HWM, hurdle), lock-up tiered redemption, Sharia audit pass-through transparency, 3-tier subscription. Doc ref <code style="font-family: var(--font-mono); color: var(--accent); font-size: 11px;">MZN-TS-26Q2-003</code>.</p>
+        <div class="card-foot">
+          <span class="card-path">terms/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="email-signature/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-at"></i></div>
+          <span class="card-tag web">Live preview</span>
+        </div>
+        <h3>Email signature</h3>
+        <p>Bilingual HTML signature with live preview + form-driven personalisation + one-click copy. Two variants: dark (primary) and light (fallback for default Gmail). Paste straight into Gmail / Outlook / Apple Mail.</p>
+        <div class="card-foot">
+          <span class="card-path">email-signature/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ LIVE PRODUCT ═══ -->
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-title"><span class="num">02</span>Live product &middot; the trading terminal</div>
+      <div class="section-sub">Hi-fi React UI kits &middot; click-thru prototypes</div>
+    </div>
+    <div class="card-grid">
+      <a class="card featured" href="ui_kits/mizanquant_terminal/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-th-large"></i></div>
+          <span class="card-tag app">React kit</span>
+        </div>
+        <h3>Overview &middot; flagship terminal</h3>
+        <p>3-column workflow: Scan (market &middot; regime &middot; signals) &middot; Analyze (sticky panel) &middot; Trade (portfolio &middot; positions &middot; paper &middot; pipeline &middot; guards). Lower row: models &middot; sectors &middot; consensus. Click signals to drive the whole UI.</p>
+        <div class="card-foot">
+          <span class="card-path">ui_kits/mizanquant_terminal/</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="ui_kits/risk_desk/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-shield-halved"></i></div>
+          <span class="card-tag app">React kit</span>
+        </div>
+        <h3>Risk Desk</h3>
+        <p>Portfolio VaR &middot; CVaR &middot; Sharpe &middot; Max DD. Continuous-Kelly sizing with per-strategy breakdown (shrinkage state visible). System-wide guard toggles (kill-switch, halt, auto-trade). Stress tests &middot; risk alerts feed.</p>
+        <div class="card-foot">
+          <span class="card-path">ui_kits/risk_desk/</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="ui_kits/halal_screener/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-mosque"></i></div>
+          <span class="card-tag app">React kit</span>
+        </div>
+        <h3>Halal Screener &middot; AAOIFI</h3>
+        <p>Four-screen compliance view (debt &middot; interest &middot; cash &middot; haram industries) + summary cards + sector filter chips with pass/fail counts. Sortable compliance table with D&middot;I&middot;C&middot;H pill column. Slide-in detail panel per symbol.</p>
+        <div class="card-foot">
+          <span class="card-path">ui_kits/halal_screener/</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ OPERATIONAL ═══ -->
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-title"><span class="num">03</span>Operational &middot; LP-facing workflows</div>
+      <div class="section-sub">Onboarding &middot; daily reporting</div>
+    </div>
+    <div class="card-grid cols-2">
+      <a class="card" href="onboarding/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-user-shield"></i></div>
+          <span class="card-tag app">React flow</span>
+        </div>
+        <h3>Institutional onboarding</h3>
+        <p>4-step clickable journey &mdash; NDA execution (canvas signature pad + acknowledgements) &rarr; Institutional KYC (entity &middot; AAOIFI disclosure &middot; document upload) &rarr; Sharia board review (5 reviewers, auto-advancing) &rarr; Credentials issuance (Partner ID, MFA QR, audit downloads). Routes into the live terminal on completion.</p>
+        <div class="card-foot">
+          <span class="card-path">onboarding/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+
+      <a class="card" href="report/index.html">
+        <div class="card-head">
+          <div class="card-ico"><i class="fas fa-file-chart-column"></i></div>
+          <span class="card-tag web">Web + print</span>
+        </div>
+        <h3>Daily EOD report</h3>
+        <p>End-of-day report mirroring <code style="font-family: var(--font-mono); color: var(--accent); font-size: 11px;">daily_report_*.md</code>. System-health strip, KPIs, top signals, trades + AAOIFI screen diff, pipeline timeline, risk snapshot, model leaderboard. Telegram-ready Arabic blurb with one-click plain-text copy.</p>
+        <div class="card-foot">
+          <span class="card-path">report/index.html</span>
+          <span class="card-open">Open <i class="fas fa-arrow-right"></i></span>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ DESIGN SYSTEM REFERENCE ═══ -->
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-title"><span class="num">04</span>Design system &middot; reference &amp; tokens</div>
+      <div class="section-sub">For designers &middot; engineers &middot; AI agents</div>
+    </div>
+    <div class="card-grid cols-4">
+
+      <a class="small-card" href="README.md">
+        <div class="ico"><i class="fas fa-book"></i></div>
+        <div class="info">
+          <div class="name">README</div>
+          <div class="desc">Full guide &middot; voice &middot; visuals</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="SKILL.md">
+        <div class="ico"><i class="fas fa-wand-magic-sparkles"></i></div>
+        <div class="info">
+          <div class="name">SKILL.md</div>
+          <div class="desc">Agent skill manifest</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="colors_and_type.css">
+        <div class="ico"><i class="fas fa-palette"></i></div>
+        <div class="info">
+          <div class="name">colors_and_type.css</div>
+          <div class="desc">Token source of truth</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="assets/logo-monogram.svg">
+        <div class="ico"><i class="fas fa-shapes"></i></div>
+        <div class="info">
+          <div class="name">Brand mark</div>
+          <div class="desc">SVG &middot; gold tinted</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="preview/color-primary.html">
+        <div class="ico"><i class="fas fa-fill-drip"></i></div>
+        <div class="info">
+          <div class="name">Color tokens</div>
+          <div class="desc">Brand &middot; semantic &middot; text</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="preview/type-display.html">
+        <div class="ico"><i class="fas fa-font"></i></div>
+        <div class="info">
+          <div class="name">Type specimens</div>
+          <div class="desc">DM Sans &middot; Cairo &middot; Mono</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="preview/components-buttons.html">
+        <div class="ico"><i class="fas fa-cube"></i></div>
+        <div class="info">
+          <div class="name">Components</div>
+          <div class="desc">Buttons &middot; badges &middot; cards</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+      <a class="small-card" href="export/README.md">
+        <div class="ico"><i class="fas fa-file-export"></i></div>
+        <div class="info">
+          <div class="name">PPTX exporter</div>
+          <div class="desc">python-pptx &middot; CLI</div>
+        </div>
+        <i class="fas fa-arrow-up-right-from-square"></i>
+      </a>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>&copy; 2026 MizanQuant FZE &middot; DIFC, Dubai &middot; All marks reserved</div>
+      <div class="ar" dir="rtl" lang="ar">ميزان كوانت &middot; خزينة العلامة التجارية</div>
+      <div>Vault sealed &middot; <strong style="color: var(--text-secondary);">Q2 2026 vintage</strong></div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

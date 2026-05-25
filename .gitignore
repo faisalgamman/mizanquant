@@ -26,3 +26,6 @@ CHANGELOG_SESSION.md
 logs/
 *.log
 test_artifacts/
+
+# Local tool cache (not project source)
+.understand-anything/

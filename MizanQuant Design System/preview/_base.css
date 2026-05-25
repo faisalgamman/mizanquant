@@ -1,0 +1,24 @@
+@import url("../colors_and_type.css");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap");
+@import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css");
+
+html, body {
+  margin: 0;
+  background: var(--bg-root);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card-wrap {
+  padding: 20px 24px;
+  width: 700px;
+  box-sizing: border-box;
+}
+
+.row { display: flex; align-items: center; gap: 12px; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.muted { color: var(--text-muted); font-size: var(--text-xs); }
+.label { color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }

@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanQuant — Institutional Fact Sheet</title>
+<link rel="icon" type="image/svg+xml" href="../assets/logo-favicon.svg">
+<link rel="stylesheet" href="../colors_and_type.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: #232328;  /* gray printing margin — only seen on screen */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  font-size: 9pt;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.sheet {
+  width: 210mm;
+  height: 297mm;
+  background: var(--bg-root);
+  position: relative;
+  padding: 14mm 14mm 12mm;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+
+/* Ambient gold glow in top-right corner */
+.sheet::before {
+  content: "";
+  position: absolute;
+  top: -120mm; right: -80mm;
+  width: 240mm; height: 240mm;
+  background: radial-gradient(circle, rgba(200, 150, 62, 0.10) 0%, rgba(200, 150, 62, 0) 60%);
+  pointer-events: none;
+}
+
+/* ═══ MASTHEAD ═══════════════════════════════════════════════ */
+.masthead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 8mm;
+  border-bottom: 0.5pt solid var(--accent);
+  position: relative;
+  z-index: 1;
+}
+.mh-brand {
+  display: flex; align-items: center; gap: 4mm;
+}
+.mh-brand .mark {
+  width: 12mm; height: 12mm;
+  background: var(--accent-dim);
+  border: 0.5pt solid var(--accent-glow);
+  border-radius: 2mm;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+}
+.mh-brand .wm {
+  font-family: var(--font-display);
+  font-size: 18pt; font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.mh-brand .wm em { font-style: normal; color: var(--accent); }
+.mh-brand .ar {
+  font-family: var(--font-arabic);
+  font-size: 10pt; color: var(--accent);
+  font-weight: 700;
+  margin-top: 1mm;
+}
+.mh-meta {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  line-height: 1.5;
+}
+.mh-meta .label { color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* ═══ HEADLINE ═══════════════════════════════════════════════ */
+.headline {
+  margin-top: 6mm;
+  position: relative; z-index: 1;
+}
+.headline .kicker {
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 3mm;
+  font-weight: 700;
+}
+.headline h1 {
+  font-family: var(--font-display);
+  font-size: 22pt;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.6px;
+  max-width: 170mm;
+  text-wrap: balance;
+}
+.headline h1 em { font-style: normal; color: var(--accent); }
+.headline .lead {
+  margin-top: 3mm;
+  font-size: 9pt;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 170mm;
+}
+.headline .ar {
+  margin-top: 2mm;
+  font-family: var(--font-arabic);
+  font-size: 10pt;
+  color: var(--text-secondary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* ═══ SECTION ════════════════════════════════════════════════ */
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 6mm 0 3mm;
+  padding-bottom: 1.5mm;
+  border-bottom: 0.5pt solid var(--border-default);
+  position: relative; z-index: 1;
+}
+.section-title {
+  font-family: var(--font-body);
+  font-size: 7pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+}
+.section-title .num {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  margin-right: 6px;
+}
+.section-aside {
+  font-family: var(--font-mono);
+  font-size: 7pt;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+/* ═══ ARCH ROW ═══════════════════════════════════════════════ */
+.arch-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2mm;
+  position: relative; z-index: 1;
+}
+.arch-step {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--border-default);
+  border-top: 1.5pt solid var(--accent);
+  border-radius: 1.5mm;
+  padding: 3mm;
+}
+.arch-step .n {
+  font-family: var(--font-mono);
+  font-size: 6pt;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 2mm;
+}
+.arch-step .ic {
+  width: 6mm; height: 6mm;
+  background: var(--accent-dim);
+  border: 0.5pt solid var(--accent-glow);
+  border-radius: 1mm;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  font-size: 9pt;
+  margin-bottom: 2mm;
+}
+.arch-step .name {
+  font-family: var(--font-display);
+  font-size: 8.5pt;
+  font-weight: 700;
+  margin-bottom: 1mm;
+  letter-spacing: -0.1px;
+}
+.arch-step .desc {
+  font-size: 6.5pt;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* ═══ TWO-COL GRID ═══════════════════════════════════════════ */
+.two-col {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 4mm;
+  position: relative; z-index: 1;
+}
+
+/* ═══ KPI STRIP ══════════════════════════════════════════════ */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 2mm;
+  position: relative; z-index: 1;
+}
+.kpi {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--border-default);
+  border-radius: 1.5mm;
+  padding: 3mm 4mm;
+}
+.kpi .v {
+  font-family: var(--font-mono);
+  font-size: 18pt;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  line-height: 1;
+  margin-bottom: 1.5mm;
+}
+.kpi .v.signed-pos { color: var(--positive); }
+.kpi .l {
+  font-size: 6.5pt;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+}
+.kpi .sub {
+  font-size: 6.5pt;
+  color: var(--text-secondary);
+  margin-top: 1mm;
+  line-height: 1.4;
+  font-family: var(--font-mono);
+}
+
+/* ═══ AAOIFI BADGE ═══════════════════════════════════════════ */
+.aaoifi-badge {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--accent-glow);
+  border-left: 1.5pt solid var(--accent);
+  border-radius: 1.5mm;
+  padding: 3mm 4mm;
+  display: flex; align-items: center; gap: 4mm;
+}
+.aaoifi-seal {
+  width: 16mm; height: 16mm;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-dim) 0%, var(--bg-raised) 80%);
+  border: 0.8pt solid var(--accent);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.aaoifi-seal .ic { font-size: 8pt; margin-bottom: 0.5mm; }
+.aaoifi-seal .t {
+  font-family: var(--font-mono);
+  font-size: 5pt;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  line-height: 1;
+}
+.aaoifi-info { flex: 1; }
+.aaoifi-info h3 {
+  font-family: var(--font-display);
+  font-size: 10pt;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin-bottom: 1mm;
+}
+.aaoifi-info p {
+  font-size: 7pt;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.screens-mini {
+  margin-top: 2mm;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5mm;
+}
+.screen-pill-mini {
+  display: flex; align-items: center; gap: 2mm;
+  background: var(--bg-raised);
+  border: 0.5pt solid var(--border-subtle);
+  border-radius: 1mm;
+  padding: 1.5mm 2.5mm;
+}
+.screen-pill-mini .num {
+  width: 4mm; height: 4mm;
+  background: var(--accent-dim);
+  border: 0.5pt solid var(--accent-glow);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 6pt; color: var(--accent);
+  flex-shrink: 0;
+}
+.screen-pill-mini .name {
+  font-size: 6.5pt; font-weight: 600;
+  flex: 1;
+}
+.screen-pill-mini .th {
+  font-family: var(--font-mono);
+  font-size: 6.5pt; color: var(--accent);
+  font-weight: 700;
+}
+
+/* ═══ AUDIENCE ROW ═══════════════════════════════════════════ */
+.aud-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2mm;
+  position: relative; z-index: 1;
+}
+.aud-tile {
+  background: var(--bg-surface);
+  border: 0.5pt solid var(--border-default);
+  border-radius: 1.5mm;
+  padding: 3mm 3.5mm;
+}
+.aud-tile .ic {
+  width: 5mm; height: 5mm;
+  background: var(--accent-dim);
+  border: 0.5pt solid var(--accent-glow);
+  border-radius: 1mm;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); font-size: 7pt;
+  margin-bottom: 2mm;
+}
+.aud-tile h4 {
+  font-family: var(--font-display);
+  font-size: 8.5pt; font-weight: 700;
+  letter-spacing: -0.1px;
+  margin-bottom: 1mm;
+}
+.aud-tile p {
+  font-size: 6.5pt;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ═══ FOOTER ═════════════════════════════════════════════════ */
+.foot {
+  margin-top: auto;
+  padding-top: 4mm;
+  border-top: 0.5pt solid var(--border-default);
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 5mm;
+}
+.foot-block h5 {
+  font-size: 6pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+  margin-bottom: 1.5mm;
+}
+.foot-block .body {
+  font-size: 6.5pt;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.foot-block .body strong { color: var(--text-primary); font-weight: 600; }
+.foot-disclosure {
+  margin-top: 3mm;
+  font-size: 5.5pt;
+  line-height: 1.45;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.2px;
+}
+.foot-stamp {
+  position: absolute;
+  bottom: 12mm; right: 14mm;
+  font-family: var(--font-mono);
+  font-size: 5.5pt;
+  color: var(--text-disabled);
+  letter-spacing: 1px;
+}
+
+/* ═══ PRINT ══════════════════════════════════════════════════ */
+@media print {
+  html, body { background: var(--bg-root); padding: 0; }
+  body { display: block; }
+  .sheet {
+    width: 100%; height: 100%;
+    box-shadow: none;
+    margin: 0;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ═══ MASTHEAD ═══ -->
+  <div class="masthead">
+    <div class="mh-brand">
+      <div class="mark">
+        <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+          <circle cx="18" cy="34" r="9.5" fill="none" stroke="currentColor" stroke-width="3.5"></circle>
+          <path d="M27 40 L36 30 L44 36 L54 22" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="54" cy="22" r="3" fill="currentColor"></circle>
+        </svg>
+      </div>
+      <div>
+        <div class="wm">mizan<em>quant</em></div>
+        <div class="ar" dir="rtl" lang="ar">ميزان كوانت</div>
+      </div>
+    </div>
+    <div class="mh-meta">
+      <div class="label">Institutional Fact Sheet</div>
+      <div>Q2 2026 · Confidential · NDA on file</div>
+      <div>Document ref · MZN-IFS-26Q2-002</div>
+    </div>
+  </div>
+
+  <!-- ═══ HEADLINE ═══ -->
+  <div class="headline">
+    <div class="kicker">Halal Trading Suite · AAOIFI Standard 21</div>
+    <h1>The convergence of <em>Sharia governance</em> and <em>algorithmic alpha.</em></h1>
+    <p class="lead">MizanQuant is an institutional-grade quantitative platform built around AAOIFI compliance. Four-screen halal gates, a 14-model forecast consensus, continuous-Kelly position sizing, and an always-on risk desk — engineered for sovereign wealth funds, Sharia-compliant asset managers, and family offices across the Gulf and MENA.</p>
+    <div class="ar" dir="rtl" lang="ar">حيث تلتقي حوكمة الشريعة بمنطق الخوارزميات. منصة كَمّية مؤسسية متوافقة مع معايير AAOIFI.</div>
+  </div>
+
+  <!-- ═══ ARCHITECTURE ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">01</span>Architecture · five-layer loop</div>
+    <div class="section-aside">Pipeline runs 6× / day · &lt;250ms guard latency</div>
+  </div>
+  <div class="arch-row">
+    <div class="arch-step">
+      <div class="n">01 / GATE</div>
+      <div class="ic"><i class="fas fa-mosque"></i></div>
+      <div class="name">Halal screener</div>
+      <div class="desc">AAOIFI 4-screen gate. Debt · interest · cash · haram. Daily rescan.</div>
+    </div>
+    <div class="arch-step">
+      <div class="n">02 / SIGNAL</div>
+      <div class="ic"><i class="fas fa-chart-line"></i></div>
+      <div class="name">Forecast lab</div>
+      <div class="desc">14 models vote per session — transformer, GRU, LSTM, CNN, ensemble.</div>
+    </div>
+    <div class="arch-step">
+      <div class="n">03 / CONSENSUS</div>
+      <div class="ic"><i class="fas fa-vote-yea"></i></div>
+      <div class="name">AI consensus</div>
+      <div class="desc">Confidence-weighted vote. STRONG BUY needs ≥ 11 of 14 + score ≥ 90.</div>
+    </div>
+    <div class="arch-step">
+      <div class="n">04 / SIZE</div>
+      <div class="ic"><i class="fas fa-percentage"></i></div>
+      <div class="name">Kelly allocator</div>
+      <div class="desc">Continuous Kelly · half-Kelly default · 25% hard ceiling · shrinkage.</div>
+    </div>
+    <div class="arch-step">
+      <div class="n">05 / EXECUTE</div>
+      <div class="ic"><i class="fas fa-arrow-right-arrow-left"></i></div>
+      <div class="name">Risk desk · execute</div>
+      <div class="desc">Pre-trade VaR · guards · kill-switch · Alpaca / IBKR · audit log.</div>
+    </div>
+  </div>
+
+  <!-- ═══ COMPLIANCE + AUDIENCE ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">02</span>Sharia compliance · AAOIFI Standard 21</div>
+    <div class="section-aside">Four-screen gate · all-or-nothing verdict</div>
+  </div>
+  <div class="aaoifi-badge">
+    <div class="aaoifi-seal">
+      <div class="ic"><i class="fas fa-mosque"></i></div>
+      <div class="t">AAOIFI</div>
+      <div class="t" style="margin-top: 0.4mm;">STD · 21</div>
+    </div>
+    <div class="aaoifi-info">
+      <h3>The halal screen runs first — never as a post-hoc filter.</h3>
+      <p>Every symbol in the universe passes the four AAOIFI screens before it can become a candidate signal. No model output, AI rationale, or override path bypasses this gate. Verdicts are logged and exportable for the Sharia committee.</p>
+      <div class="screens-mini">
+        <div class="screen-pill-mini">
+          <div class="num">1</div>
+          <div class="name">Debt / Mkt Cap</div>
+          <div class="th">&lt; 33%</div>
+        </div>
+        <div class="screen-pill-mini">
+          <div class="num">2</div>
+          <div class="name">Interest Income / Rev</div>
+          <div class="th">&lt; 5%</div>
+        </div>
+        <div class="screen-pill-mini">
+          <div class="num">3</div>
+          <div class="name">(Cash + AR) / Mkt Cap</div>
+          <div class="th">&lt; 33%</div>
+        </div>
+        <div class="screen-pill-mini">
+          <div class="num">4</div>
+          <div class="name">Haram industries</div>
+          <div class="th">Excluded</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PERFORMANCE ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">03</span>Performance &amp; risk · live book</div>
+    <div class="section-aside">Refreshed every 30 seconds · CAGR backtest 2021-26</div>
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="v signed-pos">1.84</div>
+      <div class="l">Sharpe · 30d rolling</div>
+      <div class="sub">+0.15 vs 30d avg</div>
+    </div>
+    <div class="kpi">
+      <div class="v signed-pos">+22.8%</div>
+      <div class="l">CAGR · 5-year backtest</div>
+      <div class="sub">Strategy B selected · half-K</div>
+    </div>
+    <div class="kpi">
+      <div class="v" style="color: var(--text-primary);">−2.5%</div>
+      <div class="l">Portfolio VaR · 95%</div>
+      <div class="sub">CVaR tail −3.8%</div>
+    </div>
+    <div class="kpi">
+      <div class="v" style="color: var(--text-primary);">−8.2%</div>
+      <div class="l">Max drawdown</div>
+      <div class="sub">Kill-switch arms @ −15%</div>
+    </div>
+  </div>
+
+  <!-- ═══ AUDIENCE ═══ -->
+  <div class="section-head">
+    <div class="section-title"><span class="num">04</span>For institutional desks</div>
+    <div class="section-aside">Limited onboarding · 5 partners per quarter</div>
+  </div>
+  <div class="aud-row">
+    <div class="aud-tile">
+      <div class="ic"><i class="fas fa-landmark"></i></div>
+      <h4>Sovereign wealth funds</h4>
+      <p>A Sharia-compliant systematic sleeve with auditor-ready reporting, per-position VaR caps, and full risk-desk supervision.</p>
+    </div>
+    <div class="aud-tile">
+      <div class="ic"><i class="fas fa-building-columns"></i></div>
+      <h4>Sharia asset managers</h4>
+      <p>Institutional-grade backtesting, walk-forward optimization, and Kelly sizing — without giving up your existing fatwa structure.</p>
+    </div>
+    <div class="aud-tile">
+      <div class="ic"><i class="fas fa-users-gear"></i></div>
+      <h4>Family offices</h4>
+      <p>Turn-key systematic strategy on a single dashboard. Principal can monitor, supervise, and pause from one screen. Bilingual alerts.</p>
+    </div>
+  </div>
+
+  <!-- ═══ FOOTER ═══ -->
+  <div class="foot">
+    <div class="foot-block">
+      <h5>Contact · onboarding</h5>
+      <div class="body">
+        <strong>institutional@mizanquant.com</strong><br>
+        60-minute private briefing · live demo + Q&amp;A · NDA available on request<br>
+        Languages: <strong>English · العربية</strong>
+      </div>
+    </div>
+    <div class="foot-block">
+      <h5>Standards · integrations</h5>
+      <div class="body">
+        AAOIFI Standard 21 · FMP Fundamentals · FRED Macro · Alpaca · Interactive Brokers · Telegram alerts · Daily audit report
+      </div>
+    </div>
+    <div class="foot-block">
+      <h5>Issued by</h5>
+      <div class="body">
+        MizanQuant · Q2 2026<br>
+        Internal reference MZN-IFS-26Q2-002<br>
+        Distribution: institutional partners only
+      </div>
+    </div>
+    <div class="foot-disclosure" style="grid-column: 1 / -1;">
+      <strong style="color: var(--text-secondary);">Disclosure ·</strong> Past performance is not indicative of future results. Backtests assume 20bps round-trip cost, half-Kelly sizing, and the AAOIFI-screened S&amp;P 500 universe. All performance figures are gross of fees. MizanQuant does not constitute investment advice or a solicitation. Sharia compliance verdicts are advisory and do not replace independent review by a Sharia board. Past compliance does not guarantee continued compliance. Confidential — for the named recipient only.
+    </div>
+  </div>
+
+  <div class="foot-stamp">MZN · 2026Q2 · 002</div>
+
+</div>
+
+</body>
+</html>
