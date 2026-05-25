@@ -2,11 +2,11 @@
 
 function Sidebar() {
   const sections = [
-    { label: "General",     items: mockNav },
-    { label: "Forecasting", items: mockNavForecast },
-    { label: "Analytics",   items: mockNavAnalytics },
-    { label: "Research",    items: mockNavResearch },
-    { label: "Market Data", items: mockNavMarket },
+    { label: "General",     items: mockNav          || [] },
+    { label: "Forecasting", items: mockNavForecast  || [] },
+    { label: "Analytics",   items: mockNavAnalytics || [] },
+    { label: "Research",    items: mockNavResearch  || [] },
+    { label: "Market Data", items: mockNavMarket    || [] },
   ];
   return (
     <aside className="sidebar">

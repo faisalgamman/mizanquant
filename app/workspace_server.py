@@ -6261,6 +6261,19 @@ _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
+# Mount UI kits as StaticFiles with html=True so that:
+#   /terminal  → auto-redirect to /terminal/ → index.html + assets served
+#   /terminal/styles.css, /terminal/shared.jsx, etc. → correct relative-path resolution
+_kit_mounts = [
+    ("/terminal",          "terminal"),
+    ("/halal-screener-v2", "halal-screener-v2"),
+    ("/risk-desk-v2",      "risk-desk-v2"),
+]
+for _prefix, _subdir in _kit_mounts:
+    _kit_dir = os.path.join(_static_dir, _subdir)
+    if os.path.isdir(_kit_dir):
+        app.mount(_prefix, StaticFiles(directory=_kit_dir, html=True), name=_subdir)
+
 
 @app.get("/", include_in_schema=False)
 async def get_dashboard():
@@ -6446,22 +6459,9 @@ def _static_html(rel_path: str):
     return HTMLResponse(f"<h1>{rel_path} not found</h1>", status_code=404)
 
 
-# ── UI Kits (React/Babel — wired to production APIs) ────────────────────────
-
-@app.get("/halal-screener-v2", include_in_schema=False)
-async def get_halal_screener_v2():
-    """Halal Screener — Design System UI Kit (wired to /screener API)."""
-    return _static_html("halal-screener-v2/index.html")
-
-@app.get("/risk-desk-v2", include_in_schema=False)
-async def get_risk_desk_v2():
-    """Risk Desk — Design System UI Kit (wired to /api/risk/status)."""
-    return _static_html("risk-desk-v2/index.html")
-
-@app.get("/terminal", include_in_schema=False)
-async def get_terminal():
-    """MizanQuant Terminal — 3-column overview kit (wired to /api/v1/overview)."""
-    return _static_html("terminal/index.html")
+# ── UI Kits: served via StaticFiles mounts (see bottom of file) ──────────────
+# /terminal, /halal-screener-v2, /risk-desk-v2 are handled by StaticFiles mounts
+# with html=True, which auto-redirects /kit → /kit/ so relative asset paths work.
 
 
 # ── Public-facing surfaces ────────────────────────────────────────────────────

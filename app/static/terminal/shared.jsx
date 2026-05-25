@@ -205,7 +205,7 @@ const mockNavResearch = [
   { i: "fa-robot",         l: "MizanAI",         href: "/assistant" },
 ];
 const mockNavMarket = [
-  { i: "fa-landmark",      l: "Macro · FRED",    href: "/macro" },
+  { i: "fa-landmark",      l: "Macro / FRED",    href: "/macro" },
   { i: "fa-layer-group",   l: "ETF Explorer",    href: "/etf" },
   { i: "fa-sync",          l: "Rotation",        href: "/rotation" },
 ];
