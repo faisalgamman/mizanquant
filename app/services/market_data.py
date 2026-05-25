@@ -304,6 +304,126 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
         return None
 
 
+def _bars_list_to_df(symbol: str, bars: list) -> "pd.DataFrame | None":
+    """Convert a raw Alpaca bars list to a clean DataFrame. Shared by single + batch."""
+    if not bars:
+        return None
+    bars = _dedupe_bars(bars, key_fn=lambda b: b.get("t"))
+    df = pd.DataFrame(bars)
+    df = df.rename(columns={"t": "date", "o": "open", "h": "high",
+                             "l": "low",  "c": "close", "v": "volume"})
+    df["date"] = pd.to_datetime(df["date"], utc=True)
+    df = df[["date", "open", "high", "low", "close", "volume"]].sort_values("date").reset_index(drop=True)
+    return df if len(df) >= 40 else None
+
+
+def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
+    """Fetch daily bars for multiple symbols in one Alpaca API call (batch mode).
+
+    Alpaca's /v2/stocks/bars already accepts symbols as a comma-separated list
+    (up to ~100). This reduces 650 individual round-trips to ~7 batched requests,
+    virtually eliminating the 429 storm during screener scans.
+
+    Returns:
+        {symbol: DataFrame}  — only symbols with ≥40 rows are included.
+    """
+    if _alpaca_breaker.is_open():
+        logger.warning("Alpaca circuit breaker OPEN — skipping batch of %d symbols", len(symbols))
+        return {}
+
+    try:
+        from app.config import settings
+        if not settings.ALPACA_API_KEY or not settings.ALPACA_SECRET_KEY:
+            return {}
+    except Exception:
+        return {}
+
+    try:
+        import httpx
+    except ImportError:
+        return {}
+
+    headers = {
+        "APCA-API-KEY-ID":     settings.ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": settings.ALPACA_SECRET_KEY,
+    }
+
+    end_dt   = _utc_now()
+    days     = {"1y": 365, "2y": 730, "5y": 1825}.get(period, 730)
+    start_dt = end_dt - timedelta(days=days)
+    start_s  = start_dt.strftime("%Y-%m-%d")
+    end_s    = end_dt.strftime("%Y-%m-%d")
+
+    url = "https://data.alpaca.markets/v2/stocks/bars"
+    results: dict = {}
+    chunk_size = 100  # Alpaca accepts ≤ many symbols per request; 100 is safe
+
+    valid_syms = [s for s in symbols if _validate_symbol(s)]
+
+    for i in range(0, len(valid_syms), chunk_size):
+        batch = valid_syms[i:i + chunk_size]
+        params = {
+            "symbols":    ",".join(batch),
+            "timeframe":  "1Day",
+            "start":      start_s,
+            "end":        end_s,
+            "limit":      10000,
+            "adjustment": "split",
+            "feed":       "iex",
+        }
+
+        # Retry loop (batch-level, same backoff as single-symbol fetch)
+        for attempt in range(3):
+            _alpaca_semaphore.acquire()
+            try:
+                _alpaca_rate_limit()
+                all_bars: dict[str, list] = {s: [] for s in batch}
+                next_page = None
+
+                while True:
+                    page_params = dict(params)
+                    if next_page:
+                        page_params["page_token"] = next_page
+                    with httpx.Client(timeout=45) as client:
+                        resp = client.get(url, headers=headers, params=page_params)
+
+                    if resp.status_code == 429:
+                        wait = _backoff_next(attempt)
+                        logger.warning("Alpaca batch 429 (chunk %d–%d, attempt %d), waiting %.1fs",
+                                       i, i + len(batch), attempt + 1, wait)
+                        time.sleep(wait)
+                        break  # retry the whole chunk
+
+                    resp.raise_for_status()
+                    data = resp.json()
+                    for sym, sym_bars in (data.get("bars") or {}).items():
+                        all_bars.setdefault(sym, []).extend(sym_bars)
+
+                    next_page = data.get("next_page_token")
+                    if not next_page:
+                        # Successful page exhaustion — convert to DataFrames
+                        for sym, bar_list in all_bars.items():
+                            df = _bars_list_to_df(sym, bar_list)
+                            if df is not None:
+                                results[sym] = df
+                        break
+                else:
+                    continue  # 429 → retry
+                break  # success
+
+            except Exception as exc:
+                logger.warning("Alpaca batch chunk %d-%d error: %s", i, i + len(batch), exc)
+                break
+            finally:
+                _alpaca_semaphore.release()
+
+        # Small inter-chunk pause — stays well under 200 req/min
+        time.sleep(0.4)
+
+    logger.info("fetch_alpaca_batch: returned %d/%d symbols", len(results), len(valid_syms))
+    return results
+
+
 def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, end=None):
     """Fetch intraday bars from Alpaca Market Data API v2.
 
@@ -514,9 +634,14 @@ class CircuitBreaker:
 
 
 # Global circuit breakers
-_yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=10, reset_timeout=120.0)
-_alpaca_breaker = CircuitBreaker("alpaca", failure_threshold=10, reset_timeout=60.0)
-_ibkr_breaker = CircuitBreaker("ibkr", failure_threshold=3, reset_timeout=600.0)
+# yfinance: raised threshold to 20 (was 10) so a handful of bad symbols during a
+# 650-symbol scan doesn't open the breaker prematurely; reset raised to 5 min.
+_yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=20, reset_timeout=300.0)
+_alpaca_breaker   = CircuitBreaker("alpaca",   failure_threshold=10, reset_timeout=60.0)
+_ibkr_breaker     = CircuitBreaker("ibkr",     failure_threshold=3,  reset_timeout=600.0)
+# Tiingo: 403 = key blocked (permanent). Trip after 3 failures, stay open for 2 h.
+# This short-circuits the per-symbol Tiingo attempt for the whole session.
+_tiingo_breaker   = CircuitBreaker("tiingo",   failure_threshold=3,  reset_timeout=7200.0)
 
 # Hard override: IBKR data is DISABLED until the gateway is healthy.
 # Flip to True (and ensure IBKR_DATA_ENABLED=true) to re-enable.
@@ -664,8 +789,8 @@ def fetch(symbol, period="2y", start=None, end=None):
             _m.incr("api_calls_total", provider="alpaca")
         df = fetch_alpaca(symbol, period=period, start=start, end=end)
 
-    # Fallback to Tiingo (works on Railway servers — no 401)
-    if df is None:
+    # Fallback to Tiingo — skip entirely when circuit breaker is open (key blocked/403)
+    if df is None and not _tiingo_breaker.is_open():
         try:
             from app.config import settings as _cfg
             if _cfg.TIINGO_TOKEN:
@@ -675,8 +800,13 @@ def fetch(symbol, period="2y", start=None, end=None):
                 df = fetch_ohlcv_tiingo(symbol, period=period)
                 if df is not None and not df.empty:
                     logger.debug("Market data for %s: Tiingo (%d rows)", symbol, len(df))
+                    _tiingo_breaker.record_success()
+                else:
+                    # Empty/None after a call = soft failure, let breaker count it
+                    _tiingo_breaker.record_failure()
         except Exception as _e:
             logger.debug("Tiingo fallback for %s failed: %s", symbol, _e)
+            _tiingo_breaker.record_failure()
             df = None
 
     # Final fallback to yfinance

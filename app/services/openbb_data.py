@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -23,6 +24,34 @@ logger = logging.getLogger("screener")
 # ── Credential init lock ───────────────────────────────────────────────────────
 _obb_lock = threading.Lock()
 _obb_configured = False
+
+# ── Benchmark price-history cache (SPY, ^VIX, etc.) ─────────────────────────
+# SPY daily close changes at most once per trading day after 4 pm ET.
+# Caching for 4 hours eliminates repeated FMP 429s during bundle recomputes.
+_bench_lock  = threading.Lock()
+_bench_cache: dict = {}
+_bench_cache_ts: dict = {}
+_BENCH_CACHE_TTL = 14400  # 4 hours
+
+
+def _cached_benchmark(symbol: str, period_days: int) -> "pd.Series | None":
+    """Return FMP price history for benchmark symbols with a 4-hour TTL."""
+    key = f"{symbol}:{period_days}"
+    with _bench_lock:
+        if time.time() - _bench_cache_ts.get(key, 0) < _BENCH_CACHE_TTL:
+            v = _bench_cache.get(key)
+            if v is not None:
+                return v
+    try:
+        from app.services.fmp_client import fmp_client
+        data = fmp_client.get_price_history(symbol.upper(), period_days=period_days)
+    except Exception:
+        data = None
+    if data is not None:
+        with _bench_lock:
+            _bench_cache[key] = data
+            _bench_cache_ts[key] = time.time()
+    return data
 
 
 def _get_obb():
@@ -223,7 +252,18 @@ def fetch_ohlcv_tiingo(symbol: str, period: str = "1y") -> Optional[pd.DataFrame
 
     Returns DataFrame with columns [date, open, high, low, close, volume]
     or None on failure so the caller falls through to yfinance.
+
+    Circuit-breaker aware: a 403 (key blocked) trips the breaker immediately so
+    all subsequent calls in the same session skip Tiingo for 2 hours.
     """
+    # Lazy import to avoid circular dependency (market_data ↔ openbb_data)
+    try:
+        from app.services.market_data import _tiingo_breaker
+        if _tiingo_breaker.is_open():
+            return None
+    except Exception:
+        pass
+
     import httpx
     from app.config import settings
     if not settings.TIINGO_TOKEN:
@@ -237,8 +277,20 @@ def fetch_ohlcv_tiingo(symbol: str, period: str = "1y") -> Optional[pd.DataFrame
         params  = {"startDate": start, "endDate": end, "format": "json"}
         with httpx.Client(timeout=15) as c:
             r = c.get(url, headers=headers, params=params)
-            r.raise_for_status()
-            data = r.json()
+
+        # 403 = key blocked (permanent for this session) — trip breaker immediately
+        if r.status_code == 403:
+            logger.warning("Tiingo 403 for %s — key blocked, tripping circuit breaker", symbol)
+            try:
+                from app.services.market_data import _tiingo_breaker as _tb
+                for _ in range(3):          # force threshold in one go
+                    _tb.record_failure()
+            except Exception:
+                pass
+            return None
+
+        r.raise_for_status()
+        data = r.json()
         if not isinstance(data, list) or not data:
             return None
         rows = []
@@ -453,52 +505,69 @@ def get_relative_rotation(
 
     Returns list of {symbol, rs_ratio, rs_momentum, quadrant} dicts.
     Returns [] when FMP_API_KEY not set or data unavailable.
+
+    Improvements (Fix 2 + Fix 6):
+      - SPY/benchmark fetched via _cached_benchmark (4-hour TTL) → eliminates FMP
+        429s from repeated recomputes of the context bundle.
+      - Sector ETF fetches run in a ThreadPoolExecutor(max_workers=6) → 11 sequential
+        FMP calls (~33 s) become ~2 parallel waves (~6 s), staying under the 30 s
+        compute_timeout.
     """
     from app.config import settings
     if not settings.FMP_API_KEY:
         return []
     try:
         from app.services.fmp_client import fmp_client
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Need enough history for a rolling normalization window.
         days = max(period * 12, 252)
-        bench = fmp_client.get_price_history(benchmark.upper(), period_days=days)
+
+        # ── Benchmark — cached, not re-fetched on every bundle compute ──────────
+        bench = _cached_benchmark(benchmark.upper(), days)
         if bench is None or len(bench) < period * 3:
             return []
 
-        out: list[dict] = []
-        for sym in symbols:
+        # ── Per-symbol RRG computation (reusable inner function) ─────────────────
+        def _compute_rrg(sym: str) -> "dict | None":
             try:
                 px = fmp_client.get_price_history(sym.upper(), period_days=days)
                 if px is None or len(px) < period * 3:
-                    continue
-                # Align on common dates
+                    return None
                 df = pd.concat([px.rename("sym"), bench.rename("bench")], axis=1).dropna()
                 if len(df) < period * 3:
-                    continue
+                    return None
                 rs = 100.0 * (df["sym"] / df["bench"])
-                # RS-Ratio: rolling z-score centered at 100
-                win = period
+                win  = period
                 mean = rs.rolling(win).mean()
-                std = rs.rolling(win).std()
+                std  = rs.rolling(win).std()
                 rs_ratio = 100.0 + ((rs - mean) / std).fillna(0)
-                # RS-Momentum: rolling z-score of RS-Ratio's rate of change
-                roc = rs_ratio.diff(win)
+                roc   = rs_ratio.diff(win)
                 rmean = roc.rolling(win).mean()
-                rstd = roc.rolling(win).std()
+                rstd  = roc.rolling(win).std()
                 rs_mom = 100.0 + ((roc - rmean) / rstd).fillna(0)
-
                 ratio_val = round(float(rs_ratio.iloc[-1]), 2)
-                mom_val = round(float(rs_mom.iloc[-1]), 2)
-                out.append({
+                mom_val   = round(float(rs_mom.iloc[-1]),   2)
+                return {
                     "symbol":      sym.upper(),
                     "rs_ratio":    ratio_val,
                     "rs_momentum": mom_val,
                     "quadrant":    _rrg_quadrant(ratio_val, mom_val),
-                })
+                }
             except Exception as exc:
                 logger.debug("RRG %s failed: %s", sym, exc)
-                continue
+                return None
+
+        # ── Parallel fetch — 6 workers covers 11 ETFs in ≈ 2 waves (~6 s) ───────
+        out: list[dict] = []
+        with ThreadPoolExecutor(max_workers=6) as exe:
+            futures = {exe.submit(_compute_rrg, s): s for s in symbols}
+            for fut in as_completed(futures):
+                try:
+                    res = fut.result()
+                    if res is not None:
+                        out.append(res)
+                except Exception as exc:
+                    logger.debug("RRG future error: %s", exc)
         return out
     except Exception as exc:
         logger.debug("Relative rotation failed: %s", exc)

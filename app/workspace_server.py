@@ -693,6 +693,43 @@ except ImportError:
     _HAS_TORCH = False
     logger.warning("torch not installed — DL models will fall back to ARIMA-only")
 
+# ── Per-model circuit breaker ────────────────────────────────────────────────
+# Tracks repeated walk_forward_predict / training failures per model name.
+# After _MODEL_CB_THRESHOLD consecutive failures the model is skipped for
+# _MODEL_CB_RESET_S seconds so one broken model (e.g. GRU after PSI drift)
+# doesn't pollute every consensus/screener call with repeated tracebacks.
+_model_cb: dict[str, dict] = {}
+_MODEL_CB_THRESHOLD = 3     # failures before opening
+_MODEL_CB_RESET_S   = 3600  # 1 hour cool-down
+_model_cb_lock = threading.Lock()
+
+
+def _model_cb_blocked(name: str) -> bool:
+    with _model_cb_lock:
+        s = _model_cb.get(name, {})
+        if s.get("fails", 0) >= _MODEL_CB_THRESHOLD:
+            if time.time() - s.get("ts", 0) < _MODEL_CB_RESET_S:
+                return True
+            # Reset after cool-down
+            _model_cb[name] = {"fails": 0, "ts": 0.0}
+        return False
+
+
+def _model_cb_fail(name: str) -> None:
+    with _model_cb_lock:
+        s = _model_cb.setdefault(name, {"fails": 0, "ts": 0.0})
+        s["fails"] += 1
+        s["ts"] = time.time()
+        if s["fails"] == _MODEL_CB_THRESHOLD:
+            logger.warning("Model circuit breaker OPEN for '%s' after %d failures (resets in 1 h)",
+                           name, _MODEL_CB_THRESHOLD)
+
+
+def _model_cb_ok(name: str) -> None:
+    with _model_cb_lock:
+        _model_cb[name] = {"fails": 0, "ts": 0.0}
+
+
 # Full model/agent name lists — used for display in /api/info regardless of
 # what can actually run. Defined here so they never require torch to import.
 _ALL_MODEL_NAMES: list[str] = [
@@ -3040,6 +3077,8 @@ def _score_forecast_consensus(symbol: str) -> dict:
     _model_list = ["arima"] if _lightweight else ["arima", "ensemble", "lstm"]
     model_directions = []
     for mname in _model_list:
+        if _model_cb_blocked(mname):
+            continue  # breaker open — skip silently, don't waste time
         try:
             kwargs = {}
             if mname == "lstm":
@@ -3051,7 +3090,9 @@ def _score_forecast_consensus(symbol: str) -> dict:
                 last_pred = float(fr[-1].predictions[-1, 0]) if fr[-1].predictions.ndim > 1 else float(fr[-1].predictions[-1])
                 last_actual = float(fr[-1].actuals[-1, 0]) if fr[-1].actuals.ndim > 1 else float(fr[-1].actuals[-1])
                 model_directions.append("up" if last_pred > last_actual else "down")
+                _model_cb_ok(mname)
         except Exception:
+            _model_cb_fail(mname)
             continue
 
     # ── Fast agents ──
@@ -3700,6 +3741,28 @@ def _run_screener_bg(scan_symbols: list):
     from app.services.watchlist_service import get_watchlist_set
     watchlist_set = get_watchlist_set()
 
+    # ── Alpaca batch pre-fetch ───────────────────────────────────────────────
+    # Pre-fetch all symbol bars in one pass (~7 batched Alpaca requests for 650
+    # symbols instead of 650 individual ones). Results are written into the
+    # _fetch_data disk cache so every subsequent _fetch_data(sym, "1y") call
+    # during _analyze_smart + _score_momentum hits the cache immediately —
+    # zero additional Alpaca requests, no 429s.
+    try:
+        from app.services.market_data import fetch_alpaca_batch as _alpaca_batch
+        logger.info("Alpaca batch pre-fetch for %d symbols…", len(scan_symbols))
+        prefetched = _alpaca_batch(scan_symbols, period="1y")
+        seeded = 0
+        for sym, df in prefetched.items():
+            try:
+                records = df.to_dict("records")
+                _cache_set(f"ohlcv_{_cache_key(sym)}_1y", records)
+                seeded += 1
+            except Exception:
+                pass
+        logger.info("Alpaca batch pre-fetch done: %d/%d symbols cached", seeded, len(scan_symbols))
+    except Exception as _pre_exc:
+        logger.warning("Alpaca batch pre-fetch failed (%s) — falling back to per-symbol fetch", _pre_exc)
+
     # Fetch SPY data once per batch (reused for all symbols)
     try:
         _, spy_df_shared = _fetch_data("SPY", period="2mo")
@@ -3946,6 +4009,10 @@ async def consensus(
     import concurrent.futures as _cf
 
     for model_name in MODEL_NAMES:
+        # Skip models whose circuit breaker is open (too many recent failures)
+        if _model_cb_blocked(model_name):
+            errors.append({"model": model_name, "error": "circuit breaker open"})
+            continue
         try:
             loop = _asyncio.get_event_loop()
             try:
@@ -3954,6 +4021,7 @@ async def consensus(
                     timeout=45.0,
                 )
             except _asyncio.TimeoutError:
+                _model_cb_fail(model_name)
                 errors.append({"model": model_name, "error": "timeout after 45s"})
                 continue
 
@@ -3976,7 +4044,9 @@ async def consensus(
                 "last_predicted": round(last_pred, 2),
                 "last_actual": round(last_actual, 2),
             })
+            _model_cb_ok(model_name)   # successful run resets failure counter
         except Exception as e:
+            _model_cb_fail(model_name)
             errors.append({"model": model_name, "error": str(e)})
 
     # Filter by accuracy threshold
