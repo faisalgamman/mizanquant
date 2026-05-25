@@ -1095,7 +1095,33 @@ async function loadAll(force = false) {
   loadAccuracy();
   // Watchlist + portfolio risk gate (for the decision drawer)
   api("/api/v1/watchlist").then(w => { state.watchlist = (w && w.symbols) || []; });
-  api("/api/risk/status").then(r => { state.riskStatus = r || {}; });
+  api("/api/risk/status").then(r => {
+    state.riskStatus = r || {};
+    if (_intelData) _renderIntelTable(_intelData);  // re-render with posture context
+  });
+  // Sector rotation → context overlay (needs FMP; silent/empty otherwise)
+  api("/api/chart/rotation").then(r => {
+    state.sectorRank = buildSectorRankMap(r);
+    if (_intelData) _renderIntelTable(_intelData);
+  });
+}
+
+/* ─── Sector rotation map (ETF quadrant → sector name) ────────── */
+const SECTOR_ETF_TO_NAME = {
+  XLK: "Technology", XLF: "Financials", XLV: "Health Care", XLE: "Energy",
+  XLI: "Industrials", XLP: "Consumer Staples", XLU: "Utilities",
+  XLB: "Materials", XLRE: "Real Estate", XLC: "Communication Services",
+  XLY: "Consumer Discretionary",
+};
+function buildSectorRankMap(rot) {
+  const map = {};
+  const arr = (rot && Array.isArray(rot.data)) ? rot.data : [];
+  arr.forEach(d => {
+    const name = SECTOR_ETF_TO_NAME[(d.symbol || d.ticker || "").toUpperCase()];
+    const q = (d.quadrant || d.classification || "").toLowerCase();
+    if (name && q) map[name] = q;
+  });
+  return map;
 }
 
 /* ─── Track record — REAL signal accuracy (credibility layer) ──── */
@@ -1372,10 +1398,22 @@ function _renderIntelTable(data) {
     return;
   }
 
+  // Context reactivity: posture (risk-off dampens BUY) + sector rotation rank
+  const posture = (state.riskStatus || {}).risk_posture || null;
+  const riskOff = posture === "risk_off";
+  const secRankMap = state.sectorRank || {};
+
   tbody.innerHTML = rows.map((r, i) => {
     const rank = i + 1;
     const rankClass = rank === 1 ? "r1" : rank === 2 ? "r2" : rank === 3 ? "r3" : "";
     const composite = r.composite_score ?? 0;
+    // Sector rotation marker (▲ leading/improving · ▾ lagging/weakening)
+    const secQuad = secRankMap[r.sector] || null;
+    const secLeading = secQuad === "leading" || secQuad === "improving";
+    const secLagging = secQuad === "lagging" || secQuad === "weakening";
+    const secMark = secQuad
+      ? ` <span title="rotation: ${secQuad}" style="color:${secLeading ? 'var(--positive)' : secLagging ? 'var(--negative)' : 'var(--text-muted)'};font-size:9px;">${secLeading ? '▲' : secLagging ? '▾' : '◆'}</span>`
+      : "";
     const gaugeColor = composite >= 70 ? "var(--positive)" : composite >= 50 ? "var(--accent)" : composite >= 35 ? "var(--warning)" : "var(--negative)";
 
     // Sub-score bars (T/F/S/AI)
@@ -1442,8 +1480,12 @@ function _renderIntelTable(data) {
           ${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%
         </span>
       </td>
-      <td><span class="sig-badge ${sig}">${(r.signal_composite || "WATCH").replace("STRONG BUY","SB")}</span></td>
-      <td style="color:var(--text-muted);font-size:10px">${r.sector || "—"}</td>
+      <td>
+        <span class="sig-badge ${sig}">${(r.signal_composite || "WATCH").replace("STRONG BUY","SB")}</span>
+        ${riskOff && ["STRONG BUY","BUY"].includes(r.signal_composite)
+          ? ` <span title="Posture risk-off — reduced conviction" style="color:var(--warning);font-size:9px;">⚠</span>` : ""}
+      </td>
+      <td style="color:var(--text-muted);font-size:10px">${r.sector || "—"}${secMark}</td>
     </tr>`;
   }).join("");
 }
