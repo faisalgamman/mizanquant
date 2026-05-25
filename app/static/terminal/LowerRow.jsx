@@ -1,6 +1,14 @@
 // LowerRow.jsx — Models leaderboard · Sectors heatmap · AI Consensus
 
 function ModelLeaderboard({ models }) {
+  if (!models || models.length === 0) {
+    return (
+      <div className="analyze-empty">
+        <i className="fas fa-flask"></i>
+        No validated models yet · run a backtest to populate
+      </div>
+    );
+  }
   return (
     <div className="ml-grid">
       {models.map((m) => (

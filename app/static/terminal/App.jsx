@@ -27,7 +27,7 @@ function App() {
   const [portfolio, setPortfolio] = useState(mockPortfolio);
   const [positions, setPositions] = useState([]);
   const [paper, setPaper]         = useState([]);
-  const [models, setModels]       = useState(mockModels);
+  const [models, setModels]       = useState([]);   // real leaderboard or honest empty
   const [sectors, setSectors]     = useState(mockSectors);
   const [consensus, setConsensus] = useState(null);
 

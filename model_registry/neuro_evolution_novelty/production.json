@@ -1,9 +1,0 @@
-{
-  "artifact_path": "models/neuro_evolution_novelty/v1.pt",
-  "version": "1.0",
-  "metrics": {
-    "sharpe": 1.85,
-    "win_rate": 77.0,
-    "avg_return": 9.8
-  }
-}
