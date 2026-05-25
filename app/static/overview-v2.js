@@ -309,6 +309,20 @@ async function selectSignal(symbol) {
   });
 }
 
+async function toggleWatch(symbol) {
+  const list = state.watchlist || [];
+  const on = list.includes(symbol);
+  try {
+    const res = await api(`/api/v1/watchlist/${on ? "remove" : "add"}/${encodeURIComponent(symbol)}`,
+      { method: on ? "DELETE" : "POST" });
+    state.watchlist = (res && res.symbols) || (on ? list.filter(s => s !== symbol) : [...list, symbol]);
+    toast(on ? `${symbol} removed from watchlist` : `${symbol} added to watchlist`, "ok");
+    renderAnalyze();
+  } catch (_) {
+    toast("Watchlist update failed", "error");
+  }
+}
+
 function renderAnalyze() {
   const data = state.selectedAnalyze;
   if (!data) {
@@ -328,6 +342,22 @@ function renderAnalyze() {
   const isHalal = halal?.halal === true;
   const chg = scoring?.change_pct ?? plan?.change_pct ?? 0;
   $("anSubtitle").textContent = verdict;
+
+  // Kelly-aware position sizing (already computed by /api/v1/trade/plan → risk_manager)
+  const shares   = plan?.shares ?? plan?.qty ?? null;
+  const posValue = plan?.position_value ?? null;
+  const riskAmt  = plan?.risk_amount ?? null;
+  const portPct  = plan?.portfolio_pct ?? null;
+  const rr       = plan?.rr_ratio ?? plan?.strategy_rr ?? null;
+
+  // Watchlist + portfolio risk gate (real fields from /api/risk/status)
+  const onWatch = (state.watchlist || []).includes(symbol);
+  const rs = state.riskStatus || {};
+  const tradingBlocked = rs.market_halt === true;
+  const posture = rs.risk_posture ? String(rs.risk_posture).replace("_", "-") : null;
+  const gateMsg = tradingBlocked
+    ? (rs.market_halt_reason || "Market risk gate halted execution")
+    : `Risk gate OK${posture ? " · posture " + posture : ""}${rs.var_95_pct != null ? " · VaR95 " + rs.var_95_pct + "%" : ""}`;
 
   // Score breakdown — try to pull subcomponents; fall back to a single bar.
   const breakdown = scoring?.components ?? scoring?.breakdown ?? {};
@@ -363,7 +393,11 @@ function renderAnalyze() {
   $("analyzePanel").innerHTML = `<div class="card">
     <div class="an-hdr">
       <div>
-        <div class="an-sym">${symbol}</div>
+        <div class="an-sym">${symbol}
+          <i class="${onWatch ? 'fas' : 'far'} fa-star" title="${onWatch ? 'Remove from watchlist' : 'Add to watchlist'}"
+             onclick="toggleWatch('${symbol}')"
+             style="cursor:pointer;font-size:12px;margin-left:8px;color:${onWatch ? 'var(--accent)' : 'var(--text-muted)'};"></i>
+        </div>
         <div class="an-co">${halal?.details?.reason ?? (isHalal ? "Halal · verified" : "Halal status unknown")}</div>
       </div>
       <span class="badge ${badgeClassFor(verdict)}">${verdict}</span>
@@ -387,13 +421,30 @@ function renderAnalyze() {
       <div class="row" style="grid-column:1 / -1;"><span class="l">Strategy</span><span class="v">${strat}</span></div>
     </div>
 
+    <div class="an-sect-title">Position sizing · Kelly-aware</div>
+    <div class="an-grid">
+      <div class="row"><span class="l">Shares</span><span class="v">${shares != null ? shares : "—"}</span></div>
+      <div class="row"><span class="l">R : R</span><span class="v ${rr != null && rr >= 2 ? 'txt-green' : ''}">${rr != null ? "1 : " + Number(rr).toFixed(1) : "—"}</span></div>
+      <div class="row"><span class="l">Position</span><span class="v">${posValue != null ? "$" + Number(posValue).toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</span></div>
+      <div class="row"><span class="l">% Equity</span><span class="v">${portPct != null ? Number(portPct).toFixed(1) + "%" : "—"}</span></div>
+      <div class="row"><span class="l">Risk $</span><span class="v txt-red">${riskAmt != null ? "$" + Number(riskAmt).toLocaleString("en-US",{maximumFractionDigits:0}) : "—"}</span></div>
+    </div>
+
+    <div class="an-gate" style="margin-top:10px;padding:7px 10px;border-radius:var(--radius-md);font-size:10px;
+         display:flex;align-items:center;gap:7px;
+         background:${tradingBlocked ? 'var(--negative-dim,rgba(248,113,113,0.12))' : 'var(--positive-dim,rgba(74,222,128,0.10))'};
+         color:${tradingBlocked ? 'var(--negative)' : 'var(--positive)'};
+         border:1px solid ${tradingBlocked ? 'var(--negative)' : 'var(--border-default)'};">
+      <i class="fas fa-${tradingBlocked ? 'ban' : 'shield-alt'}"></i>${gateMsg}
+    </div>
+
     ${esgBlock}
     ${segBlock}
     ${senateBlock}
     ${enrichLoading}
 
-    <button class="an-trade" onclick="sendToPaperTrade()" ${verdict === "AVOID" ? "disabled" : ""} style="margin-top:12px;">
-      <i class="fas fa-paper-plane"></i> Send to paper trade
+    <button class="an-trade" onclick="sendToPaperTrade()" ${verdict === "AVOID" || tradingBlocked ? "disabled" : ""} style="margin-top:12px;${tradingBlocked ? 'opacity:0.5;cursor:not-allowed;' : ''}">
+      <i class="fas fa-paper-plane"></i> ${tradingBlocked ? "Blocked by risk gate" : "Send to paper trade"}
     </button>
     <button class="an-trade" style="background:var(--bg-tertiary);color:var(--text-secondary);border-color:var(--border-light);margin-top:6px;" onclick="loadConsensus('${symbol}')">
       <i class="fas fa-vote-yea"></i> Run AI consensus
@@ -411,10 +462,15 @@ async function sendToPaperTrade() {
   const tp   = plan?.strategy_tp1  ?? plan?.take_profit;
   const conf = (scoring?.total ?? 0) / 100;
 
+  // Use the REAL Kelly-aware share count from the trade plan; fall back to a
+  // ~$1k position only if sizing is unavailable.
+  const kellyShares = plan?.shares ?? plan?.qty;
+  const shares = (kellyShares && kellyShares > 0) ? kellyShares : Math.max(1, Math.floor(1000 / entry));
+
   const body = {
     symbol, side: "buy", entry_price: entry,
     stop_loss: stop, take_profit: tp,
-    shares: Math.max(1, Math.floor(1000 / entry)),  // ~$1k position default
+    shares,
     confidence: clamp(conf, 0, 1),
   };
   const result = await api("/api/v1/paper/execute", {
@@ -1033,6 +1089,9 @@ async function loadAll(force = false) {
   loadEquityCurve();
   loadDeepPicks();
   loadAccuracy();
+  // Watchlist + portfolio risk gate (for the decision drawer)
+  api("/api/v1/watchlist").then(w => { state.watchlist = (w && w.symbols) || []; });
+  api("/api/risk/status").then(r => { state.riskStatus = r || {}; });
 }
 
 /* ─── Track record — REAL signal accuracy (credibility layer) ──── */
@@ -1383,3 +1442,4 @@ window.dismissAlert = dismissAlert;
 window.handleAlertAction = handleAlertAction;
 window.setIntelFilter = setIntelFilter;
 window.refreshDeepPicks = refreshDeepPicks;
+window.toggleWatch = toggleWatch;
