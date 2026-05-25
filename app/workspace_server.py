@@ -1260,6 +1260,29 @@ def _get_smart_info(symbol: str) -> dict:
                 info["earningsGrowth"] = m.get("netIncomeGrowth")
             except Exception:
                 pass
+            # Analyst layer — price-target consensus + buy/hold/sell ratings,
+            # mapped to the yfinance-compatible keys _sentiment_score reads.
+            # FMP client caches + rate-limits these, so per-symbol cost is low.
+            try:
+                pt = fmp_client.get_price_target(symbol) or {}
+                tgt = _safe_float(pt.get("targetConsensus") or pt.get("targetMedian"))
+                if tgt:
+                    info["targetMeanPrice"] = tgt
+                recs = fmp_client.get_analyst_recommendations(symbol) or []
+                if recs:
+                    latest = recs[0] if isinstance(recs[0], dict) else {}
+                    sb = int(latest.get("analystRatingsStrongBuy") or 0)
+                    b  = int(latest.get("analystRatingsbuy") or latest.get("analystRatingsBuy") or 0)
+                    h  = int(latest.get("analystRatingsHold") or 0)
+                    s  = int(latest.get("analystRatingsSell") or 0)
+                    ss = int(latest.get("analystRatingsStrongSell") or 0)
+                    total = sb + b + h + s + ss
+                    if total > 0:
+                        info["numberOfAnalystOpinions"] = total
+                        buckets = {"strong_buy": sb, "buy": b, "hold": h, "sell": s, "strong_sell": ss}
+                        info["recommendationKey"] = max(buckets, key=buckets.get)
+            except Exception:
+                pass
             return info
     except Exception:
         pass
