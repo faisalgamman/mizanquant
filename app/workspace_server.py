@@ -3906,6 +3906,51 @@ async def trailing_stop_backtest(
     return report
 
 
+@app.get("/api/selection/exit-structure-backtest")
+async def exit_structure_backtest(
+    lookback_days: int = Query(365, description="Calendar days of as_of grid"),
+    max_hold_days: int = Query(20, description="Time-stop cap / max holding window"),
+    step_days: int = Query(5, description="Days between as_of dates"),
+    top_n: int = Query(15, description="Top-N technical picks scored per as_of date"),
+    max_symbols: int = Query(90, description="Cap universe size for runtime"),
+    live_trail_pct: float = Query(2.5, description="Live trailing-stop %"),
+    live_atr_mult: float = Query(1.5, description="Live initial-stop ATR multiplier"),
+    proposed_trail_pct: float = Query(12.0, description="Proposed wide trailing-stop %"),
+):
+    """Head-to-head: the EXACT live exit stack vs the proposed simplified exit.
+
+    Verifies — before any real-money risk-param change — how much the current
+    multi-exit structure (initial ATR stop + 2.5% trail + TP1/2/3 partial exits)
+    leaves on the table versus the validated single-wide-trail + time-exit.
+    Both run on identical validated technical picks/dates (paired). Cached 6 h.
+    """
+    import asyncio as _asyncio
+
+    cache_key_es = (f"exit_struct_bt_{lookback_days}_{max_hold_days}_{step_days}_{top_n}_"
+                    f"{max_symbols}_{live_trail_pct}_{live_atr_mult}_{proposed_trail_pct}")
+    cached = _cache_get(cache_key_es, max_age=21600)  # 6 h
+    if cached:
+        return {**cached, "source": "cache"}
+
+    def _run() -> dict:
+        from app.services.validation_harness import run_exit_structure_comparison
+        universe = list(_SMART_UNIVERSE)[:max_symbols]
+        return run_exit_structure_comparison(
+            universe, lookback_days=lookback_days, max_hold_days=max_hold_days,
+            step_days=step_days, top_n=top_n, max_symbols=max_symbols,
+            live_trail_pct=live_trail_pct, live_atr_mult=live_atr_mult,
+            proposed_trail_pct=proposed_trail_pct,
+        )
+
+    try:
+        report = await _asyncio.wait_for(_asyncio.to_thread(_run), timeout=600.0)
+    except _asyncio.TimeoutError:
+        return {"status": "timeout", "message": "Backtest exceeded 600s; lower max_symbols or lookback_days."}
+    if report.get("status") == "ready":
+        _cache_set(cache_key_es, report)
+    return report
+
+
 @app.get("/api/diagnose/data-sources")
 async def diagnose_data_sources(
     symbol: str = Query("SPY", description="Symbol to test data sources against"),

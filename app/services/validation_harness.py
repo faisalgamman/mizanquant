@@ -288,6 +288,79 @@ def _simulate_trailing_stop(
     return (exit_px - entry) / entry, len(fut), "time_stop"
 
 
+def _simulate_live_exit_stack(
+    df: pd.DataFrame, as_of: pd.Timestamp,
+    trail_pct: float = 2.5, atr_mult: float = 1.5, max_hold_days: int = 20,
+) -> tuple[float, int, str] | None:
+    """Replay the EXACT live exit structure for one pick (trading_engine + trade_plan).
+
+    Mirrors production:
+      • initial stop  = min(recent_low − 0.005·entry, entry − ATR(14)·atr_mult)
+                        (trade_plan.calculate_stop_loss)
+      • R             = entry − initial_stop
+      • TP ladder     = entry+1R / +2R / +3R closing 50% / 30% / 20%
+                        (trade_plan.calculate_tp_levels)
+      • trailing stop = trail_pct from the high-water peak (trading_engine trail_percent)
+      • binding stop  = max(initial_stop, peak·(1−trail_pct))
+      • time cap       = close remainder at close[max_hold_days]
+
+    Per-bar order (conservative, no intrabar optimism): check the binding stop
+    against the bar LOW first; if untouched, ratchet the peak with the bar HIGH
+    and fill any TP levels the HIGH reached. The trade return is the share-weighted
+    blend of every partial fill.
+
+    Returns (blended_return_fraction, holding_days, last_exit_reason) or None.
+    """
+    at = df[df["date"] <= as_of]
+    fut = df[df["date"] > as_of]
+    if len(at) < 15 or len(fut) < 1:
+        return None
+    entry = float(at["close"].iloc[-1])
+    if entry <= 0:
+        return None
+    try:
+        from app.services.technical import atr as _ta_atr
+        atr_val = float(_ta_atr(at, 14).iloc[-1])
+    except Exception:
+        atr_val = float((at["high"] - at["low"]).iloc[-14:].mean())
+    if not (atr_val > 0):
+        atr_val = entry * 0.02
+    recent_low = float(at["low"].iloc[-10:].min())
+    init_stop = min(recent_low - 0.005 * entry, entry - atr_val * atr_mult)
+    if init_stop <= 0 or init_stop >= entry:
+        init_stop = entry * 0.95
+    R = entry - init_stop
+    tp_levels = [(entry + R, 0.5), (entry + 2 * R, 0.3), (entry + 3 * R, 0.2)]
+    tp_hit = [False, False, False]
+
+    remaining = 1.0
+    realized = 0.0
+    peak = entry
+    trail_frac = trail_pct / 100.0
+    fut = fut.iloc[:max_hold_days]
+    last_reason = "time_stop"
+    for i in range(len(fut)):
+        bar = fut.iloc[i]
+        hi = float(bar["high"]) if "high" in fut.columns and pd.notna(bar["high"]) else float(bar["close"])
+        lo = float(bar["low"]) if "low" in fut.columns and pd.notna(bar["low"]) else float(bar["close"])
+        binding_stop = max(init_stop, peak * (1.0 - trail_frac))
+        if lo <= binding_stop:
+            realized += remaining * (binding_stop - entry) / entry
+            return realized, i + 1, "stop"
+        peak = max(peak, hi)
+        for j, (lvl, frac) in enumerate(tp_levels):
+            if not tp_hit[j] and hi >= lvl:
+                realized += frac * (lvl - entry) / entry
+                remaining -= frac
+                tp_hit[j] = True
+                last_reason = "take_profit"
+        if remaining <= 1e-9:
+            return realized, i + 1, "take_profit"
+    exit_px = float(fut["close"].iloc[-1])
+    realized += remaining * (exit_px - entry) / entry
+    return realized, len(fut), last_reason
+
+
 # ── The backtest ────────────────────────────────────────────────────────────────
 
 def run_selection_backtest(
@@ -595,7 +668,132 @@ def run_trailing_stop_backtest(
     }
 
 
+def run_exit_structure_comparison(
+    symbols: list[str],
+    lookback_days: int = 365,
+    max_hold_days: int = 20,
+    step_days: int = 5,
+    top_n: int = 15,
+    max_symbols: int = 90,
+    live_trail_pct: float = 2.5,
+    live_atr_mult: float = 1.5,
+    proposed_trail_pct: float = 12.0,
+    n_trials: int = N_TRIALS_REGISTERED,
+) -> dict:
+    """Head-to-head: the ACTUAL live exit stack vs the proposed simplified exit.
+
+    On the SAME validated technical picks/dates (paired), compares:
+      • "live_stack"  — initial ATR stop + live trailing stop + TP1/2/3 partial
+                        exits (exactly what production does today).
+      • "proposed"    — single wide trailing stop (proposed_trail_pct) + time cap,
+                        no early take-profits (the configuration the trailing-stop
+                        backtest found optimal).
+
+    This is the "verify before touching real-money risk params" step: it proves
+    how much the current multi-exit structure leaves on the table before any
+    trading-engine change is made.
+
+    Survivorship-biased universe + technical-only selection → trust the paired
+    DELTA between the two structures, not the absolute returns.
+    """
+    syms = [s.upper() for s in symbols][:max_symbols]
+    series: dict[str, pd.DataFrame] = {}
+    for s in syms:
+        d = _fetch_series(s)
+        if d is not None:
+            series[s] = d
+    spy = _fetch_series("SPY")
+    if spy is None or len(series) < 5:
+        return {"status": "insufficient_data",
+                "message": f"Need SPY + ≥5 symbols with bars; got {len(series)}."}
+
+    spy_dates = spy["date"]
+    end_date = spy_dates.iloc[-1]
+    start_date = end_date - timedelta(days=lookback_days)
+    grid_all = spy_dates[(spy_dates >= start_date)].tolist()
+    grid = [d for d in grid_all[::step_days] if len(spy[spy["date"] > d]) >= max_hold_days]
+
+    live_rets: list[float] = []
+    prop_rets: list[float] = []
+    live_holds: list[int] = []
+    prop_holds: list[int] = []
+    live_exits: dict[str, int] = {"stop": 0, "take_profit": 0, "time_stop": 0}
+    prop_exits: dict[str, int] = {"trail_stop": 0, "time_stop": 0}
+    n_dates = 0
+
+    for as_of in grid:
+        spy_slice = _slice_to(spy, as_of)
+        if spy_slice is None:
+            continue
+        scored = []
+        for s, d in series.items():
+            sl = _slice_to(d, as_of)
+            if sl is None:
+                continue
+            tscore = technical_score(sl, spy_slice)
+            if tscore <= 0:
+                continue
+            scored.append({"tscore": tscore, "df": d})
+        if len(scored) < top_n:
+            continue
+        n_dates += 1
+        top = sorted(scored, key=lambda x: x["tscore"], reverse=True)[:top_n]
+        for pick in top:
+            d = pick["df"]
+            ls = _simulate_live_exit_stack(d, as_of, live_trail_pct, live_atr_mult, max_hold_days)
+            ps = _simulate_trailing_stop(d, as_of, proposed_trail_pct, max_hold_days)
+            if ls is not None:
+                live_rets.append(ls[0]); live_holds.append(ls[1]); live_exits[ls[2]] = live_exits.get(ls[2], 0) + 1
+            if ps is not None:
+                prop_rets.append(ps[0]); prop_holds.append(ps[1]); prop_exits[ps[2]] = prop_exits.get(ps[2], 0) + 1
+
+    if n_dates == 0 or not live_rets:
+        return {"status": "insufficient_data",
+                "message": "No as_of dates produced ≥top_n scored names with forward bars."}
+
+    def _summary(rets, holds, exits) -> dict:
+        arr = np.asarray(rets, dtype=float)
+        wins = arr[arr > 0]
+        tot = sum(exits.values()) or 1
+        return {
+            "n_trades": int(arr.size),
+            "mean_return_pct": round(float(arr.mean()) * 100, 3),
+            "median_return_pct": round(float(np.median(arr)) * 100, 3),
+            "win_rate_pct": round(float(wins.size) / arr.size * 100, 1),
+            "avg_hold_days": round(float(np.mean(holds)), 1) if holds else None,
+            "exit_mix_pct": {k: round(v / tot * 100, 1) for k, v in exits.items()},
+            "qc": qc_report(arr.tolist(), n_trials=n_trials),
+        }
+
+    live = _summary(live_rets, live_holds, live_exits)
+    prop = _summary(prop_rets, prop_holds, prop_exits)
+    delta = round(prop["mean_return_pct"] - live["mean_return_pct"], 3)
+
+    return {
+        "status": "ready",
+        "as_of_dates": n_dates,
+        "max_hold_days": max_hold_days,
+        "step_days": step_days,
+        "top_n": top_n,
+        "universe_size": len(series),
+        "n_trials": n_trials,
+        "live_stack": live,
+        "proposed": prop,
+        "delta_mean_return_pct": delta,
+        "verdict": {
+            "live_config": f"ATR×{live_atr_mult} stop + {live_trail_pct}% trail + TP 1R/2R/3R (50/30/20%)",
+            "proposed_config": f"{proposed_trail_pct}% trail + {max_hold_days}d time exit, no early TP",
+            "proposed_beats_live": delta > 0,
+            "improvement_pct": delta,
+            "note": "Paired on identical validated technical picks/dates. Live stack mirrors "
+                    "trade_plan.calculate_stop_loss + trading_engine trail + TP ladder exactly. "
+                    "Conservative intrabar order (stop checked on LOW before TP on HIGH). "
+                    "Survivorship-biased universe → trust the DELTA, not absolute returns.",
+        },
+    }
+
+
 __all__ = [
     "run_selection_backtest", "run_trailing_stop_backtest",
-    "technical_score", "pit_bundle",
+    "run_exit_structure_comparison", "technical_score", "pit_bundle",
 ]
