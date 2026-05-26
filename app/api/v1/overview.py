@@ -24,11 +24,20 @@ async def _get_system_status():
         logger.warning("Dashboard health check failed: %s", exc)
         health = {}
 
+    # Source regime from the unified MarketContextBundle — the SAME source the
+    # header ecosystem strip reads (/api/context/bundle) — so the footer regime
+    # and header regime can never disagree. Fall back to regime.py only if the
+    # bundle is unavailable.
+    regime_state = "UNKNOWN"
     try:
-        regime = get_regime()
-        regime_state = regime.state if regime else "UNKNOWN"
+        from app.services.market_context_bundle import get_context_bundle_sync
+        regime_state = get_context_bundle_sync().get("regime") or "UNKNOWN"
     except Exception:
-        regime_state = "UNKNOWN"
+        try:
+            regime = get_regime()
+            regime_state = regime.state if regime else "UNKNOWN"
+        except Exception:
+            regime_state = "UNKNOWN"
 
     return {
         "status": health.get("status", "degraded"),

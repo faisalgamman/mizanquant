@@ -444,6 +444,14 @@ def analyze(symbol, df):
         atr_val = float(atr(df).iloc[-1])
         avg_vol = float(df["volume"].iloc[-20:].mean())
         vol_rat = float(df["volume"].iloc[-1] / avg_vol) if avg_vol else 0
+        # Penny / illiquidity floor — exclude low-priced or thin names so a
+        # $1.53 pump can never become a STRONG BUY swing signal.
+        _min_price = float(getattr(settings, "MIN_PRICE", 5.0))
+        _min_adv_m = float(getattr(settings, "MIN_ADV_DOLLAR_M", 5.0))
+        if price < _min_price:
+            return None
+        if (avg_vol * price / 1_000_000) < _min_adv_m:
+            return None
         support = float(df["low"].iloc[-10:].min())
         score = 0
         signals = []

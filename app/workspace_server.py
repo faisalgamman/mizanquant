@@ -3382,6 +3382,14 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
         price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
         if not price or price <= 0:
             return None
+        # Penny floor — exclude low-priced names (manipulation/liquidity risk).
+        try:
+            from app.config import settings as _q_cfg
+            _min_price = float(getattr(_q_cfg, "MIN_PRICE", 5.0))
+        except Exception:
+            _min_price = 5.0
+        if price < _min_price:
+            return None
 
         mcap = _safe_float(info.get("marketCap"))
         sector_val = (info.get("sector") or "").lower().strip()
@@ -3476,6 +3484,14 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
             if volumes is not None:
                 avg_vol = float(np.mean(volumes[-20:])) if len(volumes) >= 20 else float(np.mean(volumes))
                 adv_dollar_m = round(avg_vol * price / 1_000_000, 1)
+                # Liquidity floor — exclude thinly-traded names.
+                try:
+                    from app.config import settings as _adv_cfg
+                    _min_adv = float(getattr(_adv_cfg, "MIN_ADV_DOLLAR_M", 5.0))
+                except Exception:
+                    _min_adv = 5.0
+                if adv_dollar_m < _min_adv:
+                    return None
 
             # Chg%: daily change
             if len(closes) >= 2:
@@ -4238,11 +4254,29 @@ def _run_screener_bg(scan_symbols: list):
     except Exception as _pre_exc:
         logger.warning("Alpaca batch pre-fetch failed (%s) — falling back to per-symbol fetch", _pre_exc)
 
-    # Fetch SPY data once per batch (reused for all symbols)
+    # Fetch SPY data once per batch (reused for all symbols). SPY is REQUIRED:
+    # the RS-vs-SPY hard gate fails closed when SPY is missing, which zeroes
+    # momentum for EVERY symbol (universal T=0). So we retry via the alternate
+    # data path and emit a loud WARNING rather than silently degrading.
+    spy_df_shared = None
     try:
         _, spy_df_shared = _fetch_data("SPY", period="2mo")
-    except Exception:
-        spy_df_shared = None
+    except Exception as _spy_exc:
+        logger.warning("SPY primary fetch failed: %s", _spy_exc)
+    if spy_df_shared is None or len(spy_df_shared) < 20:
+        try:
+            import halal_screener as _hs
+            _alt = _hs.fetch_yf("SPY", period="3mo")
+            if _alt is not None and len(_alt) >= 20:
+                spy_df_shared = _alt
+                logger.info("SPY recovered via halal_screener.fetch_yf fallback (%d bars)", len(_alt))
+        except Exception as _spy_alt_exc:
+            logger.warning("SPY fallback fetch failed: %s", _spy_alt_exc)
+    if spy_df_shared is None or len(spy_df_shared) < 20:
+        logger.error(
+            "SPY frame UNAVAILABLE — RS-vs-SPY hard gate will fail closed for "
+            "ALL symbols (momentum=0, T=0). Check Alpaca/Tiingo/yfinance data feed."
+        )
 
     batch_size = SCREENER_BATCH_SIZE
     batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]

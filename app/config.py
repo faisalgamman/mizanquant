@@ -136,6 +136,13 @@ class Settings(BaseSettings):
     RISK_CAPITAL: float = 3000.0
     RISK_PCT: float = 1.0
 
+    # --- Universe quality floor (penny / illiquid exclusion) ---
+    # Stocks below these floors are excluded from BOTH the composite screener
+    # and the signals/USX path, so low-priced manipulated names (e.g. a $1.53
+    # pump) can never reach a STRONG BUY / auto-trade. ADV = avg 20d $ volume.
+    MIN_PRICE: float = 5.0            # minimum share price (USD)
+    MIN_ADV_DOLLAR_M: float = 5.0     # minimum avg daily $ volume (millions)
+
     # --- Auto-trading (Stage 1: Paper) ---
     AUTO_TRADE_ENABLED: bool = False  # MUST be explicitly enabled
     LIVE_CONFIRMED: bool = False      # Second factor: must be true for live execution

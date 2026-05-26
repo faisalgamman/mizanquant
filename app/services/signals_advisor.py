@@ -163,6 +163,19 @@ def _format_signal(
     votes_sell = row.get("Votes SELL", 0)
     votes_hold = row.get("Votes HOLD", 0)
 
+    # When SWING_EXIT is armed, execute_buy() replaces the tight stop/TP with a
+    # wide 12% trailing stop and a 3×-risk take-profit. Mirror that here so the
+    # DISPLAYED plan matches what is actually placed (no display≠execution gap).
+    swing_on = False
+    try:
+        from app.config import settings as _disp_cfg
+        if getattr(_disp_cfg, "SWING_EXIT_ENABLED", False):
+            swing_on = True
+            stop_pct = float(getattr(_disp_cfg, "SWING_TRAIL_PCT", 12.0)) / 100.0
+            take_pct = 3.0 * stop_pct
+    except Exception:
+        pass
+
     if price <= 0:
         sl = tp1 = tp2 = tp3 = 0.0
         shares = 0
@@ -192,13 +205,17 @@ def _format_signal(
     ]
     if usx_score is not None:
         lines.append(f"USX V4:     {usx_score:.0f}/100")
+    # Honest R/R from the actual stop/target distances (was a hardcoded label).
+    rr = round((tp2 - price) / (price - sl), 1) if price > sl else 0.0
+    stop_kind = "trailing 12%" if swing_on else "fixed"
     lines.extend([
         "━━━━━━━━━━━━━━━",
         f"Price:      ${price:.2f}",
-        f"Stop Loss:  ${sl:.2f}  (−{stop_pct*100:.1f}%)",
+        f"Stop Loss:  ${sl:.2f}  (−{stop_pct*100:.1f}%, {stop_kind})",
         f"TP1 (50%):  ${tp1:.2f}  (+{take_pct*50:.1f}%)",
         f"TP2 (30%):  ${tp2:.2f}  (+{take_pct*100:.1f}%)",
         f"TP3 (20%):  ${tp3:.2f}  (+{take_pct*200:.1f}%)",
+        f"R/R:        1:{rr:.1f}  (TP2 vs stop)",
         f"Shares:     {shares}  (≈ ${notional:.2f} notional)",
         f"Risk:       ${risk_dollars:.2f}  ({risk_pct*100:.1f}% of ${account_usd:.0f})",
         "━━━━━━━━━━━━━━━",
