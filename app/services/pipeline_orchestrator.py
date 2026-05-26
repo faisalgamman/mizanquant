@@ -754,10 +754,18 @@ class UnifiedPipeline:
             # Determine actual portfolio equity from broker; fallback to last snapshot
             snapshot_equity: float = 100_000.0
             try:
-                from app.services.alpaca_client import get_account as _get_acct
-                _acct = _get_acct()
-                if _acct:
-                    snapshot_equity = float(_acct.get("equity") or _acct.get("portfolio_value") or snapshot_equity)
+                # Use broker factory (strategy-aware) instead of legacy alpaca_client
+                # which uses DEFAULT credentials and may return 401.
+                from app.services.broker.factory import get_broker as _get_brk
+                from app.config import STRATEGY_CONFIGS as _SC
+                _sid_snap = next(iter(_SC), None)
+                _brk_snap = _get_brk(strategy_id=_sid_snap)
+                if _brk_snap:
+                    _acct = _brk_snap.get_account(strategy_id=_sid_snap)
+                    if _acct:
+                        snapshot_equity = float(
+                            _acct.get("equity") or _acct.get("portfolio_value") or snapshot_equity
+                        )
             except Exception:
                 pass
 
