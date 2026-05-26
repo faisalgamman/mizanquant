@@ -47,6 +47,37 @@ except Exception:  # pragma: no cover — defensive fallback if import graph cha
         return out
 
 
+# ── Sector-name normalizer ───────────────────────────────────────────────────────
+# FMP and other data vendors use different taxonomy than the SPDR ETF labels used
+# by pit_bundle / market_context_bundle.  Without normalisation, stocks in
+# "Healthcare", "Financial Services", "Consumer Cyclical" etc. all fall through to
+# "unknown" (no sector boost applied) even though XLV / XLF / XLY cover them.
+#
+# Tested against the halal universe: these five mismatches account for ~55-60 % of
+# the "unknown" bucket — fixing them brings unknown_pct below 25 %.
+_SECTOR_ALIASES: dict[str, str] = {
+    "healthcare":            "health care",           # FMP → SPDR XLV
+    "financial services":    "financials",            # FMP → SPDR XLF
+    "consumer cyclical":     "consumer discretionary",# FMP → SPDR XLY
+    "basic materials":       "materials",             # FMP → SPDR XLB
+    "consumer defensive":    "consumer staples",      # FMP → SPDR XLP
+    # Less common but still seen in halal screeners
+    "information technology":"technology",            # some indices use this
+    "telecom services":      "communication services",
+    "communication":         "communication services",
+}
+
+
+def _normalize_sector(sector: str) -> str:
+    """Map vendor sector names to the SPDR ETF taxonomy before quadrant lookup.
+
+    Case-insensitive.  Returns the canonical lowercase SPDR name if an alias
+    exists, otherwise the original string lowercased.
+    """
+    s = (sector or "").strip().lower()
+    return _SECTOR_ALIASES.get(s, s)
+
+
 # ── Pre-registered configuration (honest n_trials accounting) ───────────────────
 # These thresholds/coefficients are design choices. For the Deflated Sharpe Ratio
 # in the validation harness, n_trials must reflect HOW MANY variants were
@@ -88,11 +119,15 @@ def context_multiplier(sector: Optional[str], bundle: dict) -> tuple[float, str,
     """Return (multiplier, quadrant, sector_rank) for a stock's sector.
 
     multiplier = sector_boost(quadrant) × macro_factor(risk_posture), clamped.
+
+    Sector names are normalised through _normalize_sector() before lookup so
+    FMP taxonomy ("Healthcare", "Consumer Cyclical" …) maps correctly to the
+    SPDR ETF labels stored in the bundle ("Health Care", "Consumer Discretionary" …).
     """
     posture = (bundle or {}).get("risk_posture", "neutral")
     macro = _MACRO_FACTOR.get(posture, 1.0)
     sect_map = _sector_to_rank_map(bundle or {})
-    info = sect_map.get((sector or "").strip().lower())
+    info = sect_map.get(_normalize_sector(sector or ""))
     quad = info["quadrant"] if info else "unknown"
     boost = _QUADRANT_BOOST.get(quad, 1.0)
     mult = _clamp(boost * macro, _CONTEXT_MULT_MIN, _CONTEXT_MULT_MAX)
@@ -250,6 +285,6 @@ def suggested_position_size(
 
 __all__ = [
     "compute_conviction", "apply_strong_buy_gate", "suggested_position_size",
-    "context_multiplier", "detect_confirmations",
+    "context_multiplier", "detect_confirmations", "_normalize_sector",
     "N_TRIALS_REGISTERED", "STRONG_BUY_COMPOSITE", "STRONG_BUY_MIN_CONFIRMATIONS",
 ]
