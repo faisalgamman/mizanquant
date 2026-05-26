@@ -227,11 +227,44 @@ def _format_signal(
     return "\n".join(lines), levels
 
 
+def _notify_auto_execute(symbol: str, result: dict, strategy_id: str | None) -> None:
+    """Send a follow-up Telegram confirming the auto-execution outcome."""
+    try:
+        from app.services.telegram_alert import send_message as tg_send
+        from app.config import settings as _trd_cfg
+        sid_lbl = f"[{strategy_id}]" if strategy_id else ""
+        if result.get("executed"):
+            qty   = result.get("qty", "?")
+            price = result.get("entry_price") or "?"
+            stop  = result.get("stop_loss", "?")
+            # SWING_EXIT_ENABLED widens the stop — show trail %
+            trail_info = ""
+            if getattr(_trd_cfg, "SWING_EXIT_ENABLED", False):
+                trail_info = f"  Trail: {getattr(_trd_cfg, 'SWING_TRAIL_PCT', 12.0):.0f}%"
+            oid = str(result.get("order_id", ""))[:16]
+            tg_send(
+                f"✅ ORDER PLACED {sid_lbl}\n"
+                f"  {symbol}  {qty} shares @ ${price}{trail_info}\n"
+                f"  Stop: ${stop}  Hold: ~20 days\n"
+                f"  ID: {oid}"
+            )
+        else:
+            reason = result.get("reason", "unknown")
+            tg_send(
+                f"⚠️ AUTO-EXECUTE SKIPPED {sid_lbl}\n"
+                f"  {symbol}: {reason}"
+            )
+    except Exception:
+        pass
+
+
 def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict | None,
                        account_usd: float, risk_pct: float, stop_pct: float,
-                       take_pct: float, dry_run: bool) -> bool:
+                       take_pct: float, dry_run: bool,
+                       strategy_id: str | None = None) -> bool:
     """Format + send one signal (text caption with attached chart when
-    available)."""
+    available). When AUTO_TRADE_ENABLED + LIVE_CONFIRMED are both True,
+    automatically executes the trade via execute_buy() after the alert."""
     text, levels = _format_signal(
         row, usx_score=usx_score, usx_breakdown=usx_breakdown,
         account_usd=account_usd, risk_pct=risk_pct,
@@ -299,6 +332,49 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
     record_alert(symbol, "strong_buy", signal="STRONG BUY", score=usx_score,
                  price=entry, stop_loss=sl, take_profit=tp1, confidence=confidence,
                  guard_passed=True, sent=sent)
+
+    # ── Auto-execute: place bracket order on Alpaca ──────────────────────
+    # Fires only when BOTH flags are live-confirmed AND the Telegram alert
+    # was delivered (belt-and-suspenders: if we can't notify, we don't trade).
+    # execute_buy() applies SWING_EXIT_ENABLED override (12% wide stop/trail)
+    # and all the usual risk/halal/kill-switch/portfolio-stop guards.
+    if sent and strategy_id and entry and sl and not dry_run:
+        try:
+            from app.config import settings as _trd_cfg
+            from app.services.trading_engine import execute_buy
+            if (getattr(_trd_cfg, "AUTO_TRADE_ENABLED", False)
+                    and getattr(_trd_cfg, "LIVE_CONFIRMED", False)):
+                signal_details = {
+                    "verdict":    row.get("Verdict"),
+                    "confidence": confidence,
+                    "strategy":   row.get("__strategy_label"),
+                    "source":     "signals_advisor",
+                    "usx_score":  usx_score,
+                    "votes_buy":  row.get("Votes BUY"),
+                    "votes_sell": row.get("Votes SELL"),
+                }
+                trade_result = execute_buy(
+                    symbol=symbol,
+                    price=entry,
+                    stop_loss=sl,
+                    take_profit=tp1,
+                    confidence=confidence,
+                    signal_details=signal_details,
+                    strategy_id=strategy_id,
+                )
+                _notify_auto_execute(symbol, trade_result, strategy_id)
+                logger.info(
+                    "signals_advisor auto-execute %s [%s]: executed=%s reason=%s",
+                    symbol, strategy_id,
+                    trade_result.get("executed"),
+                    trade_result.get("reason", ""),
+                )
+        except Exception as _exc:
+            logger.warning(
+                "signals_advisor: auto-execute failed for %s [%s]: %s",
+                symbol, strategy_id, _exc,
+            )
+
     return sent
 
 
@@ -438,6 +514,7 @@ def scan_and_notify_strong_buys(
                 account_usd=account_usd, risk_pct=risk_pct,
                 stop_pct=stop_pct, take_pct=take_pct,
                 dry_run=dry_run,
+                strategy_id=sid,
             )
             summary["signals"].append({
                 "strategy_id": sid,
@@ -454,11 +531,11 @@ def scan_and_notify_strong_buys(
             from app.services.telegram_alert import send_message as tg_send
             by = summary["by_strategy"]
             tg_send(
-                f"PRE-MARKET SIGNALS — {summary['sent']} STRONG BUY across A/B/C\n"
+                f"SIGNALS SCAN DONE — {summary['sent']} alerts sent\n"
                 f"Stage 1 (USX V4): {summary['stage1_pass']}/{summary['scanned_total']}\n"
                 f"Stage 2 (AI):     {summary['stage2_pass']}\n"
                 f"By strategy: A={by.get('A',0)} B={by.get('B',0)} C={by.get('C',0)}\n"
-                "Charts and trade plans posted above. Review and execute via Alpaca."
+                "Orders auto-executed above (✅ placed / ⚠️ skipped with reason)."
             )
         except Exception:
             pass
