@@ -143,23 +143,33 @@ def technical_score(df: pd.DataFrame, spy_df: pd.DataFrame | None) -> float:
 # ── Point-in-time market-context bundle (bars only) ─────────────────────────────
 
 def _rs_quadrant(etf_df: pd.DataFrame, spy_df: pd.DataFrame, win: int = 21) -> str:
-    """Approximate RRG quadrant from trailing RS ratio + momentum vs SPY."""
+    """RRG quadrant from trailing RS-Ratio + RS-Momentum vs SPY.
+
+    Aligns on the 'date' column (inner join) so ETF bars fetched from APIs with
+    slightly different start dates — or with a handful of missing sessions — never
+    cause an integer-index position mismatch that corrupts the RS calculation.
+
+    Also applies a 3-period trailing mean to rs_ratio / rs_mom before reading the
+    terminal value; this smooths single-day flip-flops that make the quadrant noisy.
+    """
     try:
-        e = etf_df["close"].astype(float)
-        s = spy_df["close"].astype(float)
-        df = pd.concat([e.rename("e"), s.rename("s")], axis=1).dropna()
+        # --- date-aligned inner join (fixes integer-index misalignment bug) ---
+        e = etf_df[["date", "close"]].rename(columns={"close": "e"}).set_index("date")
+        s = spy_df[["date", "close"]].rename(columns={"close": "s"}).set_index("date")
+        df = e.join(s, how="inner").dropna()
         if len(df) < win * 3:
             return "unknown"
         rs = 100.0 * (df["e"] / df["s"])
         mean = rs.rolling(win).mean()
-        std = rs.rolling(win).std()
+        std  = rs.rolling(win).std()
         rs_ratio = 100.0 + ((rs - mean) / std).fillna(0)
-        roc = rs_ratio.diff(win)
+        roc   = rs_ratio.diff(win)
         rmean = roc.rolling(win).mean()
-        rstd = roc.rolling(win).std()
+        rstd  = roc.rolling(win).std()
         rs_mom = 100.0 + ((roc - rmean) / rstd).fillna(0)
-        ratio_val = float(rs_ratio.iloc[-1])
-        mom_val = float(rs_mom.iloc[-1])
+        # Smooth the terminal value over 3 bars to reduce flip-flop noise.
+        ratio_val = float(rs_ratio.rolling(3).mean().iloc[-1])
+        mom_val   = float(rs_mom.rolling(3).mean().iloc[-1])
         if ratio_val > 100 and mom_val > 100:
             return "leading"
         if ratio_val > 100 and mom_val <= 100:
@@ -293,6 +303,10 @@ def run_selection_backtest(
     cur_returns: list[float] = []
     enh_returns: list[float] = []
     n_dates = 0
+    # Diagnostic counters — help verify sector info is actually differentiating picks.
+    _quad_counts: dict[str, int] = {}
+    _mult_sum = 0.0
+    _mult_n = 0
 
     for as_of in grid:
         spy_slice = _slice_to(spy, as_of)
@@ -310,10 +324,13 @@ def run_selection_backtest(
             tscore = technical_score(sl, spy_slice)
             if tscore <= 0:
                 continue
-            mult, _quad, _rank = context_multiplier(sector_map.get(s), bundle)
+            mult, quad, _rank = context_multiplier(sector_map.get(s), bundle)
             fwd = _forward_return(df, as_of, hold_days)
             if fwd is None:
                 continue
+            _quad_counts[quad] = _quad_counts.get(quad, 0) + 1
+            _mult_sum += mult
+            _mult_n += 1
             scored.append({"sym": s, "tscore": tscore, "enh": tscore * mult, "fwd": fwd})
 
         if len(scored) < top_n:
@@ -354,6 +371,16 @@ def run_selection_backtest(
         and enh["mean_return_pct"] > cur["mean_return_pct"]
     )
 
+    # Diagnostics: were sector quadrants actually differentiating picks?
+    # If avg_multiplier ≈ 1.0 and unknown_pct is high, sectors weren't used.
+    total_obs = _mult_n or 1
+    context_diagnostics = {
+        "avg_multiplier": round(_mult_sum / total_obs, 4),
+        "quadrant_distribution": {k: round(v / total_obs * 100, 1) for k, v in sorted(_quad_counts.items())},
+        "unknown_pct": round(_quad_counts.get("unknown", 0) / total_obs * 100, 1),
+        "differentiation_active": _quad_counts.get("unknown", 0) / total_obs < 0.70,
+    }
+
     return {
         "status": "ready",
         "as_of_dates": n_dates,
@@ -365,6 +392,7 @@ def run_selection_backtest(
         "current": cur,
         "enhanced": enh,
         "delta_mean_return_pct": round(enh["mean_return_pct"] - cur["mean_return_pct"], 3),
+        "context_diagnostics": context_diagnostics,
         "acceptance": {
             "passes": passes,
             "criteria": "DSR≥0.95 AND permutation_p<0.05 AND bootstrap_lower>0 AND enhanced_mean>current_mean",
