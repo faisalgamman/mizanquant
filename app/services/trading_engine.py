@@ -380,6 +380,30 @@ def execute_buy(
             _notify_trade(result)
             return result
 
+        # ── Swing exit mode (validated 2026-05; default OFF via SWING_EXIT_ENABLED)
+        # Replace the incoming tight ATR stop + early TP with a single WIDE stop
+        # (entry·(1−SWING_TRAIL_PCT)) and a far TP so the wide trailing stop +
+        # time exit govern instead. Done BEFORE validate_entry / eligibility so
+        # both validation and position SIZING use the wide stop (wider stop →
+        # smaller, correctly risk-scaled position). See config.py for the backtest
+        # evidence (+1.85%/trade vs the live exit stack).
+        if getattr(settings, "SWING_EXIT_ENABLED", False) and price > 0:
+            _swing_pct = float(getattr(settings, "SWING_TRAIL_PCT", 12.0)) / 100.0
+            _new_stop = round(price * (1.0 - _swing_pct), 2)
+            _new_tp = round(price * (1.0 + 3.0 * _swing_pct), 2)
+            signal_payload["swing_exit"] = {
+                "enabled": True,
+                "trail_pct": round(_swing_pct * 100, 2),
+                "stop_loss_orig": stop_loss, "take_profit_orig": take_profit,
+                "stop_loss_new": _new_stop, "take_profit_new": _new_tp,
+            }
+            logger.info(
+                "%s SWING_EXIT %s: stop %.2f→%.2f, TP %.2f→%.2f, trail=%.1f%%",
+                label, symbol, stop_loss, _new_stop, take_profit, _new_tp, _swing_pct * 100,
+            )
+            stop_loss = _new_stop
+            take_profit = _new_tp
+
         # Input validation — fail-fast before any broker/DB contact (M1 #9)
         validation = validate_entry(
             symbol=symbol,
@@ -488,6 +512,11 @@ def execute_buy(
         use_trailing = cfg.trailing_stop_enabled if cfg else settings.TRAILING_STOP_ENABLED
         trail_pct = cfg.trailing_stop_pct if cfg else app_cfg.execution.trail_percent_default
         trail_pct = min(trail_pct, app_cfg.execution.trail_percent_max)
+        # Swing exit mode overrides the trail width (and forces trailing on) so the
+        # broker-side trailing stop matches the validated wide-stop configuration.
+        if getattr(settings, "SWING_EXIT_ENABLED", False):
+            use_trailing = True
+            trail_pct = float(getattr(settings, "SWING_TRAIL_PCT", 12.0))
 
         order_payload = {
             "symbol": symbol,

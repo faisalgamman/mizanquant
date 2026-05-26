@@ -147,6 +147,24 @@ class Settings(BaseSettings):
     TRAILING_STOP_ENABLED: bool = True   # use trailing stops instead of static SL
     TRAILING_STOP_PCT: float = 2.5       # trailing stop distance (% from peak)
 
+    # --- Swing exit mode (validated 2026-05; default OFF, paper-validate first) ---
+    # The exit-structure backtest (paired, 510 trades, technical+context legs)
+    # proved the live exit stack (ATR×1.5 initial stop + 2.5% trail + TP1/2/3
+    # ladder) exits 98.8% of trades by stop in ~2.9 days and earns ~0.96%/trade,
+    # while a single WIDE trailing stop + a time exit earns ~2.82%/trade
+    # (delta +1.85%/trade, bootstrap_lower +0.014, DSR 0.99). The tight stop sits
+    # inside daily ATR noise and gets shaken out before the swing develops.
+    #
+    # When SWING_EXIT_ENABLED=True, execute_buy() replaces the incoming tight
+    # stop/TP with: initial stop = entry·(1 − SWING_TRAIL_PCT), trail =
+    # SWING_TRAIL_PCT, and a far take-profit (entry·(1 + 3·SWING_TRAIL_PCT)) so
+    # the bracket TP rarely binds — the wide trail + time exit govern instead.
+    # The wider stop correctly SHRINKS position size (constant risk budget).
+    # A scheduler job closes positions held >= SWING_MAX_HOLD_DAYS trading days.
+    SWING_EXIT_ENABLED: bool = False
+    SWING_TRAIL_PCT: float = 12.0        # wide trailing stop / initial-stop distance (%)
+    SWING_MAX_HOLD_DAYS: int = 20        # time exit: close after this many trading days
+
     # --- Emergency Kill Switch ---
     # Set to True to halt ALL trading immediately (order submission blocked).
     # Can be toggled at runtime via Railway dashboard env var without redeploy.
@@ -174,6 +192,7 @@ class Settings(BaseSettings):
     @field_validator(
         "AUTO_TRADE_ENABLED", "CONTEXT_CONDITIONING_LIVE",
         "SELECTION_CONDITIONING_LIVE", "CONVICTION_SIZING_LIVE", "ADAPTIVE_GATES_LIVE",
+        "SWING_EXIT_ENABLED",
         mode="before",
     )
     @classmethod
