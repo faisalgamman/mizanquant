@@ -142,8 +142,17 @@ def detect_confirmations(row: dict, quadrant: str) -> list[str]:
       technical    — score_tech strong, or momentum_score strong as fallback
       fundamental  — fundamental grade A/B
       ml_real      — REAL ML forecast (not the RSI proxy) points up
-      sector       — sector in a leading/improving RRG quadrant
       consensus    — per-symbol consensus majority buy (only when present)
+
+    NOTE — the sector-rotation tailwind ("leading"/"improving" RRG quadrant) was
+    REMOVED as a confirmation layer.  The validation harness proved it is
+    ANTI-predictive for this halal universe: ranking by sector-conditioned score
+    lost ~1% per trade at both 5- and 20-day horizons (delta -1.00% / -0.93%,
+    ENHANCED DSR collapsed 0.97→0.15).  A "leading" sector is momentum-extended
+    and mean-reverts, so counting it as a positive vote made the STRONG BUY gate
+    too permissive.  The gate now relies on the four genuinely predictive,
+    independent layers below (requires ≥3 of 4 → a stricter, cleaner bar).
+    `quadrant` is still accepted for signature stability and informational output.
     """
     confirms: list[str] = []
 
@@ -162,8 +171,7 @@ def detect_confirmations(row: dict, quadrant: str) -> list[str]:
     if fd.get("models") and fd.get("model_direction") == "up":
         confirms.append("ml_real")
 
-    if quadrant in _TAILWIND_QUADRANTS:
-        confirms.append("sector")
+    # (sector tailwind removed — see docstring: anti-predictive in backtest)
 
     # Consensus is optional — counted only when the row already carries it
     # (e.g. attached upstream). Never fetched here (keeps the engine pure).

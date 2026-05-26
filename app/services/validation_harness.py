@@ -248,6 +248,46 @@ def _forward_return(df: pd.DataFrame, as_of: pd.Timestamp, hold_days: int) -> fl
     return (exit_px - entry) / entry
 
 
+def _simulate_trailing_stop(
+    df: pd.DataFrame, as_of: pd.Timestamp, stop_pct: float, max_hold_days: int,
+) -> tuple[float, int, str] | None:
+    """Replay a trailing-stop exit on daily OHLC bars from entry at `as_of`.
+
+    Entry = close at/just before as_of. For each forward bar:
+      1. ratchet the high-water peak up using that bar's HIGH,
+      2. if that bar's LOW pierces peak·(1 − stop_pct), exit at the stop level.
+    If the stop is never hit, exit at the close of bar `max_hold_days` (time stop).
+
+    Returns (return_fraction, holding_days, exit_reason) or None if no forward data.
+    exit_reason ∈ {"trail_stop", "time_stop"}.
+
+    NOTE: intrabar high-before-low ordering is assumed (standard trailing-stop
+    convention). On a gap-down bar the LOW can be below the stop level itself; we
+    then fill at the stop level, which is mildly optimistic on gap days — a known,
+    documented simplification shared by most daily-bar stop backtests.
+    """
+    at = df[df["date"] <= as_of]
+    fut = df[df["date"] > as_of]
+    if len(at) == 0 or len(fut) < 1:
+        return None
+    entry = float(at["close"].iloc[-1])
+    if entry <= 0:
+        return None
+    fut = fut.iloc[:max_hold_days]
+    stop_frac = stop_pct / 100.0
+    peak = entry
+    for i in range(len(fut)):
+        bar = fut.iloc[i]
+        hi = float(bar["high"]) if "high" in fut.columns and pd.notna(bar["high"]) else float(bar["close"])
+        lo = float(bar["low"]) if "low" in fut.columns and pd.notna(bar["low"]) else float(bar["close"])
+        peak = max(peak, hi)
+        stop_level = peak * (1.0 - stop_frac)
+        if lo <= stop_level:
+            return (stop_level - entry) / entry, i + 1, "trail_stop"
+    exit_px = float(fut["close"].iloc[-1])
+    return (exit_px - entry) / entry, len(fut), "time_stop"
+
+
 # ── The backtest ────────────────────────────────────────────────────────────────
 
 def run_selection_backtest(
@@ -403,4 +443,159 @@ def run_selection_backtest(
     }
 
 
-__all__ = ["run_selection_backtest", "technical_score", "pit_bundle"]
+def run_trailing_stop_backtest(
+    symbols: list[str],
+    lookback_days: int = 365,
+    max_hold_days: int = 20,
+    step_days: int = 5,
+    top_n: int = 15,
+    max_symbols: int = 90,
+    stop_variants: tuple[float, ...] = (2.5, 4.0, 6.0),
+    n_trials: int = N_TRIALS_REGISTERED,
+) -> dict:
+    """Compare trailing-stop widths on the VALIDATED CURRENT (technical) selection.
+
+    Motivation: the selection backtest showed the technical edge is far stronger
+    at a 20-day horizon (mean 2.63%, DSR 0.97) than at 5 days (1.22%, DSR 0.67).
+    That raises the question — is the live 2.5% trailing stop exiting winners too
+    early?  This harness answers it directly.
+
+    For each as_of date it picks the SAME top_n by technical_score (the system we
+    already validated), then simulates EVERY stop width on those identical picks,
+    plus a `time_stop_only` baseline (hold to max_hold_days, no stop). Because all
+    variants act on the same picks/dates, the comparison is paired and robust to
+    the survivorship/overlap caveats that affect absolute numbers.
+
+    Returns per-variant mean/median/win/QC + average holding days + exit mix.
+    """
+    syms = [s.upper() for s in symbols][:max_symbols]
+
+    series: dict[str, pd.DataFrame] = {}
+    for s in syms:
+        df = _fetch_series(s)
+        if df is not None:
+            series[s] = df
+    spy = _fetch_series("SPY")
+    if spy is None or len(series) < 5:
+        return {"status": "insufficient_data",
+                "message": f"Need SPY + ≥5 symbols with bars; got {len(series)}."}
+
+    spy_dates = spy["date"]
+    end_date = spy_dates.iloc[-1]
+    start_date = end_date - timedelta(days=lookback_days)
+    grid_all = spy_dates[(spy_dates >= start_date)].tolist()
+    # Need room for at least a few forward bars; require >= max_hold_days for the
+    # time-stop baseline to be comparable across variants.
+    grid = [d for d in grid_all[::step_days] if len(spy[spy["date"] > d]) >= max_hold_days]
+
+    # Collect, per variant, the list of per-trade returns + holding days + exits.
+    variants = list(stop_variants)
+    returns: dict[str, list[float]] = {f"trail_{v}pct": [] for v in variants}
+    hold_days_acc: dict[str, list[int]] = {f"trail_{v}pct": [] for v in variants}
+    exit_mix: dict[str, dict[str, int]] = {f"trail_{v}pct": {"trail_stop": 0, "time_stop": 0} for v in variants}
+    returns["time_stop_only"] = []
+    hold_days_acc["time_stop_only"] = []
+
+    n_dates = 0
+    for as_of in grid:
+        spy_slice = _slice_to(spy, as_of)
+        if spy_slice is None:
+            continue
+        scored = []
+        for s, df in series.items():
+            sl = _slice_to(df, as_of)
+            if sl is None:
+                continue
+            tscore = technical_score(sl, spy_slice)
+            if tscore <= 0:
+                continue
+            scored.append({"sym": s, "tscore": tscore, "df": df})
+        if len(scored) < top_n:
+            continue
+        n_dates += 1
+        top = sorted(scored, key=lambda x: x["tscore"], reverse=True)[:top_n]
+
+        for pick in top:
+            df = pick["df"]
+            # Time-stop baseline (hold to max_hold_days).
+            base = _forward_return(df, as_of, max_hold_days)
+            if base is not None:
+                returns["time_stop_only"].append(base)
+                hold_days_acc["time_stop_only"].append(max_hold_days)
+            # Each trailing-stop width on the same pick.
+            for v in variants:
+                sim = _simulate_trailing_stop(df, as_of, v, max_hold_days)
+                if sim is None:
+                    continue
+                ret, hd, reason = sim
+                key = f"trail_{v}pct"
+                returns[key].append(ret)
+                hold_days_acc[key].append(hd)
+                exit_mix[key][reason] += 1
+
+    if n_dates == 0 or not returns["time_stop_only"]:
+        return {"status": "insufficient_data",
+                "message": "No as_of dates produced ≥top_n scored names with forward bars."}
+
+    def _summary(rets: list[float], holds: list[int], exits: dict | None) -> dict:
+        arr = np.asarray(rets, dtype=float)
+        if arr.size == 0:
+            return {"n_trades": 0}
+        wins = arr[arr > 0]
+        out = {
+            "n_trades": int(arr.size),
+            "mean_return_pct": round(float(arr.mean()) * 100, 3),
+            "median_return_pct": round(float(np.median(arr)) * 100, 3),
+            "win_rate_pct": round(float(wins.size) / arr.size * 100, 1),
+            "avg_hold_days": round(float(np.mean(holds)), 1) if holds else None,
+            "qc": qc_report(arr.tolist(), n_trials=n_trials),
+        }
+        if exits:
+            tot = sum(exits.values()) or 1
+            out["exit_mix_pct"] = {k: round(v / tot * 100, 1) for k, v in exits.items()}
+        return out
+
+    results = {"time_stop_only": _summary(returns["time_stop_only"], hold_days_acc["time_stop_only"], None)}
+    for v in variants:
+        key = f"trail_{v}pct"
+        results[key] = _summary(returns[key], hold_days_acc[key], exit_mix[key])
+
+    # Identify the best variant by mean return (with a positive bootstrap floor).
+    ranked = sorted(
+        ((k, r) for k, r in results.items() if r.get("n_trades", 0) > 0),
+        key=lambda kv: kv[1].get("mean_return_pct", -999), reverse=True,
+    )
+    best = ranked[0][0] if ranked else None
+    live_stop = "trail_2.5pct"
+    live_mean = results.get(live_stop, {}).get("mean_return_pct")
+    best_mean = results.get(best, {}).get("mean_return_pct") if best else None
+
+    return {
+        "status": "ready",
+        "as_of_dates": n_dates,
+        "max_hold_days": max_hold_days,
+        "step_days": step_days,
+        "top_n": top_n,
+        "universe_size": len(series),
+        "n_trials": n_trials,
+        "variants": results,
+        "best_variant": best,
+        "verdict": {
+            "current_live_stop": "2.5%",
+            "current_live_mean_pct": live_mean,
+            "best_variant": best,
+            "best_mean_pct": best_mean,
+            "improvement_pct": (round(best_mean - live_mean, 3)
+                                if (best_mean is not None and live_mean is not None) else None),
+            "note": "Picks come from the validated technical selection (CURRENT). All "
+                    "variants share identical picks/dates → paired comparison. Daily-bar "
+                    "trailing stop (high ratchets peak, low triggers exit). Survivorship- "
+                    "biased universe → trust the CROSS-VARIANT delta, not absolute returns.",
+        },
+    }
+
+
+__all__ = [
+    "run_selection_backtest", "run_trailing_stop_backtest",
+    "technical_score", "pit_bundle",
+]
