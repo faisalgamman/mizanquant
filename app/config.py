@@ -190,9 +190,9 @@ class Settings(BaseSettings):
     }
 
     @field_validator(
-        "AUTO_TRADE_ENABLED", "CONTEXT_CONDITIONING_LIVE",
+        "AUTO_TRADE_ENABLED", "LIVE_CONFIRMED", "CONTEXT_CONDITIONING_LIVE",
         "SELECTION_CONDITIONING_LIVE", "CONVICTION_SIZING_LIVE", "ADAPTIVE_GATES_LIVE",
-        "SWING_EXIT_ENABLED",
+        "SWING_EXIT_ENABLED", "KILL_SWITCH",
         mode="before",
     )
     @classmethod

@@ -332,6 +332,94 @@ async def readyz():
     )
 
 
+@app.get("/api/trading/auto-trade-status")
+async def api_auto_trade_status():
+    """Detailed diagnostic for auto-trading pipeline.
+
+    Shows every condition that must be true for a trade to execute,
+    the current scheduler state, market hours, and last-scan results.
+    Useful for debugging why auto-trading is/isn't firing.
+    """
+    import os
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.config import settings, STRATEGY_CONFIGS
+
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    is_weekday = now_et.weekday() < 5
+    market_open  = now_et.replace(hour=9,  minute=30, second=0, microsecond=0)
+    market_close = now_et.replace(hour=16, minute=0,  second=0, microsecond=0)
+    is_market_hours = is_weekday and market_open <= now_et <= market_close
+
+    # Signal scan slots (ET)
+    SIGNAL_SLOTS = [(10,30),(11,30),(12,30),(13,30),(14,30),(15,30),(16,30)]
+    next_slot = None
+    for h, m in SIGNAL_SLOTS:
+        slot_time = now_et.replace(hour=h, minute=m, second=0, microsecond=0)
+        if slot_time > now_et:
+            next_slot = slot_time.strftime("%H:%M ET")
+            break
+
+    # validate_for_live — what would fail?
+    validation_errors = settings.validate_for_live() if settings.AUTO_TRADE_ENABLED else ["AUTO_TRADE_ENABLED=False"]
+
+    # Scheduler state
+    try:
+        from app.services.scheduler import _scheduler_running, _scheduler_thread
+        sched_running = bool(_scheduler_running)
+        sched_alive   = bool(_scheduler_thread and _scheduler_thread.is_alive())
+    except Exception:
+        sched_running = sched_alive = None
+
+    # Last alerts (from alert_store if available)
+    last_alerts = []
+    try:
+        from app.services.alert_store import get_recent_alerts
+        last_alerts = get_recent_alerts(limit=5)
+    except Exception:
+        pass
+
+    # Gate checklist — every condition for a trade to fire
+    gate = {
+        "AUTO_TRADE_ENABLED":  settings.AUTO_TRADE_ENABLED,
+        "LIVE_CONFIRMED":      settings.LIVE_CONFIRMED,
+        "KILL_SWITCH_off":     not settings.KILL_SWITCH,
+        "SWING_EXIT_ENABLED":  settings.SWING_EXIT_ENABLED,
+        "is_weekday":          is_weekday,
+        "is_market_hours":     is_market_hours,
+        "scheduler_running":   sched_running,
+        "scheduler_alive":     sched_alive,
+        "strategies_configured": list(STRATEGY_CONFIGS.keys()),
+        "validation_errors":   validation_errors,
+    }
+
+    all_clear = (
+        settings.AUTO_TRADE_ENABLED
+        and settings.LIVE_CONFIRMED
+        and not settings.KILL_SWITCH
+        and sched_running
+        and not validation_errors
+    )
+
+    return {
+        "status":          "ALL_CLEAR" if all_clear else "BLOCKED",
+        "timestamp_et":    now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
+        "is_market_hours": is_market_hours,
+        "next_signal_slot": next_slot or ("after 16:30 ET" if is_weekday else "Monday 10:30 ET"),
+        "gate_checklist":  gate,
+        "last_5_alerts":   last_alerts,
+        "config": {
+            "TRADE_RISK_PCT":       settings.TRADE_RISK_PCT,
+            "MAX_OPEN_POSITIONS":   settings.MAX_OPEN_POSITIONS,
+            "MAX_POSITION_PCT":     settings.MAX_POSITION_PCT,
+            "MIN_TRADE_CONFIDENCE": settings.MIN_TRADE_CONFIDENCE,
+            "SWING_TRAIL_PCT":      settings.SWING_TRAIL_PCT,
+            "LIVE_WHITELIST":       settings.live_whitelist,
+        },
+    }
+
+
 @app.get("/api/system/status")
 async def api_system_status():
     """Comprehensive system status for operations dashboard.
