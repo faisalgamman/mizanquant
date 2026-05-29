@@ -47,6 +47,7 @@ stays small.
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -58,6 +59,12 @@ import pandas as pd
 from app.services.technical import adx, atr, bollinger_bands, ema, macd, rsi, sma, vwap
 
 logger = logging.getLogger("screener")
+
+# ── Near-miss cache (thread-safe) ──────────────────────────────────────────
+# Collected during filter_universe() and exposed via GET /api/screener/near-miss.
+# Symbols that scored 60-64 or passed every gate except the daily trend gate.
+_nm_cache: list = []
+_nm_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -273,12 +280,21 @@ def score_symbol(
     min_price: float = DEFAULT_MIN_PRICE,
     max_extension_pct: float = DEFAULT_MAX_EXTENSION_PCT,
     earnings_blackout_days: int = DEFAULT_EARNINGS_BLACKOUT_DAYS,
-    block_on_no_earnings: bool = True,
+    block_on_no_earnings: bool | None = None,
+    df: Optional[pd.DataFrame] = None,
 ) -> SymbolScore:
     """Run the per-symbol USX V4 qualifier. Returns SymbolScore with
     `passes=True` only when ALL safety filters AND score >= min_score
     are satisfied."""
-    df = _fetch_daily(symbol, period="2y")
+    # Resolve block_on_no_earnings: explicit arg > config > module default
+    if block_on_no_earnings is None:
+        try:
+            from app.config import settings as _usx_cfg
+            block_on_no_earnings = getattr(_usx_cfg, "BLOCK_ON_NO_EARNINGS", DEFAULT_BLOCK_ON_NO_EARNINGS)
+        except Exception:
+            block_on_no_earnings = DEFAULT_BLOCK_ON_NO_EARNINGS
+    if df is None:
+        df = _fetch_daily(symbol, period="2y")
     if df is None:
         return SymbolScore(symbol, 0.0, False, "no data", {})
 
@@ -304,9 +320,11 @@ def score_symbol(
 
     # --- Earnings blackout ---
     days_to_earn = _next_earnings_days(symbol)
-    if days_to_earn is None and block_on_no_earnings:
-        # Fail-safe: missing data → block
-        return SymbolScore(symbol, 0.0, False, "earnings data missing", {})
+    if days_to_earn is None:
+        if block_on_no_earnings:
+            return SymbolScore(symbol, 0.0, False, "earnings data missing", {})
+        # Data missing but config allows — warn, don't block
+        logger.debug("usx_filter: %s earnings data missing (BLOCK_ON_NO_EARNINGS=False)", symbol)
     if days_to_earn is not None and days_to_earn <= earnings_blackout_days:
         return SymbolScore(symbol, 0.0, False, f"earnings in {days_to_earn}d", {})
 
@@ -404,9 +422,19 @@ def score_symbol(
     }
 
     if not d_bull:
+        # Near-miss: trend gate only failure — collect if score is reasonable
+        if total >= 60:
+            with _nm_lock:
+                _nm_cache.append(SymbolScore(symbol, total, False,
+                    "daily not in uptrend (price>EMA21>EMA50)", dict(breakdown)))
         return SymbolScore(symbol, total, False,
                            "daily not in uptrend (price>EMA21>EMA50)", breakdown)
     if total < min_score:
+        # Near-miss: score in [60, min_score) — borderline quality
+        if 60 <= total < min_score:
+            with _nm_lock:
+                _nm_cache.append(SymbolScore(symbol, total, False,
+                    f"score {total:.0f}<{min_score:.0f}", dict(breakdown)))
         return SymbolScore(symbol, total, False,
                            f"score {total:.0f}<{min_score:.0f}", breakdown)
 
@@ -429,6 +457,17 @@ def filter_universe(
     When the regime gate is closed, returns ([], regime_report).
     """
     _market_cache.clear()
+    with _nm_lock:
+        _nm_cache.clear()
+
+    # ── Batch pre-fetch via Alpaca (10-50× faster than per-symbol yfinance) ──
+    _batched: dict = {}
+    try:
+        from app.services.market_data import fetch_alpaca_batch as _batch
+        _batched = _batch(symbols, period="2y")
+        logger.info("usx_filter: batch-prefetched %d/%d symbols", len(_batched), len(symbols))
+    except Exception as _be:
+        logger.debug("usx_filter: batch pre-fetch unavailable (%s) — per-symbol fallback", _be)
 
     regime = check_market_regime(use_cache=True)
     if not skip_regime_check and not regime.overall_ok:
@@ -439,7 +478,11 @@ def filter_universe(
 
     out: list[SymbolScore] = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(score_symbol, s, min_score): s for s in symbols}
+        _score_min = min_score
+        futures = {
+            pool.submit(score_symbol, s, _score_min, df=_batched.get(s)): s
+            for s in symbols
+        }
         for fut in as_completed(futures):
             try:
                 sc = fut.result()
@@ -457,10 +500,24 @@ def filter_universe(
     return out, regime
 
 
+def get_near_misses() -> list:
+    """Return the near-miss cache from the most recent filter_universe() call.
+
+    Entries are SymbolScore instances (or compatible dicts) for symbols that:
+      - scored 60-64 (below the min_score gate but borderline quality)
+      - passed every gate EXCEPT the daily trend gate (price>EMA21>EMA50)
+
+    The cache is cleared at the start of each filter_universe() call.
+    """
+    with _nm_lock:
+        return list(_nm_cache)
+
+
 __all__ = [
     "RegimeReport",
     "SymbolScore",
     "check_market_regime",
     "score_symbol",
     "filter_universe",
+    "get_near_misses",
 ]

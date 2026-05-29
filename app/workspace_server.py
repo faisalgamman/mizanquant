@@ -3952,6 +3952,7 @@ async def selection_backtest(
     step_days: int = Query(5, description="Days between as_of dates"),
     top_n: int = Query(15, description="Top-N picks scored per as_of date"),
     max_symbols: int = Query(80, description="Cap universe size for runtime"),
+    archetype: str = Query("usx", description="usx|pullback|breakout|reversal — detector to backtest against USX baseline"),
 ):
     """Point-in-time validation harness — paired CURRENT vs ENHANCED selection.
 
@@ -3965,7 +3966,7 @@ async def selection_backtest(
     """
     import asyncio as _asyncio
 
-    cache_key_bt = f"selection_backtest_{lookback_days}_{hold_days}_{step_days}_{top_n}_{max_symbols}"
+    cache_key_bt = f"selection_backtest_{lookback_days}_{hold_days}_{step_days}_{top_n}_{max_symbols}_{archetype}"
     cached = _cache_get(cache_key_bt, max_age=21600)  # 6 h
     if cached:
         return {**cached, "source": "cache"}
@@ -3981,6 +3982,25 @@ async def selection_backtest(
             cached_sec = _cache_get("backtest_sector_map", max_age=604800) or {}
             still = [s for s in missing if s.upper() not in cached_sec]
             if still:
+                # ── FMP DB cache (may hold profiles from prior sessions) ──────
+                try:
+                    from app.db.database import SessionLocal
+                    from app.db.models import FMPCache
+                    _db = SessionLocal()
+                    try:
+                        for s in still:
+                            row = _db.query(FMPCache).filter(
+                                FMPCache.cache_key == f"profile_{s.upper()}"
+                            ).first()
+                            if row and row.data and row.data.get("sector"):
+                                cached_sec[s.upper()] = row.data["sector"]
+                        still = [s for s in still if s.upper() not in cached_sec]
+                    finally:
+                        _db.close()
+                except Exception:
+                    pass
+            if still:
+                # ── FMP live API ────────────────────────────────────────────
                 try:
                     from app.services.fmp_client import fmp_client
                     for s in still:
@@ -3990,9 +4010,23 @@ async def selection_backtest(
                                 cached_sec[s.upper()] = prof["sector"]
                         except Exception:
                             continue
-                    _cache_set("backtest_sector_map", cached_sec)
+                    still = [s for s in still if s.upper() not in cached_sec]
                 except Exception:
                     pass
+            if still:
+                # ── yfinance fallback (small batches to avoid rate limits) ──
+                try:
+                    import yfinance as yf
+                    for s in still[:30]:
+                        try:
+                            info = yf.Ticker(s).info
+                            if info and info.get("sector"):
+                                cached_sec[s.upper()] = info["sector"]
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            _cache_set("backtest_sector_map", cached_sec)
             smap = {**cached_sec, **smap}
         return smap
 
@@ -4003,7 +4037,7 @@ async def selection_backtest(
         return run_selection_backtest(
             universe, lookback_days=lookback_days, hold_days=hold_days,
             step_days=step_days, top_n=top_n, max_symbols=max_symbols,
-            sector_map=sector_map,
+            sector_map=sector_map, archetype=archetype,
         )
 
     try:
@@ -4372,6 +4406,38 @@ async def screener_progress():
     else:
         p["pct"] = 0
     return p
+
+
+@app.get("/api/screener/near-miss")
+async def screener_near_miss():
+    """Symbols that almost passed the USX V4 filter.
+
+    Returns candidates that scored 60-64 (borderline quality) or failed
+    ONLY the daily trend gate (price>EMA21>EMA50) with otherwise clean
+    gates. Useful for watchlist expansion and catching recovering names
+    before they breach the main buy list.
+
+    Data is refreshed on each  call from the scheduler.
+    """
+    try:
+        from app.services.usx_pro_filter import get_near_misses
+        entries = get_near_misses()
+        results = []
+        for sc in entries:
+            results.append({
+                "symbol":       sc.symbol,
+                "score":        round(sc.score, 1),
+                "reason":       sc.reason,
+                "breakdown":    sc.breakdown,
+            })
+        return {
+            "status":   "ok",
+            "total":    len(results),
+            "results":  sorted(results, key=lambda r: r["score"], reverse=True),
+        }
+    except Exception as exc:
+        logger.warning("near-miss endpoint failed: %s", exc)
+        return {"status": "error", "total": 0, "results": [], "detail": str(exc)}
 
 
 # ---------------------------------------------------------------------------

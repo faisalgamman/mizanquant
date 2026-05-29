@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, Float, String, Text, DateTime, Boolean, JSON, Index,
+    Column, Integer, Float, String, Text, DateTime, Boolean, JSON, Index, ForeignKey,
 )
 from app.db.database import Base
 
@@ -204,6 +204,38 @@ class TradeHistory(Base):
     armed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow, index=True)
     closed_at = Column(DateTime, nullable=True)
+
+    agent_decision_id = Column(Integer, ForeignKey("agent_decisions.id"), nullable=True)
+    rationale = Column(Text, nullable=True)
+    snapshot = Column(JSON, nullable=True)
+    reflection = Column(Text, nullable=True)
+
+
+class AgentDecision(Base):
+    __tablename__ = "agent_decisions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    verdict = Column(String(30), nullable=False)
+    confidence = Column(Float, default=0)
+    rationale = Column(Text, nullable=True)
+    snapshot = Column(JSON, nullable=True)
+    strategy_id = Column(String(5), nullable=True, index=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+
+
+class TradingRulebook(Base):
+    __tablename__ = "trading_rulebook"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rule_text = Column(Text, nullable=False)
+    category = Column(String(20), nullable=False, default="general")
+    source_trade_id = Column(Integer, nullable=True)
+    source_decision_id = Column(Integer, nullable=True)
+    confidence = Column(Float, nullable=True)
+    activations = Column(Integer, default=0)
+    win_count = Column(Integer, default=0)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class Universe(Base):

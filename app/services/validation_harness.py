@@ -37,6 +37,7 @@ import pandas as pd
 
 from app.services.backtest_qc import qc_report
 from app.services.conviction_engine import context_multiplier, N_TRIALS_REGISTERED
+from app.services.signal_archetypes import detect_archetype, _ARCHETYPE_NAMES as _ARCH_BACKTEST_NAMES
 
 logger = logging.getLogger("screener")
 
@@ -372,6 +373,7 @@ def run_selection_backtest(
     max_symbols: int = 80,
     sector_map: dict | None = None,
     n_trials: int = N_TRIALS_REGISTERED,
+    archetype: str = "usx",
 ) -> dict:
     """Paired point-in-time backtest: CURRENT vs ENHANCED selection.
 
@@ -429,6 +431,7 @@ def run_selection_backtest(
         etf_slices = {e: d for e, d in etf_slices.items() if d is not None}
         bundle = pit_bundle(spy_slice, etf_slices)
 
+        use_archetype = archetype != "usx"
         scored = []
         for s, df in series.items():
             sl = _slice_to(df, as_of)
@@ -437,14 +440,21 @@ def run_selection_backtest(
             tscore = technical_score(sl, spy_slice)
             if tscore <= 0:
                 continue
-            mult, quad, _rank = context_multiplier(sector_map.get(s), bundle)
             fwd = _forward_return(df, as_of, hold_days)
             if fwd is None:
                 continue
+            mult, quad, _rank = context_multiplier(sector_map.get(s), bundle)
             _quad_counts[quad] = _quad_counts.get(quad, 0) + 1
             _mult_sum += mult
             _mult_n += 1
-            scored.append({"sym": s, "tscore": tscore, "enh": tscore * mult, "fwd": fwd})
+            if use_archetype:
+                # Archetype mode: ENHANCED = archetype detector score
+                arch = detect_archetype(archetype, sl, spy_slice)
+                arch_score = arch["score"] if arch else 0.0
+                enh = arch_score
+            else:
+                enh = tscore * mult
+            scored.append({"sym": s, "tscore": tscore, "enh": enh, "fwd": fwd})
 
         if len(scored) < top_n:
             continue
@@ -495,6 +505,7 @@ def run_selection_backtest(
     }
 
     return {
+        "archetype": archetype,
         "status": "ready",
         "as_of_dates": n_dates,
         "hold_days": hold_days,

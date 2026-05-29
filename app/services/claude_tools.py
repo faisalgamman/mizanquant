@@ -144,6 +144,41 @@ TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "get_deep_picks",
+        "description": "Get screener deep-picks with composite scores, conviction, RRG rotation quadrant, and multi-confirmation status for top symbols or a specific symbol.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Optional: single symbol to query. Omit for top-10 ranked."},
+                "top_n": {"type": "integer", "description": "Number of top symbols to return (default 10, max 20)"}
+            }
+        }
+    },
+    {
+        "name": "get_accuracy_report",
+        "description": "Get trailing accuracy of each signal source (technical, fundamental, ML, consensus) over the last N days. Used to weight sources dynamically.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "period_days": {"type": "integer", "description": "Lookback period in days (default 30)"}
+            }
+        }
+    },
+    {
+        "name": "record_recommendation",
+        "description": "Record the agent's trading recommendation with rationale and snapshot BEFORE execution. Call this when you recommend a BUY or STRONG BUY on a symbol.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker"},
+                "verdict": {"type": "string", "description": "BUY or STRONG BUY"},
+                "confidence": {"type": "number", "description": "Confidence 0-100"},
+                "rationale": {"type": "string", "description": "Why you recommend this trade"}
+            },
+            "required": ["symbol", "verdict", "confidence", "rationale"]
+        }
+    },
 ]
 
 
@@ -369,6 +404,78 @@ def _exec_get_risk_status() -> dict:
 
 from app.config import settings
 
+def _exec_get_deep_picks(symbol: str = None, top_n: int = 10) -> dict:
+    """Return deep-picks with composite/conviction/RRG for top symbols or a specific one."""
+    try:
+        import halal_screener as hs
+        from app.services.conviction_engine import detect_confirmations
+        results = []
+        universe = list(hs._universe_symbols())[:80]
+        # Use the screener compute path
+        enriched = []
+        for sym in (universe if symbol is None else [symbol.upper()]):
+            try:
+                row = hs.compute_one(sym) if hasattr(hs, "compute_one") else None
+                if row is None:
+                    row = hs._score_one(sym) if hasattr(hs, "_score_one") else {}
+                if not row:
+                    continue
+                confirms = detect_confirmations(row, row.get("rotation_quadrant", "unknown"))
+                enriched.append({
+                    "symbol": sym,
+                    "composite_score": row.get("composite_score"),
+                    "context_adjusted_score": row.get("context_adjusted_score"),
+                    "conviction_score": row.get("conviction_score"),
+                    "rotation_quadrant": row.get("rotation_quadrant"),
+                    "sector": row.get("sector"),
+                    "f_grade": row.get("f_grade"),
+                    "confirmations": confirms,
+                    "confirmation_count": len(confirms),
+                    "strong_buy_qualified": len(confirms) >= 3,
+                })
+            except Exception:
+                continue
+        enriched.sort(key=lambda x: x.get("composite_score") or 0, reverse=True)
+        return {"status": "ok", "count": len(enriched[:top_n]), "picks": enriched[:top_n]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def _exec_get_accuracy_report(period_days: int = 30) -> dict:
+    """Return trailing accuracy per signal source."""
+    try:
+        from app.services.signal_tracker import get_accuracy_report
+        report = get_accuracy_report(period_days)
+        return {"status": "ok", "period_days": period_days, "sources": report}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def _exec_record_recommendation(symbol: str, verdict: str,
+                                confidence: float, rationale: str) -> dict:
+    """Persist agent recommendation to AgentDecision table."""
+    try:
+        from app.db.connection import get_session
+        from app.db.models import AgentDecision
+        session = get_session()
+        try:
+            dec = AgentDecision(
+                symbol=symbol.upper(),
+                verdict=verdict.upper(),
+                confidence=confidence,
+                rationale=rationale,
+            )
+            session.add(dec)
+            session.commit()
+            dec_id = dec.id
+        finally:
+            session.close()
+        return {"status": "ok", "decision_id": dec_id,
+                "message": f"Recommendation recorded for {symbol.upper()}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 TOOL_REGISTRY: dict[str, Any] = {
     "analyze_stock": lambda **kw: _exec_analyze_stock(kw["symbol"]),
     "check_halal": lambda **kw: _exec_check_halal(kw["symbol"]),
@@ -378,6 +485,9 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_trade_history": lambda **kw: _exec_get_trade_history(kw.get("limit", 20)),
     "get_performance": lambda **kw: _exec_get_performance(),
     "get_risk_status": lambda **kw: _exec_get_risk_status(),
+    "get_deep_picks": lambda **kw: _exec_get_deep_picks(kw.get("symbol"), kw.get("top_n", 10)),
+    "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
+    "record_recommendation": lambda **kw: _exec_record_recommendation(kw["symbol"], kw["verdict"], kw["confidence"], kw["rationale"]),
 }
 
 

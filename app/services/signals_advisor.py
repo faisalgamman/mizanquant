@@ -195,8 +195,14 @@ def _format_signal(
 
     now_et = datetime.now(ZoneInfo("US/Eastern")).strftime("%Y-%m-%d %H:%M ET")
 
+    _gated = row.get("_bridge_gated", False)
+    _conf_count = len(row.get("_bridge_confirmations", []))
+    if _gated:
+        _header = f"⚠️ BUY (gated: {_conf_count}/3 confirmations)"
+    else:
+        _header = "🎯 STRONG BUY SIGNAL"
     lines = [
-        "🎯 STRONG BUY SIGNAL",
+        _header,
         "━━━━━━━━━━━━━━━",
         f"Symbol:     {symbol}",
         f"Strategy:   {strategy_label}",
@@ -282,6 +288,67 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
     """Format + send one signal (text caption with attached chart when
     available). When AUTO_TRADE_ENABLED + LIVE_CONFIRMED are both True,
     automatically executes the trade via execute_buy() after the alert."""
+    # ── Composite bridge (Chapter 3, Phase 4) ─────────────────────────────────
+    # When COMPOSITE_BRIDGE_LIVE is ON, enrich the row with fundamental/forecast
+    # layers and apply the multi-confirmation STRONG BUY gate. If < 3 independent
+    # confirmations, downgrade STRONG BUY → BUY before formatting the alert.
+    _bridge_on = False
+    try:
+        from app.config import settings as _bridge_cfg
+        _bridge_on = getattr(_bridge_cfg, "COMPOSITE_BRIDGE_LIVE", False)
+    except Exception:
+        pass
+    if _bridge_on and row.get("Verdict") == "STRONG BUY":
+        try:
+            _sym = row.get("Symbol", "")
+            # Lightweight enrichment: fetch f_grade + forecast_details
+            _enriched = dict(row)
+            if not _enriched.get("f_grade"):
+                try:
+                    from app.db.connection import get_session
+                    from app.models.fundamental import FundamentalSnapshot
+                    _session = get_session()
+                    try:
+                        _fs = _session.query(FundamentalSnapshot).filter(
+                            FundamentalSnapshot.symbol == _sym.upper()
+                        ).order_by(FundamentalSnapshot.as_of.desc()).first()
+                        if _fs and _fs.grade:
+                            _enriched["f_grade"] = _fs.grade
+                    finally:
+                        _session.close()
+                except Exception:
+                    pass
+            if not _enriched.get("forecast_details"):
+                try:
+                    import halal_screener as _hs
+                    _fkey = f"forecast_{_sym.upper()}"
+                    _fd = _hs._serve_or_compute(_fkey, lambda: _hs._predict_ensemble_lt(_sym.upper()))
+                    if _fd and isinstance(_fd, dict) and _fd.get("models"):
+                        _enriched["forecast_details"] = _fd
+                except Exception:
+                    pass
+            # Attach consensus votes from the strategy row (already present)
+            _enriched.setdefault("consensus_votes_buy", row.get("Votes BUY", 0))
+            _enriched.setdefault("consensus_votes_sell", row.get("Votes SELL", 0))
+            _enriched.setdefault("consensus_verdict", row.get("Verdict", ""))
+            # Score proxy for technical confirmation
+            _enriched.setdefault("score_tech", usx_score or 0)
+            _enriched.setdefault("momentum_score", usx_score or 0)
+
+            from app.services.conviction_engine import detect_confirmations, apply_strong_buy_gate
+            _confirms = detect_confirmations(_enriched, "unknown")
+            _conv = {"confirmations": _confirms, "confirmation_count": len(_confirms),
+                     "strong_buy_qualified": len(_confirms) >= 3}
+            _new_verdict = apply_strong_buy_gate("STRONG BUY", _conv)
+            if _new_verdict != "STRONG BUY":
+                row["Verdict"] = "BUY"
+                row["_bridge_gated"] = True
+                row["_bridge_confirmations"] = _confirms
+                logger.info("signals_advisor: composite bridge downgraded %s STRONG BUY→BUY (%d/3 confirmations: %s)",
+                            _sym, len(_confirms), ",".join(_confirms))
+        except Exception:
+            logger.debug("signals_advisor: composite bridge enrichment failed — passing through unchanged")
+
     text, levels = _format_signal(
         row, usx_score=usx_score, usx_breakdown=usx_breakdown,
         account_usd=account_usd, risk_pct=risk_pct,
@@ -305,7 +372,8 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
     gate_ok, gate_reason = market_risk_gate(symbol, price=entry or 0.0, stop_loss=sl or 0.0)
     if not gate_ok:
         logger.info("alert suppressed by Risk Desk gate: %s — %s", symbol, gate_reason)
-        record_alert(symbol, "strong_buy", signal="STRONG BUY", score=usx_score,
+        _actual_verdict = row.get("Verdict", "STRONG BUY")
+        record_alert(symbol, "strong_buy", signal=_actual_verdict, score=usx_score,
                      price=entry, stop_loss=sl, take_profit=tp1, confidence=confidence,
                      guard_passed=False, guard_reason=gate_reason, sent=False)
         return False
@@ -346,7 +414,8 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
         logger.warning("signals_advisor: telegram send failed: %s", exc)
         sent = False
 
-    record_alert(symbol, "strong_buy", signal="STRONG BUY", score=usx_score,
+    _actual_verdict = row.get("Verdict", "STRONG BUY")
+    record_alert(symbol, "strong_buy", signal=_actual_verdict, score=usx_score,
                  price=entry, stop_loss=sl, take_profit=tp1, confidence=confidence,
                  guard_passed=True, sent=sent)
 
@@ -494,6 +563,52 @@ def scan_and_notify_strong_buys(
             return summary
         candidates = cand_rows
 
+    # ── Archetype union (Chapter 3, Phase 3) ────────────────────────────────────
+    # When any archetype flag is raised, run its detector on the full universe
+    # and UNION the results with USX candidates. Each archetype runs inside
+    # _hard_gates so liquidity/price/extension floors still apply.
+    try:
+        from app.config import settings as _arch_cfg
+        _arch_flags = {
+            "pullback": getattr(_arch_cfg, "ARCHETYPE_PULLBACK_LIVE", False),
+            "breakout": getattr(_arch_cfg, "ARCHETYPE_BREAKOUT_LIVE", False),
+            "reversal": getattr(_arch_cfg, "ARCHETYPE_REVERSAL_LIVE", False),
+        }
+    except Exception:
+        _arch_flags = {}
+    _active_archs = [a for a, on in _arch_flags.items() if on]
+    if _active_archs and not skip_usx:
+        try:
+            from app.services.signal_archetypes import detect_archetype
+            from app.services.market_data import fetch_alpaca_batch
+            _arch_dfs = fetch_alpaca_batch(symbols, "2y")
+            _arch_new = []
+            for _sym in symbols:
+                _df = _arch_dfs.get(_sym)
+                if _df is None:
+                    continue
+                for _aname in _active_archs:
+                    try:
+                        _result = detect_archetype(_aname, _df)
+                        if _result and _result.get("score", 0) >= min_usx_score:
+                            _result["symbol"] = _sym
+                            _result["source"] = _aname
+                            _arch_new.append(_result)
+                    except Exception:
+                        pass
+            # UNION: add archetype candidates not already in USX list
+            _seen = {c["symbol"] for c in candidates}
+            for _ac in _arch_new:
+                if _ac["symbol"] not in _seen:
+                    candidates.append({"symbol": _ac["symbol"], "score": _ac.get("score", 0), "breakdown": {}})
+                    _seen.add(_ac["symbol"])
+            if _arch_new:
+                _added_count = sum(1 for a in _arch_new if any(c["symbol"] == a["symbol"] for c in candidates))
+                logger.info("signals_advisor: archetype union — %d candidates from %s (total=%d)",
+                            _added_count, ",".join(_active_archs), len(candidates))
+        except Exception:
+            logger.exception("signals_advisor: archetype union failed — continuing with USX-only candidates")
+
     summary["stage1_pass"] = len(candidates)
     candidate_symbols = [c["symbol"] for c in candidates]
     score_by_symbol = {c["symbol"]: c["score"] for c in candidates}
@@ -512,6 +627,109 @@ def scan_and_notify_strong_buys(
         except Exception:
             pass
         return summary
+
+    # ── Intraday confirmation (Chapter 3, Phase 5) ────────────────────────────
+    # When INTRADAY_CONFIRM_LIVE is ON, each Stage-1 candidate must also pass an
+    # intraday (15-min) momentum check before advancing to Stage 2. This turns
+    # the 7 daily scan-slots from repetitive same-day re-scans into genuine
+    # intraday breakout-capture events. Also completes gap_go archetype detection.
+    _intra_on = False
+    try:
+        from app.config import settings as _intra_cfg
+        _intra_on = getattr(_intra_cfg, "INTRADAY_CONFIRM_LIVE", False)
+    except Exception:
+        pass
+    if _intra_on and candidate_symbols:
+        try:
+            from app.services.market_data import fetch_alpaca_intraday
+            _intra_passed = []
+            _intra_blocked = 0
+            for _sym in candidate_symbols:
+                try:
+                    _idf = fetch_alpaca_intraday(_sym, "15Min", days_back=5)
+                    if _idf is None or len(_idf) < 5:
+                        _intra_blocked += 1
+                        continue
+                    _idf_close = _idf["close"].astype(float)
+                    _idf_high = _idf["high"].astype(float)
+                    # Condition 1: last 15-min close > VWAP
+                    _vwap_series = _idf[["high", "low", "close", "volume"]].pipe(
+                        lambda d: ((d["high"] + d["low"] + d["close"]) / 3 * d["volume"]).cumsum() / d["volume"].cumsum()
+                    )
+                    _above_vwap = float(_idf_close.iloc[-1]) > float(_vwap_series.iloc[-1])
+                    if not _above_vwap:
+                        _intra_blocked += 1
+                        continue
+                    # Condition 2: higher 15-min high (momentum)
+                    if len(_idf_high) >= 3:
+                        _higher_high = float(_idf_high.iloc[-1]) > float(_idf_high.iloc[-2])
+                    else:
+                        _higher_high = True
+                    if not _higher_high:
+                        _intra_blocked += 1
+                        continue
+                    # Condition 3: RVOL > 1.5 (current bar vs avg of last 20 same-slot bars)
+                    _idf_vol = _idf["volume"].astype(float)
+                    _vol_now = float(_idf_vol.iloc[-1])
+                    _vol_avg = float(_idf_vol.iloc[-21:-1].mean()) if len(_idf_vol) >= 21 else float(_idf_vol.mean())
+                    _rvol = _vol_now / _vol_avg if _vol_avg > 0 else 1.0
+                    if _rvol < 1.5:
+                        _intra_blocked += 1
+                        continue
+                    _intra_passed.append(_sym)
+                except Exception:
+                    _intra_blocked += 1
+                    continue
+            if _intra_blocked > 0:
+                logger.info("signals_advisor: intraday confirm — %d passed, %d blocked",
+                            len(_intra_passed), _intra_blocked)
+            # Also run gap_go detection on all candidates with intraday data
+            _gap_new = []
+            try:
+                from app.services.signal_archetypes import detect_gap_go
+                from app.services.market_data import fetch_alpaca_batch as _gap_fetch
+                _gap_dfs = _gap_fetch(candidate_symbols, "2y")
+                for _sym in candidate_symbols:
+                    _gdf = _gap_dfs.get(_sym)
+                    if _gdf is None:
+                        continue
+                    _gidf = fetch_alpaca_intraday(_sym, "15Min", days_back=5)
+                    if _gidf is None:
+                        continue
+                    _gr = detect_gap_go(_gdf, _gidf)
+                    if _gr and _gr.get("score", 0) >= min_usx_score:
+                        _gr["symbol"] = _sym
+                        _gr["source"] = "gap_go_intraday"
+                        _gap_new.append(_gr)
+            except Exception:
+                pass
+            # UNION gap_go candidates into the list
+            _seen_syms = set(candidate_symbols)
+            for _gc in _gap_new:
+                if _gc["symbol"] not in _seen_syms:
+                    candidate_symbols.append(_gc["symbol"])
+                    candidates.append({"symbol": _gc["symbol"], "score": _gc.get("score", 0), "breakdown": {}})
+                    _seen_syms.add(_gc["symbol"])
+                    _intra_passed.append(_gc["symbol"])
+                    score_by_symbol[_gc["symbol"]] = _gc.get("score", 0)
+            # Filter: keep only intraday-confirmed + gap_go candidates
+            candidate_symbols = [s for s in candidate_symbols if s in _intra_passed]
+            candidates = [c for c in candidates if c["symbol"] in _intra_passed]
+            summary["stage1_pass"] = len(candidates)
+            if not candidate_symbols:
+                try:
+                    from app.services.telegram_alert import send_message as tg_send
+                    if not dry_run:
+                        tg_send(
+                            "PRE-MARKET SIGNALS - Stage 1 (USX V4) passed but "
+                            "INTRADAY CONFIRM filtered all candidates. "
+                            "No further analysis."
+                        )
+                except Exception:
+                    pass
+                return summary
+        except Exception:
+            logger.exception("signals_advisor: intraday confirm failed — passing through all candidates")
 
     # ------ Stage 2: AI consensus on USX-passing candidates only ------
     for sid in strategy_ids:

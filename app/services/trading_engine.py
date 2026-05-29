@@ -347,6 +347,7 @@ def execute_buy(
     confidence: float,
     signal_details: dict,
     strategy_id: str = None,
+    agent_decision_id: int = None,
 ) -> dict:
     """Execute a BUY trade with full risk checks.
 
@@ -895,6 +896,7 @@ def _record_trade(trade_result: dict, signal_details: dict):
                 filled_qty=int(trade_result.get("filled_qty")) if trade_result.get("filled_qty") is not None else None,
                 filled_avg_price=trade_result.get("filled_avg_price"),
                 armed_at=trade_result.get("armed_at"),
+                agent_decision_id=agent_decision_id,
             )
             db.add(trade)
             db.commit()

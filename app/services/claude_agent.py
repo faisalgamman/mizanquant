@@ -24,7 +24,9 @@ logger = logging.getLogger("claude_agent")
 # System prompt
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a bilingual (Arabic & English) Islamic-finance-aware trading assistant.
+def _build_system_prompt() -> str:
+    """Build system prompt with active trading rules injected."""
+    base = """You are a bilingual (Arabic & English) Islamic-finance-aware trading assistant.
 You help users analyze US stocks, check Sharia compliance, find buy opportunities,
 and review portfolio performance.
 
@@ -49,6 +51,18 @@ HALAL SCREENING (AAOIFI):
 - No haram sectors (alcohol, gambling, pork, conventional banking/insurance)
 - Cash+Securities/Market Cap < 33%
 """
+    try:
+        from app.services.agent_reflection import get_active_rules
+        rules = get_active_rules(limit=15)
+        if rules:
+            lines = [base, "", "## Active Trading Rules (from post-trade reflection):"]
+            for r in rules:
+                conf_str = f"{r['confidence']:.0%}" if r.get('confidence') else "new"
+                lines.append(f"- [{r['category']}] {r['rule_text']} (confidence: {conf_str})")
+            return "\n".join(lines)
+    except Exception:
+        pass
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +142,7 @@ class TradingAgent:
                     self.client.messages.create,
                     model=self.model,
                     max_tokens=4096,
-                    system=SYSTEM_PROMPT,
+                    system=_build_system_prompt(),
                     tools=TOOL_SCHEMAS,
                     messages=messages,
                 )

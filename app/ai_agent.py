@@ -117,7 +117,8 @@ class AIAgent:
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
 
         if self._llm_available:
-            system_prompt = (
+            _base_prompt = (
+
                 "أنت المحلل المالي الإسلامي في منصة \"ميزان كوانت\" (mizanquant) — منصة تداول خوارزمي وفق ضوابط الشريعة الإسلامية. مهمتك هي تحليل بيانات الفرص الاستثمارية "
                 "وكتابة تقرير استثماري باللغة العربية الفصحى. يجب أن يكون التقرير "
                 "احترافياً ومفيداً للمستثمر المسلم. استخدم لغة واضحة ومنظمة."
@@ -149,7 +150,9 @@ class AIAgent:
                 "2. تحليل أفضل 3 فرص استثمارية مع الأسباب\n"
                 "3. توصية استثمارية بناءً على البيانات\n"
                 "4. نصيحة للمستثمر المسلم"
+            
             )
+            system_prompt = self._build_system_prompt(_base_prompt)
             llm_result = self._call_llm(system_prompt, user_prompt, max_tokens=2000)
             if llm_result:
                 return llm_result
@@ -230,16 +233,32 @@ class AIAgent:
     # Public API — Chat / Ask Questions (Arabic)
     # ------------------------------------------------------------------
 
+    def _build_system_prompt(self, base_prompt: str) -> str:
+        """Append active trading rules from TradingRulebook to the system prompt."""
+        try:
+            from app.services.agent_reflection import get_active_rules
+            rules = get_active_rules(limit=15)
+            if rules:
+                lines = [base_prompt, "", "## Active Trading Rules (from post-trade reflection):"]
+                for r in rules:
+                    conf_str = f"{r['confidence']:.0%}" if r.get('confidence') else "new"
+                    lines.append(f"- [{r['category']}] {r['rule_text']} (confidence: {conf_str})")
+                return "\n".join(lines)
+        except Exception:
+            pass
+        return base_prompt
+
     def ask(self, question: str, context: Optional[dict] = None) -> str:
         """Answer a user's question in Arabic using available data."""
         q = question.strip()
 
         if self._llm_available and context:
-            system_prompt = (
+            _base_prompt = (
                 "أنت مستشار \"ميزان كوانت\" (mizanquant) للاستثمار وفق الشريعة الإسلامية. أجب على أسئلة المستثمرين "
                 "باللغة العربية الفصحى. استخدم البيانات المتاحة لتقديم إجابات "
                 "دقيقة ومفيدة. إذا لم تكن متأكداً من معلومة، فقل ذلك بوضوح."
             )
+            system_prompt = self._build_system_prompt(_base_prompt)
             user_prompt = (
                 f"السؤال: {q}\n\n"
                 f"البيانات المتاحة:\n{json.dumps(context, ensure_ascii=False, default=str)[:3000]}\n\n"

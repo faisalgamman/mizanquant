@@ -120,6 +120,34 @@ class Settings(BaseSettings):
     CONVICTION_SIZING_LIVE: bool = False
     ADAPTIVE_GATES_LIVE: bool = False
 
+    # --- USX Pro V4: earnings fail-safe ---
+    # When True, symbols with missing earnings data are BLOCKED (fail-safe).
+    # When False, missing data emits a warning instead — recovers candidates
+    # dropped by unreliable yfinance earnings lookups.
+    BLOCK_ON_NO_EARNINGS: bool = True
+
+    # --- Signal archetypes (Chapter 3, Phase 3) ---
+    # Each flag enables its detector IN ADDITION to USX Pro in the live
+    # Stage-1 funnel. A flag must NEVER be raised before its paired
+    # backtest clears the acceptance gate (DSR>=0.95, permutation p<0.05,
+    # reality-check LB>0, walk-forward consistency >=3 windows).
+    ARCHETYPE_PULLBACK_LIVE: bool = False
+    ARCHETYPE_BREAKOUT_LIVE: bool = False
+    ARCHETYPE_REVERSAL_LIVE: bool = False
+
+    # --- Composite bridge (Chapter 3, Phase 4) ---
+    # When True, enriches Stage-1 candidates with fundamental/forecast/conviction
+    # layers and applies the multi-confirmation STRONG BUY gate (>=3 independent
+    # confirmations required). This reduces false positives before the existing
+    # Stage-2 AI consensus. Default OFF — raise only after validation.
+    COMPOSITE_BRIDGE_LIVE: bool = False
+
+    # --- Intraday confirmation (Chapter 3, Phase 5) ---
+    # When True, each Stage-1 candidate must also pass an intraday (15-min)
+    # confirmation check before advancing to Stage 2: close > VWAP + higher
+    # 15-min high + RVOL > 1.5. Also completes gap_go archetype detection.
+    INTRADAY_CONFIRM_LIVE: bool = False
+
     # --- Phase 5: API authentication ---
     # Required for operator/admin/trading endpoints. If left empty, those
     # endpoints fail closed and auto-trading validation will refuse to arm.
@@ -199,6 +227,10 @@ class Settings(BaseSettings):
     @field_validator(
         "AUTO_TRADE_ENABLED", "LIVE_CONFIRMED", "CONTEXT_CONDITIONING_LIVE",
         "SELECTION_CONDITIONING_LIVE", "CONVICTION_SIZING_LIVE", "ADAPTIVE_GATES_LIVE",
+        "BLOCK_ON_NO_EARNINGS",
+        "ARCHETYPE_PULLBACK_LIVE", "ARCHETYPE_BREAKOUT_LIVE", "ARCHETYPE_REVERSAL_LIVE",
+        "COMPOSITE_BRIDGE_LIVE",
+        "INTRADAY_CONFIRM_LIVE",
         "SWING_EXIT_ENABLED", "KILL_SWITCH",
         mode="before",
     )
