@@ -76,6 +76,14 @@ def _run_schema_migrations():
     tables = set(inspector.get_table_names())
     dialect_name = engine.dialect.name
 
+    # Ensure new agent_decisions table exists (FK target)
+    if "agent_decisions" not in tables and "agent_decisions" in Base.metadata.tables:
+        try:
+            Base.metadata.tables["agent_decisions"].create(bind=engine)
+            logger.info("Created agent_decisions table")
+        except Exception as exc:
+            logger.warning("Could not create agent_decisions table: %s", exc)
+
     if "trade_history" in tables:
         existing_columns = {col["name"] for col in inspector.get_columns("trade_history")}
         statements = []
@@ -89,6 +97,16 @@ def _run_schema_migrations():
             statements.append(
                 f"ALTER TABLE trade_history ADD COLUMN armed_at {_datetime_sql_type(dialect_name)}"
             )
+        # Chapter 3 / Agent Reflection layer columns
+        if "agent_decision_id" not in existing_columns:
+            statements.append("ALTER TABLE trade_history ADD COLUMN agent_decision_id INTEGER REFERENCES agent_decisions(id)")
+        if "rationale" not in existing_columns:
+            statements.append("ALTER TABLE trade_history ADD COLUMN rationale TEXT")
+        if "snapshot" not in existing_columns:
+            stype = "JSON" if dialect_name == "postgresql" else "TEXT"
+            statements.append(f"ALTER TABLE trade_history ADD COLUMN snapshot {stype}")
+        if "reflection" not in existing_columns:
+            statements.append("ALTER TABLE trade_history ADD COLUMN reflection TEXT")
         for statement in statements:
             with engine.begin() as conn:
                 conn.execute(text(statement))
