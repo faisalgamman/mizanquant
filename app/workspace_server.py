@@ -2882,11 +2882,9 @@ async def ai_models():
 
 @app.get("/assistant", include_in_schema=False)
 async def get_assistant_page():
-    """Serve the MizanAI assistant page."""
-    from fastapi.responses import FileResponse
-    import os
-    p = os.path.join(os.path.dirname(__file__), "static", "assistant.html")
-    return FileResponse(p)
+    """Redirect legacy /assistant to the new /ai-assistant (RTL, DeepSeek)."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ai-assistant", status_code=302)
 
 
 # ---------------------------------------------------------------------------
