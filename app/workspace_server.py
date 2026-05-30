@@ -867,6 +867,24 @@ from app.ai_agent import AIAgent
 from app.services.model_performance import get_all_model_performance
 ai_agent = AIAgent()
 
+# Run initial model benchmark if no performance cache exists yet
+try:
+    from app.services.model_performance import _PERF_DIR
+    if not any(_PERF_DIR.glob('*.json')):
+        import threading
+        def _run_initial_benchmark():
+            import time
+            time.sleep(15)  # let server fully start
+            try:
+                from app.services.model_performance import update_all_model_performance
+                update_all_model_performance()
+                logger.info('Initial model benchmark complete')
+            except Exception as e:
+                logger.warning('Initial benchmark failed (will retry Sunday): %s', e)
+        threading.Thread(target=_run_initial_benchmark, daemon=True).start()
+except Exception:
+    pass
+
 
 @app.get("/api/forecast/{model_name}")
 async def forecast_model(
