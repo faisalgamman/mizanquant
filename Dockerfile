@@ -7,8 +7,8 @@ COPY . .
 
 # Step 1 — CPU-only PyTorch first (no CUDA drivers → ~250 MB vs 1.9 GB for CUDA wheel).
 # Must run BEFORE requirements.txt so pip sees torch already satisfied and skips reinstall.
-RUN pip install --no-cache-dir torch \
-      --index-url https://download.pytorch.org/whl/cpu
+# DISABLED for Railway cost savings: RUN pip install --no-cache-dir torch \
+# --index-url https://download.pytorch.org/whl/cpu
 
 # Step 2 — openbb-forecast (no deps) + all other requirements
 # torch in requirements.txt is already satisfied by the CPU build above.

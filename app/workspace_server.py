@@ -7251,7 +7251,7 @@ _LEGACY_REDIRECTS: dict[str, str] = {
     "/trading":           "/terminal",
     "/trading-lab":       "/terminal",
     # "/ai-assistant":      "/assistant",  # REMOVED — v2 page is live, not a legacy redirect
-    "/analysis-lab":      "/assistant",
+    # "/analysis-lab":      "/assistant",  # REMOVED — v2 page is live, not a legacy redirect
     "/backtest":          "/terminal",
     "/etf":               "/macro",
     "/investors":         "/landing",

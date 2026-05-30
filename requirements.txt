@@ -3,7 +3,7 @@ uvicorn>=0.40.0,<0.41.0          # openbb-core 1.6.x requires uvicorn<0.41.0
 yfinance>=1.2.0,<2.0.0          # openbb-yfinance 1.6.x requires >=1.2.0
 pandas>=2.3.3,<3.0
 numpy>=2.4.2,<3.0
-torch>=2.7.0,<3.0
+# torch>=2.7.0,<3.0  # DISABLED for Railway cost savings — uncomment for local use
 xgboost>=3.2.0,<4.0
 scikit-learn>=1.8.0,<2.0
 requests>=2.32.5,<3.0

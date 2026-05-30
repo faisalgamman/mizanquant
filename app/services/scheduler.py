@@ -94,6 +94,14 @@ def _is_post_market(now):
     return _is_weekday(now) and now.hour == 16 and now.minute < 30
 
 
+def _is_active_window(now):
+    """True only during active trading window: Mon-Fri 4 AM - 8 PM ET.
+    Outside this window the scheduler sleeps deeply to save Railway costs."""
+    if not _is_weekday(now):
+        return False
+    return 4 <= now.hour < 20  # 4 AM to 8 PM ET
+
+
 def _scheduler_loop():
     """Main scheduler loop — runs forever in a background thread."""
     global _scheduler_running
@@ -109,7 +117,7 @@ def _scheduler_loop():
         f"SCHEDULER ACTIVE\n\n"
         f"Multi-strategy scanning started.\n"
         f"Strategies: {strategy_names or 'Default only'}\n"
-        f"Scans run every 30 min during market hours."
+        f"Scans run every 4 hours during active window (4 AM - 8 PM ET, Mon-Fri)."
     )
 
     last_scan_time = 0
@@ -124,17 +132,13 @@ def _scheduler_loop():
     last_pipeline_data = ""
     last_pipeline_filter = ""
     last_pipeline_full = ""
-    SCAN_INTERVAL = 1800  # 30 minutes between scans
+    SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
     SIGNALS_SLOTS = [
         (10, 30, "10:30 AM ET"),
-        (11, 30, "11:30 AM ET"),
-        (12, 30, "12:30 PM ET (midday)"),
         (13, 30, "1:30 PM ET"),
-        (14, 30, "2:30 PM ET"),
-        (15, 30, "3:30 PM ET (pre-close)"),
-        (16, 30, "4:30 PM ET (post-close)"),
+        (16, 0, "4:00 PM ET (close)"),
     ]
     last_signals_slot: dict[str, str] = {}
 
@@ -142,6 +146,12 @@ def _scheduler_loop():
         try:
             now = _get_eastern_now()
             today_str = now.strftime("%Y-%m-%d")
+
+            # --- COST OPTIMIZATION: Sleep deeply outside active window ---
+            if not _is_active_window(now):
+                # Weekends or late night: sleep 10 minutes between checks
+                time.sleep(600)
+                continue
 
             if _is_weekday(now) and now.hour == 1 and last_reference_refresh != today_str:
                 last_reference_refresh = today_str
