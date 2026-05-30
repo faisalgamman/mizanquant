@@ -416,14 +416,14 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
     <div class="consensus-wrap" id="consensusPanel">
       <div class="consensus-header">
         <div class="consensus-title">🎯 Combined Signal — <span id="csymbol">AAPL</span></div>
-        <div id="signalBadge" class="signal-badge signal-WAIT">WAIT</div>
+        <div id="signalBadge" class="signal-badge signal-WAIT">WAIT</div><span id="confidenceNote" style="font-size:10px;color:var(--txt3);margin-left:8px"></span>
       </div>
       <div style="font-size:10px;color:var(--txt3);margin:-4px 2px 10px;line-height:1.5">
-        Research view. Forecast direction is <strong>skill-weighted by real out-of-sample accuracy</strong> — coin-flip models do not move the signal. Agents with zero trades are excluded. Not investment advice; validate on the paper track record before acting.
+        Research view. <strong>FQ = Forecast Quality (not Sharpe)</strong>.  — coin-flip models do not move the signal. Agents with zero trades are excluded. Not investment advice; validate on the paper track record before acting.
       </div>
       <div class="consensus-grid">
         <div class="c-metric"><div class="c-metric-label">Overall Signal</div><div class="c-metric-val" id="csignal" style="color:var(--txt2)">—</div></div>
-        <div class="c-metric"><div class="c-metric-label" title="Avg FQ Score: (100−MAPE)/20 — not a real Sharpe ratio.">Avg Forecast FQ</div><div class="c-metric-val" id="cfc_sharpe">—</div></div>
+        <div class="c-metric"><div class="c-metric-label" title="Avg FQ Score: (100−MAPE)/20 — not a real Sharpe ratio.">Forecast Quality</div><div class="c-metric-val" id="cfc_sharpe">—</div></div>
         <div class="c-metric"><div class="c-metric-label">Avg Agent Sharpe</div><div class="c-metric-val" id="cag_sharpe">—</div></div>
         <div class="c-metric"><div class="c-metric-label">Models Bullish</div><div class="c-metric-val" id="cbullish">—</div></div>
         <div class="c-metric"><div class="c-metric-label">Models Bearish</div><div class="c-metric-val" id="cbearish">—</div></div>
@@ -663,8 +663,12 @@ function buildAgentCards() {
 }
 function buildCombinedCards() {
   // Show top 4 models + top 4 agents in combined view
-  const topM = MODELS.slice(0,8);
-  const topA = AGENTS.slice(0,8);
+  const availM = MODELS.filter(function(m){return m.available !== false});
+  const unavailM = MODELS.filter(function(m){return m.available === false});
+  const topM = availM.concat(unavailM).slice(0, 8);
+  const availA = AGENTS.filter(function(a){return a.available !== false});
+  const unavailA = AGENTS.filter(function(a){return a.available === false});
+  const topA = availA.concat(unavailA).slice(0, 8);
   document.getElementById('combinedFcGrid').innerHTML = topM.map(m => makeCard(m,'fc')).join('');
   document.getElementById('combinedAgGrid').innerHTML = topA.map(a => makeCard(a,'ag')).join('');
 }
@@ -1044,6 +1048,8 @@ function updateConsensus() {
   document.getElementById('cbullish').textContent = fcUp + agBullish;
   document.getElementById('cbearish').textContent = fcDown + agBearish;
   document.getElementById('cconfidence').textContent = conf.toFixed(0) + '%';
+  var confNoteEl = document.getElementById('confidenceNote');
+  if (confNoteEl) confNoteEl.textContent = conf === 0 && total > 0 ? '(no trade history yet)' : '';
 
   // Build consensus table
   const rows = [];
