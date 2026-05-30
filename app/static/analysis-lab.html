@@ -387,6 +387,9 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
   <div class="sec-tab" id="tab-fundamentals" onclick="switchSection('fundamentals')">
     📊 Fundamentals
   </div>
+  <div class="sec-tab" id="tab-accuracy" onclick="switchSection('accuracy')">
+    🎯 Signal Accuracy
+  </div>
 </div>
 
 <!-- ═══ CONTENT ═══ -->
@@ -506,6 +509,34 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
       </div>
 
     </div>
+
+  <!-- ─ SIGNAL ACCURACY ─ -->
+  <div class="section-panel" id="panel-accuracy">
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:14px;font-weight:700">🎯 Conviction Layer Weights &amp; Accuracy</span>
+      <span style="font-size:10px;color:var(--txt3)">last 30 days</span>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm btn-ghost" onclick="loadSignalAccuracy()">↻ Refresh</button>
+    </div>
+
+    <!-- Flags row -->
+    <div id="accFlags" style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap"></div>
+
+    <!-- Overall Health card -->
+    <div id="accHealth" style="margin-bottom:14px"></div>
+
+    <!-- Layer cards grid -->
+    <div class="card-grid" id="accGrid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))"></div>
+
+    <!-- Gate Governor card -->
+    <div id="accGate" style="margin-top:20px"></div>
+
+    <!-- Raw accuracy table (collapsible) -->
+    <details style="margin-top:20px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px">
+      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--txt2)">📋 Raw Source Accuracy (detail)</summary>
+      <div id="accRawTable" style="margin-top:8px;max-height:400px;overflow-y:auto"></div>
+    </details>
+  </div>
   </div>
 
 </div><!-- /content -->
@@ -1266,6 +1297,136 @@ async function loadDividends(sym) {
     panel.innerHTML = `<div class="fund-empty">⚠ ${e.message}</div>`;
   }
 }
+
+// ═══ SIGNAL ACCURACY ═══
+var _SOURCE_TO_LAYER = {
+  "swing":"technical","momentum":"technical","breakout":"technical",
+  "usx_pro":"technical","usx pro":"technical",
+  "fundamental":"fundamental",
+  "forecast":"ml_real","consensus":"consensus","ensemble":"ml_real",
+  "rotation":"sector","sector":"sector"
+};
+var _LAYER_LABELS = {
+  "technical":"Technical","fundamental":"Fundamental",
+  "ml_real":"ML/Real","sector":"Sector","consensus":"Consensus"
+};
+
+async function loadSignalAccuracy() {
+  var panel = document.getElementById('accGrid');
+  panel.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div>Loading signal accuracy…</div>';
+  try {
+    var d = await apiFetch('/api/analysis/signal-weights?period_days=30');
+    if (!d || d.error) { panel.innerHTML = '<div class="empty-state">⚠ '+(d&&d.error||'No data')+'</div>'; return; }
+    renderAccuracy(d);
+  } catch(e) {
+    panel.innerHTML = '<div class="empty-state">⚠ '+e.message+'</div>';
+  }
+}
+
+function renderAccuracy(d) {
+  // Flags
+  var f = d.flags || {};
+  document.getElementById('accFlags').innerHTML =
+    '<span class="badge" style="background:'+(f.conviction_sizing_live?'rgba(74,222,128,0.15)':'rgba(248,113,113,0.15)')+';color:'+(f.conviction_sizing_live?'var(--green)':'var(--red)')+';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600">CONVICTION '+(f.conviction_sizing_live?'ON':'OFF')+'</span>'+
+    '<span class="badge" style="background:'+(f.adaptive_gates_live?'rgba(74,222,128,0.15)':'rgba(248,113,113,0.15)')+';color:'+(f.adaptive_gates_live?'var(--green)':'var(--red)')+';padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600">GATES '+(f.adaptive_gates_live?'ON':'OFF')+'</span>';
+
+  // Overall Health
+  var h = d.overall_health || {};
+  var hCls = (h.win_rate_pct||0) >= 55 ? 'up' : (h.win_rate_pct||0) >= 45 ? 'neutral' : 'down';
+  document.getElementById('accHealth').innerHTML =
+    '<div class="consensus-wrap" style="margin-top:0;padding:14px 18px">'+
+    '<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">'+
+    '<div><div style="font-size:10px;color:var(--txt2);text-transform:uppercase">Overall Win Rate</div><div class="m-metric-val '+hCls+'" style="font-size:20px">'+(h.win_rate_pct!=null?h.win_rate_pct.toFixed(1)+'%':'—')+'</div></div>'+
+    '<div><div style="font-size:10px;color:var(--txt2);text-transform:uppercase">Profit Factor</div><div style="font-size:16px;font-weight:700">'+(h.profit_factor!=null?h.profit_factor.toFixed(2):'—')+'</div></div>'+
+    '<div><div style="font-size:10px;color:var(--txt2);text-transform:uppercase">Avg Return</div><div style="font-size:16px;font-weight:700;color:'+(h.avg_return_pct>=0?'var(--green)':'var(--red)')+'">'+(h.avg_return_pct!=null?(h.avg_return_pct>=0?'+':'')+h.avg_return_pct.toFixed(1)+'%':'—')+'</div></div>'+
+    '<div><div style="font-size:10px;color:var(--txt2);text-transform:uppercase">Sample</div><div style="font-size:16px;font-weight:700">'+(h.sample||0)+' signals</div></div>'+
+    '</div></div>';
+
+  // Group accuracy by layer
+  var rows = d.source_accuracy || [];
+  var layerAcc = {};
+  var layerSample = {};
+  var layerPF = {};
+  for (var i = 1; i < rows.length; i++) {  // skip OVERALL row
+    var r = rows[i];
+    var src = (r.Source||'').toLowerCase();
+    var layer = _SOURCE_TO_LAYER[src] || src;
+    if (!layerAcc[layer]) { layerAcc[layer] = []; layerSample[layer] = 0; layerPF[layer] = 0; }
+    var wr = r['Win Rate %'] || 0;
+    var pf = r['Profit Factor'] || 0;
+    var ts = r['Total Signals'] || 0;
+    layerAcc[layer].push(wr);
+    layerSample[layer] += ts;
+    layerPF[layer] = pf > layerPF[layer] ? pf : layerPF[layer];
+  }
+  // Average win rate per layer
+  var layerWR = {};
+  for (var l in layerAcc) {
+    var sum = 0;
+    for (var j = 0; j < layerAcc[l].length; j++) sum += layerAcc[l][j];
+    layerWR[l] = layerAcc[l].length ? sum / layerAcc[l].length : 0;
+  }
+
+  // Build layer cards
+  var lw = d.layer_weights || {};
+  var layers = ['technical','fundamental','ml_real','sector','consensus'];
+  var html = '';
+  for (var k = 0; k < layers.length; k++) {
+    var name = layers[k];
+    var label = _LAYER_LABELS[name] || name;
+    var w = lw[name] != null ? lw[name] : 1.0;
+    var wr = layerWR[name] || 0;
+    var sample = layerSample[name] || 0;
+    var pf = layerPF[name] || 0;
+    var cls = wr >= 55 ? 'up' : wr >= 45 ? 'neutral' : 'down';
+    var wCls = w >= 1.05 ? 'up' : w <= 0.95 ? 'down' : 'neutral';
+    html += '<div class="m-card">'+
+      '<div class="m-card-top"><div class="m-name" style="font-size:13px">'+label+'</div>'+
+      '<span class="badge" style="background:'+(w>=1.05?'rgba(74,222,128,0.15)':w<=0.95?'rgba(248,113,113,0.15)':'rgba(255,255,255,0.06)')+';color:'+(w>=1.05?'var(--green)':w<=0.95?'var(--red)':'var(--txt2)')+'">Weight: '+w.toFixed(2)+'</span></div>'+
+      '<div class="m-metrics">'+
+      '<div class="m-metric"><div class="m-metric-label">Win Rate</div><div class="m-metric-val '+cls+'">'+wr.toFixed(0)+'%</div></div>'+
+      '<div class="m-metric"><div class="m-metric-label">Sample</div><div class="m-metric-val neutral">'+sample+'</div></div>'+
+      '<div class="m-metric"><div class="m-metric-label">Best PF</div><div class="m-metric-val '+(pf>=1.5?'up':pf>=1?'neutral':'down')+'">'+pf.toFixed(2)+'</div></div>'+
+      '</div></div>';
+  }
+  document.getElementById('accGrid').innerHTML = html || '<div class="empty-state">No layer data available</div>';
+
+  // Gate Governor
+  var g = d.gate_state || {};
+  var gCls = g.tightened ? 'down' : 'up';
+  document.getElementById('accGate').innerHTML =
+    '<div class="consensus-wrap" style="margin-top:0;padding:14px 18px;border-color:'+(g.tightened?'rgba(248,113,113,0.3)':'rgba(74,222,128,0.3)')+'">'+
+    '<div style="font-size:13px;font-weight:700;margin-bottom:8px">🛡️ Adaptive Gate Governor</div>'+
+    '<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">'+
+    '<div><div style="font-size:10px;color:var(--txt2)">Status</div><div class="m-metric-val '+gCls+'" style="font-size:16px">'+(g.tightened?'🔒 TIGHTENED':'✅ NORMAL')+'</div></div>'+
+    '<div><div style="font-size:10px;color:var(--txt2)">Delta</div><div style="font-size:16px;font-weight:700">'+(g.delta||0)+' pts</div></div>'+
+    '<div><div style="font-size:10px;color:var(--txt2)">Win Rate</div><div style="font-size:16px;font-weight:700">'+(g.win_rate_pct!=null?g.win_rate_pct.toFixed(1)+'%':'—')+'</div></div>'+
+    '<div><div style="font-size:10px;color:var(--txt2)">Sample</div><div style="font-size:16px;font-weight:700">'+(g.sample||0)+'</div></div>'+
+    '<div style="flex:1;min-width:150px"><div style="font-size:10px;color:var(--txt2)">Reason</div><div style="font-size:12px;color:var(--txt2)">'+(g.reason||'—')+'</div></div>'+
+    '</div></div>';
+
+  // Raw accuracy table
+  var rawRows = d.source_accuracy || [];
+  if (rawRows.length > 1) {
+    var tbl = '<table class="consensus-table" style="margin-top:0"><thead><tr><th>Source</th><th>Signals</th><th>Win Rate</th><th>Avg Return</th><th>Avg Win</th><th>Avg Loss</th><th>PF</th></tr></thead><tbody>';
+    for (var ri = 1; ri < rawRows.length; ri++) {
+      var rr = rawRows[ri];
+      var srcLayer = _SOURCE_TO_LAYER[(rr.Source||'').toLowerCase()] || 'other';
+      tbl += '<tr><td style="font-weight:600">'+rr.Source+' <span style="font-size:9px;color:var(--txt3)">('+srcLayer+')</span></td>'+
+        '<td>'+rr['Total Signals']+'</td>'+
+        '<td style="color:'+(rr['Win Rate %']>=55?'var(--green)':rr['Win Rate %']>=45?'var(--txt)':'var(--red)')+';font-weight:700">'+rr['Win Rate %']+'%</td>'+
+        '<td style="color:'+(rr['Avg Return %']>=0?'var(--green)':'var(--red)')+'">'+(rr['Avg Return %']>=0?'+':'')+rr['Avg Return %']+'%</td>'+
+        '<td>'+rr['Avg Win %']+'%</td><td>'+rr['Avg Loss %']+'%</td><td>'+rr['Profit Factor']+'</td></tr>';
+    }
+    tbl += '</tbody></table>';
+    document.getElementById('accRawTable').innerHTML = tbl;
+  } else {
+    document.getElementById('accRawTable').innerHTML = '<div class="fund-empty">No signal accuracy data yet. Signals need 5+ days to mature.</div>';
+  }
+}
+
+// Load accuracy when tab is switched (lazy)
+var _accLoaded = false;
 
 // ═══ TOAST ═══
 var _toastTimer;

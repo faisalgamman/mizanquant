@@ -2768,6 +2768,45 @@ async def signal_lineage(correlation_id: str):
     return await asyncio.to_thread(gather_lineage, correlation_id)
 
 
+@app.get("/api/analysis/signal-weights")
+async def signal_weights_analysis(period_days: int = 30):
+    """Signal accuracy + model weights dashboard data.
+
+    Returns layer weights, per-source accuracy, overall health, and
+    adaptive gate state. Used by the Analysis Lab Signal Accuracy tab.
+    """
+    from app.services.model_weights import get_source_weights, get_overall_health, adaptive_gate_delta
+    from app.services.signal_tracker import get_accuracy_report
+    from app.config import settings
+
+    def _compute():
+        layer_weights = get_source_weights(period_days=period_days)
+        accuracy_rows = get_accuracy_report(period_days=period_days)
+        health = get_overall_health(period_days=period_days)
+        gate_delta, gate_meta = adaptive_gate_delta(period_days=period_days)
+
+        return {
+            "layer_weights": layer_weights,
+            "source_accuracy": accuracy_rows,
+            "overall_health": health,
+            "gate_state": {
+                "delta": gate_delta,
+                "applied": gate_meta.get("applied", False),
+                "tightened": gate_meta.get("tightened", False),
+                "win_rate_pct": gate_meta.get("win_rate_pct"),
+                "sample": gate_meta.get("sample", 0),
+                "reason": gate_meta.get("reason", ""),
+            },
+            "flags": {
+                "conviction_sizing_live": getattr(settings, "CONVICTION_SIZING_LIVE", False),
+                "adaptive_gates_live": getattr(settings, "ADAPTIVE_GATES_LIVE", False),
+            },
+            "period_days": period_days,
+        }
+
+    return await asyncio.to_thread(_compute)
+
+
 @app.get("/api/stock/senate-trading")
 async def stock_senate_trading(
     symbol: str = Query("", description="Stock symbol (empty = all recent trades)"),
