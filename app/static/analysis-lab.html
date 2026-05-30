@@ -621,6 +621,7 @@ function switchSection(s) {
   document.getElementById('tab-'+s).classList.add('active');
   document.getElementById('panel-'+s).classList.add('active');
   if (s === 'fundamentals') loadFundamentals();
+  if (s === 'accuracy' && !_accLoaded) { _accLoaded = true; loadSignalAccuracy(); }
 }
 
 // ═══ CARD BUILDERS ═══
