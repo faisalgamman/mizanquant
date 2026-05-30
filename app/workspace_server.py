@@ -7250,7 +7250,7 @@ _LEGACY_REDIRECTS: dict[str, str] = {
     # would shadow the data API. Navigate to /halal-screener-v2 directly for the page.
     "/trading":           "/terminal",
     "/trading-lab":       "/terminal",
-    "/ai-assistant":      "/assistant",
+    # "/ai-assistant":      "/assistant",  # REMOVED — v2 page is live, not a legacy redirect
     "/analysis-lab":      "/assistant",
     "/backtest":          "/terminal",
     "/etf":               "/macro",
