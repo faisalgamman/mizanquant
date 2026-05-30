@@ -1,402 +1,387 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MizanAI — منصة التداول الذكي</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/fontawesome/all.min.css">
-<link rel="stylesheet" href="/static/design-tokens.css">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Assistant — MizanQuant</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
-  --bg-root:        #0c0c10;
-  --bg-surface:     #14141a;
-  --bg-raised:      #1c1c26;
-  --bg-overlay:     #242430;
-  --bg:             #0c0c10;
-  --surface:        #14141a;
-  --card:           #1c1c26;
-  --bg-card:        #1c1c26;
-  --bg-hover:       #242430;
-  --surface-raised: #1c1c26;
-  --border-subtle:  rgba(255, 255, 255, 0.04);
-  --border-default: rgba(255, 255, 255, 0.06);
-  --border-strong:  rgba(255, 255, 255, 0.10);
-  --border:         rgba(255, 255, 255, 0.06);
-  --border-light:   rgba(255, 255, 255, 0.04);
-  --border-hi:      rgba(255, 255, 255, 0.10);
-  --text-primary:   #e4e4ec;
-  --text-secondary: #9494a0;
-  --text-muted:     #5c5c6a;
-  --text-disabled:  #3c3c48;
-  --text:           #e4e4ec;
-  --txt:            #e4e4ec;
-  --txt2:           #9494a0;
-  --txt3:           #5c5c6a;
-  --muted:          #5c5c6a;
-  --accent:         #c8963e;
-  --accent-hover:   #d4a853;
-  --accent-dim:     rgba(200, 150, 62, 0.10);
-  --accent-glow:    rgba(200, 150, 62, 0.18);
-  --positive:       #4ade80;
-  --positive-dim:   rgba(74, 222, 128, 0.10);
-  --negative:       #f87171;
-  --negative-dim:   rgba(248, 113, 113, 0.10);
-  --warning:        #fbbf24;
-  --warning-dim:    rgba(251, 191, 36, 0.10);
-  --info:           #60a5fa;
-  --info-dim:       rgba(96, 165, 250, 0.10);
-  --green:          #4ade80;
-  --green-dim:      rgba(74, 222, 128, 0.10);
-  --red:            #f87171;
-  --red-dim:        rgba(248, 113, 113, 0.10);
-  --yellow:         #fbbf24;
-  --amber:          #fbbf24;
-  --amber-dim:      rgba(251, 191, 36, 0.10);
-  --orange:         #fb923c;
-  --gold:           #c8963e;
-  --accent-green:   #4ade80;
-  --accent-red:     #f87171;
-  --accent-orange:  #fb923c;
-  --accent-purple:  #a78bfa;
-  --accent2:        #a78bfa;
-  --fam-transformer: #eab308;
-  --fam-rnn:         #a855f7;
-  --fam-lstm:        var(--accent);
-  --fam-cnn:         #06b6d4;
-  --fam-ensemble:    #22c55e;
-  --fam-classic:     #64748b;
-  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
-  --font-body:    system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono:    'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  --font-arabic:  'Cairo', 'Tahoma', 'Geeza Pro', system-ui, sans-serif;
-  --mono:         'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  --text-xs:   0.625rem;
-  --text-sm:   0.75rem;
-  --text-base: 0.8125rem;
-  --text-md:   0.9375rem;
-  --text-lg:   1.125rem;
-  --text-xl:   1.375rem;
-  --text-2xl:  1.625rem;
-  --radius-sm: 3px;
-  --radius-md: 5px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius:    5px;
-  --r:         5px;
-  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
-  --duration-fast:   120ms;
-  --duration-normal: 200ms;
-  --duration-slow:   350ms;
-  --sidebar-w:  56px;
-  --cmd-h:      48px;
-  --market-h:   36px;
-  --status-h:   28px;
+  --bg-deep:    #06060b;
+  --bg-main:    #0a0a12;
+  --bg-card:    #111119;
+  --bg-hover:   #181825;
+  --bg-input:   #0e0e18;
+  --border:     rgba(255,255,255,0.04);
+  --border-hi:  rgba(255,255,255,0.08);
+  --gold:       #c8963e;
+  --gold-dim:   rgba(200,150,62,0.12);
+  --gold-glow:  rgba(200,150,62,0.2);
+  --green:      #22c55e;
+  --green-dim:  rgba(34,197,94,0.1);
+  --red:        #ef4444;
+  --red-dim:    rgba(239,68,68,0.1);
+  --blue:       #3b82f6;
+  --blue-dim:   rgba(59,130,246,0.1);
+  --amber:      #f59e0b;
+  --purple:     #8b5cf6;
+  --text:       #e8e8f0;
+  --text2:      #9494a8;
+  --text3:      #5c5c72;
+  --font:       'Cairo', system-ui, sans-serif;
+  --mono:       'JetBrains Mono', monospace;
+  --radius:     8px;
+  --radius-lg:  14px;
+  --radius-xl:  20px;
+  --ease:       cubic-bezier(0.22, 0.61, 0.36, 1);
+  --transition: 200ms var(--ease);
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font: 13px/1.5 var(--font-body); background: var(--bg); color: var(--text); padding: 20px; height: 100vh; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
-.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
-.header h1 { font-size: 22px; font-weight: 600; }
-.header h1 span { color: var(--accent); }
-.refresh-btn { background: var(--accent); color: #fff; border: none; padding: 8px 20px; border-radius: var(--radius); cursor: pointer; font-size: 13px; }
-.refresh-btn:hover { opacity: .85; }
-
-/* Tab bar */
-.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.tab-btn { padding: 10px 20px; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.tab-btn:hover { color: var(--text); }
-.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-.tab-content { display: none; flex: 1; min-height: 0; }
-.tab-content.active { display: block; }
-
-/* === Report Tab === */
-.report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; height: 100%; }
-.report-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-y: auto; }
-.report-panel h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--accent); }
-.report-text { font-size: 13px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
-.report-text .empty { color: var(--muted); font-style: italic; }
-.controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-.controls select, .controls input, .controls button { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: 13px; }
-.controls button { background: var(--accent); color: #fff; cursor: pointer; border: none; }
-.controls button:hover { opacity: .85; }
-.controls button:disabled { opacity: .5; cursor: not-allowed; }
-
-/* === Chat Tab === */
-.chat-container { display: flex; flex-direction: column; height: 100%; }
-.chat-messages { flex: 1; overflow-y: auto; padding: 12px 0; display: flex; flex-direction: column; gap: 12px; }
-.chat-msg { max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 13px; line-height: 1.6; }
-.chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
-.chat-msg.assistant { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-.chat-msg .meta { font-size: 11px; color: var(--muted); margin-top: 6px; }
-.chat-msg.assistant .meta { color: var(--muted); }
-.chat-msg .llm-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--surface); margin-left: 6px; }
-.chat-input-row { display: flex; gap: 8px; margin-top: 12px; }
-.chat-input-row input { flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: 13px; }
-.chat-input-row input:focus { outline: none; border-color: var(--accent); }
-.chat-input-row button { padding: 10px 20px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); cursor: pointer; font-size: 13px; }
-.chat-input-row button:hover { opacity: .85; }
-.chat-input-row button:disabled { opacity: .5; cursor: not-allowed; }
-.suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.suggestions button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 12px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
-.suggestions button:hover { color: var(--text); border-color: var(--muted); }
-
-/* Consensus widget */
-.consensus-widget { background: var(--surface); border-radius: var(--radius); padding: 12px; margin-top: 12px; }
-.consensus-widget .header { font-size: 12px; font-weight: 500; margin-bottom: 8px; color: var(--muted); }
-.consensus-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
-.consensus-bar .up { background: var(--green); }
-.consensus-bar .down { background: var(--red); }
-.consensus-bar .neutral { background: var(--muted); }
-.consensus-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
-.consensus-row .model { color: var(--muted); }
-
-/* Loading */
-.loading { text-align: center; padding: 40px; color: var(--muted); }
-.loading .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 8px; }
+* { margin:0; padding:0; box-sizing:border-box; }
+html { font-size: 14px; }
+body {
+  font-family: var(--font);
+  background: var(--bg-deep);
+  color: var(--text);
+  min-height: 100vh;
+  direction: rtl;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(200,150,62,0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(59,130,246,0.03) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(139,92,246,0.02) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+.app { position:relative; z-index:1; max-width:1400px; margin:0 auto; padding:16px 20px; display:flex; flex-direction:column; gap:16px; min-height:100vh; }
+.top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.logo { display: flex; align-items: center; gap: 8px; }
+.logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--gold), #e8b84b);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; color: #0a0a12; font-weight: 900;
+}
+.logo-text { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.5px; }
+.logo-text span { color: var(--gold); }
+.market-strip { display: flex; gap: 4px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 4px; flex-wrap: wrap; }
+.market-chip { padding: 6px 14px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; gap: 6px; background: transparent; transition: background var(--transition); cursor: default; white-space: nowrap; }
+.market-chip:hover { background: var(--bg-hover); }
+.market-chip .label { color: var(--text3); font-size: 0.7rem; }
+.market-chip .value { color: var(--text); }
+.market-chip.positive .value { color: var(--green); }
+.market-chip.negative .value { color: var(--red); }
+.market-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+.market-chip .dot.up { background: var(--green); }
+.market-chip .dot.down { background: var(--red); }
+.market-chip .dot.neutral { background: var(--amber); }
+.nav-links { display:flex; gap:6px; }
+.nav-btn {
+  padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: transparent; color: var(--text2); cursor: pointer;
+  font-family: var(--font); font-size: 0.85rem; font-weight: 500;
+  text-decoration: none; transition: all var(--transition);
+}
+.nav-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-hi); }
+.nav-btn.primary { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 700; }
+.nav-btn.primary:hover { background: #d4a853; }
+.main-grid { display: grid; grid-template-columns: 1fr 380px; gap: 16px; flex: 1; }
+.picks-panel { display: flex; flex-direction: column; gap: 16px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.section-title { font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.section-title .icon { color: var(--gold); font-size: 1.2rem; }
+.section-badge { padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; background: var(--gold-dim); color: var(--gold); }
+.refresh-btn {
+  padding: 6px 14px; border-radius: var(--radius); background: var(--bg-card);
+  border: 1px solid var(--border); color: var(--text2); cursor: pointer;
+  font-family: var(--font); font-size: 0.8rem; font-weight: 500;
+  transition: all var(--transition); display: flex; align-items: center; gap: 6px;
+}
+.refresh-btn:hover { background: var(--bg-hover); color: var(--text); }
+.refresh-btn:disabled { opacity:0.5; cursor:not-allowed; }
+.refresh-btn .spinner { width: 14px; height: 14px; border: 2px solid var(--border-hi); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+.refresh-btn.loading .spinner { display: inline-block; }
+.refresh-btn.loading .btn-text { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* Responsive */
-@media (max-width: 768px) { .report-grid { grid-template-columns: 1fr; } }
+.picks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.pick-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px; cursor: pointer;
+  transition: all var(--transition); position: relative; overflow: hidden;
+}
+.pick-card:hover { border-color: var(--border-hi); transform: translateY(-1px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+.pick-card.featured { border-color: var(--gold); box-shadow: 0 0 20px var(--gold-glow); }
+.pick-card::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  opacity: 0; transition: opacity var(--transition);
+}
+.pick-card.featured::after { opacity: 1; }
+.pick-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.pick-symbol { font-size: 1.1rem; font-weight: 800; letter-spacing: -0.5px; }
+.pick-company { font-size: 0.75rem; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.pick-score { display: flex; align-items: center; gap: 4px; font-weight: 700; font-size: 0.9rem; }
+.score-high { color: var(--green); }
+.score-mid { color: var(--amber); }
+.score-low { color: var(--red); }
+.pick-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.metric { display: flex; flex-direction: column; gap: 2px; }
+.metric-label { font-size: 0.65rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; }
+.metric-value { font-size: 0.85rem; font-weight: 600; }
+.pick-plan { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.plan-item { flex: 1; text-align: center; padding: 6px 4px; border-radius: 8px; background: var(--bg-main); }
+.plan-label { font-size: 0.6rem; color: var(--text3); margin-bottom: 2px; }
+.plan-value { font-size: 0.8rem; font-weight: 700; font-family: var(--mono); }
+.plan-item.entry .plan-value { color: var(--blue); }
+.plan-item.stop .plan-value { color: var(--red); }
+.plan-item.target .plan-value { color: var(--green); }
+.plan-item.rr .plan-value { color: var(--gold); }
+.pick-actions { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.btn-sm {
+  flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--text2); cursor: pointer;
+  font-family: var(--font); font-size: 0.7rem; font-weight: 600;
+  transition: all var(--transition); text-align: center;
+}
+.btn-sm:hover { background: var(--bg-hover); color: var(--text); }
+.btn-sm.buy { background: var(--green-dim); color: var(--green); border-color: var(--green); }
+.btn-sm.buy:hover { background: var(--green); color: #000; }
+.empty-state { grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--text3); }
+.empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+.empty-state p { font-size: 0.9rem; }
+.chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; min-height: 250px; position: relative; }
+.chart-card canvas { width: 100% !important; height: 220px !important; }
+.chat-panel {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); display: flex; flex-direction: column;
+  height: calc(100vh - 140px); position: sticky; top: 16px;
+}
+.chat-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.chat-avatar { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--gold), #e8b84b); display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.chat-title { font-weight: 700; font-size: 0.95rem; }
+.chat-subtitle { font-size: 0.7rem; color: var(--text3); }
+.chat-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.chat-body::-webkit-scrollbar { width: 4px; }
+.chat-body::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+.msg { max-width: 90%; padding: 10px 14px; border-radius: 14px; font-size: 0.82rem; line-height: 1.6; animation: msgIn 0.3s var(--ease); }
+@keyframes msgIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+.msg.user { align-self: flex-end; background: var(--gold); color: #000; border-bottom-right-radius: 6px; font-weight: 500; }
+.msg.assistant { align-self: flex-start; background: var(--bg-main); border: 1px solid var(--border); border-bottom-left-radius: 6px; }
+.msg .ts { font-size: 0.6rem; color: var(--text3); margin-top: 4px; display: block; }
+.msg.user .ts { color: rgba(0,0,0,0.5); }
+.chat-suggestions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; flex-shrink: 0; }
+.chip { padding: 5px 12px; border-radius: 20px; background: transparent; border: 1px solid var(--border); color: var(--text2); cursor: pointer; font-family: var(--font); font-size: 0.72rem; font-weight: 500; transition: all var(--transition); white-space: nowrap; }
+.chip:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-hi); }
+.chat-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.chat-input { flex: 1; padding: 10px 14px; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 0.85rem; outline: none; transition: border var(--transition); }
+.chat-input:focus { border-color: var(--gold); }
+.chat-input::placeholder { color: var(--text3); }
+.send-btn { width: 40px; height: 40px; border-radius: 10px; background: var(--gold); border: none; color: #000; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: all var(--transition); flex-shrink: 0; }
+.send-btn:hover { background: #d4a853; }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.typing-dots { display:flex; gap:4px; padding:4px 0; }
+.typing-dots span { width:6px; height:6px; border-radius:50%; background: var(--text3); animation: bounce 1.4s infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,80%,100% { transform:scale(0.6); } 40% { transform:scale(1); } }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg-card); border: 1px solid var(--gold); padding: 12px 24px; border-radius: var(--radius-lg); font-weight: 600; font-size: 0.85rem; z-index: 100; animation: toastIn 0.3s var(--ease); box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+@keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+@media (max-width: 900px) {
+  .main-grid { grid-template-columns: 1fr; }
+  .chat-panel { height: 500px; position: static; }
+  .picks-grid { grid-template-columns: 1fr; }
+  .market-strip { overflow-x: auto; flex-wrap: nowrap; }
+}
 </style>
 </head>
 <body>
-
-<div class="header">
-  <h1><span>AI</span> Assistant</h1>
-  <a href="/" style="padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius);color:var(--muted);text-decoration:none;font-size:13px;">← Dashboard</a>
-</div>
-
-<div class="tab-bar">
-  <button class="tab-btn active" data-tab="report">Investment Report</button>
-  <button class="tab-btn" data-tab="chat">Ask AI</button>
-  <button class="tab-btn" data-tab="consensus">Model Consensus</button>
-</div>
-
-<!-- === Tab: Report === -->
-<div class="tab-content active" id="tab-report">
-  <div class="controls">
-    <select id="reportMinScore">
-      <option value="70">Min Score: 70</option>
-      <option value="60">Min Score: 60</option>
-      <option value="80">Min Score: 80</option>
-    </select>
-    <select id="reportMaxResults">
-      <option value="8">Max Results: 8</option>
-      <option value="5">Max Results: 5</option>
-      <option value="15">Max Results: 15</option>
-    </select>
-    <button onclick="loadReport()">⟳ Generate Report</button>
-  </div>
-  <div class="loading" id="loadingReport" style="display:none;">
-    <div class="spinner"></div>
-    Generating report...
-  </div>
-  <div class="report-grid" id="reportGrid" style="display:none;">
-    <div class="report-panel" id="reportContentPanel">
-      <h3>📋 AI Report</h3>
-      <div class="report-text" id="reportText">Click "Generate Report" to start</div>
+<div class="app">
+  <header class="top-bar">
+    <div class="logo">
+      <div class="logo-icon">م</div>
+      <div class="logo-text">Mizan<span>AI</span></div>
     </div>
-    <div class="report-panel">
-      <h3>📊 Top Opportunities</h3>
-      <div id="reportOpportunities"></div>
+    <div class="market-strip" id="marketStrip">
+      <div class="market-chip"><span class="label">SPY</span><span class="value">—</span></div>
+      <div class="market-chip"><span class="label">VIX</span><span class="value">—</span></div>
+      <div class="market-chip"><span class="label">النظام</span><span class="value">—</span></div>
+      <div class="market-chip"><span class="label">الانتشار</span><span class="value">—</span></div>
     </div>
-  </div>
-</div>
-
-<!-- === Tab: Chat === -->
-<div class="tab-content" id="tab-chat">
-  <div class="chat-container">
-    <div class="suggestions">
-      <button onclick="quickAsk('What is the best stock to buy right now?')">Best stock to buy?</button>
-      <button onclick="quickAsk('Analyze AAPL for halal investment')">Analyze AAPL</button>
-      <button onclick="quickAsk('What is the market outlook?')">Market outlook</button>
-      <button onclick="quickAsk('Explain the scoring system')">Scoring system</button>
+    <div class="nav-links">
+      <a href="/" class="nav-btn">📊 Dashboard</a>
+      <button class="nav-btn primary" onclick="refreshPicks()">🔄 تحديث</button>
     </div>
-    <div class="chat-messages" id="chatMessages">
-      <div class="chat-msg assistant">
-        👋 Ask me anything about stocks, halal investing, or market analysis.
-        <div class="meta">AI Assistant</div>
+  </header>
+  <div class="main-grid">
+    <div class="picks-panel">
+      <div class="section-header">
+        <div class="section-title">
+          <span class="icon">🔥</span>
+          أفضل الفرص الجاهزة للشراء
+          <span class="section-badge" id="pickCount">0</span>
+        </div>
+        <button class="refresh-btn" id="refreshBtn" onclick="refreshPicks()">
+          <span class="spinner"></span>
+          <span class="btn-text">⟳ تحديث</span>
+        </button>
       </div>
+      <div class="picks-grid" id="picksGrid">
+        <div class="empty-state"><div class="icon">📡</div><p>جاري تحميل أفضل الفرص...</p><p style="font-size:0.7rem;color:var(--text3)">يتم تحليل ~650 سهماً حلالاً</p></div>
+      </div>
+      <div class="chart-card" id="chartCard" style="display:none"><canvas id="equityChart"></canvas></div>
     </div>
-    <div class="chat-input-row">
-      <input type="text" id="chatInput" placeholder="Ask about a stock or strategy..." onkeydown="if(event.key==='Enter') sendChat()">
-      <button onclick="sendChat()">Send</button>
-    </div>
+    <aside class="chat-panel" id="chatPanel">
+      <div class="chat-header">
+        <div class="chat-avatar">🤖</div>
+        <div><div class="chat-title">MizanAI</div><div class="chat-subtitle">مساعد التداول الذكي · DeepSeek</div></div>
+      </div>
+      <div class="chat-body" id="chatBody">
+        <div class="msg assistant">👋 السلام عليكم! أنا مساعد التداول الذكي في ميزان كوانت.<br>اسألني عن أفضل الأسهم الحلال، تحليل السوق، أو المحفظة.<span class="ts">الآن</span></div>
+      </div>
+      <div class="chat-suggestions">
+        <button class="chip" onclick="quickAsk('ما هي أفضل ٣ أسهم حلال جاهزة للشراء اليوم؟')">🔥 أفضل الفرص</button>
+        <button class="chip" onclick="quickAsk('حلل سهم AAPL للاستثمار الحلال')">📊 تحليل AAPL</button>
+        <button class="chip" onclick="quickAsk('ما هي حالة السوق اليوم؟')">📈 حالة السوق</button>
+        <button class="chip" onclick="quickAsk('ملخص محفظتي الحالية')">💼 محفظتي</button>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" class="chat-input" id="chatInput" placeholder="اسأل عن الأسهم، التحليل، المحفظة..." onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChat();}">
+        <button class="send-btn" onclick="sendChat()" id="sendBtn">➤</button>
+      </div>
+    </aside>
   </div>
 </div>
-
-<!-- === Tab: Consensus === -->
-<div class="tab-content" id="tab-consensus">
-  <div class="controls">
-    <input type="text" id="consSymbol" value="AAPL" placeholder="Symbol" style="width:100px;">
-    <button onclick="loadConsensus()">⟳ Load Consensus</button>
-    <span id="consStatus" style="color:var(--muted);font-size:12px;"></span>
-  </div>
-  <div class="loading" id="loadingConsensus" style="display:none;">
-    <div class="spinner"></div>
-    Running 14-model ensemble...
-  </div>
-  <div id="consensusContent" style="display:none;">
-    <div class="consensus-widget" id="consensusWidget"></div>
-    <div class="report-panel" style="margin-top:14px;max-height:500px;overflow-y:auto;" id="consensusModels"></div>
-  </div>
-</div>
-
 <script>
 const API = '';
-
-// === Tab switching ===
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
-});
-
-async function apiGet(path) {
-  try {
-    const res = await fetch(API + path, { signal: AbortSignal.timeout(30000) });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
+let allPicks = [];
+let equityChart = null;
+async function api(path) {
+  try { const r = await fetch(API + path, { signal: AbortSignal.timeout(25000) }); if (!r.ok) return null; return await r.json(); }
+  catch { return null; }
 }
+function fmt(n) { return n != null ? (typeof n === 'number' ? n.toFixed(2) : n) : '—'; }
+function fmt$(n) { return n != null ? '$' + Number(n).toFixed(2) : '—'; }
+function pct(n) { return n != null ? (Number(n) >= 0 ? '+' : '') + Number(n).toFixed(1) + '%' : '—'; }
 
-function now() { return new Date().toISOString(); }
-function timeAgo(ts) {
-  if (!ts) return '';
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (sec < 60) return sec + 's ago';
-  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
-  return Math.floor(sec/3600) + 'h ago';
-}
-
-// === Report ===
-async function loadReport() {
-  document.getElementById('loadingReport').style.display = '';
-  document.getElementById('reportGrid').style.display = 'none';
-  const minScore = document.getElementById('reportMinScore').value;
-  const maxResults = document.getElementById('reportMaxResults').value;
-  const data = await apiGet(`/api/ai/report?min_score=${minScore}&max_results=${maxResults}&use_cache=false`);
-  document.getElementById('loadingReport').style.display = 'none';
-  if (!data) {
-    document.getElementById('reportText').textContent = 'Failed to generate report';
-    document.getElementById('reportGrid').style.display = '';
+async function refreshPicks() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('loading'); btn.disabled = true;
+  const data = await api('/api/screener/deep-picks?limit=12');
+  btn.classList.remove('loading'); btn.disabled = false;
+  if (!data || !data.results || !data.results.length) {
+    document.getElementById('picksGrid').innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>لا توجد فرص حالياً</p><p style="font-size:0.7rem;color:var(--text3)">جرب تشغيل السكانر أولاً</p></div>';
+    document.getElementById('pickCount').textContent = '0';
     return;
   }
-  document.getElementById('reportText').innerHTML = data.report ? data.report.replace(/\n/g, '<br>') : '<span class="empty">No report content available</span>';
-  document.getElementById('reportGrid').style.display = '';
-  // LLM badge
-  document.getElementById('reportContentPanel').querySelector('h3').innerHTML = `📋 AI Report ${data.llm_used ? '<span class="llm-badge" style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface);margin-left:6px;color:var(--yellow)">LLM</span>' : '<span class="llm-badge" style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface);margin-left:6px;color:var(--muted)">Proxy</span>'}`;
-  // Opportunities placeholder
-  const oppEl = document.getElementById('reportOpportunities');
-  if (data.opportunities != null) {
-    oppEl.innerHTML = `<div style="text-align:center;padding:30px;"><div style="font-size:36px;font-weight:700;color:var(--green);">${data.opportunities}</div><div style="color:var(--muted);margin-top:4px;">Opportunities Found</div></div>`;
-  } else {
-    oppEl.innerHTML = '<div class="empty-state" style="padding:20px;"><div class="icon">📊</div>No data</div>';
-  }
+  allPicks = data.results;
+  document.getElementById('pickCount').textContent = allPicks.length;
+  renderPicks(allPicks);
+  renderChart(allPicks);
 }
 
-// === Chat ===
+function renderPicks(picks) {
+  const grid = document.getElementById('picksGrid');
+  grid.innerHTML = picks.slice(0, 6).map((p, i) => {
+    const score = p.composite_score || p.smart_score || 0;
+    const scoreClass = score >= 75 ? 'score-high' : score >= 60 ? 'score-mid' : 'score-low';
+    const plan = p.trade_plan || {};
+    const isTop = i === 0;
+    return '<div class="pick-card' + (isTop ? ' featured' : '') + '" onclick="analyzePick(\'' + p.symbol + '\')">' +
+      '<div class="pick-header"><div><div class="pick-symbol">' + (p.symbol || '—') + '</div><div class="pick-company">' + (p.company || '') + '</div></div>' +
+      '<div class="pick-score ' + scoreClass + '">' + Math.round(score) + ' ⭐</div></div>' +
+      '<div class="pick-metrics">' +
+      '<div class="metric"><span class="metric-label">السعر</span><span class="metric-value">' + fmt$(p.price) + '</span></div>' +
+      '<div class="metric"><span class="metric-label">القيمة السوقية</span><span class="metric-value">' + (p.market_cap ? (p.market_cap / 1e9).toFixed(1) + 'B' : '—') + '</span></div>' +
+      '<div class="metric"><span class="metric-label">RSI</span><span class="metric-value">' + fmt((p.momentum_details || {}).rsi) + '</span></div>' +
+      '<div class="metric"><span class="metric-label">ATR%</span><span class="metric-value">' + fmt(p.atr_pct) + '%</span></div></div>' +
+      (plan.stop_pct ? '<div class="pick-plan">' +
+        '<div class="plan-item entry"><div class="plan-label">دخول</div><div class="plan-value">' + fmt$(p.price) + '</div></div>' +
+        '<div class="plan-item stop"><div class="plan-label">وقف</div><div class="plan-value">' + fmt$(plan.stop_price) + ' (-' + plan.stop_pct + '%)</div></div>' +
+        '<div class="plan-item target"><div class="plan-label">هدف</div><div class="plan-value">' + fmt$(plan.tp_price) + '</div></div>' +
+        '<div class="plan-item rr"><div class="plan-label">R:R</div><div class="plan-value">1:' + (plan.rr_ratio || 3) + '</div></div></div>' : '') +
+      '<div class="pick-actions">' +
+      '<button class="btn-sm" onclick="event.stopPropagation();quickAsk(\'حلل سهم ' + p.symbol + ' بالتفصيل\')">📊 تحليل</button>' +
+      '<button class="btn-sm buy" onclick="event.stopPropagation();quickBuy(\'' + p.symbol + '\', ' + (p.price || 0) + ')">🛒 شراء</button></div></div>';
+  }).join('');
+}
+
+function renderChart(picks) {
+  const card = document.getElementById('chartCard');
+  if (picks.length < 2) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const labels = picks.slice(0, 8).map(p => p.symbol);
+  const scores = picks.slice(0, 8).map(p => Math.round(p.composite_score || p.smart_score || 0));
+  const ctx = document.getElementById('equityChart').getContext('2d');
+  if (equityChart) equityChart.destroy();
+  equityChart = new Chart(ctx, {
+    type: 'bar', data: { labels, datasets: [{ label: 'النتيجة المركبة', data: scores,
+      backgroundColor: scores.map(s => s >= 75 ? 'rgba(200,150,62,0.7)' : s >= 60 ? 'rgba(245,158,11,0.5)' : 'rgba(239,68,68,0.3)'),
+      borderColor: scores.map(s => s >= 75 ? '#c8963e' : s >= 60 ? '#f59e0b' : '#ef4444'),
+      borderWidth: 1.5, borderRadius: 6, borderSkipped: false }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#5c5c72', font: { size: 10 } }, max: 100 },
+        y: { grid: { display: false }, ticks: { color: '#e8e8f0', font: { size: 11, weight: '600' } } } }
+    }
+  });
+}
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
-  const q = input.value.trim();
-  if (!q) return;
-  input.value = '';
-  const msgDiv = document.getElementById('chatMessages');
-  msgDiv.innerHTML += `<div class="chat-msg user">${escapeHtml(q)}<div class="meta">You</div></div>`;
-  msgDiv.scrollTop = msgDiv.scrollHeight;
-  const loadingId = 'loading-' + Date.now();
-  msgDiv.innerHTML += `<div class="chat-msg assistant" id="${loadingId}"><div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin-right:8px;"></div> Thinking...</div>`;
-  const data = await apiGet(`/api/ai/ask?question=${encodeURIComponent(q)}`);
-  document.getElementById(loadingId)?.remove();
+  const q = input.value.trim(); if (!q) return;
+  input.value = ''; input.focus();
+  const body = document.getElementById('chatBody');
+  body.innerHTML += '<div class="msg user">' + esc(q) + '<span class="ts">الآن</span></div>';
+  const typingId = 'typing-' + Date.now();
+  body.innerHTML += '<div class="msg assistant" id="' + typingId + '"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+  body.scrollTop = body.scrollHeight;
+  document.getElementById('sendBtn').disabled = true;
+  const data = await api('/api/ai/ask?question=' + encodeURIComponent(q));
+  document.getElementById(typingId)?.remove();
+  document.getElementById('sendBtn').disabled = false;
   if (!data || !data.answer) {
-    msgDiv.innerHTML += `<div class="chat-msg assistant">Sorry, I couldn't process that request.<div class="meta">AI Assistant</div></div>`;
+    body.innerHTML += '<div class="msg assistant">⚠️ عذراً، لم أستطع معالجة الطلب. حاول مرة أخرى.<span class="ts">الآن</span></div>';
   } else {
-    msgDiv.innerHTML += `<div class="chat-msg assistant">${escapeHtml(data.answer).replace(/\n/g, '<br>')}<div class="meta">AI Assistant${data.llm_used ? ' <span class="llm-badge">LLM</span>' : ' <span class="llm-badge">Proxy</span>'}</div></div>`;
+    const badge = data.llm_used ? ' 🤖 DeepSeek' : '';
+    body.innerHTML += '<div class="msg assistant">' + data.answer.replace(/\\n/g, '<br>') + '<span class="ts">الآن' + badge + '</span></div>';
   }
-  msgDiv.scrollTop = msgDiv.scrollHeight;
+  body.scrollTop = body.scrollHeight;
 }
 
-function quickAsk(q) {
-  document.getElementById('chatInput').value = q;
-  sendChat();
+function quickAsk(q) { document.getElementById('chatInput').value = q; sendChat(); }
+function analyzePick(sym) { quickAsk('حلل سهم ' + sym + ' بالتفصيل: هل هو حلال؟ ما هي نقاط الدخول والخروج؟'); }
+function quickBuy(sym, price) { showToast('✅ تم إرسال أمر شراء ' + sym + ' @ ' + fmt$(price) + ' — سيتم التأكيد عبر Telegram'); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function showToast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); }
+
+async function loadMarketContext() {
+  const data = await api('/api/v1/system/market-status');
+  if (!data) return;
+  const strip = document.getElementById('marketStrip');
+  strip.innerHTML = '<div class="market-chip"><span class="label">SPY</span><span class="value">' + (data.spy_status || data.regime || '—') + '</span><span class="dot ' + (data.spy_status === 'BULL' ? 'up' : data.spy_status === 'BEAR' ? 'down' : 'neutral') + '"></span></div>' +
+    '<div class="market-chip"><span class="label">VIX</span><span class="value">' + (data.vix || '—') + '</span></div>' +
+    '<div class="market-chip"><span class="label">النظام</span><span class="value">' + (data.regime || '—') + '</span></div>' +
+    '<div class="market-chip"><span class="label">الانتشار</span><span class="value">' + (data.breadth || '—') + '%</span></div>';
 }
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+async function init() {
+  await Promise.all([refreshPicks(), loadMarketContext()]);
+  setInterval(refreshPicks, 60000);
 }
-
-// === Consensus ===
-async function loadConsensus() {
-  const sym = document.getElementById('consSymbol').value.trim().toUpperCase() || 'AAPL';
-  document.getElementById('consStatus').textContent = 'Loading...';
-  document.getElementById('loadingConsensus').style.display = '';
-  document.getElementById('consensusContent').style.display = 'none';
-  const data = await apiGet(`/api/consensus?symbol=${sym}&accuracy_threshold=55`);
-  document.getElementById('loadingConsensus').style.display = 'none';
-  if (!data) {
-    document.getElementById('consStatus').textContent = 'Failed to load';
-    return;
-  }
-  document.getElementById('consStatus').textContent = `Updated ${timeAgo(data.timestamp || now())}`;
-  document.getElementById('consensusContent').style.display = '';
-
-  const widget = document.getElementById('consensusWidget');
-  const up = data.up_votes || 0;
-  const down = data.down_votes || 0;
-  const total = data.total_models || (up + down);
-  const neutral = total - up - down;
-  const upPct = total > 0 ? (up / total * 100) : 0;
-  const downPct = total > 0 ? (down / total * 100) : 0;
-  const neutralPct = total > 0 ? (neutral / total * 100) : 0;
-
-  widget.innerHTML = `
-    <div class="header">${sym.toUpperCase()} — ${data.recommendation || 'N/A'} (${data.confidence || '0/0'})</div>
-    <div style="font-size:24px;font-weight:700;margin-bottom:6px;" class="${(data.recommendation||'').startsWith('BUY') ? 'text-green' : (data.recommendation||'').startsWith('SELL') ? 'text-red' : ''}">${data.recommendation || 'N/A'}</div>
-    <div class="consensus-bar">
-      <div class="up" style="width:${Math.max(upPct, 2)}%"></div>
-      <div class="neutral" style="width:${Math.max(neutralPct, 2)}%"></div>
-      <div class="down" style="width:${Math.max(downPct, 2)}%"></div>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;">
-      <span style="color:var(--green)">▲ ${up} Up</span>
-      <span style="color:var(--muted)">— ${neutral} Neutral</span>
-      <span style="color:var(--red)">▼ ${down} Down</span>
-    </div>
-    <div class="consensus-row"><span>Qualified Models</span><span>${data.qualified_models || 0} / ${data.total_models || 0}</span></div>
-    <div class="consensus-row"><span>Threshold</span><span>>${data.accuracy_threshold || 55}% accuracy</span></div>
-  `;
-
-  const modelsEl = document.getElementById('consensusModels');
-  if (data.model_votes && data.model_votes.length) {
-    let html = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-      <thead><tr><th>Model</th><th>Direction</th><th>Accuracy</th><th>R²</th><th>MAPE</th></tr></thead><tbody>`;
-    for (const m of data.model_votes) {
-      const dir = (m.direction || '').toLowerCase();
-      html += `<tr>
-        <td>${m.model || '—'}</td>
-        <td class="${dir === 'up' ? 'text-green' : dir === 'down' ? 'text-red' : ''}" style="font-weight:500;">${(m.direction || '—').toUpperCase()}</td>
-        <td>${m.accuracy_pct != null ? m.accuracy_pct.toFixed(1)+'%' : '—'}</td>
-        <td>${m.r2 != null ? m.r2.toFixed(3) : '—'}</td>
-        <td>${m.mape != null ? m.mape.toFixed(2)+'%' : '—'}</td>
-      </tr>`;
-    }
-    html += '</tbody></table>';
-    modelsEl.innerHTML = html;
-  } else {
-    modelsEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);">No model votes available</div>';
-  }
-}
-
-// Load defaults
-loadConsensus();
+document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); document.getElementById('chatInput').focus(); } });
 </script>
 <script src="/static/ecosystem-strip.js" defer></script>
 <script src="/static/sidebar-nav.js" defer></script>
