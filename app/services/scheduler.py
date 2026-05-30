@@ -130,6 +130,7 @@ def _scheduler_loop():
     last_reference_refresh = ""
     last_pairs_scan = ""
     last_pipeline_data = ""
+    last_model_benchmark = ""
     last_pipeline_filter = ""
     last_pipeline_full = ""
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
@@ -196,6 +197,17 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("signal_audit", success=False, error=str(e))
                     logger.error(f"Signal audit failed: {e}")
+
+            # --- MODEL PERFORMANCE BENCHMARK: Sunday 11:00 AM ET (weekly) ---
+            if now.weekday() == 6 and now.hour == 11 and last_model_benchmark != today_str:
+                last_model_benchmark = today_str
+                logger.info("Weekly model benchmark: computing real directional accuracy...")
+                try:
+                    from app.services.model_performance import update_all_model_performance
+                    update_all_model_performance()
+                    logger.info("Model benchmark complete")
+                except Exception as e:
+                    logger.error("Model benchmark failed: %s", e)
 
             # --- WEEKLY OPTIMIZER: Sunday 10:00 AM ET (once per week) ---
             if now.weekday() == 6 and now.hour == 10 and last_optimizer != today_str:

@@ -864,6 +864,7 @@ _MODELS_DIR = Path(__file__).parent.parent / "models"
 
 # AI Agent — LLM-powered investment analyst with template fallback
 from app.ai_agent import AIAgent
+from app.services.model_performance import get_all_model_performance
 ai_agent = AIAgent()
 
 
@@ -5381,6 +5382,20 @@ async def get_info():
             "is_champion": False,
             "available": m in _RUNNABLE_MODEL_NAMES,
         })
+    # Inject real performance data from benchmark cache
+    try:
+        perf_cache = get_all_model_performance()
+        for mi in model_items:
+            p = perf_cache.get(mi["name"])
+            if p and p.get("directional_accuracy"):
+                mi["sharpe"] = p.get("sharpe")
+                mi["win_rate"] = p.get("win_rate")
+                mi["directional_accuracy"] = p.get("directional_accuracy")
+                mi["last_trained"] = p.get("last_run")
+                mi["is_champion"] = p.get("directional_accuracy", 0) >= 0.60
+    except Exception:
+        pass
+
     agent_items = []
     for a in sorted(_ALL_AGENT_NAMES):
         cat = _agent_category(a)
