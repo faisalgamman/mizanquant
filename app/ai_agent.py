@@ -1,6 +1,6 @@
 """AI Agent — LLM-powered investment analyst with template fallback.
 
-Supports OpenAI GPT-4 and Anthropic Claude via environment variables.
+Supports DeepSeek (primary), OpenAI GPT-4, and Anthropic Claude via environment variables.
 Falls back to smart template-based Arabic reports when no API key is configured.
 """
 
@@ -23,12 +23,13 @@ class AIAgent:
     """
 
     def __init__(self):
+        self.deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
         self.openai_key = os.environ.get("OPENAI_API_KEY", "")
         self.anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        self._llm_available = bool(self.openai_key or self.anthropic_key)
+        self._llm_available = bool(self.deepseek_key or self.openai_key or self.anthropic_key)
         if self._llm_available:
-            logger.info("AI Agent: LLM available (%s)",
-                        "OpenAI" if self.openai_key else "Anthropic")
+            provider = "DeepSeek" if self.deepseek_key else ("OpenAI" if self.openai_key else "Anthropic")
+            logger.info("AI Agent: LLM available (%s)", provider)
         else:
             logger.info("AI Agent: No LLM API key — using template-based reports")
 
@@ -39,6 +40,8 @@ class AIAgent:
     def _call_llm(self, system_prompt: str, user_prompt: str,
                   max_tokens: int = 1500, temperature: float = 0.7) -> Optional[str]:
         """Call configured LLM provider. Returns text or None."""
+        if self.deepseek_key:
+            return self._call_deepseek(system_prompt, user_prompt, max_tokens, temperature)
         if self.openai_key:
             return self._call_openai(system_prompt, user_prompt, max_tokens, temperature)
         if self.anthropic_key:
@@ -72,6 +75,35 @@ class AIAgent:
             return None
         except Exception as e:
             logger.warning("OpenAI call failed: %s", e)
+            return None
+
+    def _call_deepseek(self, system_prompt: str, user_prompt: str,
+                       max_tokens: int, temperature: float) -> Optional[str]:
+        try:
+            import httpx
+            resp = httpx.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.deepseek_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                },
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"]
+            logger.warning("DeepSeek API error: %s %s", resp.status_code, resp.text[:200])
+            return None
+        except Exception as e:
+            logger.warning("DeepSeek call failed: %s", e)
             return None
 
     def _call_anthropic(self, system_prompt: str, user_prompt: str,
@@ -343,5 +375,5 @@ class AIAgent:
             "- 'ما هي توقعات السوق؟'\n"
             "- 'هل سهم AAPL حلال؟'\n\n"
             "💡 **نصيحة:** للحصول على تحليل أعمق، قم بتعيين مفتاح API (OpenAI أو Anthropic) "
-            "في متغيرات البيئة."
+            "في متغيرات البيئة (DeepSeek، OpenAI، أو Anthropic)."
         )

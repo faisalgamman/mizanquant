@@ -219,8 +219,8 @@ async def optimize_parameters(n_stocks: int = 10, x_api_key: OperatorAPIKey = No
 @router.post("/agent/chat")
 async def agent_chat(payload: dict):
     from halal_screener import settings, NON_FATAL_ANALYSIS_ERROR, logger
-    if not settings.ANTHROPIC_API_KEY:
-        return {"error": "ANTHROPIC_API_KEY not configured. Add it to Railway environment variables."}
+    if not (settings.DEEPSEEK_API_KEY or settings.ANTHROPIC_API_KEY):
+        return {"error": "No LLM API key configured. Set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY in Railway environment variables."}
     message = payload.get("message", "").strip()
     if not message:
         return {"error": "Message is required"}
@@ -238,8 +238,8 @@ async def agent_chat(payload: dict):
 @router.get("/agent/analyze")
 async def agent_analyze(symbol: str = "AAPL"):
     from halal_screener import settings, NON_FATAL_ANALYSIS_ERROR, logger, validate_symbol
-    if not settings.ANTHROPIC_API_KEY:
-        return [{"Error": "ANTHROPIC_API_KEY not configured"}]
+    if not (settings.DEEPSEEK_API_KEY or settings.ANTHROPIC_API_KEY):
+        return [{"Error": "No LLM API key configured — set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY"}]
     s = validate_symbol(symbol)
     try:
         from app.services.claude_agent import get_agent
@@ -258,10 +258,13 @@ async def agent_analyze(symbol: str = "AAPL"):
 async def agent_health():
     from halal_screener import settings
     from app.services.claude_tools import TOOL_SCHEMAS
-    configured = bool(settings.ANTHROPIC_API_KEY)
-    return {"status": "ready" if configured else "not_configured", "model": settings.CLAUDE_MODEL,
-            "api_key_configured": configured, "tools_count": len(TOOL_SCHEMAS),
-            "tools": [t["name"] for t in TOOL_SCHEMAS]}
+    configured = bool(settings.DEEPSEEK_API_KEY or settings.ANTHROPIC_API_KEY)
+    provider = "deepseek" if settings.DEEPSEEK_API_KEY else ("anthropic" if settings.ANTHROPIC_API_KEY else "none")
+    model = settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY else settings.CLAUDE_MODEL
+    tools = DEEPSEEK_TOOL_SCHEMAS if settings.DEEPSEEK_API_KEY else TOOL_SCHEMAS
+    return {"status": "ready" if configured else "not_configured", "provider": provider, "model": model,
+            "api_key_configured": configured, "tools_count": len(tools),
+            "tools": [t["name"] if "name" in t else t["function"]["name"] for t in tools]}
 
 
 from pydantic import BaseModel

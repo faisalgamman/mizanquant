@@ -1,7 +1,8 @@
-"""Claude AI Trading Agent — bilingual conversational assistant.
+"""AI Trading Agent — bilingual conversational assistant.
 
-Uses Anthropic's tool-use API to orchestrate existing trading services
-(technical analysis, halal screening, consensus, portfolio, risk).
+Uses DeepSeek (primary) or Anthropic Claude (fallback) tool-use API to
+orchestrate existing trading services (technical analysis, halal screening,
+consensus, portfolio, risk).
 Read-only: the agent cannot execute trades.
 """
 
@@ -13,9 +14,10 @@ import uuid
 from typing import Optional
 
 import anthropic
+from openai import OpenAI
 
 from app.config import settings
-from app.services.claude_tools import TOOL_SCHEMAS, execute_tool
+from app.services.claude_tools import TOOL_SCHEMAS, DEEPSEEK_TOOL_SCHEMAS, execute_tool
 
 logger = logging.getLogger("claude_agent")
 
@@ -100,14 +102,32 @@ def get_or_create_conversation(conversation_id: Optional[str] = None) -> tuple[s
 # ---------------------------------------------------------------------------
 
 class TradingAgent:
-    """Claude-powered trading assistant with tool use."""
+    """AI-powered trading assistant with tool use (DeepSeek or Claude)."""
 
     def __init__(self):
-        if not settings.ANTHROPIC_API_KEY:
-            raise ValueError("ANTHROPIC_API_KEY not configured")
+        self._provider = None  # "deepseek" or "anthropic"
+        self._deepseek_client = None
+        self._anthropic_client = None
+        self._tools = None  # schema list for the active provider
 
-        self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self.model = settings.CLAUDE_MODEL
+        if settings.DEEPSEEK_API_KEY:
+            self._provider = "deepseek"
+            self._deepseek_client = OpenAI(
+                api_key=settings.DEEPSEEK_API_KEY,
+                base_url="https://api.deepseek.com/v1",
+            )
+            self._tools = DEEPSEEK_TOOL_SCHEMAS
+            self.model = settings.DEEPSEEK_MODEL
+            logger.info("TradingAgent: using DeepSeek (%s)", self.model)
+        elif settings.ANTHROPIC_API_KEY:
+            self._provider = "anthropic"
+            self._anthropic_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self._tools = TOOL_SCHEMAS
+            self.model = settings.CLAUDE_MODEL
+            logger.info("TradingAgent: using Anthropic Claude (%s)", self.model)
+        else:
+            raise ValueError("No LLM API key configured — set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY")
+
         self.max_iterations = 8  # max tool-use loop iterations
 
     async def chat(
@@ -136,16 +156,140 @@ class TradingAgent:
         while iterations < self.max_iterations:
             iterations += 1
 
-            # Call Claude (run in thread pool to not block event loop)
+            # Call LLM (run in thread pool to not block event loop)
             try:
-                response = await asyncio.to_thread(
-                    self.client.messages.create,
-                    model=self.model,
-                    max_tokens=4096,
-                    system=_build_system_prompt(),
-                    tools=TOOL_SCHEMAS,
-                    messages=messages,
-                )
+                if self._provider == "deepseek":
+                    response = await asyncio.to_thread(
+                        self._call_deepseek,
+                        messages=messages,
+                        tools=self._tools,
+                    )
+                    # DeepSeek response processing
+                    if response is None:
+                        return {
+                            "response": "DeepSeek API error — no response",
+                            "conversation_id": cid,
+                            "tools_used": tools_used,
+                            "model": self.model,
+                        }
+                    # Process DeepSeek response
+                    choice = response.choices[0]
+                    finish_reason = choice.finish_reason
+                    
+                    # Build assistant message for history
+                    assistant_msg = {"role": "assistant"}
+                    text_parts = []
+                    tool_calls = []
+                    
+                    if choice.message.content:
+                        text_parts.append(choice.message.content)
+                    if choice.message.tool_calls:
+                        for tc in choice.message.tool_calls:
+                            tool_calls.append(tc)
+                    
+                    if tool_calls:
+                        # Convert to Anthropic-style content blocks for history
+                        content_blocks = []
+                        if text_parts:
+                            content_blocks.append({"type": "text", "text": "".join(text_parts)})
+                        for tc in tool_calls:
+                            content_blocks.append({
+                                "type": "tool_use",
+                                "id": tc.id,
+                                "name": tc.function.name,
+                                "input": json.loads(tc.function.arguments),
+                            })
+                        assistant_msg["content"] = content_blocks
+                    else:
+                        assistant_msg["content"] = choice.message.content or ""
+                    
+                    messages.append(assistant_msg)
+                    
+                    # Check if done
+                    if finish_reason == "stop":
+                        return {
+                            "response": choice.message.content or "",
+                            "conversation_id": cid,
+                            "tools_used": tools_used,
+                            "model": self.model,
+                        }
+                    
+                    # Process tool calls
+                    if finish_reason == "tool_calls":
+                        tool_results = []
+                        for tc in tool_calls:
+                            tool_name = tc.function.name
+                            tool_input = json.loads(tc.function.arguments)
+                            
+                            logger.info(f"Agent calling tool: {tool_name}({tool_input})")
+                            tools_used.append(tool_name)
+                            
+                            result_str = await asyncio.to_thread(
+                                execute_tool, tool_name, tool_input
+                            )
+                            
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": tc.id,
+                                "content": result_str,
+                            })
+                        
+                        messages.append({"role": "user", "content": tool_results})
+                    else:
+                        break
+                        
+                else:  # anthropic
+                    response = await asyncio.to_thread(
+                        self._anthropic_client.messages.create,
+                        model=self.model,
+                        max_tokens=4096,
+                        system=_build_system_prompt(),
+                        tools=TOOL_SCHEMAS,
+                        messages=messages,
+                    )
+                    
+                    # Append assistant response to history
+                    messages.append({"role": "assistant", "content": response.content})
+                    
+                    # Check if Claude is done
+                    if response.stop_reason == "end_turn":
+                        text_parts = []
+                        for block in response.content:
+                            if block.type == "text":
+                                text_parts.append(block.text)
+                        return {
+                            "response": "\n".join(text_parts),
+                            "conversation_id": cid,
+                            "tools_used": tools_used,
+                            "model": self.model,
+                        }
+                    
+                    # Process tool calls
+                    if response.stop_reason == "tool_use":
+                        tool_results = []
+                        for block in response.content:
+                            if block.type == "tool_use":
+                                tool_name = block.name
+                                tool_input = block.input
+                                tool_use_id = block.id
+                                
+                                logger.info(f"Agent calling tool: {tool_name}({tool_input})")
+                                tools_used.append(tool_name)
+                                
+                                result_str = await asyncio.to_thread(
+                                    execute_tool, tool_name, tool_input
+                                )
+                                
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": result_str,
+                                })
+                        
+                        messages.append({"role": "user", "content": tool_results})
+                    else:
+                        break
+                        
             except anthropic.APIError as e:
                 logger.error(f"Claude API error: {e}")
                 return {
@@ -213,6 +357,55 @@ class TradingAgent:
             "tools_used": tools_used,
             "model": self.model,
         }
+
+
+    def _call_deepseek(self, messages: list, tools: list):
+        """Call DeepSeek API with tool definitions."""
+        system_msg = _build_system_prompt()
+        # Inject system prompt as first message
+        api_messages = [{"role": "system", "content": system_msg}]
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if isinstance(content, list):
+                # Flatten tool results / mixed content
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "tool_result":
+                            text_parts.append(block.get("content", ""))
+                        elif block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "tool_use":
+                            # Convert Anthropic tool_use to OpenAI assistant with tool_calls
+                            api_messages.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{
+                                    "id": block.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": block.get("name", ""),
+                                        "arguments": json.dumps(block.get("input", {})),
+                                    }
+                                }]
+                            })
+                            # Then add tool result
+                            continue
+                    else:
+                        text_parts.append(str(block))
+                content = "\n".join(text_parts)
+                if not content.strip():
+                    continue
+            api_messages.append({"role": role, "content": content})
+        
+        return self._deepseek_client.chat.completions.create(
+            model=self.model,
+            messages=api_messages,
+            tools=tools,
+            max_tokens=4096,
+            temperature=0.7,
+        )
 
 
 # ---------------------------------------------------------------------------

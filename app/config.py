@@ -330,7 +330,7 @@ class Settings(BaseSettings):
             "ALPACA_API_KEY_A", "ALPACA_SECRET_KEY_A",
             "ALPACA_API_KEY_B", "ALPACA_SECRET_KEY_B",
             "ALPACA_API_KEY_C", "ALPACA_SECRET_KEY_C",
-            "FMP_API_KEY", "TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "API_KEY",
+            "FMP_API_KEY", "TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "API_KEY",
         }
         out: dict = {}
         for k, v in self.model_dump().items():

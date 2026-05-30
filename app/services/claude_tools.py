@@ -11,6 +11,26 @@ from typing import Any
 logger = logging.getLogger("claude_tools")
 
 
+def _to_openai_tools(anthropic_schemas: list) -> list:
+    """Convert Anthropic-format tool schemas to OpenAI/DeepSeek format."""
+    openai_tools = []
+    for s in anthropic_schemas:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": s["name"],
+                "description": s.get("description", ""),
+                "parameters": s.get("input_schema", {"type": "object", "properties": {}}),
+            }
+        })
+    return openai_tools
+
+
+# OpenAI-compatible tool schemas (DeepSeek / Groq / etc.)
+DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
+
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas (Anthropic format)
 # ---------------------------------------------------------------------------
