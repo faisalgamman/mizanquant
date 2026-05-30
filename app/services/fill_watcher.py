@@ -123,7 +123,7 @@ def _watcher_loop():
             _poll_once()
         except Exception as exc:
             logger.error("Fill watcher poll failed: %s", exc, exc_info=True)
-        time.sleep(5)
+        time.sleep(20)
 
 
 def start_fill_watcher():
