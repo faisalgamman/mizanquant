@@ -2884,7 +2884,7 @@ async def ai_models():
 async def get_assistant_page():
     """Redirect legacy /assistant to the new /ai-assistant (RTL, DeepSeek)."""
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/ai-assistant", status_code=302)
+    return RedirectResponse(url="/mizan-ai", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -7226,6 +7226,15 @@ async def get_ai_assistant_page():
     if p.exists():
         return HTMLResponse(content=p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>AI Assistant not found</h1>", status_code=404)
+
+
+@app.get("/mizan-ai", include_in_schema=False)
+async def get_mizan_ai_page():
+    """Fresh route for MizanAI RTL design — no cached 301 conflict."""
+    p = Path(__file__).resolve().parent / "static" / "ai-assistant.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Not found</h1>", status_code=404)
 
 
 @app.get("/backtest", include_in_schema=False)
