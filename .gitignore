@@ -1,5 +1,10 @@
 .env
 .env.live
+*.pt
+*.pkl
+*.h5
+*.onnx
+model_checkpoints/
 __pycache__/
 *.pyc
 *.db
