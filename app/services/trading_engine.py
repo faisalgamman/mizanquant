@@ -60,6 +60,36 @@ def _finite_round(value: float | None, digits: int = 2) -> float | None:
     return round(numeric, digits)
 
 
+def _retry_http(
+    url: str,
+    method: str = "GET",
+    *,
+    headers: dict | None = None,
+    json: dict | None = None,
+    params: dict | None = None,
+    timeout: int = 10,
+    retries: int = 3,
+    strategy_id: str | None = None,
+) -> httpx.Response | None:
+    """HTTP call with exponential backoff retry (1s, 2s, 4s)."""
+    sid = f"[{strategy_id}] " if strategy_id else ""
+    for attempt in range(1, retries + 1):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                resp = client.request(method, url, headers=headers, json=json, params=params)
+                return resp
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            logger.warning(f"{sid}HTTP {method} {url} attempt {attempt}/{retries} failed: {e}")
+            if attempt < retries:
+                time.sleep(2 ** (attempt - 1))
+            else:
+                logger.error(f"{sid}HTTP {method} {url} exhausted {retries} retries")
+                return None
+        except httpx.HTTPError as e:
+            logger.error(f"{sid}HTTP {method} {url} non-retryable error: {e}")
+            return None
+
+
 _PENDING_ORDER_STATUSES = (
     "submitted",
     "armed",
@@ -142,44 +172,35 @@ def _submit_order(order_payload: dict, strategy_id: str = None) -> Optional[dict
     coid = order_payload["client_order_id"]
 
     try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.post(url, headers=headers, json=order_payload)
-            if resp.status_code in (200, 201):
-                order = resp.json()
-                logger.info(
-                    f"{sid}Order submitted: broker_id={order.get('id')} coid={coid} "
-                    f"{order_payload.get('symbol')} {order_payload.get('side')} "
-                    f"{order_payload.get('qty')} shares"
-                )
-                return order
-            # 422 + "client_order_id already exists" means the order was
-            # already accepted on a previous attempt — look it up and return it.
-            duplicate_text = resp.text.lower()
-            if (
-                resp.status_code == 422
-                and "already exists" in duplicate_text
-                and "client_order_id" in duplicate_text
-            ):
-                logger.warning(
-                    f"{sid}Order with coid={coid} already exists on broker — "
-                    f"fetching existing order instead of re-submitting."
-                )
-                existing = _get_order_by_client_id(coid, strategy_id)
-                if existing:
-                    return existing
-            logger.error(
-                f"{sid}Order rejected ({resp.status_code}) coid={coid}: {resp.text[:300]}"
-            )
+        resp = _retry_http(url, "POST", headers=headers, json=order_payload, timeout=15, strategy_id=strategy_id)
+        if resp is None:
             return None
-    except httpx.TimeoutException as e:
+        if resp.status_code in (200, 201):
+            order = resp.json()
+            logger.info(
+                f"{sid}Order submitted: broker_id={order.get('id')} coid={coid} "
+                f"{order_payload.get('symbol')} {order_payload.get('side')} "
+                f"{order_payload.get('qty')} shares"
+            )
+            return order
+        # 422 + "client_order_id already exists" means the order was
+        # already accepted on a previous attempt — look it up and return it.
+        duplicate_text = resp.text.lower()
+        if (
+            resp.status_code == 422
+            and "already exists" in duplicate_text
+            and "client_order_id" in duplicate_text
+        ):
+            logger.warning(
+                f"{sid}Order with coid={coid} already exists on broker — "
+                f"fetching existing order instead of re-submitting."
+            )
+            existing = _get_order_by_client_id(coid, strategy_id)
+            if existing:
+                return existing
         logger.error(
-            f"{sid}Order submission TIMEOUT coid={coid}: {e}. "
-            f"Broker state unknown — reconciliation job will resolve on next scan.",
-            exc_info=True,
+            f"{sid}Order rejected ({resp.status_code}) coid={coid}: {resp.text[:300]}"
         )
-        return None
-    except httpx.HTTPError as e:
-        logger.error(f"{sid}Order submission HTTP error coid={coid}: {e}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"{sid}Order submission unexpected error coid={coid}: {e}", exc_info=True)
@@ -233,51 +254,34 @@ def _get_order_by_client_id(client_order_id: str, strategy_id: str = None) -> Op
     """Look up an order by its client_order_id. Used for idempotent retries."""
     base = _get_base_url()
     url = f"{base}/v2/orders:by_client_order_id"
-    try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.get(
-                url,
-                headers=_get_headers(strategy_id),
-                params={"client_order_id": client_order_id},
-            )
-            if resp.status_code == 200:
-                return resp.json()
-            return None
-    except Exception as e:
-        logger.warning(f"Could not look up order by coid={client_order_id}: {e}")
+    resp = _retry_http(url, "GET", headers=_get_headers(strategy_id), params={"client_order_id": client_order_id}, strategy_id=strategy_id)
+    if resp is None:
         return None
+    if resp.status_code == 200:
+        return resp.json()
+    return None
 
 
 def _get_order(order_id: str, strategy_id: str = None) -> Optional[dict]:
     """Fetch a broker order by id with nested legs when available."""
     base = _get_base_url()
     url = f"{base}/v2/orders/{order_id}"
-    try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.get(
-                url,
-                headers=_get_headers(strategy_id),
-                params={"nested": "true"},
-            )
-            if resp.status_code == 200:
-                return resp.json()
-            return None
-    except Exception as e:
-        logger.warning(f"Could not fetch order {order_id}: {e}")
+    resp = _retry_http(url, "GET", headers=_get_headers(strategy_id), params={"nested": "true"}, strategy_id=strategy_id)
+    if resp is None:
         return None
+    if resp.status_code == 200:
+        return resp.json()
+    return None
 
 
 def _cancel_order(order_id: str, strategy_id: str = None) -> bool:
     """Cancel a pending order."""
     base = _get_base_url()
     url = f"{base}/v2/orders/{order_id}"
-    try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.delete(url, headers=_get_headers(strategy_id))
-            return resp.status_code in (200, 204)
-    except Exception as e:
-        logger.error(f"Cancel order error: {e}")
+    resp = _retry_http(url, "DELETE", headers=_get_headers(strategy_id), strategy_id=strategy_id)
+    if resp is None:
         return False
+    return resp.status_code in (200, 204)
 
 
 def _close_position(symbol: str, strategy_id: str = None) -> Optional[dict]:
@@ -285,18 +289,15 @@ def _close_position(symbol: str, strategy_id: str = None) -> Optional[dict]:
     base = _get_base_url()
     url = f"{base}/v2/positions/{symbol}"
     sid = f"[{strategy_id}] " if strategy_id else ""
-    try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.delete(url, headers=_get_headers(strategy_id))
-            if resp.status_code == 200:
-                data = resp.json()
-                logger.info(f"{sid}Position closed: {symbol}")
-                return data
-            else:
-                logger.error(f"{sid}Close position failed ({resp.status_code}): {resp.text[:200]}")
-                return None
-    except Exception as e:
-        logger.error(f"{sid}Close position error for {symbol}: {e}")
+    resp = _retry_http(url, "DELETE", headers=_get_headers(strategy_id), timeout=15, strategy_id=strategy_id)
+    if resp is None:
+        return None
+    if resp.status_code == 200:
+        data = resp.json()
+        logger.info(f"{sid}Position closed: {symbol}")
+        return data
+    else:
+        logger.error(f"{sid}Close position failed ({resp.status_code}): {resp.text[:200]}")
         return None
 
 
