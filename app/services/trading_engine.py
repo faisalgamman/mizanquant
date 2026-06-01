@@ -484,6 +484,26 @@ def execute_buy(
                 sizing["qty"] = qty
                 sizing["note"] = "Portfolio stop warning: sizing halved"
 
+        # ── 2A.5: GARCH volatility regime sizing ─────────────────────────
+        # Scale position by the stock's current vol regime (low→larger,
+        # high→smaller). Shadow mode: adjustment is surfaced in
+        # sizing["garch_vol_regime"] and sizing["garch_vol_shadow_qty"];
+        # applied to live qty only when GARCH_SIZING_LIVE=True.
+        sizing["garch_vol_regime"] = "unknown"
+        sizing["garch_vol_shadow_qty"] = qty
+        try:
+            from app.services.garch_volatility import garch_vol_multiplier
+            garch_mult = garch_vol_multiplier(symbol)
+            sizing["garch_vol_regime"] = "applied" if garch_mult != 1.0 else "medium"
+            garch_qty = max(1, int(qty * garch_mult))
+            sizing["garch_vol_shadow_qty"] = garch_qty
+            if getattr(settings, "GARCH_SIZING_LIVE", False):
+                qty = garch_qty
+                sizing["qty"] = qty
+                sizing["note"] = (sizing.get("note", "") + " | GARCH adjusted").strip(" | ")
+        except Exception as _garch_exc:
+            logger.debug("garch_vol: skipped for %s — %s", symbol, _garch_exc)
+
         # ── 2A: Pre-trade execution cost estimation + illiquidity gate ──────
         # Store decision_price NOW so fill_watcher can compute TCA later
         # (fill_watcher._apply_fill_metrics overwrites entry_price with the

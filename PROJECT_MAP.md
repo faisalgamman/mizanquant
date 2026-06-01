@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-05-15 (M1-M6 complete, M7 done, A-Pre done, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-01 (M8: GARCH(1,1) model added) (M1-M6 complete, M7 done, A-Pre done, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
@@ -162,6 +162,14 @@ openbb-trading/
 
 ---
 
+## RECENT ADDITIONS (GARCH Volatility)
+
+| # | Feature | Files | Status |
+|---|---------|-------|--------|
+| **M8** | GARCH(1,1) volatility model with shadow-mode sizing | app/services/garch_volatility.py (new), app/services/trading_engine.py (additive) | ✅ Done |
+
+---
+
 ## ORPHANS & PENDING
 
 | Item | Status | Location | Action Required |
@@ -195,4 +203,5 @@ openbb-trading/
 | **M4** | Merge copilot into main app | `POST /v1/query` streaming endpoint on main FastAPI; `copilot.py` removed | ✅ Done (commit pending) |
 | **M5** | Clean orphans | `keep_alive.py` → `app/services/`, `russell1000_halal.py` → `app/data/` | ✅ Done |
 | **M6** | Activate IBKR | IB Gateway Docker on Railway (paper, port 4002), `BROKER_TYPE=ibkr`, `/api/ibkr/ping` → `ok` | ✅ Done |
+| **M8** | GARCH(1,1) volatility model | app/services/garch_volatility.py, GARCH integration in execute_buy() | ✅ Done |
 | **M7** | OpenBB Workspace Integration | Custom backend at `app/workspace_server.py` serving 40 widgets (19 models + 19 agents + MC + metrics) with OpenBB Platform extension registration | ✅ Done |
