@@ -190,3 +190,34 @@ def qc_report(
         "permutation_pvalue": permutation_pvalue(returns),
         "bootstrap_lower_5pct": reality_check_lower_bound(returns),
     }
+
+def bayesian_qc_report(
+    returns: list[float],
+    n_trials: int = 0,
+    risk_free: float = 0.0,
+) -> dict:
+    """Quality-control report with Bayesian Sharpe instead of point estimate.
+
+    Wraps the existing qc_report() and adds Bayesian posterior summaries
+    including credible intervals and P(Sharpe > 1).
+
+    Parameters
+    ----------
+    returns : list[float]
+        Per-period returns (daily recommended).
+    n_trials : int
+        Number of strategies tested — for deflated Sharpe (0 = skip).
+    risk_free : float
+        Per-period risk-free rate.
+
+    Returns
+    -------
+    dict — standard qc_report + bayesian key.
+    """
+    from app.services.bayesian_sharpe import bayesian_sharpe
+
+    base = qc_report(returns, n_trials)
+    bayes = bayesian_sharpe(returns, risk_free=risk_free)
+
+    base["bayesian"] = bayes
+    return base

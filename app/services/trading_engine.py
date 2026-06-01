@@ -484,6 +484,27 @@ def execute_buy(
                 sizing["qty"] = qty
                 sizing["note"] = "Portfolio stop warning: sizing halved"
 
+        # ── 2A.4: Kalman filter signal-quality sizing ────────────────────
+        # Kalman-denoised vs raw volatility ratio. Higher noise reduction
+        # = cleaner signal = slightly larger position warranted.
+        sizing["kalman_noise_ratio"] = 1.0
+        sizing["kalman_multiplier"] = 1.0
+        try:
+            from app.services.kalman_filter import get_kalman_adjustment
+            kalman_mult = get_kalman_adjustment(symbol)
+            sizing["kalman_multiplier"] = kalman_mult
+            if kalman_mult != 1.0:
+                kalman_qty = max(1, int(qty * kalman_mult))
+                if getattr(settings, "KALMAN_SIZING_LIVE", False):
+                    qty = kalman_qty
+                    sizing["qty"] = qty
+                    sizing["note"] = (sizing.get("note", "") + " | Kalman adjusted").strip(" | ")
+                else:
+                    sizing["kalman_shadow_qty"] = kalman_qty
+        except Exception as _kal_exc:
+            logger.debug("kalman_filter: skipped for %s — %s", symbol, _kal_exc)
+
+
         # ── 2A.5: GARCH volatility regime sizing ─────────────────────────
         # Scale position by the stock's current vol regime (low→larger,
         # high→smaller). Shadow mode: adjustment is surfaced in

@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-06-01 (M13: Model Explainability (SHAP)) (M1-M12 complete, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M13 complete, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
@@ -172,6 +172,7 @@ openbb-trading/
 | **M11** | News sentiment engine — VADER + analyst consensus | app/services/sentiment_engine.py (new), app/services/trading_engine.py (additive), app/workspace_server.py (delegated) | ✅ Done |
 | **M12** | Strategy simulation sandbox with full sizing cascade | app/services/strategy_simulator.py (new), app/workspace_server.py (endpoint) | ✅ Done |
 | **M13** | Model explainability — ensemble attribution + SHAP-ready | app/services/model_explainer.py (new), app/workspace_server.py (endpoint) | ✅ Done |
+| **M14** | Kalman filter denoising + Bayesian Sharpe ratio | app/services/kalman_filter.py, app/services/bayesian_sharpe.py, app/services/backtest_qc.py (new) | ✅ Done |
 
 ---
 
@@ -215,3 +216,4 @@ openbb-trading/
 | **M11** | News Sentiment Engine | app/services/sentiment_engine.py — VADER news + analyst consensus scoring, shadow-mode integration in execute_buy() | ✅ Done |
 | **M12** | Strategy Simulation Sandbox | app/services/strategy_simulator.py — historical what-if with full sizing cascade (GARCH/Cov/MR/Sentiment), /api/simulate/strategy endpoint | ✅ Done |
 | **M13** | Model Explainability (SHAP) | app/services/model_explainer.py — ensemble attribution now, SHAP TreeExplainer ready for future XGBoost/sklearn models | ✅ Done |
+| **M14** | Kalman Filter + Bayesian Sharpe | app/services/kalman_filter.py — signal denoising, app/services/bayesian_sharpe.py — full posterior with credible intervals | ✅ Done |
