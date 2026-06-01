@@ -4078,6 +4078,50 @@ async def exit_structure_backtest(
         _cache_set(cache_key_es, report)
     return report
 
+@app.get("/api/simulate/strategy")
+async def simulate_strategy_endpoint(
+    symbol: str = Query("AAPL", description="Ticker to simulate"),
+    start_date: str = Query("2024-01-01", description="Start date ISO"),
+    end_date: str = Query(None, description="End date ISO (default: today)"),
+    strategy_id: str = Query("A", description="Strategy A/B/C"),
+    capital: float = Query(10000.0, description="Starting capital USD"),
+    risk_pct: float = Query(0.02, description="Risk per trade (0.02 = 2%)"),
+    stop_pct: float = Query(0.05, description="Stop-loss distance (0.05 = 5%)"),
+    tp_pct: float = Query(0.10, description="Take-profit distance (0.10 = 10%)"),
+    garch: bool = Query(False, description="Enable GARCH vol sizing layer"),
+    covariance: bool = Query(False, description="Enable portfolio covariance layer"),
+    mr_quality: bool = Query(False, description="Enable mean-reversion quality layer"),
+    sentiment: bool = Query(False, description="Enable news sentiment layer"),
+):
+    """Strategy simulation sandbox - what-if on historical data.
+
+    Runs the EXACT same sizing cascade as live execute_buy() on
+    historical OHLCV data. No broker, no DB writes - pure what-if.
+    """
+    from app.services.strategy_simulator import simulate_strategy
+
+    sizing_layers = {}
+    if garch:
+        sizing_layers["garch"] = True
+    if covariance:
+        sizing_layers["covariance"] = True
+        sizing_layers["strategy_id"] = strategy_id
+    if mr_quality:
+        sizing_layers["mr_quality"] = True
+    if sentiment:
+        sizing_layers["sentiment"] = True
+
+    return simulate_strategy(
+        symbol=symbol.upper(),
+        start_date=start_date,
+        end_date=end_date,
+        strategy_id=strategy_id,
+        capital=capital,
+        risk_pct=risk_pct,
+        stop_pct=stop_pct,
+        tp_pct=tp_pct,
+        sizing_layers=sizing_layers if sizing_layers else None,
+    )
 
 @app.get("/api/diagnose/data-sources")
 async def diagnose_data_sources(
