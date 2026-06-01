@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-06-01 (M9: Portfolio Covariance Matrix) (M1-M8 complete, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-01 (M10: Mean Reversion OU Utility) (M1-M9 complete, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
@@ -168,6 +168,7 @@ openbb-trading/
 |---|---------|-------|--------|
 | **M8** | GARCH(1,1) volatility model with shadow-mode sizing | app/services/garch_volatility.py (new), app/services/trading_engine.py (additive) | ✅ Done |
 | **M9** | Portfolio covariance-based capital allocation | app/services/portfolio_optimizer.py (new), app/services/trading_engine.py (additive) | ✅ Done |
+| **M10** | Mean-reversion OU utility with quality scoring | app/services/mean_reversion_util.py (new), app/services/trading_engine.py (additive) | ✅ Done |
 
 ---
 
@@ -207,3 +208,4 @@ openbb-trading/
 | **M8** | GARCH(1,1) volatility model | app/services/garch_volatility.py, GARCH integration in execute_buy() | ✅ Done |
 | **M7** | OpenBB Workspace Integration | Custom backend at `app/workspace_server.py` serving 40 widgets (19 models + 19 agents + MC + metrics) with OpenBB Platform extension registration | ✅ Done |
 | **M9** | Portfolio Covariance Matrix | app/services/portfolio_optimizer.py — Kelly-optimal portfolio weights via Cov^-1 x mu, shadow-mode integration in execute_buy() | ✅ Done |
+| **M10** | Mean Reversion OU Utility | app/services/mean_reversion_util.py — OU parameter estimation, mr_quality_score(), shadow-mode integration in execute_buy() | ✅ Done |

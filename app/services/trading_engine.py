@@ -524,6 +524,26 @@ def execute_buy(
         except Exception as _cov_exc:
             logger.debug("portfolio_cov: skipped for %s — %s", symbol, _cov_exc)
 
+        # ── 2A.7: Mean-reversion quality sizing ──────────────────────────
+        # Amplify position when the symbol exhibits strong mean-reversion
+        # (short half-life / high OU theta); shrink when it is a random walk.
+        sizing["mr_quality_score"] = 0.5
+        sizing["mr_multiplier"] = 1.0
+        try:
+            from app.services.mean_reversion_util import get_mr_multiplier
+            mr_mult = get_mr_multiplier(symbol)
+            sizing["mr_multiplier"] = mr_mult
+            if mr_mult != 1.0:
+                mr_qty = max(1, int(qty * mr_mult))
+                if getattr(settings, "MR_QUALITY_SIZING_LIVE", False):
+                    qty = mr_qty
+                    sizing["qty"] = qty
+                    sizing["note"] = (sizing.get("note", "") + " | MR quality adjusted").strip(" | ")
+                else:
+                    sizing["mr_shadow_qty"] = mr_qty
+        except Exception as _mr_exc:
+            logger.debug("mr_util: skipped for %s — %s", symbol, _mr_exc)
+
         # ── 2A: Pre-trade execution cost estimation + illiquidity gate ──────
         # Store decision_price NOW so fill_watcher can compute TCA later
         # (fill_watcher._apply_fill_metrics overwrites entry_price with the
