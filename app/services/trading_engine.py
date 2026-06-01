@@ -504,6 +504,26 @@ def execute_buy(
         except Exception as _garch_exc:
             logger.debug("garch_vol: skipped for %s — %s", symbol, _garch_exc)
 
+        # ── 2A.6: Portfolio covariance-based capital allocation ──────────
+        # Adjust position size based on Kelly-optimal portfolio weights.
+        # Strategies with excessive covariance get reduced; under-represented
+        # strategies get increased (capped at 1.5×). Shadow mode by default.
+        sizing["portfolio_cov_weight"] = 1.0
+        try:
+            from app.services.portfolio_optimizer import get_strategy_multiplier
+            cov_mult = get_strategy_multiplier(strategy_id)
+            if cov_mult != 1.0:
+                sizing["portfolio_cov_weight"] = round(cov_mult, 4)
+                cov_qty = max(1, int(qty * cov_mult))
+                if getattr(settings, "PORTFOLIO_COV_SIZING_LIVE", False):
+                    qty = cov_qty
+                    sizing["qty"] = qty
+                    sizing["note"] = (sizing.get("note", "") + " | Portfolio cov adjusted").strip(" | ")
+                else:
+                    sizing["portfolio_cov_shadow_qty"] = cov_qty
+        except Exception as _cov_exc:
+            logger.debug("portfolio_cov: skipped for %s — %s", symbol, _cov_exc)
+
         # ── 2A: Pre-trade execution cost estimation + illiquidity gate ──────
         # Store decision_price NOW so fill_watcher can compute TCA later
         # (fill_watcher._apply_fill_metrics overwrites entry_price with the

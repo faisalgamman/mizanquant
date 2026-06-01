@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-06-01 (M8: GARCH(1,1) model added) (M1-M6 complete, M7 done, A-Pre done, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-01 (M9: Portfolio Covariance Matrix) (M1-M8 complete, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
@@ -162,11 +162,12 @@ openbb-trading/
 
 ---
 
-## RECENT ADDITIONS (GARCH Volatility)
+## RECENT ADDITIONS
 
 | # | Feature | Files | Status |
 |---|---------|-------|--------|
 | **M8** | GARCH(1,1) volatility model with shadow-mode sizing | app/services/garch_volatility.py (new), app/services/trading_engine.py (additive) | ✅ Done |
+| **M9** | Portfolio covariance-based capital allocation | app/services/portfolio_optimizer.py (new), app/services/trading_engine.py (additive) | ✅ Done |
 
 ---
 
@@ -205,3 +206,4 @@ openbb-trading/
 | **M6** | Activate IBKR | IB Gateway Docker on Railway (paper, port 4002), `BROKER_TYPE=ibkr`, `/api/ibkr/ping` → `ok` | ✅ Done |
 | **M8** | GARCH(1,1) volatility model | app/services/garch_volatility.py, GARCH integration in execute_buy() | ✅ Done |
 | **M7** | OpenBB Workspace Integration | Custom backend at `app/workspace_server.py` serving 40 widgets (19 models + 19 agents + MC + metrics) with OpenBB Platform extension registration | ✅ Done |
+| **M9** | Portfolio Covariance Matrix | app/services/portfolio_optimizer.py — Kelly-optimal portfolio weights via Cov^-1 x mu, shadow-mode integration in execute_buy() | ✅ Done |
