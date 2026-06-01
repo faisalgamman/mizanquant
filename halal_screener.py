@@ -2445,9 +2445,262 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
 
 
 def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
-    """Strategy B: Mean Reversion — DISABLED (A-Pre.1, Sharpe -1.93, WR 26.3%)."""
-    logger.warning("run_consensus_reversion(%s) skipped — DISABLED (A-Pre.1)", symbol)
-    return []
+    """Strategy B: Mean Reversion — buy oversold stocks.
+
+    Tools: Stationarity gate, Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
+    Entry: RSI < 35 + price near lower BB + volume confirmation
+    Exit: Static SL 2%, TP when RSI > 60 or price hits middle BB
+
+    Per Chan Ch.3 a mean-reversion strategy is only valid on a series
+    that actually mean-reverts. We compute an ADF/Hurst/half-life
+    report on the last 250 closes and cast a SELL vote when the gate
+    fails — this dilutes BUY conviction on trending or random-walk
+    series without hard-blocking the run.
+    """
+    try:
+        is_halal, halal_reason = verify_halal(symbol)
+        if not is_halal:
+            return [{"Symbol": symbol.upper(), "Verdict": "BLOCKED",
+                     "Strategy": "B-Reversion", "Error": f"Not halal: {halal_reason}"}]
+
+        votes_buy, votes_sell, votes_hold = 0, 0, 0
+        details = []
+
+        df = _load_consensus_df(symbol, df_override=df_override, as_of=as_of)
+        if df is None:
+            return [{"Error": f"No data for {symbol}"}]
+        price = float(df["close"].iloc[-1])
+        atr_val = float(atr(df).iloc[-1])
+        close = df["close"]
+
+        # --- Tool 0a: Strategy regime router (Chan Ch.6) ---
+        # If the asset is "trending", running a mean-reversion strategy
+        # on it is structurally wrong — vote SELL on the entry.
+        try:
+            from app.services.strategy_regime import classify_strategy_regime
+            sr = classify_strategy_regime(close.tail(300))
+            if sr.label == "ranging":
+                votes_buy += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Ranging ({sr.reason})", "Vote": "BUY"})
+            elif sr.label == "trending":
+                votes_sell += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Trending — wrong strategy ({sr.reason})", "Vote": "SELL"})
+            else:
+                votes_hold += 1
+                details.append({"Tool": "Regime Router", "Signal": f"Noisy ({sr.reason})", "Vote": "HOLD"})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Regime Router error: {e}")
+            details.append({"Tool": "Regime Router", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 0: Stationarity gate (Chan Ch.3) ---
+        try:
+            from app.services.stationarity import stationarity_report
+            window = close.tail(250)
+            rep = stationarity_report(window, max_half_life_bars=30.0)
+            if rep.is_mean_reverting:
+                votes_buy += 1
+                details.append({"Tool": "Stationarity",
+                                "Signal": f"Mean-reverting (H={rep.hurst:.2f}, ADF p={rep.adf_pvalue:.2f}, t1/2={rep.half_life:.1f})",
+                                "Vote": "BUY"})
+            else:
+                votes_sell += 1
+                details.append({"Tool": "Stationarity",
+                                "Signal": f"Not mean-reverting: {rep.reason}",
+                                "Vote": "SELL"})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Stationarity gate error: {e}")
+            details.append({"Tool": "Stationarity", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 1: Bollinger Bands ---
+        try:
+            sma20 = close.rolling(20).mean()
+            std20 = close.rolling(20).std()
+            upper_bb = sma20 + 2 * std20
+            lower_bb = sma20 - 2 * std20
+            mid_bb = float(sma20.iloc[-1])
+            bb_width = ((upper_bb - lower_bb) / sma20 * 100).iloc[-1]
+            lower_bb_val = float(lower_bb.iloc[-1])
+            upper_bb_val = float(upper_bb.iloc[-1])
+
+            # Mean reversion: BUY when price near/below lower band
+            if price <= lower_bb_val:
+                votes_buy += 1; vote = "BUY"; sig = f"At/Below Lower BB (${lower_bb_val:.2f})"
+            elif price >= upper_bb_val:
+                votes_sell += 1; vote = "SELL"; sig = f"At/Above Upper BB (${upper_bb_val:.2f})"
+            else:
+                pct_bb = (price - lower_bb_val) / (upper_bb_val - lower_bb_val) * 100
+                if pct_bb < 25:
+                    votes_buy += 1; vote = "BUY"; sig = f"Near Lower BB ({pct_bb:.0f}%)"
+                elif pct_bb > 75:
+                    votes_sell += 1; vote = "SELL"; sig = f"Near Upper BB ({pct_bb:.0f}%)"
+                else:
+                    votes_hold += 1; vote = "HOLD"; sig = f"Mid-range ({pct_bb:.0f}%)"
+            details.append({"Tool": "Bollinger Bands", "Signal": sig, "Vote": vote})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Bollinger Bands error: {e}")
+            mid_bb = price  # fallback
+            details.append({"Tool": "Bollinger Bands", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 2: RSI ---
+        try:
+            rsi_val = float(rsi(close).iloc[-1])
+            if rsi_val < 30:
+                votes_buy += 1; vote = "BUY"; sig = f"Oversold RSI={rsi_val:.0f}"
+            elif rsi_val < 40:
+                votes_buy += 1; vote = "BUY"; sig = f"Weak RSI={rsi_val:.0f}"
+            elif rsi_val > 70:
+                votes_sell += 1; vote = "SELL"; sig = f"Overbought RSI={rsi_val:.0f}"
+            elif rsi_val > 60:
+                votes_sell += 1; vote = "SELL"; sig = f"Elevated RSI={rsi_val:.0f}"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral RSI={rsi_val:.0f}"
+            details.append({"Tool": "RSI", "Signal": sig, "Vote": vote})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"RSI error: {e}")
+            rsi_val = 50
+            details.append({"Tool": "RSI", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 3: Volume-Price Divergence ---
+        try:
+            vol = df["volume"]
+            price_chg_5d = float((price / close.iloc[-5] - 1) * 100)
+            vol_chg_5d = float((vol.iloc[-5:].mean() / vol.iloc[-25:-5].mean() - 1) * 100)
+            # For mean reversion: price down + high volume = capitulation (BUY)
+            if price_chg_5d < -2 and vol_chg_5d > 30:
+                votes_buy += 1; vote = "BUY"; sig = f"Capitulation (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            elif price_chg_5d > 2 and vol_chg_5d < -15:
+                votes_sell += 1; vote = "SELL"; sig = f"Weak Rally (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            elif price_chg_5d < -1 and vol_chg_5d < -10:
+                votes_buy += 1; vote = "BUY"; sig = f"Exhaustion (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral (P={price_chg_5d:+.1f}% V={vol_chg_5d:+.0f}%)"
+            details.append({"Tool": "Volume-Price", "Signal": sig, "Vote": vote})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Volume-Price tool error: {e}")
+            details.append({"Tool": "Volume-Price", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 4: Stochastic Oscillator ---
+        try:
+            from app.services.technical import stochastic
+            pct_k, pct_d = stochastic(df, k_period=14, d_period=3)
+            k_val = float(pct_k.iloc[-1])
+            d_val = float(pct_d.iloc[-1])
+            # Oversold + bullish crossover = BUY
+            if k_val < 20 and k_val > d_val:
+                votes_buy += 1; vote = "BUY"; sig = f"Oversold Crossover (K={k_val:.0f} D={d_val:.0f})"
+            elif k_val < 25:
+                votes_buy += 1; vote = "BUY"; sig = f"Oversold (K={k_val:.0f})"
+            elif k_val > 80 and k_val < d_val:
+                votes_sell += 1; vote = "SELL"; sig = f"Overbought Crossdown (K={k_val:.0f})"
+            elif k_val > 75:
+                votes_sell += 1; vote = "SELL"; sig = f"Overbought (K={k_val:.0f})"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"Neutral (K={k_val:.0f})"
+            details.append({"Tool": "Stochastic", "Signal": sig, "Vote": vote})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"Stochastic tool error: {e}")
+            details.append({"Tool": "Stochastic", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Tool 5: OBV Trend ---
+        try:
+            from app.services.technical import obv
+            obv_series = obv(df)
+            obv_now = float(obv_series.iloc[-1])
+            obv_10ago = float(obv_series.iloc[-10])
+            obv_slope = (obv_now - obv_10ago) / abs(obv_10ago) * 100 if obv_10ago != 0 else 0
+            price_chg_10 = float((price / close.iloc[-10] - 1) * 100)
+            # OBV rising while price falling = accumulation (bullish divergence)
+            if obv_slope > 5 and price_chg_10 < -1:
+                votes_buy += 1; vote = "BUY"; sig = f"Accumulation (OBV={obv_slope:+.1f}% P={price_chg_10:+.1f}%)"
+            elif obv_slope < -5 and price_chg_10 > 1:
+                votes_sell += 1; vote = "SELL"; sig = f"Distribution (OBV={obv_slope:+.1f}% P={price_chg_10:+.1f}%)"
+            elif obv_slope > 5:
+                votes_buy += 1; vote = "BUY"; sig = f"OBV Rising ({obv_slope:+.1f}%)"
+            elif obv_slope < -5:
+                votes_sell += 1; vote = "SELL"; sig = f"OBV Falling ({obv_slope:+.1f}%)"
+            else:
+                votes_hold += 1; vote = "HOLD"; sig = f"OBV Flat ({obv_slope:+.1f}%)"
+            details.append({"Tool": "OBV", "Signal": sig, "Vote": vote})
+        except NON_FATAL_ANALYSIS_ERROR as e:
+            logger.debug(f"OBV tool error: {e}")
+            details.append({"Tool": "OBV", "Signal": "ERROR", "Vote": "-"})
+
+        # --- Verdict ---
+        total = votes_buy + votes_sell + votes_hold
+        if total == 0: total = 1
+        confidence = round(max(votes_buy, votes_sell) / total * 100, 1)
+
+        if votes_buy >= 3:
+            verdict = "STRONG BUY"
+        elif votes_buy >= 2 and confidence >= 50:
+            verdict = "BUY"
+        elif votes_sell >= 3:
+            verdict = "STRONG SELL"
+        elif votes_sell >= 2 and confidence >= 50:
+            verdict = "SELL"
+        elif votes_buy > votes_sell:
+            verdict = "WEAK BUY"
+        elif votes_sell > votes_buy:
+            verdict = "WEAK SELL"
+        else:
+            verdict = "NEUTRAL"
+
+        # Static SL 2%, TP at middle Bollinger Band or +1.5 ATR
+        levels = ATR_TARGETS["reversion"]
+        sl = round(price * (1 - levels["stop_pct"] / 100.0), 2)
+        tp1 = round(mid_bb, 2)            # Target: middle BB (mean reversion target)
+        tp2 = round(price + levels["tp2"] * atr_val, 2)
+        tp3 = round(price + levels["tp3"] * atr_val, 2)
+
+        summary = [{
+            "Symbol": symbol.upper(), "Strategy": "B-Mean Reversion",
+            "Price": round(price, 2), "Verdict": verdict,
+            "Confidence %": confidence,
+            "Votes BUY": votes_buy, "Votes SELL": votes_sell, "Votes HOLD": votes_hold,
+            "RSI": round(rsi_val, 1) if 'rsi_val' in dir() else "N/A",
+            "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
+        }]
+
+        # Telegram: chart + breakdown for all actionable verdicts
+        if verdict not in ("NEUTRAL", "HOLD"):
+            try:
+                alert_signal_with_chart(
+                    symbol=symbol.upper(), verdict=f"[B] Reversion: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, tp1=tp1, tp2=tp2, tp3=tp3,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, df=df,
+                )
+                _send_consensus_breakdown(
+                    symbol=symbol.upper(), verdict=f"[B] Reversion: {verdict}",
+                    confidence=confidence, price=round(price, 2),
+                    votes_buy=votes_buy, votes_sell=votes_sell, votes_hold=votes_hold,
+                    sl=sl, tp1=tp1, tp2=tp2, tp3=tp3, details=details,
+                )
+            except NON_FATAL_ANALYSIS_ERROR as e:
+                logger.warning(f"[B] Telegram alert failed: {e}")
+
+        # Send BUY/STRONG BUY/SELL/STRONG SELL — let on_signal() decide
+        if verdict not in ("NEUTRAL", "HOLD"):
+            try:
+                trade_result = auto_trade_signal(
+                    symbol=symbol.upper(), verdict=verdict,
+                    confidence=confidence, price=round(price, 2),
+                    stop_loss=sl, take_profit=tp1,
+                    votes_buy=votes_buy, votes_sell=votes_sell,
+                    votes_hold=votes_hold, details={"strategy": "B"},
+                    strategy_id="B",
+                )
+                if trade_result:
+                    summary[0]["Auto_Trade"] = "EXECUTED" if trade_result.get("executed") else "REJECTED"
+                    summary[0]["Trade_Reason"] = trade_result.get("reason", "")
+            except NON_FATAL_ANALYSIS_ERROR as e:
+                logger.error(f"[B] Auto-trade error for {symbol}: {e}")
+
+        return summary + details
+
+    except NON_FATAL_ANALYSIS_ERROR as e:
+        return [{"Error": str(e), "Strategy": "B-Reversion"}]
 
 
 # Default subset of ML models and agents for consensus_ml

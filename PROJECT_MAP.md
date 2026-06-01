@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M13 complete, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M16 complete, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
@@ -219,3 +219,5 @@ openbb-trading/
 | **M13** | Model Explainability (SHAP) | app/services/model_explainer.py — ensemble attribution now, SHAP TreeExplainer ready for future XGBoost/sklearn models | ✅ Done |
 | **M14** | Kalman Filter + Bayesian Sharpe | app/services/kalman_filter.py — signal denoising, app/services/bayesian_sharpe.py — full posterior with credible intervals | ✅ Done |
 | **M15** | Wavelet + XGBoost + Fama-French | wavelet_denoise.py — edge-preserving denoising, signal_classifier.py — buy-signal probability gate, factor_exposure.py — Fama-French 5-factor betas | ✅ Done |
+| **M16** | Strategy B Reactivation (trading specialization) | halal_screener.py — full mean-reversion consensus restored (7 tools: regime router, stationarity gate, Bollinger, RSI, volume-price, stochastic, OBV); signals_advisor.py — strategy B re-enabled in _strategy_runners | ✅ Done |
+| **M16** | Strategy B (Mean Reversion) re-enabled — 3-strategy specialization | halal_screener.py (restored run_consensus_reversion), app/services/signals_advisor.py (re-enabled B runner) | ✅ Done |
