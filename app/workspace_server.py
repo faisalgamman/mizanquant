@@ -7614,6 +7614,51 @@ async def ws_overview(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 
 
+@app.post("/api/execute-signals", include_in_schema=False)
+async def execute_signals(
+    symbols: str = "DELL,AMD,AAPL,INTC,QCOM,TXN",
+    qty: int = 10,
+):
+    """Execute Strategy A STRONG BUY signals with full sizing pipeline."""
+    from app.services.signals_advisor import _send_signal_alert
+    import halal_screener as hs
+    
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    results = []
+    
+    for sym in syms:
+        try:
+            result = hs.run_consensus_momentum(sym)
+            if not result or len(result) == 0:
+                results.append({"symbol": sym, "status": "no_result"})
+                continue
+            
+            row = result[0]
+            verdict = str(row.get("Verdict", "")).upper()
+            
+            if verdict not in ("STRONG BUY", "BUY"):
+                results.append({"symbol": sym, "verdict": verdict, "status": "not_strong_buy"})
+                continue
+            
+            sent = _send_signal_alert(
+                row, usx_score=None, usx_breakdown=None,
+                account_usd=100000, risk_pct=1.5,
+                stop_pct=4.0, take_pct=8.0,
+                dry_run=False, strategy_id="A",
+            )
+            results.append({
+                "symbol": sym,
+                "verdict": verdict,
+                "confidence": row.get("Confidence %", 0),
+                "buy_votes": row.get("Votes BUY", 0),
+                "sent": sent,
+            })
+        except Exception as e:
+            results.append({"symbol": sym, "status": "error", "error": str(e)})
+    
+    return {"executed": sum(1 for r in results if r.get("sent")), "results": results}
+
+
 def main():
     """Start the workspace backend server."""
     host = os.getenv("WORKSPACE_HOST", "0.0.0.0")
