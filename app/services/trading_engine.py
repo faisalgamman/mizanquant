@@ -544,6 +544,26 @@ def execute_buy(
         except Exception as _mr_exc:
             logger.debug("mr_util: skipped for %s — %s", symbol, _mr_exc)
 
+        # ── 2A.8: News sentiment sizing ──────────────────────────────────
+        # Scale position based on VADER news sentiment + analyst consensus.
+        # Bullish news → increase; bearish → reduce; no data → conservative.
+        sizing["sentiment_label"] = "neutral"
+        sizing["sentiment_multiplier"] = 1.0
+        try:
+            from app.services.sentiment_engine import get_sentiment_multiplier
+            sent_mult = get_sentiment_multiplier(symbol)
+            sizing["sentiment_multiplier"] = sent_mult
+            if sent_mult != 1.0:
+                sent_qty = max(1, int(qty * sent_mult))
+                if getattr(settings, "SENTIMENT_SIZING_LIVE", False):
+                    qty = sent_qty
+                    sizing["qty"] = qty
+                    sizing["note"] = (sizing.get("note", "") + " | Sentiment adjusted").strip(" | ")
+                else:
+                    sizing["sentiment_shadow_qty"] = sent_qty
+        except Exception as _sent_exc:
+            logger.debug("sentiment_engine: skipped for %s — %s", symbol, _sent_exc)
+
         # ── 2A: Pre-trade execution cost estimation + illiquidity gate ──────
         # Store decision_price NOW so fill_watcher can compute TCA later
         # (fill_watcher._apply_fill_metrics overwrites entry_price with the
