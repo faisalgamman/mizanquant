@@ -484,6 +484,54 @@ def execute_buy(
                 sizing["qty"] = qty
                 sizing["note"] = "Portfolio stop warning: sizing halved"
 
+        # ── XGBoost buy-signal quality gate ──────────────────────────────
+        # Trained on historical trade outcomes. Predicts probability the
+        # current signal will be profitable. Blocks low-quality signals.
+        sizing["xgb_signal_prob"] = 0.5
+        try:
+            from app.services.signal_classifier import classify_buy_signal
+            xgb_gate = classify_buy_signal(
+                confidence=confidence,
+                risk_pct=sizing.get("risk_pct", 0.02),
+                archetype_score=signal_payload.get("score", 0.5),
+            )
+            sizing["xgb_signal_prob"] = xgb_gate["probability"]
+            sizing["xgb_model_available"] = xgb_gate.get("model_available", False)
+            if xgb_gate.get("model_available") and not xgb_gate.get("pass_gate", True):
+                if getattr(settings, "XGB_SIGNAL_GATE_LIVE", False):
+                    result["reason"] = (
+                        f"XGBoost signal gate: probability={xgb_gate['probability']:.2f} < 0.55"
+                    )
+                    logger.info(f"{label} Trade blocked by XGB signal gate for {symbol}: {result['reason']}")
+                    _notify_trade(result)
+                    return result
+                else:
+                    sizing["xgb_would_block"] = True
+                    sizing["note"] = (sizing.get("note", "") + " | XGB would block").strip(" | ")
+        except Exception as _xgb_exc:
+            logger.debug("signal_classifier: skipped for %s — %s", symbol, _xgb_exc)
+
+
+        # ── 2A.3: Wavelet denoising signal-quality sizing ────────────────
+        # Wavelet removes high-frequency noise while preserving edges.
+        # Cleaner signal = slightly higher confidence in the entry.
+        sizing["wavelet_noise_ratio"] = 1.0
+        sizing["wavelet_multiplier"] = 1.0
+        try:
+            from app.services.wavelet_denoise import get_wavelet_adjustment
+            wav_mult = get_wavelet_adjustment(symbol)
+            sizing["wavelet_multiplier"] = wav_mult
+            if wav_mult != 1.0:
+                wav_qty = max(1, int(qty * wav_mult))
+                if getattr(settings, "WAVELET_SIZING_LIVE", False):
+                    qty = wav_qty
+                    sizing["qty"] = qty
+                    sizing["note"] = (sizing.get("note", "") + " | Wavelet adjusted").strip(" | ")
+                else:
+                    sizing["wavelet_shadow_qty"] = wav_qty
+        except Exception as _wav_exc:
+            logger.debug("wavelet_denoise: skipped for %s — %s", symbol, _wav_exc)
+
         # ── 2A.4: Kalman filter signal-quality sizing ────────────────────
         # Kalman-denoised vs raw volatility ratio. Higher noise reduction
         # = cleaner signal = slightly larger position warranted.
@@ -584,6 +632,26 @@ def execute_buy(
                     sizing["sentiment_shadow_qty"] = sent_qty
         except Exception as _sent_exc:
             logger.debug("sentiment_engine: skipped for %s — %s", symbol, _sent_exc)
+
+        # ── 2A.9: Fama-French factor exposure sizing ─────────────────────
+        # Prefer stocks with positive exposure to size (SMB) and quality
+        # (RMW) factors. Negative exposure = reduce position.
+        sizing["factor_betas"] = {}
+        sizing["factor_multiplier"] = 1.0
+        try:
+            from app.services.factor_exposure import get_factor_multiplier
+            ff_mult = get_factor_multiplier(symbol)
+            sizing["factor_multiplier"] = ff_mult
+            if ff_mult != 1.0:
+                ff_qty = max(1, int(qty * ff_mult))
+                if getattr(settings, "FACTOR_SIZING_LIVE", False):
+                    qty = ff_qty
+                    sizing["qty"] = qty
+                    sizing["note"] = (sizing.get("note", "") + " | Factor adjusted").strip(" | ")
+                else:
+                    sizing["factor_shadow_qty"] = ff_qty
+        except Exception as _ff_exc:
+            logger.debug("factor_exposure: skipped for %s — %s", symbol, _ff_exc)
 
         # ── 2A: Pre-trade execution cost estimation + illiquidity gate ──────
         # Store decision_price NOW so fill_watcher can compute TCA later

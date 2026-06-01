@@ -173,6 +173,7 @@ openbb-trading/
 | **M12** | Strategy simulation sandbox with full sizing cascade | app/services/strategy_simulator.py (new), app/workspace_server.py (endpoint) | ✅ Done |
 | **M13** | Model explainability — ensemble attribution + SHAP-ready | app/services/model_explainer.py (new), app/workspace_server.py (endpoint) | ✅ Done |
 | **M14** | Kalman filter denoising + Bayesian Sharpe ratio | app/services/kalman_filter.py, app/services/bayesian_sharpe.py, app/services/backtest_qc.py (new) | ✅ Done |
+| **M15** | Wavelet denoising + XGBoost signal classifier + Fama-French factors | app/services/wavelet_denoise.py, app/services/signal_classifier.py, app/services/factor_exposure.py, app/services/trading_engine.py | ✅ Done |
 
 ---
 
@@ -217,3 +218,4 @@ openbb-trading/
 | **M12** | Strategy Simulation Sandbox | app/services/strategy_simulator.py — historical what-if with full sizing cascade (GARCH/Cov/MR/Sentiment), /api/simulate/strategy endpoint | ✅ Done |
 | **M13** | Model Explainability (SHAP) | app/services/model_explainer.py — ensemble attribution now, SHAP TreeExplainer ready for future XGBoost/sklearn models | ✅ Done |
 | **M14** | Kalman Filter + Bayesian Sharpe | app/services/kalman_filter.py — signal denoising, app/services/bayesian_sharpe.py — full posterior with credible intervals | ✅ Done |
+| **M15** | Wavelet + XGBoost + Fama-French | wavelet_denoise.py — edge-preserving denoising, signal_classifier.py — buy-signal probability gate, factor_exposure.py — Fama-French 5-factor betas | ✅ Done |
