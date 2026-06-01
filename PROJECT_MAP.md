@@ -1,6 +1,6 @@
 # PROJECT_MAP — openbb-trading
 
-_Last updated: 2026-06-01 (M12: Strategy Simulation Sandbox) (M1-M11 complete, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-01 (M13: Model Explainability (SHAP)) (M1-M12 complete, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
 
@@ -171,6 +171,7 @@ openbb-trading/
 | **M10** | Mean-reversion OU utility with quality scoring | app/services/mean_reversion_util.py (new), app/services/trading_engine.py (additive) | ✅ Done |
 | **M11** | News sentiment engine — VADER + analyst consensus | app/services/sentiment_engine.py (new), app/services/trading_engine.py (additive), app/workspace_server.py (delegated) | ✅ Done |
 | **M12** | Strategy simulation sandbox with full sizing cascade | app/services/strategy_simulator.py (new), app/workspace_server.py (endpoint) | ✅ Done |
+| **M13** | Model explainability — ensemble attribution + SHAP-ready | app/services/model_explainer.py (new), app/workspace_server.py (endpoint) | ✅ Done |
 
 ---
 
@@ -213,3 +214,4 @@ openbb-trading/
 | **M10** | Mean Reversion OU Utility | app/services/mean_reversion_util.py — OU parameter estimation, mr_quality_score(), shadow-mode integration in execute_buy() | ✅ Done |
 | **M11** | News Sentiment Engine | app/services/sentiment_engine.py — VADER news + analyst consensus scoring, shadow-mode integration in execute_buy() | ✅ Done |
 | **M12** | Strategy Simulation Sandbox | app/services/strategy_simulator.py — historical what-if with full sizing cascade (GARCH/Cov/MR/Sentiment), /api/simulate/strategy endpoint | ✅ Done |
+| **M13** | Model Explainability (SHAP) | app/services/model_explainer.py — ensemble attribution now, SHAP TreeExplainer ready for future XGBoost/sklearn models | ✅ Done |

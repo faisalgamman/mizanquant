@@ -2806,6 +2806,38 @@ async def signal_weights_analysis(period_days: int = 30):
 
     return await asyncio.to_thread(_compute)
 
+@app.get("/api/analysis/model-explain")
+async def model_explain_endpoint():
+    """Explain the current weighted-consensus attribution.
+
+    Returns which tools/models drove the latest ensemble decision
+    and by how much. No trained model required -- works from the
+    existing model_weights + tool_votes infrastructure.
+
+    Future: supports SHAP TreeExplainer when XGBoost/sklearn models
+    are added to the pipeline.
+    """
+    from app.services.smart_ensemble import get_model_weights
+    from app.services.model_explainer import get_ensemble_attribution
+
+    weights = get_model_weights()
+
+    # Build sample tool votes from the current model lineup
+    tool_votes = []
+    for model_name, weight in weights.items():
+        vote = "BUY" if weight > 0.15 else "SELL" if weight < 0.05 else "HOLD"
+        tool_votes.append({
+            "Tool": model_name.replace("_", " ").title(),
+            "Vote": vote,
+            "Weight": round(weight, 4),
+        })
+
+    attribution = get_ensemble_attribution(tool_votes, weights)
+    return {
+        "models_active": len(weights),
+        "model_weights": {k: round(v, 4) for k, v in weights.items()},
+        "attribution": attribution,
+    }
 
 @app.get("/api/stock/senate-trading")
 async def stock_senate_trading(
