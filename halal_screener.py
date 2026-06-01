@@ -1693,7 +1693,7 @@ def _vote_signal(sig_str):
         return "SELL", 0, 1, 0
     return "HOLD", 0, 0, 1
 
-def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
+def _impl_run_consensus_base(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
     try:
         # --- Halal verification gate (MUST pass before any analysis) ---
         is_halal, halal_reason = verify_halal(symbol)
@@ -2181,7 +2181,7 @@ def run_consensus(symbol, horizon=5, episodes=10, df_override=None, as_of=None):
 # MULTI-STRATEGY CONSENSUS FUNCTIONS
 # ============================================================================
 
-def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
+def _impl_run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
     """Strategy A: Momentum Alpha — trend-following with 5 tools.
 
     Tools: EMA Alignment (2x), Momentum ROC+ADX, Backtest 2Y, XGBoost, Monte Carlo
@@ -2444,7 +2444,7 @@ def run_consensus_momentum(symbol, horizon=5, df_override=None, as_of=None):
         return [{"Error": str(e), "Strategy": "A-Momentum"}]
 
 
-def run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
+def _impl_run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=None):
     """Strategy B: Mean Reversion — buy oversold stocks.
 
     Tools: Stationarity gate, Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
@@ -2823,7 +2823,7 @@ def _run_consensus_agent(agent_name, symbol, episodes, df):
         return "-", f"{agent_name}: ERROR"
 
 
-def run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None):
+def _impl_run_consensus_ml(symbol, horizon=7, episodes=5, df_override=None, as_of=None):
     """Strategy C: AI Ensemble — pure ML decision-making.
 
     Dynamically discovers all registered forecast models and RL agents
@@ -3116,10 +3116,10 @@ def _persist_consensus_result(symbol: str, profile: str, result: list[dict]) -> 
         logger.warning("Consensus persistence skipped for %s/%s: %s", symbol, profile, exc)
 
 
-_legacy_run_consensus_base = run_consensus
-_legacy_run_consensus_momentum = run_consensus_momentum
-_legacy_run_consensus_reversion = run_consensus_reversion
-_legacy_run_consensus_ml = run_consensus_ml
+_legacy_run_consensus_base = _impl_run_consensus_base
+_legacy_run_consensus_momentum = _impl_run_consensus_momentum
+_legacy_run_consensus_reversion = _impl_run_consensus_reversion
+_legacy_run_consensus_ml = _impl_run_consensus_ml
 
 CONSENSUS_PROFILES = {
     "base": ConsensusProfile(
