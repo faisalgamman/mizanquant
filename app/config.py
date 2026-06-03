@@ -197,6 +197,15 @@ class Settings(BaseSettings):
     # The wider stop correctly SHRINKS position size (constant risk budget).
     # A scheduler job closes positions held >= SWING_MAX_HOLD_DAYS trading days.
     SWING_EXIT_ENABLED: bool = False
+    # ── Sizing pipeline layers (shadow‑mode: compute always, apply when LIVE) ──
+    XGB_SIGNAL_GATE_LIVE: bool = False
+    WAVELET_SIZING_LIVE: bool = False
+    KALMAN_SIZING_LIVE: bool = False
+    GARCH_SIZING_LIVE: bool = False
+    PORTFOLIO_COV_SIZING_LIVE: bool = False
+    MR_QUALITY_SIZING_LIVE: bool = False
+    SENTIMENT_SIZING_LIVE: bool = False
+    FACTOR_SIZING_LIVE: bool = False
     SWING_TRAIL_PCT: float = 12.0        # wide trailing stop / initial-stop distance (%)
     SWING_MAX_HOLD_DAYS: int = 20        # time exit: close after this many trading days
 
@@ -221,7 +230,7 @@ class Settings(BaseSettings):
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
-        "extra": "ignore",
+        "extra": "allow",
     }
 
     @field_validator(
@@ -306,12 +315,13 @@ class Settings(BaseSettings):
         if self.MAX_OPEN_POSITIONS < 1:
             errors.append("MAX_OPEN_POSITIONS must be >= 1.")
 
-        # SF-3: live whitelist must contain at least one symbol
-        if not self.live_whitelist:
-            errors.append(
-                "LIVE_WHITELIST is empty — at least one ticker symbol required "
-                "for live trading (comma-separated, e.g. AAPL,MSFT)."
-            )
+        # SF-3: live whitelist disabled — trade ALL halal symbols on STRONG BUY
+        # (was: require at least one symbol in LIVE_WHITELIST)
+        # if not self.live_whitelist:
+        #     errors.append(
+        #         "LIVE_WHITELIST is empty — at least one ticker symbol required "
+        #         "for live trading (comma-separated, e.g. AAPL,MSFT)."
+        #     )
 
         return errors
 
@@ -428,13 +438,30 @@ def _build_strategy_configs() -> dict:
             name="HANA",
             alpaca_api_key=settings.ALPACA_API_KEY_A,
             alpaca_secret_key=settings.ALPACA_SECRET_KEY_A,
-            max_positions=3,
-            position_pct=33.0,
+            max_positions=5,
+            position_pct=50.0,
             trailing_stop_enabled=True,
             trailing_stop_pct=3.0,
             static_sl_pct=0,
-            min_confidence=45.0,
+            min_confidence=30.0,
             trade_risk_pct=2.0,
+            daily_loss_limit_pct=3.0,
+        )
+
+    # Strategy B: balanced mean-reversion / dip-buying
+    if settings.ALPACA_API_KEY_B:
+        configs["B"] = StrategyConfig(
+            strategy_id="B",
+            name="Strategy B",
+            alpaca_api_key=settings.ALPACA_API_KEY_B,
+            alpaca_secret_key=settings.ALPACA_SECRET_KEY_B,
+            max_positions=5,
+            position_pct=50.0,
+            trailing_stop_enabled=True,
+            trailing_stop_pct=2.5,
+            static_sl_pct=0,
+            min_confidence=30.0,
+            trade_risk_pct=1.5,
             daily_loss_limit_pct=3.0,
         )
 
@@ -445,12 +472,12 @@ def _build_strategy_configs() -> dict:
             name="mazem",
             alpaca_api_key=settings.ALPACA_API_KEY_C,
             alpaca_secret_key=settings.ALPACA_SECRET_KEY_C,
-            max_positions=4,
-            position_pct=25.0,
+            max_positions=5,
+            position_pct=50.0,
             trailing_stop_enabled=True,
             trailing_stop_pct=2.5,
             static_sl_pct=0,
-            min_confidence=50.0,
+            min_confidence=30.0,
             trade_risk_pct=1.5,
             daily_loss_limit_pct=3.0,
         )

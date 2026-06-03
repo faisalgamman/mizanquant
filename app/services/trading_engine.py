@@ -1031,7 +1031,7 @@ def on_signal(
 # Trade recording (to DB)
 # ---------------------------------------------------------------------------
 
-def _record_trade(trade_result: dict, signal_details: dict):
+def _record_trade(trade_result: dict, signal_details: dict, agent_decision_id=None):
     """Persist trade to database for performance tracking."""
     try:
         from app.db.database import SessionLocal

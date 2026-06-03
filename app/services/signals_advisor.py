@@ -59,7 +59,7 @@ def _strategy_runners() -> dict:
     }
 
 
-def _is_strong_buy(row: dict, min_confidence: float = 70.0) -> bool:
+def _is_strong_buy(row: dict, min_confidence: float = 35.0) -> bool:
     """A signal qualifies as STRONG BUY when:
     - Verdict is exactly 'STRONG BUY' or 'BUY' (anything weaker is filtered)
     - Confidence >= threshold (default 70%)
@@ -97,7 +97,7 @@ def scan_universe_for_strategy(
     strategy_id: str,
     symbols: list[str] | None = None,
     max_workers: int = 3,
-    min_confidence: float = 70.0,
+    min_confidence: float = 35.0,
 ) -> list[dict]:
     """Stage 2 helper — run AI consensus for one strategy across the
     provided candidate list. Returns rows passing the STRONG BUY filter,
@@ -430,6 +430,26 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
             from app.services.trading_engine import execute_buy
             if (getattr(_trd_cfg, "AUTO_TRADE_ENABLED", False)
                     and getattr(_trd_cfg, "LIVE_CONFIRMED", False)):
+                # ── Position limit gate ──
+                # Skip if strategy already at max_positions
+                try:
+                    from app.config import STRATEGY_CONFIGS as _sc
+                    _cfg = _sc.get(strategy_id)
+                    if _cfg and _cfg.max_positions > 0:
+                        import urllib.request, json, base64
+                        _auth = f"{_cfg.alpaca_api_key}:{_cfg.alpaca_secret_key}"
+                        _b64 = base64.b64encode(_auth.encode()).decode()
+                        _req = urllib.request.Request(
+                            "https://paper-api.alpaca.markets/v2/positions",
+                            headers={"Authorization": f"Basic {_b64}"})
+                        _positions = json.loads(urllib.request.urlopen(_req, timeout=5).read())
+                        if len(_positions) >= _cfg.max_positions:
+                            logger.info(
+                                "signals_advisor: position limit reached for %s (%d/%d) — skipping %s",
+                                strategy_id, len(_positions), _cfg.max_positions, symbol)
+                            return sent
+                except Exception:
+                    pass  # if limit check fails, proceed anyway
                 signal_details = {
                     "verdict":    row.get("Verdict"),
                     "confidence": confidence,
@@ -468,7 +488,7 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
 # Stage 1 — USX Pro V4 universe pre-filter
 # ---------------------------------------------------------------------------
 
-def _stage1_usx_filter(symbols: list[str], min_usx_score: float = 65.0,
+def _stage1_usx_filter(symbols: list[str], min_usx_score: float = 0.0,
                        max_workers: int = 3) -> tuple[list[dict], dict]:
     """Run USX V4 regime gate + per-stock qualifier across the universe.
 
@@ -499,17 +519,17 @@ def _stage1_usx_filter(symbols: list[str], min_usx_score: float = 65.0,
 # ---------------------------------------------------------------------------
 
 def scan_and_notify_strong_buys(
-    strategy_ids: tuple[str, ...] = ("A", "C"),
+    strategy_ids: tuple[str, ...] = ("A", "C"),  # B disabled — poor WR
     symbols: list[str] | None = None,
     max_workers: int = 3,
-    min_confidence: float = 70.0,
-    min_usx_score: float = 65.0,
+    min_confidence: float = 35.0,
+    min_usx_score: float = 0.0,
     account_usd: float = _DEFAULT_ACCOUNT_USD,
     risk_pct: float = _DEFAULT_RISK_PCT,
     stop_pct: float = _DEFAULT_STOP_PCT,
     take_pct: float = _DEFAULT_TAKE_PCT,
     dry_run: bool = False,
-    skip_usx: bool = False,
+    skip_usx: bool = True,  # default True — USX needs Alpaca DATA keys
 ) -> dict:
     """Three-stage scan with Telegram delivery.
 

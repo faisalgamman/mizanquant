@@ -48,7 +48,21 @@ _GUARDS: list[Guard] = [
 
 
 def run_all(ctx: GuardContext) -> list[GuardResult]:
-    return [guard(ctx) for guard in _GUARDS]
+    results: list[GuardResult] = []
+    for guard in _GUARDS:
+        try:
+            results.append(guard(ctx))
+        except Exception as exc:
+            # Conservative fallback: block if guard itself crashes
+            name = guard.__module__.rsplit(".", 1)[-1] if hasattr(guard, "__module__") else "unknown"
+            results.append(GuardResult(
+                name=name,
+                passed=False,
+                blocking=True,
+                reason=f"Guard crashed: {exc}",
+                code="GUARD_EXCEPTION",
+            ))
+    return results
 
 
 def evaluate(ctx: GuardContext) -> tuple[bool, list[GuardResult]]:

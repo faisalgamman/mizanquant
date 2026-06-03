@@ -338,6 +338,27 @@ class OrderManager:
         if not cancel_result["success"]:
             return {"success": False, "reason": f"CANCEL_FAILED: {cancel_result['reason']}"}
 
+        # Verify cancel: re-check broker to guard against fill-during-cancel race
+        try:
+            broker_orders = self._broker.get_orders(
+                status="all", limit=50, strategy_id=self.strategy_id
+            )
+            oid = order.order_id or ""
+            coid = order.client_order_id or ""
+            for bo in broker_orders:
+                if bo["id"] == oid or bo["client_order_id"] == coid:
+                    if bo["status"] in ("filled", "partially_filled"):
+                        return {
+                            "success": False,
+                            "reason": (
+                                f"Order filled during cancel "
+                                f"({bo['filled_qty']} shares) — replacement blocked"
+                            ),
+                        }
+                    break
+        except Exception:
+            pass  # broker check is best-effort; proceed below
+
         # Create replacement with new values
         replacement = self.create_order(
             symbol=order.symbol,

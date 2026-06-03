@@ -137,9 +137,16 @@ def _scheduler_loop():
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
     SIGNALS_SLOTS = [
-        (10, 30, "10:30 AM ET"),
-        (13, 30, "1:30 PM ET"),
-        (16, 0, "4:00 PM ET (close)"),
+        # Market open — immediate scan
+        (9, 30, "Open"),
+        # Mid-morning
+        (10, 30, "Mid-Morning"),
+        # Lunch / midday
+        (12, 30, "Midday"),
+        # Power hour kick-off
+        (14, 30, "Afternoon"),
+        # Close
+        (16, 0, "Close"),
     ]
     last_signals_slot: dict[str, str] = {}
 
@@ -390,9 +397,9 @@ def _run_pre_market():
         from app.services.signals_advisor import scan_and_notify_strong_buys
 
         summary = scan_and_notify_strong_buys(
-            strategy_ids=("A", "B", "C"),
+            strategy_ids=("A",),  # B disabled — poor WR 25% — too slow (~100s/symbol)
             min_confidence=60.0,
-            account_usd=5000.0,
+            account_usd=100000.0,
         )
         logger.info(
             "Signals advisor: sent=%s by_strategy=%s",
@@ -493,9 +500,9 @@ def _run_signals_scan(label: str = "intraday"):
     # daily signal count. This helps the operator accumulate enough
     # trades without having to expand the universe yet.
     summary = scan_and_notify_strong_buys(
-        strategy_ids=("A", "B", "C"),
+        strategy_ids=("A",),  # B disabled — poor WR 25% — too slow (~100s/symbol)
         min_confidence=60.0,
-        account_usd=5000.0,
+        account_usd=100000.0,
     )
     sent = summary.get("sent", 0)
     by_strat = summary.get("by_strategy", {})
