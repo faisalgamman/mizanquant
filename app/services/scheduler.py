@@ -397,8 +397,8 @@ def _run_pre_market():
         from app.services.signals_advisor import scan_and_notify_strong_buys
 
         summary = scan_and_notify_strong_buys(
-            strategy_ids=("A",),  # B disabled — poor WR 25% — too slow (~100s/symbol)
-            min_confidence=60.0,
+            strategy_ids=("A", "C"),  # B disabled — poor WR 25% — too slow (~100s/symbol)
+            min_confidence=30.0,  # Matches config STRATEGY_CONFIGS min_confidence
             account_usd=100000.0,
         )
         logger.info(
@@ -500,8 +500,8 @@ def _run_signals_scan(label: str = "intraday"):
     # daily signal count. This helps the operator accumulate enough
     # trades without having to expand the universe yet.
     summary = scan_and_notify_strong_buys(
-        strategy_ids=("A",),  # B disabled — poor WR 25% — too slow (~100s/symbol)
-        min_confidence=60.0,
+        strategy_ids=("A", "C"),  # B disabled — poor WR 25% — too slow (~100s/symbol)
+        min_confidence=30.0,  # Matches config STRATEGY_CONFIGS min_confidence
         account_usd=100000.0,
     )
     sent = summary.get("sent", 0)

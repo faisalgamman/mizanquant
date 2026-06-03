@@ -634,7 +634,51 @@ class UnifiedPipeline:
         approved = getattr(self, "_cached_approved", [])
         stage.count_in = len(approved)
 
+        # ── Position limit gate (per strategy) ──────────────────────────
+        # Enforce max_positions from STRATEGY_CONFIGS BEFORE submitting orders.
+        # Prevents overshooting limits when multiple signals fire for the same
+        # strategy in one pipeline run.
         from app.config import settings
+        from app.config import STRATEGY_CONFIGS
+        import urllib.request, json, base64
+        _approved_by_sid: dict[str, list] = {}
+        for sig in approved:
+            _approved_by_sid.setdefault(sig.strategy_id, []).append(sig)
+        _approved_filtered = []
+        for sid, sigs in _approved_by_sid.items():
+            cfg = STRATEGY_CONFIGS.get(sid)
+            if cfg and cfg.max_positions > 0:
+                try:
+                    auth = base64.b64encode(
+                        f"{cfg.alpaca_api_key}:{cfg.alpaca_secret_key}".encode()
+                    ).decode()
+                    req = urllib.request.Request(
+                        "https://paper-api.alpaca.markets/v2/positions",
+                        headers={"Authorization": f"Basic {auth}"})
+                    positions = json.loads(urllib.request.urlopen(req, timeout=5).read())
+                    current = len(positions)
+                    available = cfg.max_positions - current
+                    if available <= 0:
+                        logger.info(
+                            "Pipeline execute: %s at max_positions (%d/%d) — skipping %d signals",
+                            sid, current, cfg.max_positions, len(sigs))
+                        continue
+                    taken = min(available, len(sigs))
+                    _approved_filtered.extend(sigs[:taken])
+                    if taken < len(sigs):
+                        logger.info(
+                            "Pipeline execute: %s position limit (%d/%d) — keeping %d of %d signals",
+                            sid, current + taken, cfg.max_positions, taken, len(sigs))
+                except Exception as exc:
+                    logger.warning(
+                        "Pipeline execute: position-limit check failed for %s: %s — passing all through", sid, exc)
+                    _approved_filtered.extend(sigs)
+            else:
+                _approved_filtered.extend(sigs)
+        approved = _approved_filtered
+        stage.count_in = len(approved)
+        # ── End position limit gate ─────────────────────────────────────
+
         if not settings.AUTO_TRADE_ENABLED and not dry_run:
             stage.status = "skipped"
             stage.details["reason"] = "AUTO_TRADE_ENABLED is False"
