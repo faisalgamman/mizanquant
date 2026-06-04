@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     # When True, symbols with missing earnings data are BLOCKED (fail-safe).
     # When False, missing data emits a warning instead — recovers candidates
     # dropped by unreliable yfinance earnings lookups.
-    BLOCK_ON_NO_EARNINGS: bool = True
+    BLOCK_ON_NO_EARNINGS: bool = False  # was True — blocks all when yfinance rate-limited
 
     # --- Signal archetypes (Chapter 3, Phase 3) ---
     # Each flag enables its detector IN ADDITION to USX Pro in the live
