@@ -398,7 +398,7 @@ def _run_pre_market():
 
         summary = scan_and_notify_strong_buys(
             strategy_ids=("A", "C"),  # B disabled — poor WR 25%
-            min_confidence=30.0,  # Matches config STRATEGY_CONFIGS min_confidence
+            min_confidence=45.0,  # Quality gate: only high-conviction signals
             account_usd=100000.0,
             skip_usx=False,  # USX V4 pre-filter enabled — quality gate
         )
@@ -502,7 +502,7 @@ def _run_signals_scan(label: str = "intraday"):
     # trades without having to expand the universe yet.
     summary = scan_and_notify_strong_buys(
         strategy_ids=("A", "C"),  # B disabled — poor WR 25%
-        min_confidence=30.0,  # Matches config STRATEGY_CONFIGS min_confidence
+        min_confidence=45.0,  # Quality gate: only high-conviction signals
         account_usd=100000.0,
         skip_usx=False,  # USX V4 pre-filter enabled — quality gate
     )

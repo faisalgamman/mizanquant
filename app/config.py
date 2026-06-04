@@ -443,7 +443,7 @@ def _build_strategy_configs() -> dict:
             trailing_stop_enabled=True,
             trailing_stop_pct=3.0,
             static_sl_pct=0,
-            min_confidence=30.0,
+            min_confidence=45.0,
             trade_risk_pct=2.0,
             daily_loss_limit_pct=3.0,
         )
@@ -460,7 +460,7 @@ def _build_strategy_configs() -> dict:
             trailing_stop_enabled=True,
             trailing_stop_pct=2.5,
             static_sl_pct=0,
-            min_confidence=30.0,
+            min_confidence=45.0,
             trade_risk_pct=1.5,
             daily_loss_limit_pct=3.0,
         )
@@ -477,7 +477,7 @@ def _build_strategy_configs() -> dict:
             trailing_stop_enabled=True,
             trailing_stop_pct=2.5,
             static_sl_pct=0,
-            min_confidence=30.0,
+            min_confidence=45.0,
             trade_risk_pct=1.5,
             daily_loss_limit_pct=3.0,
         )
