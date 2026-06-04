@@ -179,6 +179,19 @@ def _alpaca_data_creds():
     return key, secret
 
 
+def _data_base_url() -> str:
+    """Return the correct Alpaca data API base URL.
+    
+    When paper trading (ALPACA_PAPER=true), uses paper-api.alpaca.markets
+    which serves both trading and market data. Live uses data.alpaca.markets.
+    """
+    from app.config import settings
+    if getattr(settings, "ALPACA_PAPER", True):
+        return "https://paper-api.alpaca.markets"
+    return "https://data.alpaca.markets"
+
+
+
 # ---------------------------------------------------------------------------
 # Symbol validation
 # ---------------------------------------------------------------------------
@@ -239,7 +252,7 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
             start = start_dt.strftime("%Y-%m-%d")
             end = end_dt.strftime("%Y-%m-%d")
 
-        url = "https://data.alpaca.markets/v2/stocks/bars"
+        url = _data_base_url() + "/v2/stocks/bars"
         params = {
             "symbols": symbol,
             "timeframe": "1Day",
@@ -376,7 +389,7 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
     start_s  = start_dt.strftime("%Y-%m-%d")
     end_s    = end_dt.strftime("%Y-%m-%d")
 
-    url = "https://data.alpaca.markets/v2/stocks/bars"
+    url = _data_base_url() + "/v2/stocks/bars"
     results: dict = {}
     chunk_size = 100  # Alpaca accepts ≤ many symbols per request; 100 is safe
 
@@ -491,7 +504,7 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
         end_dt = _utc_now() if end is None else pd.Timestamp(end).to_pydatetime()
         start_dt = (end_dt - timedelta(days=days_back)) if start is None else pd.Timestamp(start).to_pydatetime()
 
-        url = "https://data.alpaca.markets/v2/stocks/bars"
+        url = _data_base_url() + "/v2/stocks/bars"
         params = {
             "symbols": symbol,
             "timeframe": timeframe,
