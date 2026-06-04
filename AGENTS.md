@@ -1,7 +1,7 @@
 # AGENTS.md — MizanQuant
 
 > **AI agent context file.** Read this before working on the project.
-> Last updated: 2026-05-29
+> Last updated: 2026-06-04
 
 ---
 
@@ -144,7 +144,10 @@ All new features are gated behind independent flags that default to . **No flag 
 ## 7. KNOWN PITFALLS
 
 1. **FMP/Tiingo often down** — data providers have rate limits. Alpaca is the reliable fallback.
-2. **yfinance circuit breaker** — may trip on batch requests. Use small batches (<=30 symbols).
+2. **yfinance circuit breaker** — 3-stage (closed→throttle→open). 50 failures → THROTTLE (1s delay). 150 → OPEN (skip all, 5 min). Auto-blacklists delisted symbols. No more 48% scan loss.
 3. **Screener hangs** — typically rate limit on last ~50 symbols. Scanner can still serve partial results.
 4. **WSL <-> Windows networking** — WSL can reach Windows host at  (gateway IP), not .
 5. **No hot-reload** — server must be restarted after code changes.
+6. **Alpaca feed parameter** — DO NOT hardcode feed=iex/sip. Omit the feed param entirely; Alpaca auto-selects best available. feed=iex caused 404 for NVDA, AMD + 300 other symbols on paper accounts.
+7. **fetch_alpaca_batch bug (FIXED)** — had NameError (valid_syms undefined) + missing url variable. Now fixed with yfinance fallback for paper mode.
+8. **httpx log spam** — httpx + httpcore loggers set to WARNING in workspace_server.py (was INFO, flooded logs with HTTP requests).
