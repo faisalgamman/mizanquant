@@ -65,12 +65,25 @@ def _grader_metric(val: any, default: float = 0.0) -> float:
 
 
 def compute_grade_from_metrics(metrics: dict) -> str | None:
-    """Compute fundamental grade (A/B/C/D/F) from FMP key-metrics dict.
+    """Compute fundamental grade (A/B/C/D/F) from key-metrics dict.
+
+    Accepts both FMP format (whole numbers, e.g. 34 = 34%) and
+    yfinance format (decimals, e.g. 0.34 = 34%). Auto-detects and
+    normalises to percentages.
 
     Returns None if metrics dict is empty or insufficient data.
     """
     if not metrics:
         return None
+
+    # Normalise ratio fields — yfinance returns decimals (0.34), FMP returns whole numbers (34).
+    # If ALL ratio values are < 1.0, they're in decimal form → multiply by 100.
+    _ratio_keys = ["roe", "roa", "netProfitMargin", "revenueGrowth", "earningsGrowth"]
+    _ratio_vals = [metrics.get(k) for k in _ratio_keys if metrics.get(k) is not None]
+    if _ratio_vals and all(v is not None and abs(float(v)) < 1.0 for v in _ratio_vals):
+        for k in _ratio_keys:
+            if metrics.get(k) is not None:
+                metrics[k] = float(metrics[k]) * 100
 
     roe         = _grader_metric(metrics.get("roe"), 0)
     roa         = _grader_metric(metrics.get("roa"), 0)
