@@ -312,23 +312,11 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
                 except Exception:
                     pass
             if not _enriched.get("forecast_details"):
-                try:
-                    import halal_screener as _hs
-                    # run_ensemble returns [{summary}, {day1_fc}, {day2_fc}, ...]
-                    _fc = _hs.run_ensemble(_sym.upper(), horizon=5)
-                    if isinstance(_fc, list) and len(_fc) > 1:
-                        # Determine direction from the forecast days
-                        _buy_signals = sum(
-                            1 for d in _fc[1:] if str(d.get("Signal", "")).upper() == "BUY"
-                        )
-                        _direction = "up" if _buy_signals >= len(_fc[1:]) / 2 else "down"
-                        _enriched["forecast_details"] = {
-                            "models": ["ensemble"],
-                            "model_direction": _direction,
-                            "forecast": _fc,
-                        }
-                except Exception:
-                    pass
+                # NOTE: forecast enrichment via run_ensemble() was disabled
+                # (caused server timeout during intraday scans).
+                # The Composite Bridge requires only 3/4 confirmations,
+                # and technical + fundamental + consensus = 3 is sufficient.
+                pass
             # Attach consensus votes from the strategy row (already present)
             _enriched.setdefault("consensus_votes_buy", row.get("Votes BUY", 0))
             _enriched.setdefault("consensus_votes_sell", row.get("Votes SELL", 0))
