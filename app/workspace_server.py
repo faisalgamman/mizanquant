@@ -256,6 +256,12 @@ async def login_post(request: Request):
             str(DASHBOARD_USER or "").encode("utf-8")
         )
 
+        # TEMP DEBUG: log expected vs received credentials
+        logger.warning(
+            "LOGIN ATTEMPT: user=%r (expected=%r) | pw_ok=%s | is_hashed=%s",
+            username, str(DASHBOARD_USER or ""), password_ok, is_hashed
+        )
+
         if user_ok and password_ok:
             resp = RedirectResponse(url=next_url, status_code=302)
             resp.set_cookie(
