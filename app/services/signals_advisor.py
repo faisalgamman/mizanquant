@@ -295,7 +295,7 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
     _bridge_on = False
     try:
         from app.config import settings as _bridge_cfg
-        _bridge_on = getattr(_bridge_cfg, "COMPOSITE_BRIDGE_LIVE", False)
+        _bridge_on = getattr(_bridge_cfg, "COMPOSITE_BRIDGE_LIVE", True)
     except Exception:
         pass
     if _bridge_on and row.get("Verdict") == "STRONG BUY":
@@ -656,7 +656,7 @@ def scan_and_notify_strong_buys(
     _intra_on = False
     try:
         from app.config import settings as _intra_cfg
-        _intra_on = getattr(_intra_cfg, "INTRADAY_CONFIRM_LIVE", False)
+        _intra_on = getattr(_intra_cfg, "INTRADAY_CONFIRM_LIVE", True)
     except Exception:
         pass
     if _intra_on and candidate_symbols:
