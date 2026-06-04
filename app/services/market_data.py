@@ -179,16 +179,27 @@ def _alpaca_data_creds():
     return key, secret
 
 
-def _data_base_url() -> str:
-    """Return the correct Alpaca data API base URL.
-    
-    When paper trading (ALPACA_PAPER=true), uses paper-api.alpaca.markets
-    which serves both trading and market data. Live uses data.alpaca.markets.
-    """
+def _is_paper() -> bool:
+    """True when running in paper-trading mode."""
     from app.config import settings
-    if getattr(settings, "ALPACA_PAPER", True):
-        return "https://paper-api.alpaca.markets"
-    return "https://data.alpaca.markets"
+    return getattr(settings, "ALPACA_PAPER", True)
+
+
+def _data_bars_url(symbols: list[str]) -> tuple[str, dict]:
+    """Return (url, params) for a bars request.
+    
+    Paper trading uses single-symbol /v2/stocks/{s}/bars because the
+    multi-symbol batch endpoint is DATA-plan only (data.alpaca.markets).
+    Live with DATA keys uses the batch endpoint for efficiency.
+    """
+    if _is_paper():
+        # Single-symbol request — paper-api doesn't support /v2/stocks/bars
+        url = "https://paper-api.alpaca.markets/v2/stocks/" + symbols[0] + "/bars"
+        return url, {}
+    else:
+        # Batch endpoint for live data subscribers
+        url = "https://data.alpaca.markets/v2/stocks/bars"
+        return url, {"symbols": ",".join(symbols)}
 
 
 
@@ -231,6 +242,10 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
     if not symbol:
         return None
 
+    # ── Paper trading: use yfinance (Alpaca paper lacks market data) ──
+    if _is_paper():
+        return fetch_yf(symbol, period, start, end)
+
     try:
         _dk, _ds = _alpaca_data_creds()
         if not _dk or not _ds:
@@ -252,7 +267,9 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
             start = start_dt.strftime("%Y-%m-%d")
             end = end_dt.strftime("%Y-%m-%d")
 
-        url = _data_base_url() + "/v2/stocks/bars"
+        url, _extra = _data_bars_url([symbol])
+        if _extra:
+            params.update(_extra)
         params = {
             "symbols": symbol,
             "timeframe": "1Day",
@@ -352,6 +369,43 @@ def _bars_list_to_df(symbol: str, bars: list) -> "pd.DataFrame | None":
     return df if len(df) >= 40 else None
 
 
+def _fetch_yf_batch(symbols: list, period: str = "2y") -> dict:
+    """Fetch daily bars via Yahoo Finance for paper/offline mode.
+
+    Returns {symbol: DataFrame} for symbols with >= 40 rows.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.warning("yfinance not installed — cannot fetch data")
+        return {}
+
+    end_dt = _utc_now()
+    days = {"1y": 365, "2y": 730, "5y": 1825}.get(period, 730)
+    start_dt = end_dt - timedelta(days=days)
+
+    results = {}
+    for symbol in symbols:
+        sym = _validate_symbol(symbol)
+        if not sym:
+            continue
+        try:
+            ticker = yf.Ticker(sym)
+            df = ticker.history(start=start_dt, end=end_dt)
+            if df is not None and len(df) >= 40:
+                # Normalize columns to match Alpaca format
+                df = df.rename(columns={
+                    "Open": "o", "High": "h", "Low": "l",
+                    "Close": "c", "Volume": "v"
+                })
+                df.index.name = "t"
+                results[sym] = df
+        except Exception:
+            pass  # skip failed symbols silently
+    return results
+
+
+
 def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
     """Fetch daily bars for multiple symbols in one Alpaca API call (batch mode).
 
@@ -373,6 +427,14 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
     except Exception:
         return {}
 
+    # ── Yahoo Finance fallback for paper trading ──────────────────────
+    # Alpaca paper accounts don't include market data (v2/stocks/*/bars
+    # returns 401). For paper mode, use yfinance which is free and
+    # reliable enough for USX V4 filtering.
+    if _is_paper():
+        return _fetch_yf_batch(valid_syms, period)
+    # ──────────────────────────────────────────────────────────────────
+
     try:
         import httpx
     except ImportError:
@@ -389,11 +451,8 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
     start_s  = start_dt.strftime("%Y-%m-%d")
     end_s    = end_dt.strftime("%Y-%m-%d")
 
-    url = _data_base_url() + "/v2/stocks/bars"
     results: dict = {}
-    chunk_size = 100  # Alpaca accepts ≤ many symbols per request; 100 is safe
-
-    valid_syms = [s for s in symbols if _validate_symbol(s)]
+    chunk_size = 100  # Alpaca accepts <= 100 symbols per request
 
     for i in range(0, len(valid_syms), chunk_size):
         batch = valid_syms[i:i + chunk_size]
@@ -490,6 +549,10 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
     if cached is not None:
         return cached
 
+    # ── Paper trading: use yfinance ───────────────────────────────────
+    if _is_paper():
+        return fetch_yf(symbol, str(days_back) + "d", start, end)
+
     try:
         _dk, _ds = _alpaca_data_creds()
         if not _dk or not _ds:
@@ -504,7 +567,9 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
         end_dt = _utc_now() if end is None else pd.Timestamp(end).to_pydatetime()
         start_dt = (end_dt - timedelta(days=days_back)) if start is None else pd.Timestamp(start).to_pydatetime()
 
-        url = _data_base_url() + "/v2/stocks/bars"
+        url, _extra = _data_bars_url([symbol])
+        if _extra:
+            params.update(_extra)
         params = {
             "symbols": symbol,
             "timeframe": timeframe,
