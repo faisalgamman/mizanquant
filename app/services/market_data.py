@@ -277,8 +277,9 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
             "end": end,
             "limit": 10000,
             "adjustment": "split",
-            "feed": "iex",
         }
+        # Omit feed param — Alpaca auto-selects best available feed.
+        # "iex" caused 404 on paper accounts for 300+ symbols including NVDA, AMD.
 
         max_retries = 3
         retry_delay = 2.0  # initial backoff seconds
@@ -432,7 +433,7 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
     # returns 401). For paper mode, use yfinance which is free and
     # reliable enough for USX V4 filtering.
     if _is_paper():
-        return _fetch_yf_batch(valid_syms, period)
+        return _fetch_yf_batch(symbols, period)
     # ──────────────────────────────────────────────────────────────────
 
     try:
@@ -453,9 +454,11 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
 
     results: dict = {}
     chunk_size = 100  # Alpaca accepts <= 100 symbols per request
+    # Batch endpoint URL (data.alpaca.markets for live, paper uses yfinance above)
+    batch_url = "https://data.alpaca.markets/v2/stocks/bars"
 
-    for i in range(0, len(valid_syms), chunk_size):
-        batch = valid_syms[i:i + chunk_size]
+    for i in range(0, len(symbols), chunk_size):
+        batch = symbols[i:i + chunk_size]
         params = {
             "symbols":    ",".join(batch),
             "timeframe":  "1Day",
@@ -463,8 +466,8 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
             "end":        end_s,
             "limit":      10000,
             "adjustment": "split",
-            "feed":       "iex",
         }
+        # Omit feed param — Alpaca auto-selects best available feed.
 
         # Retry loop (batch-level, same backoff as single-symbol fetch)
         for attempt in range(3):
@@ -479,7 +482,7 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
                     if next_page:
                         page_params["page_token"] = next_page
                     with httpx.Client(timeout=45) as client:
-                        resp = client.get(url, headers=headers, params=page_params)
+                        resp = client.get(batch_url, headers=headers, params=page_params)
 
                     if resp.status_code == 429:
                         wait = _backoff_next(attempt)
@@ -522,7 +525,7 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
         # Small inter-chunk pause — stays well under 200 req/min
         time.sleep(0.4)
 
-    logger.info("fetch_alpaca_batch: returned %d/%d symbols", len(results), len(valid_syms))
+    logger.info("fetch_alpaca_batch: returned %d/%d symbols", len(results), len(symbols))
     return results
 
 
@@ -577,8 +580,8 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
             "end": end_dt.strftime("%Y-%m-%dT23:59:59Z"),
             "limit": 10000,
             "adjustment": "split",
-            "feed": "iex",
         }
+        # Omit feed param — Alpaca auto-selects best available feed.
 
         _alpaca_semaphore.acquire()
         try:
@@ -646,6 +649,12 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
     if _yfinance_breaker.is_open():
         logger.warning("yfinance circuit breaker OPEN — skipping %s", symbol)
         return None
+    
+    # Throttle check: if breaker is in THROTTLE mode, enforce delay
+    _delay = _yfinance_breaker.throttle_delay()
+    if _delay > 0:
+        time.sleep(_delay)
+    _yfinance_breaker.mark_request()
 
     symbol = _validate_symbol(symbol)
     if not symbol:
@@ -683,6 +692,11 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
             return result
         except Exception as e:
             estr = str(e)
+            # Auto-blacklist delisted/invalid symbols so they're never retried
+            if "delisted" in estr.lower() or "no data found" in estr.lower() or                "symbol may be" in estr.lower():
+                _BAD_SYMBOLS.add(symbol)
+                logger.warning("yfinance %s: auto-blacklisted (delisted/invalid) — %s", symbol, estr)
+                return None
             is_auth = "401" in estr or "Unauthorized" in estr or "Invalid Crumb" in estr
             if is_auth and attempt < max_retries - 1:
                 ua = _rotate_user_agent()
@@ -708,14 +722,25 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 
 
 class CircuitBreaker:
-    """Tracks failures; cuts off after threshold, auto-resets after timeout."""
+    """Tracks failures with 3 states: closed → throttle → open.
+    
+    - closed:     normal operation, no delay.
+    - throttle:   add delay between requests (slow down, don't skip).
+    - open:       skip all requests until reset timeout.
+    
+    Progression:  5 consecutive failures → throttle → 10 more → open."""
+    
+    THROTTLE_DELAY = 1.0       # seconds between requests in throttle mode
+    THROTTLE_MULTIPLIER = 1.5  # exponential backoff multiplier per failure
 
     def __init__(self, name: str, failure_threshold: int = 5, reset_timeout: float = 60.0):
         self.name = name
         self.failure_threshold = failure_threshold
         self.reset_timeout = reset_timeout
         self.failures = 0
+        self.successes_since_throttle = 0
         self.last_failure_time = 0.0
+        self.last_request_time = 0.0
         self.state = "closed"
         self._lock = threading.Lock()
 
@@ -723,28 +748,56 @@ class CircuitBreaker:
         with self._lock:
             self.failures += 1
             self.last_failure_time = time.time()
-            if self.failures >= self.failure_threshold:
+            self.successes_since_throttle = 0
+            if self.failures >= self.failure_threshold * 3:
                 self.state = "open"
+            elif self.failures >= self.failure_threshold:
+                self.state = "throttle"
 
     def record_success(self) -> None:
         with self._lock:
-            self.failures = 0
-            self.state = "closed"
+            if self.state == "throttle":
+                self.successes_since_throttle += 1
+                # Back to closed after 5 consecutive successes in throttle mode
+                if self.successes_since_throttle >= 5:
+                    self.failures = 0
+                    self.state = "closed"
+                    self.successes_since_throttle = 0
+            else:
+                self.failures = 0
+                self.state = "closed"
+                self.successes_since_throttle = 0
 
     def is_open(self) -> bool:
         with self._lock:
             if self.state == "open":
                 if time.time() - self.last_failure_time > self.reset_timeout:
-                    self.state = "half-open"
+                    self.state = "throttle"
+                    self.failures = self.failure_threshold  # stay in throttle
                     return False
                 return True
             return False
 
+    def throttle_delay(self) -> float:
+        """Return seconds to delay before next request. 0 = no delay needed."""
+        with self._lock:
+            if self.state == "throttle":
+                elapsed = time.time() - self.last_request_time
+                if elapsed < self.THROTTLE_DELAY:
+                    return self.THROTTLE_DELAY - elapsed
+            return 0.0
+
+    def mark_request(self) -> None:
+        """Call before each request to track timing."""
+        with self._lock:
+            self.last_request_time = time.time()
+
 
 # Global circuit breakers
-# yfinance: raised threshold to 20 (was 10) so a handful of bad symbols during a
-# 650-symbol scan doesn't open the breaker prematurely; reset raised to 5 min.
-_yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=20, reset_timeout=300.0)
+# yfinance: uses 3-stage (closed→throttle→open). Threshold 50: first 50 failures
+# → THROTTLE (1s delay between requests). 150 failures → OPEN (skip all, 5 min).
+# This prevents a handful of bad/delisted symbols from killing the entire scan.
+_yfinance_breaker = CircuitBreaker("yfinance", failure_threshold=50, reset_timeout=300.0)
 _alpaca_breaker   = CircuitBreaker("alpaca",   failure_threshold=10, reset_timeout=60.0)
 _ibkr_breaker     = CircuitBreaker("ibkr",     failure_threshold=3,  reset_timeout=600.0)
 # Tiingo: 403 = key blocked (permanent). Trip after 3 failures, stay open for 2 h.

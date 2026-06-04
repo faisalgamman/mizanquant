@@ -83,6 +83,7 @@ async def v1_pipeline_status(db: AsyncSession = Depends(get_async_db)):
 
 
 @router.get("/pipeline/run")
+@router.post("/pipeline/run")
 async def v1_pipeline_run(dry_run: bool = True, strategy: str = "ABC"):
     import asyncio
     from app.services.pipeline_orchestrator import run_pipeline

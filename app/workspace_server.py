@@ -44,6 +44,9 @@ import hmac
 
 
 logging.basicConfig(level=logging.INFO)
+# Silence noisy httpx INFO logs (HTTP request/response spam)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("workspace_server")
 
 # ---------------------------------------------------------------------------
@@ -674,7 +677,7 @@ def _fetch_data(symbol: str, period: str = "1y") -> tuple[list[dict], pd.DataFra
         try:
             df = pd.DataFrame(cached)
             if "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"])
+                df["date"] = pd.to_datetime(df["date"], utc=True)
             return cached, df
         except Exception:
             pass
@@ -695,7 +698,7 @@ def _fetch_data(symbol: str, period: str = "1y") -> tuple[list[dict], pd.DataFra
 def _records_to_df(records: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(records)
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
+        df["date"] = pd.to_datetime(df["date"], utc=True)
         df.sort_values("date", inplace=True)
         df.reset_index(drop=True, inplace=True)
     return df
