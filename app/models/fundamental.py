@@ -166,62 +166,96 @@ def compute_grade_from_metrics(metrics: dict) -> str | None:
         return "F"
 
 
+def _fetch_yfinance_metrics(symbol: str) -> dict | None:
+    """Fetch fundamental metrics from yfinance as fallback."""
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol.upper())
+        info = ticker.info or {}
+        if not info:
+            return None
+
+        return {
+            "roe": info.get("returnOnEquity"),
+            "roa": info.get("returnOnAssets"),
+            "debtToEquity": info.get("debtToEquity"),
+            "currentRatio": info.get("currentRatio"),
+            "grossProfitMargin": info.get("grossMargins"),
+            "netProfitMargin": info.get("profitMargins"),
+            "peRatio": info.get("trailingPE") or info.get("forwardPE"),
+            "priceToBookRatio": info.get("priceToBook"),
+            "revenueGrowth": info.get("revenueGrowth"),
+            "earningsGrowth": info.get("earningsGrowth"),
+        }
+    except Exception as exc:
+        logger.debug("fundamental: yfinance fallback failed for %s: %s", symbol, exc)
+        return None
+
+
 def fetch_and_grade(symbol: str) -> dict | None:
-    """Fetch FMP key-metrics for symbol, compute grade, persist snapshot.
+    """Fetch FMP key-metrics for symbol (with yfinance fallback), compute grade, persist snapshot.
 
     Returns dict with at least {'grade': 'A'|'B'|'C'|'D'|'F'} or None on failure.
     """
+    metrics = None
+
+    # Try FMP first
     try:
         from app.services.fmp_client import FMPClient
 
         client = FMPClient()
         metrics_list = client.get_key_metrics(symbol, limit=1)
-        if not metrics_list:
-            logger.debug("fundamental: no FMP key-metrics for %s", symbol)
-            return None
-
-        metrics = metrics_list[0]
-        grade = compute_grade_from_metrics(metrics)
-        if grade is None:
-            logger.debug("fundamental: insufficient metrics for %s", symbol)
-            return None
-
-        # Persist snapshot
-        try:
-            from app.db.database import SessionLocal
-
-            session = SessionLocal()
-            try:
-                snap = FundamentalSnapshot(
-                    symbol=symbol.upper(),
-                    grade=grade,
-                    roe=_grader_metric(metrics.get("roe")),
-                    roa=_grader_metric(metrics.get("roa")),
-                    debt_to_equity=_grader_metric(metrics.get("debtToEquity")),
-                    current_ratio=_grader_metric(metrics.get("currentRatio")),
-                    gross_margin=_grader_metric(metrics.get("grossProfitMargin")),
-                    net_margin=_grader_metric(metrics.get("netProfitMargin")),
-                    pe_ratio=_grader_metric(metrics.get("peRatio")),
-                    pb_ratio=_grader_metric(metrics.get("priceToBookRatio")),
-                    revenue_growth=_grader_metric(metrics.get("revenueGrowth")),
-                    earnings_growth=_grader_metric(metrics.get("earningsGrowth")),
-                    as_of=datetime.now(timezone.utc),
-                )
-                session.add(snap)
-                session.commit()
-            except Exception:
-                session.rollback()
-            finally:
-                session.close()
-        except Exception as exc:
-            logger.debug("fundamental: failed to persist snapshot for %s: %s", symbol, exc)
-
-        logger.info("fundamental: %s → grade %s (score from metrics)", symbol, grade)
-        return {"grade": grade}
-
+        if metrics_list:
+            metrics = metrics_list[0]
+            logger.debug("fundamental: %s — using FMP metrics", symbol)
     except Exception as exc:
-        logger.debug("fundamental: fetch_and_grade failed for %s: %s", symbol, exc)
+        logger.debug("fundamental: FMP fetch failed for %s: %s", symbol, exc)
+
+    # Fall back to yfinance
+    if not metrics:
+        metrics = _fetch_yfinance_metrics(symbol)
+        if not metrics:
+            logger.debug("fundamental: no metrics available for %s (FMP + yfinance both failed)", symbol)
+            return None
+        logger.debug("fundamental: %s — using yfinance fallback metrics", symbol)
+
+    grade = compute_grade_from_metrics(metrics)
+    if grade is None:
+        logger.debug("fundamental: insufficient metrics for %s", symbol)
         return None
+
+    # Persist snapshot
+    try:
+        from app.db.database import SessionLocal
+
+        session = SessionLocal()
+        try:
+            snap = FundamentalSnapshot(
+                symbol=symbol.upper(),
+                grade=grade,
+                roe=_grader_metric(metrics.get("roe")),
+                roa=_grader_metric(metrics.get("roa")),
+                debt_to_equity=_grader_metric(metrics.get("debtToEquity")),
+                current_ratio=_grader_metric(metrics.get("currentRatio")),
+                gross_margin=_grader_metric(metrics.get("grossProfitMargin")),
+                net_margin=_grader_metric(metrics.get("netProfitMargin")),
+                pe_ratio=_grader_metric(metrics.get("peRatio")),
+                pb_ratio=_grader_metric(metrics.get("priceToBookRatio")),
+                revenue_growth=_grader_metric(metrics.get("revenueGrowth")),
+                earnings_growth=_grader_metric(metrics.get("earningsGrowth")),
+                as_of=datetime.now(timezone.utc),
+            )
+            session.add(snap)
+            session.commit()
+        except Exception:
+            session.rollback()
+        finally:
+            session.close()
+    except Exception as exc:
+        logger.debug("fundamental: failed to persist snapshot for %s: %s", symbol, exc)
+
+    logger.info("fundamental: %s → grade %s", symbol, grade)
+    return {"grade": grade}
 
 
 def get_f_grade(symbol: str, max_age_hours: int = 168) -> str | None:
