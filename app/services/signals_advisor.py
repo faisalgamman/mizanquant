@@ -305,26 +305,28 @@ def _send_signal_alert(row: dict, usx_score: float | None, usx_breakdown: dict |
             _enriched = dict(row)
             if not _enriched.get("f_grade"):
                 try:
-                    from app.db.connection import get_session
-                    from app.models.fundamental import FundamentalSnapshot
-                    _session = get_session()
-                    try:
-                        _fs = _session.query(FundamentalSnapshot).filter(
-                            FundamentalSnapshot.symbol == _sym.upper()
-                        ).order_by(FundamentalSnapshot.as_of.desc()).first()
-                        if _fs and _fs.grade:
-                            _enriched["f_grade"] = _fs.grade
-                    finally:
-                        _session.close()
+                    from app.models.fundamental import get_f_grade
+                    _grade = get_f_grade(_sym.upper())
+                    if _grade:
+                        _enriched["f_grade"] = _grade
                 except Exception:
                     pass
             if not _enriched.get("forecast_details"):
                 try:
                     import halal_screener as _hs
-                    _fkey = f"forecast_{_sym.upper()}"
-                    _fd = _hs._serve_or_compute(_fkey, lambda: _hs._predict_ensemble_lt(_sym.upper()))
-                    if _fd and isinstance(_fd, dict) and _fd.get("models"):
-                        _enriched["forecast_details"] = _fd
+                    # run_ensemble returns [{summary}, {day1_fc}, {day2_fc}, ...]
+                    _fc = _hs.run_ensemble(_sym.upper(), horizon=5)
+                    if isinstance(_fc, list) and len(_fc) > 1:
+                        # Determine direction from the forecast days
+                        _buy_signals = sum(
+                            1 for d in _fc[1:] if str(d.get("Signal", "")).upper() == "BUY"
+                        )
+                        _direction = "up" if _buy_signals >= len(_fc[1:]) / 2 else "down"
+                        _enriched["forecast_details"] = {
+                            "models": ["ensemble"],
+                            "model_direction": _direction,
+                            "forecast": _fc,
+                        }
                 except Exception:
                     pass
             # Attach consensus votes from the strategy row (already present)

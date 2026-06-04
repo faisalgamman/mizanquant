@@ -65,6 +65,7 @@ def init_db():
     # create_all runs — guarantees new tables (e.g. alerts) are created
     # regardless of import order at startup.
     from app.db import models  # noqa: F401
+    from app.models import fundamental  # noqa: F401  # Composite Bridge enrichment
     Base.metadata.create_all(bind=engine)
     _run_schema_migrations()
     logger.info("Database tables initialized.")
