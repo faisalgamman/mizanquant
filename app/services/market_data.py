@@ -675,6 +675,9 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
                 if attempt < max_retries - 1:
                     _yfinance_breaker.record_failure()
                     continue
+                # All retries exhausted with empty data — likely delisted
+                _BAD_SYMBOLS.add(symbol)
+                logger.warning("yfinance %s: auto-blacklisted (empty data after %d retries — likely delisted)", symbol, max_retries)
                 _yfinance_breaker.record_failure()
                 return None
 
