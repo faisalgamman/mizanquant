@@ -68,6 +68,26 @@ _SECTOR_ALIASES: dict[str, str] = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SCORING SYSTEM BOUNDARIES (A7 — Architectural Decision 2026-06-05)
+# ═══════════════════════════════════════════════════════════════════════
+# TWO independent scoring systems serve different domains:
+#
+#   swing_score (signals_advisor, scheduler, pipeline_orchestrator):
+#     → Fast per-symbol qualifier for 7x daily signal slots.
+#     → Outputs: BUY / STRONG BUY with price + stop + target.
+#     → Domain: immediate trading decisions (10:30-16:30 ET).
+#
+#   composite_score / deep-picks (workspace_server, conviction_engine):
+#     → Multi-factor deep analysis via CompositeBridge (tech + fund + consensus).
+#     → Outputs: scored picks with conviction, context, archetype enrichments.
+#     → Domain: research-quality ranking, NOT a parallel signal source.
+#
+# They may produce DIFFERENT top-pick lists. This is EXPECTED — they
+# score different things at different cadences for different consumers.
+# DO NOT merge them. Keep explicit domain boundaries.
+# ═══════════════════════════════════════════════════════════════════════
+
 def _normalize_sector(sector: str) -> str:
     """Map vendor sector names to the SPDR ETF taxonomy before quadrant lookup.
 
