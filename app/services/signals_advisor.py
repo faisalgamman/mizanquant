@@ -164,15 +164,18 @@ def _format_signal(
     votes_hold = row.get("Votes HOLD", 0)
 
     # When SWING_EXIT is armed, execute_buy() replaces the tight stop/TP with a
-    # wide 12% trailing stop and a 3×-risk take-profit. Mirror that here so the
+    # FIXED wide catastrophe stop (SWING_TRAIL_PCT) + a far TP, and the position
+    # is closed by a TIME exit at SWING_MAX_HOLD_DAYS. Mirror that here so the
     # DISPLAYED plan matches what is actually placed (no display≠execution gap).
     swing_on = False
+    hold_days = 0
     try:
         from app.config import settings as _disp_cfg
         if getattr(_disp_cfg, "SWING_EXIT_ENABLED", False):
             swing_on = True
-            stop_pct = float(getattr(_disp_cfg, "SWING_TRAIL_PCT", 12.0)) / 100.0
+            stop_pct = float(getattr(_disp_cfg, "SWING_TRAIL_PCT", 15.0)) / 100.0
             take_pct = 3.0 * stop_pct
+            hold_days = int(getattr(_disp_cfg, "SWING_MAX_HOLD_DAYS", 20))
     except Exception:
         pass
 
@@ -213,7 +216,7 @@ def _format_signal(
         lines.append(f"USX V4:     {usx_score:.0f}/100")
     # Honest R/R from the actual stop/target distances (was a hardcoded label).
     rr = round((tp2 - price) / (price - sl), 1) if price > sl else 0.0
-    stop_kind = "trailing 12%" if swing_on else "fixed"
+    stop_kind = "fixed catastrophe" if swing_on else "fixed"
     lines.extend([
         "━━━━━━━━━━━━━━━",
         f"Price:      ${price:.2f}",
@@ -224,6 +227,10 @@ def _format_signal(
         f"R/R:        1:{rr:.1f}  (TP2 vs stop)",
         f"Shares:     {shares}  (≈ ${notional:.2f} notional)",
         f"Risk:       ${risk_dollars:.2f}  ({risk_pct*100:.1f}% of ${account_usd:.0f})",
+    ])
+    if swing_on and hold_days:
+        lines.append(f"Hold:       ~{hold_days} trading days (time exit) — don't sell on normal pullbacks")
+    lines.extend([
         "━━━━━━━━━━━━━━━",
         f"AI Votes:   BUY {votes_buy} / SELL {votes_sell} / HOLD {votes_hold}",
     ])

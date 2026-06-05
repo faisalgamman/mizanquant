@@ -3829,22 +3829,25 @@ async def screener_deep_picks(
         except Exception as _conv_exc:
             logger.debug("conviction layer failed for %s: %s", symbol, _conv_exc)
         # ── Backtest-validated trade plan (informational, always attached) ────
-        # • Stop loss : 12% when SWING_EXIT_ENABLED, else max(ATR×1.5, 4%)
-        #   Rationale : trailing-stop backtest — 12% trail → 2.815% mean return
-        #               vs 0.962% for tight 2.5% stack (+1.853%/trade), DSR=0.97
-        # • Take profit: 3 × risk (1:3 R:R validated in exit-structure backtest)
-        # • Hold days : 20 (selection backtest DSR=0.97 at 20d vs 0.69 at 5d)
+        # • Stop loss : FIXED wide catastrophe stop (SWING_TRAIL_PCT, 15%) when
+        #   SWING_EXIT_ENABLED, else max(ATR×1.5, 4%). NOT a trailing stop.
+        # • Hold days : 20 — the real edge. Paired backtest (2026-06): time-stop
+        #   20d mean +3.60% / win 58.9% / DSR 0.985; trailing stops cut winners.
+        # • Take profit: far (3×stop) so it rarely binds before the time exit.
         try:
             _price_tp = float(out.get("price") or 0)
             _atr_p    = float(out.get("atr_pct") or 0)
             _swing_on = getattr(_sel_cfg, "SWING_EXIT_ENABLED", False)
-            _stop_p   = 12.0 if _swing_on else max(round(_atr_p * 1.5, 1), 4.0)
+            _stop_p   = float(getattr(_sel_cfg, "SWING_TRAIL_PCT", 15.0)) if _swing_on else max(round(_atr_p * 1.5, 1), 4.0)
+            _hold_d   = int(getattr(_sel_cfg, "SWING_MAX_HOLD_DAYS", 20))
             out["trade_plan"] = {
                 "stop_pct":   _stop_p,
+                "stop_kind":  "fixed_catastrophe" if _swing_on else "atr_fixed",
                 "stop_price": round(_price_tp * (1 - _stop_p / 100), 2) if _price_tp else None,
                 "tp_price":   round(_price_tp * (1 + 3 * _stop_p / 100), 2) if _price_tp else None,
                 "rr_ratio":   3.0,
-                "hold_days":  20,
+                "hold_days":  _hold_d,
+                "exit_rule":  "hold to time exit; do not sell on normal pullbacks",
                 "basis":      "backtest_validated",
             }
         except Exception:

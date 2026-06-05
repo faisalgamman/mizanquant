@@ -194,10 +194,15 @@ class Settings(BaseSettings):
     # inside daily ATR noise and gets shaken out before the swing develops.
     #
     # When SWING_EXIT_ENABLED=True, execute_buy() replaces the incoming tight
-    # stop/TP with: initial stop = entry·(1 − SWING_TRAIL_PCT), trail =
-    # SWING_TRAIL_PCT, and a far take-profit (entry·(1 + 3·SWING_TRAIL_PCT)) so
-    # the bracket TP rarely binds — the wide trail + time exit govern instead.
-    # The wider stop correctly SHRINKS position size (constant risk budget).
+    # stop/TP with: a FIXED (non-trailing) catastrophe stop = entry·(1 −
+    # SWING_TRAIL_PCT) and a far take-profit (entry·(1 + 3·SWING_TRAIL_PCT)) so
+    # neither binds in normal noise — the 20-day TIME exit governs instead.
+    # Validation (2026-06, paired backtest on the technical selection):
+    #   time-stop 20d         → mean +3.60%, win 58.9%, DSR 0.985 (PASSES ≥0.95)
+    #   trailing 12%          → mean +1.48%, DSR 0.750 (cuts winners early)
+    #   trailing 2.5% (old)   → mean +0.12%, DSR 0.198 (= the live PF 0.58 killer)
+    # ⇒ the edge needs a TIME hold + a WIDE FIXED catastrophe stop, NOT a trailing
+    # stop. The wider stop correctly SHRINKS position size (constant risk budget).
     # A scheduler job closes positions held >= SWING_MAX_HOLD_DAYS trading days.
     SWING_EXIT_ENABLED: bool = False
     # ── Sizing pipeline layers (shadow‑mode: compute always, apply when LIVE) ──
@@ -209,8 +214,8 @@ class Settings(BaseSettings):
     MR_QUALITY_SIZING_LIVE: bool = False
     SENTIMENT_SIZING_LIVE: bool = False
     FACTOR_SIZING_LIVE: bool = False
-    SWING_TRAIL_PCT: float = 12.0        # wide trailing stop / initial-stop distance (%)
-    SWING_MAX_HOLD_DAYS: int = 20        # time exit: close after this many trading days
+    SWING_TRAIL_PCT: float = 15.0        # FIXED wide catastrophe-stop distance (%) — not trailing
+    SWING_MAX_HOLD_DAYS: int = 20        # time exit: close after this many trading days (the real edge)
 
     # --- Emergency Kill Switch ---
     # Set to True to halt ALL trading immediately (order submission blocked).

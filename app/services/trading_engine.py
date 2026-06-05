@@ -683,11 +683,13 @@ def execute_buy(
         use_trailing = cfg.trailing_stop_enabled if cfg else settings.TRAILING_STOP_ENABLED
         trail_pct = cfg.trailing_stop_pct if cfg else app_cfg.execution.trail_percent_default
         trail_pct = min(trail_pct, app_cfg.execution.trail_percent_max)
-        # Swing exit mode overrides the trail width (and forces trailing on) so the
-        # broker-side trailing stop matches the validated wide-stop configuration.
+        # Swing exit mode: place a FIXED (non-trailing) wide catastrophe stop and
+        # let the 20-day TIME exit do the work. Backtest (2026-06) showed trailing
+        # stops cut winners (trail 2.5% DSR 0.198, trail 12% DSR 0.750) while the
+        # time-stop hold passes (DSR 0.985). So force trailing OFF here — the
+        # static stop_loss (entry·(1−SWING_TRAIL_PCT)) becomes the bracket stop.
         if getattr(settings, "SWING_EXIT_ENABLED", False):
-            use_trailing = True
-            trail_pct = float(getattr(settings, "SWING_TRAIL_PCT", 12.0))
+            use_trailing = False
 
         order_payload = {
             "symbol": symbol,
