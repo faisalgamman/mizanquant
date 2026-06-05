@@ -2,7 +2,7 @@
 
 _Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M16 complete, V1 API deployed, Options 1-3 complete)_
 
-> **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 680 symbols, ✅ Momentum Burst strategy added.
+> **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 660 symbols, ✅ Momentum Burst strategy added.
 
 ---
 
@@ -103,7 +103,8 @@ _Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M16 co
 
 ```
 openbb-trading/
-├── halal_screener.py          [~4308 lines → ~3880 lines] ← Entry point, includes routers
+├── halal_screener.py          [~5006 lines] ← Router/function provider (NOT deployable)
+├── app/workspace_server.py     [~7514 lines] ← CANONICAL entry point (railway.json → Dockerfile)
 ├── app/
 │   ├── config.py              [Domain: Configuration] Settings + StrategyConfig
 │   ├── exceptions.py          [Domain: Shared] Exception hierarchy (7 types)
@@ -195,7 +196,7 @@ openbb-trading/
 | # | Feature | Files | Status |
 |---|---------|-------|--------|
 | **O3** | Gate Toggle UI — dynamic min_gate/strong_gate via slider + override + Telegram alert | `app/services/gate_settings.py` (new), `app/services/scoring.py` (mod), `app/routers/dashboard.py` (mod), `app/static/dashboard.html` (mod) | ✅ Done |
-| **O1** | Universe expansion: S&P 500 + Russell 1000 → 680 halal symbols, JSON loader with fallback | `scripts/build_halal_universe.py` (new), `data/halal_universe_v2.json` (new), `app/services/universe.py` (mod) | ✅ Done |
+| **O1** | Universe expansion: S&P 500 + Russell 1000 → 660 halal symbols, JSON loader with fallback | `scripts/build_halal_universe.py` (new), `data/halal_universe_v2.json` (new), `app/services/universe.py` (mod) | ✅ Done |
 | **O2** | Momentum Burst Strategy: 8-condition daily breakout detector + backtest + registration | `app/strategies/momentum_burst.py` (new), `app/strategies/__init__.py` (mod), `app/strategies/backtest.py` (mod), `app/routers/dashboard.py` (mod) | ✅ Done |
 
 ---
@@ -221,3 +222,22 @@ openbb-trading/
 | **M15** | Wavelet + XGBoost + Fama-French | wavelet_denoise.py — edge-preserving denoising, signal_classifier.py — buy-signal probability gate, factor_exposure.py — Fama-French 5-factor betas | ✅ Done |
 | **M16** | Strategy B Reactivation (trading specialization) | halal_screener.py — full mean-reversion consensus restored (7 tools: regime router, stationarity gate, Bollinger, RSI, volume-price, stochastic, OBV); signals_advisor.py — strategy B re-enabled in _strategy_runners | ✅ Done |
 | **M16** | Strategy B (Mean Reversion) re-enabled — 3-strategy specialization | halal_screener.py (restored run_consensus_reversion), app/services/signals_advisor.py (re-enabled B runner) | ✅ Done |
+
+
+## Recent Changes (2026-06-05 — Architectural Review)
+
+| Milestone | Change | Status |
+|-----------|--------|--------|
+| **A1** | Entry point resolved: nixpacks.toml → `python app/workspace_server.py` | ✅ |
+| **A2** | halal_screener.py made non-deployable (removed `__main__` + uvicorn) | ✅ |
+| **A3** | All `alpaca_get_account()` calls pass `strategy_id` (3 fixed) | ✅ |
+| **A4** | OHLCV batch cache with 5-min TTL added to usx_pro_filter | ✅ |
+| **A5** | Phase 1 extraction: 6 dashboard endpoints → `app/api/dashboard_api.py` | ✅ |
+| **A6** | Orphans cleaned: scripts moved, reports archived, 1.9GB checkpoints pruned | ✅ |
+| **A7** | Scoring boundary documented in conviction_engine.py (swing ≠ composite) | ✅ |
+| **A8** | Archetype detectors verified behind OFF flags with validation_harness gate | ✅ |
+
+**Files modified:** `nixpacks.toml`, `halal_screener.py`, `workspace_server.py`, `usx_pro_filter.py`,
+`pipeline_orchestrator.py`, `conviction_engine.py`, `PROJECT_MAP.md`
+**Files created:** `app/api/dashboard_api.py`
+**Files moved:** `_run_consensus.py`, `_run_scan.py` → `scripts/`; 4 reports → `docs/`
