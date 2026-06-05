@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -199,7 +199,7 @@ def simulate_strategy(
     dict with keys: trades, metrics, sizing_summary, config
     """
     if end_date is None:
-        end_date = datetime.now().strftime("%Y-%m-%d")
+        end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # 1. Fetch data
     ticker = yf.Ticker(symbol)

@@ -27,7 +27,6 @@ def _to_openai_tools(anthropic_schemas: list) -> list:
 
 
 # OpenAI-compatible tool schemas (DeepSeek / Groq / etc.)
-DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
 
 
@@ -200,6 +199,7 @@ TOOL_SCHEMAS = [
         }
     },
 ]
+DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
 
 # ---------------------------------------------------------------------------

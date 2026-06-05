@@ -720,7 +720,7 @@ class EarlyStopping:
                 with open(ckpt_path, "wb") as f:
                     pickle.dump(model_state, f)
             # Also save a timestamped copy
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             ts_path = self.checkpoint_dir / f"{self.model_name}_{ts}_epoch{epoch}.pt"
             try:
                 import torch
@@ -944,7 +944,7 @@ def spy_benchmark(
     try:
         from app.services.market_data import fetch as _md_fetch
         spy = _md_fetch("SPY", start=start_date or "2019-01-01",
-                        end=end_date or datetime.now().strftime("%Y-%m-%d"))
+                        end=end_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         if spy is None or spy.empty:
             return {"error": "SPY data unavailable"}
         spy_close = spy["close"].astype(float)  # market_data.fetch returns lowercase cols
