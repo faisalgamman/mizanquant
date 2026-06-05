@@ -48,6 +48,21 @@ def _fetch_etf_data(ticker: str) -> Optional[pd.DataFrame]:
     return None
 
 
+def _safe_pct(last: float, prior: float) -> float | None:
+    """Percent change rounded to 2dp, or None when undefined.
+
+    Guards against NaN/zero/non-finite inputs so the result is always JSON
+    serializable (a raw NaN float breaks the JSON encoder → 500).
+    """
+    try:
+        if not prior or pd.isna(last) or pd.isna(prior):
+            return None
+        v = (last / prior - 1.0) * 100.0
+        return round(v, 2) if pd.notna(v) and v not in (float("inf"), float("-inf")) else None
+    except (ZeroDivisionError, TypeError, ValueError):
+        return None
+
+
 def get_sector_performance(force_refresh: bool = False) -> list[dict]:
     """Return performance for all 11 sectors over 1d, 5d, 20d."""
     global _sector_cache, _sector_cache_ts
@@ -62,9 +77,9 @@ def get_sector_performance(force_refresh: bool = False) -> list[dict]:
             results[ticker] = {"ticker": ticker, "name": name, "perf_1d": None, "perf_5d": None, "perf_20d": None, "available": False}
             continue
         close = hist["Close"].astype(float)
-        perf_1d = round((float(close.iloc[-1]) / float(close.iloc[-2]) - 1) * 100, 2) if len(close) >= 2 else None
-        perf_5d = round((float(close.iloc[-1]) / float(close.iloc[-5]) - 1) * 100, 2) if len(close) >= 5 else None
-        perf_20d = round((float(close.iloc[-1]) / float(close.iloc[-21]) - 1) * 100, 2) if len(close) >= 21 else None
+        perf_1d = _safe_pct(float(close.iloc[-1]), float(close.iloc[-2])) if len(close) >= 2 else None
+        perf_5d = _safe_pct(float(close.iloc[-1]), float(close.iloc[-5])) if len(close) >= 5 else None
+        perf_20d = _safe_pct(float(close.iloc[-1]), float(close.iloc[-21])) if len(close) >= 21 else None
         results[ticker] = {"ticker": ticker, "name": name, "perf_1d": perf_1d, "perf_5d": perf_5d, "perf_20d": perf_20d, "available": True}
 
     # Sort by 20d performance descending
