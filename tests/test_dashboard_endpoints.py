@@ -8,13 +8,21 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
+
+class _FakeBroker:
+    name = "alpaca"
+    def __init__(self, account=None, positions=None):
+        self._a = account; self._p = positions or []
+    def get_account(self, strategy_id=None): return self._a
+    def get_positions(self, strategy_id=None): return self._p
+
 import halal_screener as hs
 
 
 def test_system_status(monkeypatch):
     client = TestClient(hs.app)
     monkeypatch.setattr(hs.settings, "API_KEY", "")
-    monkeypatch.setattr(hs, "_universe_symbols", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr("app.services.universe.get_universe_symbols", lambda _session=None: ["AAPL", "MSFT"])
 
     resp = client.get("/api/system/status")
     assert resp.status_code == 200
@@ -48,7 +56,7 @@ def test_symbols_search(monkeypatch):
 
 def test_symbols_search_empty(monkeypatch):
     client = TestClient(hs.app)
-    monkeypatch.setattr(hs, "_universe_symbols", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr("app.services.universe.get_universe_symbols", lambda _session=None: ["AAPL", "MSFT"])
 
     resp = client.get("/api/symbols/search?q=ZZZ")
     assert resp.status_code == 200
@@ -57,8 +65,8 @@ def test_symbols_search_empty(monkeypatch):
 
 def test_trading_summary_no_account(monkeypatch):
     client = TestClient(hs.app)
-    monkeypatch.setattr(hs, "alpaca_get_account", lambda strategy_id=None: None)
-    monkeypatch.setattr(hs, "alpaca_get_positions", lambda strategy_id=None: [])
+    monkeypatch.setattr("app.services.broker.factory.get_broker",
+                        lambda strategy_id=None: _FakeBroker(account=None, positions=[]))
 
     resp = client.get("/api/trading/summary")
     assert resp.status_code == 200
@@ -89,8 +97,8 @@ def test_trading_summary_with_account(monkeypatch):
             "unrealized_plpc": "0.0333",
         }
     ]
-    monkeypatch.setattr(hs, "alpaca_get_account", lambda strategy_id=None: mock_account)
-    monkeypatch.setattr(hs, "alpaca_get_positions", lambda strategy_id=None: mock_positions)
+    monkeypatch.setattr("app.services.broker.factory.get_broker",
+                        lambda strategy_id=None: _FakeBroker(account=mock_account, positions=mock_positions))
 
     resp = client.get("/api/trading/summary")
     assert resp.status_code == 200
@@ -129,7 +137,7 @@ def test_guards_recent_empty(monkeypatch):
 def test_halal_check(monkeypatch):
     client = TestClient(hs.app)
     monkeypatch.setattr(hs, "validate_symbol", lambda s: s.upper())
-    monkeypatch.setattr(hs, "verify_halal", lambda s: (True, "Verified halal"))
+    monkeypatch.setattr("app.services.halal_screening.verify_halal", lambda s: (True, "Verified halal"))
 
     resp = client.get("/api/halal/check?symbol=AAPL")
     assert resp.status_code == 200
@@ -141,7 +149,7 @@ def test_halal_check(monkeypatch):
 
 def test_halal_universe(monkeypatch):
     client = TestClient(hs.app)
-    monkeypatch.setattr(hs, "_universe_symbols", lambda: ["AAPL", "MSFT"])
+    monkeypatch.setattr("app.services.universe.get_universe_symbols", lambda _session=None: ["AAPL", "MSFT"])
 
     resp = client.get("/api/halal/universe")
     assert resp.status_code == 200

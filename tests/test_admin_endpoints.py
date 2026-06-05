@@ -10,6 +10,14 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
+
+class _FakeBroker:
+    name = "alpaca"
+    def __init__(self, account=None, positions=None):
+        self._a = account; self._p = positions or []
+    def get_account(self, strategy_id=None): return self._a
+    def get_positions(self, strategy_id=None): return self._p
+
 import halal_screener as hs
 
 
@@ -104,8 +112,10 @@ def test_trading_status_returns_broker_diagnostics(monkeypatch):
     monkeypatch.setattr(hs.settings, "API_KEY", "secret")
     monkeypatch.setattr(hs.settings, "ALPACA_API_KEY_A", "key")
     monkeypatch.setattr(hs.settings, "ALPACA_SECRET_KEY_A", "secret")
-    monkeypatch.setattr(hs, "alpaca_get_account", lambda strategy_id=None: None)
-    monkeypatch.setattr(hs, "alpaca_get_last_error", lambda strategy_id=None: {"reason": "unauthorized", "status_code": 401})
+    monkeypatch.setattr("app.services.broker.factory.get_broker",
+                        lambda strategy_id=None: _FakeBroker(account=None))
+    monkeypatch.setattr("app.services.alpaca_client.get_last_error",
+                        lambda strategy_id=None: {"reason": "unauthorized", "status_code": 401})
 
     response = client.get("/api/v1/trading/status", headers={"X-API-Key": "secret"})
 
