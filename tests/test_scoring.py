@@ -84,7 +84,13 @@ class TestWeightedScore:
         assert expected_keys == set(result["components"].keys())
 
     def test_component_sum_matches_total(self, monkeypatch):
-        """Sum of component scores should equal total."""
+        """Component scores sum to the base subtotal; total adds bonus_total on top.
+
+        `total = sum(components) + bonus_total` by design — the bonus system
+        (volume surge, RS leader, ADX/MACD crossover) awards points OUTSIDE the
+        100-point component breakdown, so the sum must be compared against the
+        non-bonus part of total.
+        """
         monkeypatch.setattr("app.services.scoring.get_market_context", lambda: {
             "spy_regime": {"regime": "bull"},
             "vix": {"vix": 15},
@@ -93,7 +99,7 @@ class TestWeightedScore:
         df = _make_df(prices)
         spy_df = _make_spy_df(prices)
         result = weighted_score(df, spy_df=spy_df, vix=15)
-        assert sum(result["components"].values()) == result["total"]
+        assert sum(result["components"].values()) == result["total"] - result["bonus_total"]
 
     def test_max_score_100(self, monkeypatch):
         """When all conditions are perfect, max score is 100."""
@@ -127,6 +133,13 @@ class TestWeightedScore:
 
 
 class TestIsSignalReady:
+    @pytest.fixture(autouse=True)
+    def _fixed_gate(self, monkeypatch):
+        # is_signal_ready() reads get_market_status()["min_score"], which varies
+        # with the ambient/cached market regime. Pin it to the default gate (65)
+        # so these threshold assertions are deterministic regardless of suite order.
+        monkeypatch.setattr("app.services.scoring.get_market_status", lambda: {"min_score": 65})
+
     def test_above_threshold(self):
         assert is_signal_ready({"total": 80}) is True
 
