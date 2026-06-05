@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     # --- Claude AI Agent ---
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
+    # DeepSeek provider (consumed by app/routers/admin.py::agent_health)
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL: str = "deepseek-chat"
 
     # --- Groq AI (fast LLM inference — trading assistant) ---
     # Free: 14,400 req/day. Register at: https://console.groq.com
