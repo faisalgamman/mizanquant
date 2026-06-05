@@ -75,7 +75,7 @@ async def admin_alpaca_check(x_api_key: OperatorAPIKey = None):
     if bt == "ibkr":
         from app.services.broker.ibkr_adapter import IBBroker
         broker = IBBroker()
-        acct = broker.get_account()
+        acct = broker.get_account(strategy_id=None)  # explicit
         return {"broker_type": "ibkr", "ibkr_host": settings.IBKR_HOST, "ibkr_port": settings.IBKR_PORT,
                 "connected": acct is not None, "account": acct}
     results = {}
@@ -121,7 +121,7 @@ async def admin_broker_diagnose(x_api_key: OperatorAPIKey = None):
         from app.services.broker.ibkr_adapter import IBBroker, disconnect_all
         disconnect_all()  # force fresh connect for diagnosis
         broker = IBBroker()
-        acct = broker.get_account()
+        acct = broker.get_account(strategy_id=None)  # explicit
         if acct is not None:
             result["checks"]["ib_api"] = "connected"
             result["account"] = {k: v for k, v in acct.items() if k != "positions"}

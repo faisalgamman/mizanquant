@@ -508,8 +508,10 @@ class UnifiedPipeline:
 
         total_equity = 100000.0  # Will be updated from Alpaca account
         try:
+            from app.config import STRATEGY_CONFIGS
+            _psid = next(iter(STRATEGY_CONFIGS), None)
             from app.services.alpaca_client import get_account
-            acct = get_account()
+            acct = get_account(strategy_id=_psid)
             if acct:
                 total_equity = float(acct.get("equity", total_equity))
         except Exception:
@@ -570,13 +572,15 @@ class UnifiedPipeline:
         passed_signals: list[Signal] = []
 
         # Fetch real account + positions once before looping
+        from app.config import STRATEGY_CONFIGS
+        _psid = next(iter(STRATEGY_CONFIGS), None)
         live_account: dict[str, Any] = {"equity": 100000.0, "cash": 50000.0}
         live_positions: list[dict] = []
         try:
-            acct = alpaca_get_account()
+            acct = alpaca_get_account(strategy_id=_psid)
             if acct:
                 live_account = acct
-            pos = alpaca_get_positions()
+            pos = alpaca_get_positions(strategy_id=_psid)
             if pos:
                 live_positions = pos
         except Exception:

@@ -185,7 +185,7 @@ async def v1_broker_diagnose():
         from app.services.broker.ibkr_adapter import IBBroker, disconnect_all
         disconnect_all()
         broker = IBBroker()
-        acct = broker.get_account()
+        acct = broker.get_account(strategy_id=None)  # IBKR default
         if acct is not None:
             result["checks"]["ib_api"] = "connected"
             result["account"] = acct
