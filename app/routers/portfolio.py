@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from fastapi import APIRouter
 
+from app.core.security import OperatorAPIKey
+
 router = APIRouter(tags=["Portfolio"])
 
 def _get_operator_api_key():

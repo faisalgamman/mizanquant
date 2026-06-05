@@ -138,8 +138,7 @@ def _build_app(standalone: bool = False) -> FastAPI:
     return FastAPI(lifespan=_lifespan)
 
 app = _build_app(standalone=False)  # no-op lifespan — workspace_server owns scheduler
-operator_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-OperatorAPIKey = Annotated[str | None, Security(operator_api_key_header)]
+from app.core.security import operator_api_key_header, OperatorAPIKey  # noqa: F401
 
 
 @app.get("/")
