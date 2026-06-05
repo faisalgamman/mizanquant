@@ -22,7 +22,7 @@ def test_run_train_models_invokes_script(monkeypatch):
     scheduler._run_train_models()
 
     assert calls["cmd"][-1] == "scripts/train_models.py"
-    assert Path(calls["cwd"]).name == "trading_app"
+    assert Path(calls["cwd"]).name == "mizanquant"
     assert "openbb_forecast" in calls["env"]["PYTHONPATH"]
 
 
@@ -40,7 +40,7 @@ def test_run_signal_audit_invokes_script(monkeypatch):
     scheduler._run_signal_audit()
 
     assert calls["cmd"][-1] == "scripts/audit_signals.py"
-    assert Path(calls["cwd"]).name == "trading_app"
+    assert Path(calls["cwd"]).name == "mizanquant"
     assert "openbb_forecast" in calls["env"]["PYTHONPATH"]
 
 

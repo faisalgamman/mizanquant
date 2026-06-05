@@ -26,7 +26,7 @@ def test_system_status(monkeypatch):
 
 def test_symbols_universe(monkeypatch):
     client = TestClient(hs.app)
-    monkeypatch.setattr(hs, "_universe_symbols", lambda: ["AAPL", "MSFT", "GOOGL"])
+    monkeypatch.setattr("app.api.v1.system._fetch_universe", lambda: ["AAPL", "MSFT", "GOOGL"])
 
     resp = client.get("/api/symbols/universe")
     assert resp.status_code == 200
@@ -37,7 +37,7 @@ def test_symbols_universe(monkeypatch):
 
 def test_symbols_search(monkeypatch):
     client = TestClient(hs.app)
-    monkeypatch.setattr(hs, "_universe_symbols", lambda: ["AAPL", "MSFT", "GOOGL", "AMD"])
+    monkeypatch.setattr("app.api.v1.system._fetch_universe", lambda: ["AAPL", "MSFT", "GOOGL", "AMD"])
 
     resp = client.get("/api/symbols/search?q=AM")
     assert resp.status_code == 200

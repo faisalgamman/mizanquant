@@ -46,7 +46,7 @@ def test_evaluate_no_staging():
 
 
 def test_evaluate_no_production_promotes_staging():
-    mr.register("lstm", alias="staging", artifact_path="models/lstm/v2.pt", version="v2")
+    mr.register("lstm", alias="staging", artifact_path="models/lstm/v2.pt", version="v2", metrics={"sharpe": 2.0, "test_acc": 0.60})
     result = ss.evaluate("lstm")
     assert result == "no_production"
     prod = mr.resolve("lstm", "production")
@@ -65,7 +65,7 @@ def test_evaluate_promotes_after_outperformance(monkeypatch):
     monkeypatch.setattr(ss, "_DAYS_REQUIRED", 5)
     monkeypatch.setattr(ss, "_MIN_WINDOW", 3)
 
-    mr.register("lstm", alias="staging", artifact_path="models/lstm/v2.pt", version="v2", metrics={"sharpe": 2.0})
+    mr.register("lstm", alias="staging", artifact_path="models/lstm/v2.pt", version="v2", metrics={"sharpe": 2.0, "test_acc": 0.60})
     mr.register("lstm", alias="production", artifact_path="models/lstm/v1.pt", version="v1", metrics={"sharpe": 1.0})
 
     # Production does poorly, staging does well (add noise so sharpe != 0)

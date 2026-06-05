@@ -47,9 +47,11 @@ def test_rejects_invalid_stop(engine, monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "halal_screener", fake_halal)
 
     # stop_loss > price -> should be rejected by validators BEFORE broker contact
+    monkeypatch.setattr("app.config.settings.SWING_EXIT_ENABLED", False)
     with patch.object(engine, "_submit_order") as submit, \
-         patch.object(engine, "alpaca_get_account") as acct, \
-         patch.object(engine, "alpaca_get_positions", return_value=[]):
+         patch.object(engine, "alpaca_get_account", return_value={"equity": 100000, "cash": 50000, "status": "ACTIVE"}) as acct, \
+         patch.object(engine, "alpaca_get_positions", return_value=[]), \
+         patch("app.services.risk_manager.is_market_open", return_value=True):
         r = engine.execute_buy("AAPL", 100.0, 110.0, 120.0, 80.0, {})
         assert r["executed"] is False
         assert "VALIDATION" in r["reason"]
