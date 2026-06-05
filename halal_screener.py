@@ -1,4 +1,8 @@
 import asyncio, time, logging, os, uuid, threading, re, gc, json, pandas as pd, numpy as np
+# NOTE: This module is a router/function provider for workspace_server,
+# which is the CANONICAL entry point (see railway.json → Dockerfile).
+# halal_screener is NOT independently deployable.
+
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
@@ -11,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import APIKeyHeader
 from html import escape
-import uvicorn
 
 # --- New modular imports (Phase 1 restructuring) ---
 from app.config import settings
@@ -112,7 +115,29 @@ async def _app_lifespan(_app: FastAPI):
             logger.exception("Fill watcher shutdown failed")
 
 
-app = FastAPI(lifespan=_app_lifespan)
+# ═══════════════════════════════════════════════════════════════════
+# APP CONSTRUCTION: halal_screener is a LIBRARY, not a deployable app.
+# The canonical entry point is app/workspace_server.py (railway.json).
+# `app` exists ONLY for backward compat with tests (TestClient(hs.app)).
+# See F-3 resolution in CODE_REVIEW_DEEPSEEK_2026-06-05.md.
+# ═══════════════════════════════════════════════════════════════════
+
+def _build_app(standalone: bool = False) -> FastAPI:
+    """Build the FastAPI app instance. Called once at module load for
+    backward test compatibility. NOT intended for standalone deployment.
+
+    When standalone=False (imported by tests/workspace_server), lifespan
+    is a no-op — no scheduler start/stop. When standalone=True (run via
+    `python halal_screener.py`), the real lifespan with scheduler cleanup
+    is used.
+    """
+    async def _noop_lifespan(_app: FastAPI):
+        yield  # nothing — scheduler is workspace_server's responsibility
+
+    _lifespan = _app_lifespan if standalone else _noop_lifespan
+    return FastAPI(lifespan=_lifespan)
+
+app = _build_app(standalone=False)  # no-op lifespan — workspace_server owns scheduler
 operator_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 OperatorAPIKey = Annotated[str | None, Security(operator_api_key_header)]
 
@@ -5000,7 +5025,5 @@ async def forecast_panel():
         return FileResponse(_f)
     return {"error": "Forecast panel not found"}
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+
 
