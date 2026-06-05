@@ -47,6 +47,7 @@ stays small.
 from __future__ import annotations
 
 import logging
+import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -89,6 +90,11 @@ DEFAULT_BLOCK_ON_NO_EARNINGS = False  # was True; yfinance earnings often
 # Cache for market-wide series so we don't refetch SPY/VIX/HYG/LQD/TLT
 # per symbol. Cleared at the start of every filter_universe() call.
 _market_cache: dict[str, dict] = {}
+
+# OHLCV batch cache — reused across consecutive scans (7 signal slots/day)
+# to avoid re-fetching 660 symbols × 2y OHLCV per scan. TTL=300s (5 min).
+_ohclv_batch_cache: dict = {"data": {}, "ts": 0.0}
+_OHLCV_CACHE_TTL_S = 300  # 5 minutes — fresh enough for daily bars
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +387,7 @@ def score_symbol(
             gap_pct = float((float(open_.iloc[-1]) - prev_c) / prev_c * 100.0)
 
     # BB squeeze (current vs 20-bar mean of bandwidth)
-    upper, mid, lower = bollinger_bands(close, 20, 2)
+    upper, mid, lower, _bb_bw = bollinger_bands(close, 20, 2)
     bb_width = ((upper - lower) / mid * 100).fillna(0)
     bb_sqz = bool(bb_width.iloc[-2] < bb_width.rolling(20).mean().iloc[-2]) if len(bb_width) >= 22 else False
 
@@ -456,18 +462,39 @@ def filter_universe(
     Returns (passing_scores_sorted_high_to_low, regime_report).
     When the regime gate is closed, returns ([], regime_report).
     """
+    global _ohclv_batch_cache
     _market_cache.clear()
     with _nm_lock:
         _nm_cache.clear()
 
-    # ── Batch pre-fetch via Alpaca (10-50× faster than per-symbol yfinance) ──
+    # ── Batch pre-fetch via yfinance (same source as old per-symbol path) ──
+    # Use time-based cache to avoid re-fetching across consecutive scans.
+    # Source parity: _fetch_daily → halal_screener.fetch_yf = yfinance (NOT Alpaca).
+    _now = time.time()
     _batched: dict = {}
-    try:
-        from app.services.market_data import fetch_alpaca_batch as _batch
-        _batched = _batch(symbols, period="2y")
-        logger.info("usx_filter: batch-prefetched %d/%d symbols", len(_batched), len(symbols))
-    except Exception as _be:
-        logger.debug("usx_filter: batch pre-fetch unavailable (%s) — per-symbol fallback", _be)
+    if _ohclv_batch_cache["data"] and (_now - _ohclv_batch_cache["ts"]) < _OHLCV_CACHE_TTL_S:
+        _batched = _ohclv_batch_cache["data"]
+        logger.info("usx_filter: reused cached OHLCV batch (%d symbols, age=%.0fs)",
+                    len(_batched), _now - _ohclv_batch_cache["ts"])
+    else:
+        try:
+            import halal_screener as _hs
+            _new_batch: dict = {}
+            with ThreadPoolExecutor(max_workers=5) as _pool:
+                _futures = {_pool.submit(_hs.fetch_yf, s, period="2y"): s for s in symbols}
+                for _fut in as_completed(_futures):
+                    _s = _futures[_fut]
+                    try:
+                        _df = _fut.result()
+                        if _df is not None and len(_df) >= 60:
+                            _new_batch[_s] = _df
+                    except Exception:
+                        pass
+            _batched = _new_batch
+            _ohclv_batch_cache = {"data": _batched, "ts": _now}
+            logger.info("usx_filter: yfinance-batch-prefetched %d/%d symbols", len(_batched), len(symbols))
+        except Exception as _be:
+            logger.debug("usx_filter: batch pre-fetch unavailable (%s) — per-symbol fallback", _be)
 
     regime = check_market_regime(use_cache=True)
     if not skip_regime_check and not regime.overall_ok:
