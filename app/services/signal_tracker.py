@@ -25,20 +25,66 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def check_signal_outcomes(lookback_days: int = 5):
-    """Check outcomes for signals that are old enough to evaluate.
+def _simulate_fixed_exit(post_bars, entry_price: float, hold_days: int,
+                         stop_pct: float, is_sell: bool):
+    """Realized return of holding from entry until the FIRST of:
+      • the fixed catastrophe stop is hit (BUY: low<=entry·(1−s); SELL: high>=entry·(1+s)), or
+      • `hold_days` trading days elapse (time exit at that day's close).
 
-    For each signal that is lookback_days old and has no outcome yet,
-    fetches the current price and records the result.
+    Mirrors the live Option-A exit so the measured PF reflects what is traded.
+    Returns (ret_pct, exit_price) or None when the signal has NOT matured yet
+    (fewer than hold_days bars available and no stop hit).
+    """
+    if entry_price <= 0 or post_bars is None or len(post_bars) == 0:
+        return None
+    s = stop_pct / 100.0
+    n_avail = len(post_bars)
+    n = min(hold_days, n_avail)
+    exit_price = None
+    if is_sell:
+        stop_price = entry_price * (1.0 + s)
+        for i in range(n):
+            if float(post_bars["high"].iloc[i]) >= stop_price:
+                exit_price = stop_price
+                break
+    else:
+        stop_price = entry_price * (1.0 - s)
+        for i in range(n):
+            if float(post_bars["low"].iloc[i]) <= stop_price:
+                exit_price = stop_price
+                break
+    if exit_price is None:
+        if n_avail >= hold_days:
+            exit_price = float(post_bars["close"].iloc[hold_days - 1])  # time exit
+        else:
+            return None  # not matured, no stop hit yet → leave pending
+    chg = (exit_price / entry_price - 1.0) * 100.0
+    ret = -chg if is_sell else chg
+    return round(ret, 2), round(exit_price, 2)
+
+
+def check_signal_outcomes(lookback_days: int | None = None):
+    """Evaluate matured signals on the ACTUAL exit policy (Option A).
+
+    A signal is scored by simulating the live exit — a fixed catastrophe stop
+    (SIGNAL_OUTCOME_STOP_PCT) or the time exit at SIGNAL_OUTCOME_HOLD_DAYS — not a
+    stale current-price snapshot. Signals younger than the hold window that have
+    not hit their stop are left pending until they mature.
     """
     from app.services.market_data import fetch as fetch_market_data
+    from app.config import settings as _cfg
 
-    cutoff = _utc_now() - timedelta(days=lookback_days)
+    hold_days = int(getattr(_cfg, "SIGNAL_OUTCOME_HOLD_DAYS", 20))
+    stop_pct = float(getattr(_cfg, "SIGNAL_OUTCOME_STOP_PCT", 15.0))
+    # Only consider signals old enough that the hold window could have elapsed
+    # (trading days ≈ calendar·5/7, plus a holiday buffer). The per-signal
+    # maturity check in _simulate_fixed_exit is the exact gate.
+    maturity_days = lookback_days if lookback_days is not None else int(hold_days * 1.5) + 3
+    cutoff = _utc_now() - timedelta(days=maturity_days)
 
     try:
         db = SessionLocal()
         try:
-            # Find signals without outcomes that are old enough
             pending = db.query(SignalHistory).filter(
                 SignalHistory.outcome_price.is_(None),
                 SignalHistory.created_at <= cutoff,
@@ -52,24 +98,31 @@ def check_signal_outcomes(lookback_days: int = 5):
             for signal in pending:
                 try:
                     df = fetch_market_data(signal.symbol, period="1y")
-                    if df is not None and len(df) > 0:
-                        current_price = float(df["close"].iloc[-1])
-                        price_chg = ((current_price - signal.price) / signal.price) * 100
-                        # Normalise: outcome_return_pct > 0 always means profitable.
-                        # For SELL signals the trade profits when price falls, so negate.
-                        sig_text = (signal.signal or "").upper()
-                        is_sell = "SELL" in sig_text and "BUY" not in sig_text
-                        ret_pct = -price_chg if is_sell else price_chg
-
-                        signal.outcome_price = current_price
-                        signal.outcome_date = _utc_now()
-                        signal.outcome_return_pct = round(ret_pct, 2)
-                        updated += 1
+                    if df is None or len(df) == 0:
+                        continue
+                    # Bars strictly AFTER the signal date (the forward path).
+                    try:
+                        post = df[df.index > signal.created_at]
+                    except Exception:
+                        post = df.tail(hold_days + 5)
+                    sig_text = (signal.signal or "").upper()
+                    is_sell = "SELL" in sig_text and "BUY" not in sig_text
+                    sim = _simulate_fixed_exit(
+                        post, float(signal.price), hold_days, stop_pct, is_sell
+                    )
+                    if sim is None:
+                        continue  # not matured yet
+                    ret_pct, exit_price = sim
+                    signal.outcome_price = exit_price
+                    signal.outcome_date = _utc_now()
+                    signal.outcome_return_pct = ret_pct
+                    updated += 1
                 except Exception as e:
                     logger.debug(f"Could not check outcome for {signal.symbol}: {e}")
 
             db.commit()
-            return {"checked": len(pending), "updated": updated}
+            return {"checked": len(pending), "updated": updated,
+                    "hold_days": hold_days, "stop_pct": stop_pct}
         finally:
             db.close()
     except SQLAlchemyError as e:
@@ -94,7 +147,10 @@ def get_accuracy_report(period_days: int = 30) -> list[dict]:
             ).all()
 
             if not signals:
-                return [{"Message": f"No evaluated signals in last {period_days} days. Signals need {5}+ days to mature."}]
+                _hd = int(getattr(__import__("app.config", fromlist=["settings"]).settings,
+                                  "SIGNAL_OUTCOME_HOLD_DAYS", 20))
+                return [{"Message": f"No evaluated signals in last {period_days} days. "
+                                    f"Signals mature at the {_hd}-day exit (or earlier if the catastrophe stop is hit)."}]
 
             # Group by signal_type
             by_type = {}

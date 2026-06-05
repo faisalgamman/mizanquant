@@ -246,7 +246,9 @@ async def signals_accuracy(period: int = 30):
     import threading
     validate_range(period, "period", 1, 365)
     try:
-        threading.Thread(target=check_signal_outcomes, args=(5,), daemon=True).start()
+        # No positional arg → uses the exit-aware maturity (SIGNAL_OUTCOME_HOLD_DAYS),
+        # so outcomes are scored on the live 20d/15% exit, not a 5-day snapshot.
+        threading.Thread(target=check_signal_outcomes, daemon=True).start()
     except NON_FATAL_ANALYSIS_ERROR as e:
         logger.error(f"check_signal_outcomes thread failed: {e}")
     return get_accuracy_report(period_days=period)

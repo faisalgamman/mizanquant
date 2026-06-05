@@ -216,6 +216,10 @@ class Settings(BaseSettings):
     FACTOR_SIZING_LIVE: bool = False
     SWING_TRAIL_PCT: float = 15.0        # FIXED wide catastrophe-stop distance (%) — not trailing
     SWING_MAX_HOLD_DAYS: int = 20        # time exit: close after this many trading days (the real edge)
+    # Forward-outcome evaluation — MUST mirror the live exit policy (Option A) so the
+    # measured forward PF reflects what is actually traded (not a stale 5-day snapshot).
+    SIGNAL_OUTCOME_HOLD_DAYS: int = 20   # evaluate a signal at its time exit (trading days)
+    SIGNAL_OUTCOME_STOP_PCT: float = 15.0  # ...or earlier if this fixed catastrophe stop is hit
 
     # --- Emergency Kill Switch ---
     # Set to True to halt ALL trading immediately (order submission blocked).
