@@ -2449,13 +2449,13 @@ def _impl_run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=Non
 
     Tools: Stationarity gate, Bollinger Bands, RSI, Volume-Price Divergence, Stochastic, OBV
     Entry: RSI < 35 + price near lower BB + volume confirmation
-    Exit: Static SL 2%, TP when RSI > 60 or price hits middle BB
+    Exit: ATR-based SL (2× ATR below 20-day low), TP middle BB / +ATR
 
     Per Chan Ch.3 a mean-reversion strategy is only valid on a series
     that actually mean-reverts. We compute an ADF/Hurst/half-life
-    report on the last 250 closes and cast a SELL vote when the gate
-    fails — this dilutes BUY conviction on trending or random-walk
-    series without hard-blocking the run.
+    report on the last 250 closes. If stationarity fails, the signal is
+    HARD-BLOCKED regardless of other tool votes — running mean-reversion
+    on a non-stationary series is structurally wrong.
     """
     try:
         is_halal, halal_reason = verify_halal(symbol)
@@ -2472,6 +2472,13 @@ def _impl_run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=Non
         price = float(df["close"].iloc[-1])
         atr_val = float(atr(df).iloc[-1])
         close = df["close"]
+
+        # Sharpe ratio from price history (annualised)
+        daily_ret = close.pct_change().dropna()
+        if len(daily_ret) > 20 and daily_ret.std() > 0:
+            sharpe_ratio = float((daily_ret.mean() / daily_ret.std()) * np.sqrt(252))
+        else:
+            sharpe_ratio = 0.0
 
         # --- Tool 0a: Strategy regime router (Chan Ch.6) ---
         # If the asset is "trending", running a mean-reversion strategy
@@ -2645,9 +2652,27 @@ def _impl_run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=Non
         else:
             verdict = "NEUTRAL"
 
-        # Static SL 2%, TP at middle Bollinger Band or +1.5 ATR
+        # ── Hard gate: per Chan §3.1, mean reversion requires stationarity ──
+        # If the stationarity gate voted SELL (not mean-reverting), block the
+        # signal regardless of what the other tools voted.  Non-stationary series
+        # cannot be traded with mean-reversion logic — it's a falling-knife chase.
+        stationarity_blocked = False
+        try:
+            for d in details:
+                if d.get("Tool") == "Stationarity" and d.get("Vote") == "SELL":
+                    stationarity_blocked = True
+                    break
+        except Exception:
+            pass
+        if stationarity_blocked and verdict not in ("NEUTRAL", "HOLD"):
+            verdict = "BLOCKED"
+            confidence = 0
+
+        # SL = 2× ATR below 20-day low (not fixed % — respects actual volatility)
+        # Chan Ch.6: stops should be volatility-aware, not arbitrary percentages.
+        recent_20d_low = float(close.tail(20).min())
+        sl = round(recent_20d_low - 2 * atr_val, 2)
         levels = ATR_TARGETS["reversion"]
-        sl = round(price * (1 - levels["stop_pct"] / 100.0), 2)
         tp1 = round(mid_bb, 2)            # Target: middle BB (mean reversion target)
         tp2 = round(price + levels["tp2"] * atr_val, 2)
         tp3 = round(price + levels["tp3"] * atr_val, 2)
@@ -2659,6 +2684,7 @@ def _impl_run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=Non
             "Votes BUY": votes_buy, "Votes SELL": votes_sell, "Votes HOLD": votes_hold,
             "RSI": round(rsi_val, 1) if 'rsi_val' in dir() else "N/A",
             "Stop Loss": sl, "TP1": tp1, "TP2": tp2, "TP3": tp3,
+            "Sharpe": round(sharpe_ratio, 2),
         }]
 
         # Telegram: chart + breakdown for all actionable verdicts
