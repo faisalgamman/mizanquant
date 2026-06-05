@@ -354,8 +354,20 @@ async def trading_status(x_api_key: OperatorAPIKey = None):
     broker = get_broker(strategy_id=sid)
     account = broker.get_account(strategy_id=sid) if broker else None
     if not account:
+        # Surface broker diagnostics (reason/status) so operators can see WHY the
+        # connection failed — e.g. 401 unauthorized vs a timeout. Best-effort
+        # (alpaca path); same pattern as screener.py. Keeps the endpoint's
+        # "diagnostics" contract intact after the broker-factory refactor.
+        err = {}
+        try:
+            from app.services.alpaca_client import get_last_error
+            err = get_last_error(strategy_id=sid) or {}
+        except Exception:
+            pass
         return {"broker_configured": broker is not None, "broker_connected": False,
                 "message": "Cannot connect to broker" if broker else "No broker configured",
+                "broker_reason": err.get("reason", ""),
+                "broker_status_code": err.get("status_code"),
                 **base}
     positions = broker.get_positions(strategy_id=sid) if broker else []
     return {
