@@ -6860,14 +6860,32 @@ if os.path.isdir(_static_dir):
 
 _STATIC = Path(__file__).resolve().parent / "static"
 
+# Cache-bust token for static assets — changes every deploy/restart so browsers
+# and the CDN fetch fresh JSX/CSS instead of serving stale cached copies.
+_BUILD_ID = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12] or str(int(time.time()))
+
+
 def _html(rel: str):
-    """Return an HTMLResponse for a static file, stripping SRI so CDN scripts always load."""
+    """Return an HTMLResponse for a static file, stripping SRI so CDN scripts always load.
+
+    Appends ``?v=<build>`` to local ``/static/*.js|jsx|css`` references so a fresh
+    deploy invalidates the browser/CDN cache (the HTML itself is already no-store,
+    but the JSX/CSS it loads are cacheable and were going stale across deploys).
+    """
+    import re
+
     p = _STATIC / rel
     if not p.exists():
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": f"Not found: {rel}"}, status_code=404)
+    html = p.read_text(encoding="utf-8")
+    html = re.sub(
+        r'((?:src|href)=")(/static/[^"?]+\.(?:jsx?|css|mjs))(")',
+        lambda m: f"{m.group(1)}{m.group(2)}?v={_BUILD_ID}{m.group(3)}",
+        html,
+    )
     return HTMLResponse(
-        content=p.read_text(encoding="utf-8"),
+        content=html,
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
 
@@ -6888,6 +6906,12 @@ async def get_dashboard():
 async def get_terminal():
     """Terminal Overview kit — served directly so auth gate works correctly."""
     return _html("terminal/index.html")
+
+@app.get("/weekly-picks", include_in_schema=False)
+@app.get("/weekly-picks/", include_in_schema=False)
+async def get_weekly_picks_page():
+    """Weekly swing-picks report UI (advisory). Data: GET /weekly_picks."""
+    return _html("weekly-picks.html")
 
 @app.get("/halal-screener-v2", include_in_schema=False)
 @app.get("/halal-screener-v2/", include_in_schema=False)
