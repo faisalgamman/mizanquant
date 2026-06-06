@@ -257,6 +257,7 @@ openbb-trading/
 | **M-C** | Vectorise the scoring hot path (`get_score`) in both backtest engines | Byte-identical to scalar; ≥3× faster | ✅ (49× on 5k rows) |
 | **M-D** | Consolidate the 5 identical shadow-sizing layers in `execute_buy` | Golden-master byte-identical (qty + payload + diagnostics) | ✅ |
 | **M-E** | First safe extraction from the `halal_screener` monolith behind a re-export facade | Data byte-identical to HEAD; contract preserved; no regression | ✅ (increment 1) |
+| **W1** | Advisory weekly swing-picks report (manual execution, Option-A plan + validation status) | 10 tests green; read-only, no orders; no regression | ✅ |
 
 **M-B coverage added:**
 - `tests/test_forward_pf.py` (+7): SELL-side exit, stop-precedence-over-time, exact-touch

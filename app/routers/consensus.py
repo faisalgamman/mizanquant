@@ -84,6 +84,36 @@ async def refresh_ready(min_swing: int = 55, max_stocks: int = 25, x_api_key: Op
     return [{"Status": "Ready-to-Trade refresh started."}]
 
 
+@router.get("/weekly_picks")
+async def weekly_picks(account: float = 10000.0, top: int = 15,
+                       min_confidence: float = 45.0, funnel: str = "pipeline",
+                       format: str = "json"):
+    """Advisory weekly swing-picks report (read-only, no orders).
+
+    Runs the halal funnel (cached/background) and enriches each candidate with the
+    validated Option-A plan (fixed 15% catastrophe stop + ~20 trading-day time
+    exit) and a cap-aware position size, plus the live validation status
+    (forward-PF + paper-trade graduation). `format=text` returns the rendered
+    table once computed. First call may return a "computing" status (1-3 min).
+    """
+    from halal_screener import _serve_or_compute, _cache_key, validate_range
+    from app.services.weekly_report import build_weekly_report, format_report
+    validate_range(account, "account", 100, 100_000_000)
+    validate_range(top, "top", 1, 50)
+    validate_range(min_confidence, "min_confidence", 0, 100)
+    funnel = funnel if funnel in ("pipeline", "ready") else "pipeline"
+    key = _cache_key("weekly_picks", acct=account, top=top, conf=min_confidence, funnel=funnel)
+    result = _serve_or_compute(
+        key, build_weekly_report, args=(account,),
+        kwargs={"top": top, "min_confidence": min_confidence, "funnel": funnel},
+        msg="Building weekly swing-picks report (full funnel, 1-3 min)...",
+    )
+    if format == "text" and isinstance(result, dict) and "picks" in result:
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(format_report(result))
+    return result
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,
