@@ -2685,14 +2685,18 @@ def _impl_run_consensus_reversion(symbol, horizon=3, df_override=None, as_of=Non
         return [{"Error": str(e), "Strategy": "B-Reversion"}]
 
 
-# Default subset of ML models and agents for consensus_ml
-# Uses configurable lists — set via app_cfg or env to include/exclude specific tools
-_CONSENSUS_ML_MODELS = getattr(app_cfg, "consensus_ml_models", [
-    "lstm", "transformer", "ensemble", "gru", "cnn_seq2seq", "arima",
-])
-_CONSENSUS_ML_AGENTS = getattr(app_cfg, "consensus_ml_agents", [
-    "double_dqn", "policy_gradient", "qlearning", "actor_critic",
-])
+# Forecast models + RL agents for consensus_ml — DISABLED by default (2026-06).
+# The forecast models are broken: the loss compares a [B, horizon] target against a
+# [B, 1] prediction (torch broadcasting warning), so training is meaningless —
+# measured directional accuracy ~= 50% (coin-flip), Sharpe ~= 0, and none pass the
+# model_registry quality gate. Invoking them on every scan only burned Railway
+# compute, failed 3x each ("giving up until restart"), and flooded the error log
+# with ~900 warnings per scan. Defaulting to EMPTY makes consensus_ml fall through
+# to the technical path instead of acting on garbage model votes. Re-enable via
+# app_cfg.consensus_ml_models / consensus_ml_agents ONLY after the shape bug is fixed
+# and the models pass the quality gate.
+_CONSENSUS_ML_MODELS = getattr(app_cfg, "consensus_ml_models", [])
+_CONSENSUS_ML_AGENTS = getattr(app_cfg, "consensus_ml_agents", [])
 
 
 def _run_consensus_forecast_model(model_name, symbol, horizon, df, price):
