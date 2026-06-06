@@ -133,6 +133,8 @@ def _scheduler_loop():
     last_model_benchmark = ""
     last_pipeline_filter = ""
     last_pipeline_full = ""
+    last_paper_record = ""
+    last_paper_mature = ""
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
@@ -319,6 +321,31 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("pairs_scan", success=False, error=str(e))
                     logger.error(f"Pairs trading cycle failed: {e}", exc_info=True)
+
+            # --- PAPER-VALIDATION LEDGER (simulated, isolated strategy "PV") ---
+            # Weekly (Mon ~09:00 ET): record this week's picks as simulated paper
+            # trades. Daily (~17:00 ET, post-close): mature open trades on the
+            # Option-A exit (15% stop / 20-day) so closed pnl_pct accumulates and
+            # the paper_trade_gate graduation counter can move. No broker orders.
+            if (_is_weekday(now) and now.weekday() == 0 and now.hour == 9
+                    and now.minute < 10 and last_paper_record != today_str):
+                last_paper_record = today_str
+                logger.info("Paper validation: recording weekly picks...")
+                try:
+                    from app.services.paper_validation import record_weekly_picks
+                    record_weekly_picks()
+                except Exception as e:
+                    logger.error(f"Paper validation record failed: {e}", exc_info=True)
+
+            if (_is_weekday(now) and now.hour == 17 and now.minute < 5
+                    and last_paper_mature != today_str):
+                last_paper_mature = today_str
+                logger.info("Paper validation: maturing open paper trades...")
+                try:
+                    from app.services.paper_validation import mature_open_paper_trades
+                    mature_open_paper_trades()
+                except Exception as e:
+                    logger.error(f"Paper validation mature failed: {e}", exc_info=True)
 
             # Sleep 60 seconds between checks
             time.sleep(60)

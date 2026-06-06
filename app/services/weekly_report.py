@@ -132,8 +132,10 @@ def _default_forward_pf():
 
 
 def _default_graduation():
+    # Measure graduation on the isolated paper-validation ledger ("PV") — the
+    # simulated record of THESE weekly picks closed on the Option-A exit.
     from app.services.paper_trade_gate import paper_trade_status
-    return paper_trade_status().as_dict()
+    return paper_trade_status(strategy_id="PV").as_dict()
 
 
 def _market_note() -> str:

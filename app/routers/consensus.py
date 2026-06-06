@@ -114,6 +114,39 @@ async def weekly_picks(account: float = 10000.0, top: int = 15,
     return result
 
 
+@router.get("/paper_validation/record")
+async def paper_validation_record(account: float = 10000.0, top: int = 15,
+                                  min_confidence: float = 45.0, funnel: str = "pipeline",
+                                  x_api_key: OperatorAPIKey = None):
+    """Record this week's picks into the isolated paper-validation ledger (background)."""
+    from halal_screener import _require_api_key, validate_range
+    from app.services.paper_validation import record_weekly_picks
+    _require_api_key(x_api_key)
+    validate_range(account, "account", 100, 100_000_000)
+    funnel = funnel if funnel in ("pipeline", "ready") else "pipeline"
+    from threading import Thread
+    Thread(target=record_weekly_picks,
+           kwargs={"account": account, "top": top, "min_confidence": min_confidence, "funnel": funnel},
+           daemon=True).start()
+    return {"Status": "Paper-validation recording started (1-3 min). Poll /paper_validation/status."}
+
+
+@router.get("/paper_validation/mature")
+async def paper_validation_mature(x_api_key: OperatorAPIKey = None):
+    """Close any open paper-validation trade whose Option-A exit has fired."""
+    from halal_screener import _require_api_key
+    from app.services.paper_validation import mature_open_paper_trades
+    _require_api_key(x_api_key)
+    return mature_open_paper_trades()
+
+
+@router.get("/paper_validation/status")
+async def paper_validation_status():
+    """Open/closed paper-ledger counts + the PV graduation status."""
+    from app.services.paper_validation import paper_ledger_status
+    return paper_ledger_status()
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,

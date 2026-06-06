@@ -54,6 +54,7 @@
   </div>
   <h1>Weekly Swing Picks</h1>
   <div class="sub">Advisory · manual execution · Option-A exit (fixed 15% catastrophe stop + ~20 trading-day time exit). Not investment advice — validate on the paper track record before acting.</div>
+  <div id="ledger" class="sub" style="margin-bottom:14px">Paper ledger (simulated · Option-A): loading…</div>
 
   <div class="controls">
     <div class="ctl"><label>Account $</label><input id="account" type="number" value="10000" min="100"></div>
@@ -69,6 +70,18 @@
 <script>
 const $ = id => document.getElementById(id);
 let polling = null;
+
+async function loadLedger(){
+  try{
+    const s = await (await fetch("/paper_validation/status")).json();
+    const g = s.graduation || {};
+    $("ledger").innerHTML = `Paper ledger (simulated · Option-A · not broker orders): `
+      + `<b>${s.open||0}</b> open · <b>${s.closed||0}</b> closed · graduation: `
+      + `<b style="color:${g.graduated?'var(--pos)':'var(--warn)'}">${g.graduated?'GRADUATED':'not graduated'}</b>`
+      + (g.n_trades!=null ? ` (n=${g.n_trades})` : "");
+  }catch(_){ $("ledger").textContent = "Paper ledger: unavailable"; }
+}
+loadLedger();
 
 function fmt(n, d=2){ return (n==null||isNaN(n)) ? "—" : Number(n).toFixed(d); }
 
