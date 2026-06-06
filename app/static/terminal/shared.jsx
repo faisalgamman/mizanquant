@@ -189,9 +189,10 @@ const mockNav = [
   { i: "fa-th-large",      l: "Overview",        active: true, badge: "Live", href: "/terminal" },
 ];
 const mockNavForecast = [
-  { i: "fa-brain",         l: "Analysis Lab",    href: "/analysis-lab" },
-  { i: "fa-chart-line",    l: "Forecast Lab",    href: "/forecast" },
-  { i: "fa-robot",         l: "Trading Lab",     href: "/trading-lab" },
+  // Forecast Lab / Trading Lab / Analysis Lab removed from nav on purpose:
+  // that model zoo is unvalidated research (directional accuracy ~= coin-flip,
+  // Sharpe ~= 0) and is NOT used in the live trading decision, so it must not be
+  // presented as a trading tool. The pages still exist for research at their URLs.
   { i: "fa-history",       l: "Backtest",        href: "/backtest" },
 ];
 const mockNavAnalytics = [

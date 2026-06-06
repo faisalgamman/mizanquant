@@ -371,6 +371,13 @@ body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSys
   <a href="/" class="btn btn-ghost btn-sm">← Dashboard</a>
 </div>
 
+<!-- ═══ RESEARCH-ONLY WARNING — models are unvalidated and NOT used for trading ═══ -->
+<div style="margin:0;padding:11px 18px;background:rgba(248,113,113,0.12);border-bottom:1px solid var(--negative,#f87171);color:var(--negative,#f87171);font-size:12.5px;line-height:1.55;display:flex;align-items:center;gap:10px;">
+  <span style="font-size:16px;">&#9888;&#65039;</span>
+  <span><b>RESEARCH ONLY &mdash; DO NOT TRADE ON THIS PAGE.</b>
+  These forecast models and RL agents are <b>unvalidated</b>: measured directional accuracy &asymp; 50% (coin&#8209;flip), Sharpe &asymp; 0.05&ndash;0.10, and none pass the quality gate. They are <b>not</b> part of the live trading decision (which runs on technical analysis) and must not be relied upon. Use the validated weekly picks and the paper track record instead.</span>
+</div>
+
 <!-- ═══ SECTION TABS ═══ -->
 <div class="section-tabs">
   <div class="sec-tab active" id="tab-combined" onclick="switchSection('combined')">
