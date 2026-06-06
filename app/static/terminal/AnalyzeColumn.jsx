@@ -10,7 +10,35 @@ const _AN_MAX = { rs: 25, trend: 15, regime: 15, macd: 15, volume: 10, rsi: 8, a
 const _AN_LAB = { rs: "RS vs SPY", trend: "Trend", regime: "Regime", macd: "MACD", volume: "Volume", rsi: "RSI", adx: "ADX", bb: "Bollinger", vwap: "VWAP", gap: "Gap" };
 const _anFx = (n, p = 2) => (n == null || isNaN(Number(n))) ? "—" : "$" + Number(n).toFixed(p);
 
-function AnalyzeColumn({ signal, analyze, onTrade }) {
+// Probabilistic forecast fan chart: P5–P95 + P25–P75 ribbons + median line, with a
+// dashed reference line at the current price. Pure function returning an <svg>.
+function _forecastFanSvg(fc) {
+  const bands = (fc && fc.bands) || [];
+  if (bands.length < 2) return null;
+  const W = 100, H = 60, padT = 3, padB = 3;
+  const dmax = Math.max(...bands.map(b => b.day)) || 1;
+  const lo = Math.min(...bands.map(b => b.p5), fc.current_price);
+  const hi = Math.max(...bands.map(b => b.p95), fc.current_price);
+  const span = (hi - lo) || 1;
+  const X = d => (d / dmax) * W;
+  const Y = p => padT + (1 - (p - lo) / span) * (H - padT - padB);
+  const ribbon = (loKey, hiKey) =>
+    bands.map(b => `${X(b.day).toFixed(1)},${Y(b[hiKey]).toFixed(1)}`)
+      .concat(bands.slice().reverse().map(b => `${X(b.day).toFixed(1)},${Y(b[loKey]).toFixed(1)}`))
+      .join(" ");
+  const median = bands.map((b, i) => `${i ? "L" : "M"}${X(b.day).toFixed(1)},${Y(b.median).toFixed(1)}`).join(" ");
+  const cy = Y(fc.current_price).toFixed(1);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 60 }}>
+      <polygon points={ribbon("p5", "p95")} fill="var(--accent)" opacity="0.10" />
+      <polygon points={ribbon("p25", "p75")} fill="var(--accent)" opacity="0.22" />
+      <line x1="0" y1={cy} x2={W} y2={cy} stroke="var(--text-muted)" strokeWidth="0.5" strokeDasharray="2,2" />
+      <path d={median} fill="none" stroke="var(--accent)" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade }) {
   if (!signal) {
     return (
       <div className="col col-analyze">
@@ -106,6 +134,41 @@ function AnalyzeColumn({ signal, analyze, onTrade }) {
             <div className="row"><span className="l">R / R</span><span className="v">{rr != null ? "1 : " + Number(rr).toFixed(1) : "—"}</span></div>
             <div className="row"><span className="l">Risk $</span><span className="v txt-negative">{riskAmt != null ? "$" + Number(riskAmt).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</span></div>
           </div>
+
+          {(() => {
+            const fc = (forecast && forecast.data && !forecast.data.error) ? forecast.data : null;
+            const fcLoading = forecast && forecast.loading;
+            const last = fc && fc.bands && fc.bands.length ? fc.bands[fc.bands.length - 1] : null;
+            return (
+              <>
+                <div className="an-sect-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span>Forecast · probabilistic</span>
+                  <select value={horizon} onChange={(e) => onHorizon && onHorizon(Number(e.target.value))}
+                          style={{ background: "var(--bg-raised)", color: "var(--text-secondary)", border: "1px solid var(--border)", borderRadius: 4, fontSize: 9, padding: "1px 4px", cursor: "pointer" }}>
+                    {[5, 10, 20, 30].map(h => <option key={h} value={h}>{h}d</option>)}
+                  </select>
+                </div>
+                {fcLoading ? (
+                  <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Simulating…</span></div>
+                ) : fc ? (
+                  <>
+                    {_forecastFanSvg(fc)}
+                    <div className="an-grid" style={{ marginTop: 6 }}>
+                      <div className="row"><span className="l">Expected</span><span className="v">{_anFx(fc.expected_price)} <span style={{ fontSize: 9, color: fc.expected_change_pct >= 0 ? "var(--positive)" : "var(--negative)" }}>{fmtPct(fc.expected_change_pct)}</span></span></div>
+                      <div className="row"><span className="l">Prob profit</span><span className="v">{fc.prob_profit_pct}%</span></div>
+                      <div className="row"><span className="l">Range P5–P95</span><span className="v">{last ? "$" + last.p5.toFixed(2) + " – $" + last.p95.toFixed(2) : "—"}</span></div>
+                      <div className="row"><span className="l">Annual vol</span><span className="v">{fc.annual_vol_pct}%</span></div>
+                    </div>
+                    <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.4 }}>
+                      Probabilistic range over {fc.horizon}d — not a point prediction · from historical drift + vol
+                    </div>
+                  </>
+                ) : (
+                  <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Forecast unavailable</span></div>
+                )}
+              </>
+            );
+          })()}
 
           <button className="an-trade" onClick={() => onTrade(signal)} disabled={!canTrade}>
             <i className="fas fa-paper-plane" style={{ marginRight: 6 }}></i>

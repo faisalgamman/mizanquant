@@ -36,6 +36,8 @@ function App() {
   const [system, setSystem]       = useState(null);  // real system status (auto-trade/kill-switch/regime)
   const [realStages, setRealStages] = useState([]);  // real pipeline stages from /api/v1/overview
   const [analyze, setAnalyze]     = useState(null);  // {symbol, scoring, plan} — real scoring + trade plan
+  const [forecast, setForecast]   = useState(null);  // {symbol, loading, data} — probabilistic price forecast
+  const [forecastHorizon, setForecastHorizon] = useState(20);  // selectable forecast horizon (days)
 
   // Fetch /buys, map real rows. Returns true once real signals are loaded.
   const loadBuys = async () => {
@@ -243,6 +245,22 @@ function App() {
     return () => { cancelled = true; };
   }, [selectedSym]);
 
+  // Probabilistic price forecast for the selected symbol (re-fetches on horizon change).
+  useEffect(() => {
+    if (!selectedSym) { setForecast(null); return; }
+    let cancelled = false;
+    setForecast({ symbol: selectedSym, loading: true, data: null });
+    (async () => {
+      let data = null;
+      try {
+        data = await fetch('/api/v1/forecast/' + encodeURIComponent(selectedSym) + '?horizon=' + forecastHorizon)
+          .then(r => r.json());
+      } catch (_) { data = null; }
+      if (!cancelled) setForecast({ symbol: selectedSym, loading: false, data });
+    })();
+    return () => { cancelled = true; };
+  }, [selectedSym, forecastHorizon]);
+
   const filteredSignals = useMemo(() => {
     if (!query) return displaySignals;
     const q = query.toUpperCase();
@@ -325,6 +343,9 @@ function App() {
           <AnalyzeColumn
             signal={selected}
             analyze={analyze}
+            forecast={forecast}
+            horizon={forecastHorizon}
+            onHorizon={setForecastHorizon}
             onTrade={sendToPaper}
           />
           <TradeColumn
