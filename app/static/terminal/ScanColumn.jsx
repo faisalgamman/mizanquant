@@ -132,8 +132,108 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
   );
 }
 
-function ScanEmpty({ status }) {
+// Monthly composite table — real sub-score breakdown (Technical / Fundamental /
+// Sentiment / AI). The AI column is flagged: it comes from ~coin-flip models, so
+// it is shown for transparency but discounted in the conviction logic.
+function MonthlyTable({ signals, selectedSymbol, onSelect }) {
+  const cell = (v) => (v == null ? <span style={{ color: "var(--text-muted)" }}>—</span> : v);
+  return (
+    <div className="s-table-wrap">
+      <table className="s-table">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Comp</th><th>Signal</th><th>Price</th>
+            <th title="Technical /30">T</th><th title="Fundamental /25">F</th>
+            <th title="Sentiment /20">S</th><th title="AI/ML /15 — unvalidated (~coin-flip)">AI*</th>
+            <th title="Fundamental grade">Gr</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signals.map((s) => {
+            const verdict = s.verdict || verdictFromScore(s.score);
+            return (
+              <tr key={s.symbol} className={s.symbol === selectedSymbol ? "selected" : ""} onClick={() => onSelect(s.symbol)}>
+                <td style={{ fontWeight: 600 }}>{s.symbol}</td>
+                <td>
+                  <div className="score-bar">
+                    <div className="score-bar-fill"><div style={{ width: s.score + "%", background: scoreColor(s.score) }}></div></div>
+                    <span className="mono" style={{ fontWeight: 600 }}>{s.score}</span>
+                  </div>
+                </td>
+                <td><Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge></td>
+                <td className="mono">${(s.price || 0).toFixed(2)}</td>
+                <td className="mono">{cell(s.tech)}</td>
+                <td className="mono">{cell(s.fund)}</td>
+                <td className="mono">{cell(s.sent)}</td>
+                <td className="mono" style={{ color: "var(--text-muted)" }}>{cell(s.ai)}</td>
+                <td className="mono">{cell(s.grade)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 8, color: "var(--text-muted)", padding: "6px 10px", lineHeight: 1.5 }}>
+        * AI/ML sub-score (15) is from models with ~coin-flip directional accuracy — shown for
+        transparency, discounted in conviction. The composite leans on Technical + Fundamental.
+      </div>
+    </div>
+  );
+}
+
+// Weekly | Monthly scanner switch.
+function ScanTabs({ mode, onMode }) {
+  const tab = (id, label, sub) => (
+    <button
+      type="button"
+      className={"scan-tab" + (mode === id ? " active" : "")}
+      onClick={() => onMode(id)}
+      style={{
+        flex: 1, padding: "8px 10px", cursor: "pointer", textAlign: "center",
+        background: mode === id ? "var(--accent-dim)" : "transparent",
+        border: "1px solid " + (mode === id ? "var(--accent)" : "var(--border)"),
+        color: mode === id ? "var(--accent)" : "var(--text-secondary)",
+        borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+      }}>
+      {label}
+      <span style={{ display: "block", fontSize: 8, fontWeight: 500, color: "var(--text-muted)", marginTop: 2 }}>{sub}</span>
+    </button>
+  );
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+      {tab("weekly", "Weekly Scanner", "swing · technical · Option-A")}
+      {tab("monthly", "Monthly Scanner", "composite · fundamental · rebalanced")}
+    </div>
+  );
+}
+
+// Honest per-scanner paper-ledger banner: real money only after graduation.
+function LedgerBanner({ ledger, kind }) {
+  const g = (ledger && ledger.graduation) || {};
+  const grad = !!g.graduated;
+  const n = g.n_trades;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+      padding: "7px 10px", marginBottom: 10, borderRadius: 6, fontSize: 10,
+      background: grad ? "var(--positive-dim)" : "var(--warning-dim)",
+      border: "1px solid " + (grad ? "var(--positive)" : "var(--warning)"),
+      color: grad ? "var(--positive)" : "var(--warning)",
+    }}>
+      <i className={"fas " + (grad ? "fa-check-circle" : "fa-flask")}></i>
+      <b>{kind} paper ledger</b>
+      <span style={{ color: "var(--text-secondary)" }}>
+        {ledger ? `${ledger.open ?? 0} open · ${ledger.closed ?? 0} closed` : "loading…"}
+      </span>
+      <span style={{ marginLeft: "auto", fontWeight: 700 }}>
+        {grad ? "GRADUATED" : "NOT graduated — no real money yet"}{n != null ? ` (n=${n})` : ""}
+      </span>
+    </div>
+  );
+}
+
+function ScanEmpty({ status, mode }) {
   const computing = status === "computing";
+  const monthly = mode === "monthly";
   return (
     <div style={{
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -146,24 +246,32 @@ function ScanEmpty({ status }) {
         }}></div>
       )}
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>
-        {computing ? "Scanning the halal universe…" : "No buy signals right now"}
+        {computing ? "Scanning the halal universe…" : (monthly ? "No composite picks right now" : "No buy signals right now")}
       </div>
       <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: 0.4 }}>
         {computing
           ? "Screening ~650 symbols across AAOIFI gates · 1–2 min"
-          : "Nothing scored ≥ 55 this cycle · check the watchlist"}
+          : (monthly
+              ? "Composite screener cache is empty · trigger the smart screener first"
+              : "Nothing scored ≥ 55 this cycle · check the watchlist")}
       </div>
     </div>
   );
 }
 
 function ScanColumn(props) {
-  const { signals, selectedSymbol, onSelect, market, signalsStatus } = props;
+  const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
+          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
-  const top3 = signals.slice(0, 3);
-  const empty = signals.length === 0;
+
+  const monthlyMode = scanMode === "monthly";
+  const list   = monthlyMode ? (monthlySignals || []) : signals;
+  const status = monthlyMode ? monthlyStatus : signalsStatus;
+  const top3   = list.slice(0, 3);
+  const empty  = list.length === 0;
+
   return (
     <div className="col col-scan">
       <div className="wf-section">
@@ -182,11 +290,13 @@ function ScanColumn(props) {
       </div>
       <div className="wf-section">
         <div className="wf-head">
-          <span className="wf-title">Signals</span>
-          <span className="wf-sub">High-conviction opportunities</span>
+          <span className="wf-title">Scanners</span>
+          <span className="wf-sub">{monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
         </div>
+        <ScanTabs mode={scanMode} onMode={onScanMode} />
+        <LedgerBanner ledger={monthlyMode ? ledgerMonthly : ledgerWeekly} kind={monthlyMode ? "Monthly" : "Weekly"} />
         {empty ? (
-          <ScanEmpty status={signalsStatus} />
+          <ScanEmpty status={status} mode={scanMode} />
         ) : (
           <>
             <div className="signals-featured">
@@ -194,14 +304,18 @@ function ScanColumn(props) {
                 <SignalHeroCard key={s.symbol} signal={s} selected={s.symbol === selectedSymbol} onSelect={onSelect} />
               ))}
             </div>
-            <SignalTable
-              signals={signals}
-              selectedSymbol={selectedSymbol}
-              onSelect={onSelect}
-              filterSignal={filterSignal} setFilterSignal={setFilterSignal}
-              filterScore={filterScore} setFilterScore={setFilterScore}
-              halalOnly={halalOnly} setHalalOnly={setHalalOnly}
-            />
+            {monthlyMode ? (
+              <MonthlyTable signals={list} selectedSymbol={selectedSymbol} onSelect={onSelect} />
+            ) : (
+              <SignalTable
+                signals={list}
+                selectedSymbol={selectedSymbol}
+                onSelect={onSelect}
+                filterSignal={filterSignal} setFilterSignal={setFilterSignal}
+                filterScore={filterScore} setFilterScore={setFilterScore}
+                halalOnly={halalOnly} setHalalOnly={setHalalOnly}
+              />
+            )}
           </>
         )}
       </div>

@@ -187,7 +187,9 @@ const mockConsensusVotes = [
 
 const mockNav = [
   { i: "fa-th-large",      l: "Overview",        active: true, badge: "Live", href: "/terminal" },
-  { i: "fa-calendar-week", l: "Weekly Picks",    href: "/weekly-picks" },
+  { i: "fa-calendar-week", l: "Weekly Scanner",  href: "/terminal#weekly" },
+  { i: "fa-calendar-alt",  l: "Monthly Scanner", href: "/terminal#monthly" },
+  { i: "fa-list-ul",       l: "Weekly Picks",    href: "/weekly-picks" },
 ];
 const mockNavForecast = [
   // Forecast Lab / Trading Lab / Analysis Lab removed from nav on purpose:

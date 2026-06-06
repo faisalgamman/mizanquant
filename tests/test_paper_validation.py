@@ -115,3 +115,69 @@ def test_mature_leaves_immature_open(tdb, monkeypatch):
         assert t.status == "open" and t.pnl_pct is None
     finally:
         db.close()
+
+
+# ── Monthly composite ledger (PVM) — rebalance ────────────────────────────────
+
+def _mpick(sym, price, score):
+    return {"symbol": sym, "price": price, "score": score}
+
+
+def _seed_open_pvm(tdb, symbol, entry, qty=5):
+    db = tdb()
+    try:
+        db.add(TradeHistory(strategy_id=pv.PV_MONTHLY, symbol=symbol, side="buy", qty=qty,
+                            entry_price=entry, status="open", created_at=datetime(2024, 1, 1)))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_monthly_row_from_pick_equal_weight():
+    row = pv._monthly_row_from_pick(_mpick("AAA", 100.0, 88), account=10000.0, top_n=10)
+    # equal-weight: budget = 10000/10 = 1000 → floor(1000/100) = 10 shares, no stop
+    assert row["strategy_id"] == "PVM" and row["qty"] == 10.0
+    assert row["entry_price"] == 100.0 and row.get("stop_loss") is None
+    assert row["signal_details"]["source"] == "paper_validation_monthly"
+
+
+def test_rebalance_opens_top_n_on_empty_ledger(tdb):
+    picks = [_mpick("AAA", 100, 90), _mpick("BBB", 50, 80), _mpick("CCC", 25, 70)]
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks)
+    assert out == {"target": 2, "opened": 2, "closed": 0, "held": 0}
+
+    db = tdb()
+    try:
+        syms = {r.symbol for r in db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == "PVM", TradeHistory.pnl_pct.is_(None)).all()}
+        assert syms == {"AAA", "BBB"}      # CCC ranked 3rd → outside top-2
+    finally:
+        db.close()
+
+
+def test_rebalance_closes_dropouts_opens_entrants_keeps_held(tdb):
+    # Held: AAA (stays in top-N) and DDD (fell out → must close at current price).
+    _seed_open_pvm(tdb, "AAA", entry=100.0, qty=5)
+    _seed_open_pvm(tdb, "DDD", entry=40.0, qty=10)
+    # New ranking top-2 = AAA, BBB. DDD priced at 50 (was 40) → +25% on close.
+    picks = [_mpick("AAA", 110, 95), _mpick("BBB", 60, 85),
+             _mpick("CCC", 30, 60), _mpick("DDD", 50, 30)]
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks)
+    assert out == {"target": 2, "opened": 1, "closed": 1, "held": 1}
+
+    db = tdb()
+    try:
+        ddd = db.query(TradeHistory).filter(TradeHistory.symbol == "DDD").first()
+        assert ddd.status == "closed" and ddd.pnl_pct == 25.0
+        assert ddd.exit_price == 50.0 and ddd.pnl == round((50.0 - 40.0) * 10, 2)
+        aaa = db.query(TradeHistory).filter(TradeHistory.symbol == "AAA").first()
+        assert aaa.status == "open" and aaa.pnl_pct is None   # kept (still top-N)
+        bbb = db.query(TradeHistory).filter(TradeHistory.symbol == "BBB").first()
+        assert bbb is not None and bbb.status == "open"        # new entrant opened
+    finally:
+        db.close()
+
+
+def test_rebalance_no_picks_is_noop(tdb):
+    out = pv.rebalance_monthly(top_n=2, _picks_fn=lambda n: [])
+    assert out["opened"] == 0 and out["closed"] == 0

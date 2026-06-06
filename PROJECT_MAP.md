@@ -312,3 +312,34 @@ openbb-trading/
 > dashboard_endpoints, ibkr_config, market_data, scheduler_hooks, trading_engine_entry)
 > exist on the clean tree under the local Python 3.14 interpreter (project targets 3.11/3.12).
 > They are unrelated to this review and were confirmed present before any change.
+
+## Recent Changes (2026-06-07 — Two-scanner split + monthly composite ledger)
+
+Owner decision: split capital into a **weekly** half and a **monthly** half. The
+program is a decision tool scanning ~650 symbols with all analysis types, with
+**simulated** paper validation per scanner. Real money for either half is released
+**only after that scanner's paper ledger graduates**. No broker orders, no live-flag
+changes — simulated ledgers on REAL prices and the exact policies we run.
+
+| Milestone | Change | Success criterion | Status |
+|-----------|--------|-------------------|--------|
+| **S1** | `paper_validation.py` generalised to TWO ledgers: weekly `PV` (Option-A 15%/20d — existing) + monthly `PVM` (cross-sectional rebalance) | weekly id kept as `PV` (no migration); 8 tests green | ✅ |
+| **S2** | `rebalance_monthly(top_n, account, _picks_fn)`: close names that fell out of top-N at current price (`pnl_pct` written), open new entrants equal-weight, keep the rest | 4 new rebalance tests green; pure-injectable picks fn | ✅ |
+| **S3** | Scheduler hook: **first trading day of month ~09:30 ET → `rebalance_monthly`** (month-key dedup); endpoints `/paper_validation/{record?scanner,rebalance,status?scanner}` | additive; ruff = baseline (811) | ✅ |
+| **S4** | `/terminal` dashboard split into **Weekly \| Monthly** scanner tabs; monthly view reads `/api/screener/deep-picks` (composite T/F/S/AI breakdown); per-scanner paper-ledger banner ("NOT graduated → no real money yet"); Sidebar links | all 4 JSX transpile (babel preset react); no value unless real or "—" | ✅ |
+
+**Honesty touches (supervisor):**
+- Each scanner shows its own graduation banner; real money gated on graduation.
+- Monthly composite **AI(15)** sub-score is column-flagged `AI*` ("~coin-flip models —
+  shown for transparency, discounted in conviction"); composite leans on Technical +
+  Fundamental.
+- Monthly ledger default picks fn (`_default_monthly_picks`) returns `[]` on any failure
+  → the rebalance no-ops and logs; it never fabricates a price or a position.
+
+**Key functions/endpoints:**
+- `paper_validation.rebalance_monthly / _monthly_row_from_pick / _default_monthly_picks /
+  _strategy_for / paper_ledger_status(strategy_id)`.
+- `GET /paper_validation/rebalance?top_n=&account=` (operator-key); `?scanner=weekly|monthly`
+  on `/record` and `/status`.
+- Data source unchanged: Alpaca batch + yfinance + FMP. **IBKR stays execution-only**
+  (~108 min to bulk-scan 650 — not a data source).

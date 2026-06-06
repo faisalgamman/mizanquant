@@ -117,14 +117,24 @@ async def weekly_picks(account: float = 10000.0, top: int = 15,
 @router.get("/paper_validation/record")
 async def paper_validation_record(account: float = 10000.0, top: int = 15,
                                   min_confidence: float = 45.0, funnel: str = "pipeline",
-                                  x_api_key: OperatorAPIKey = None):
-    """Record this week's picks into the isolated paper-validation ledger (background)."""
+                                  scanner: str = "weekly", x_api_key: OperatorAPIKey = None):
+    """Record picks into a ledger (background).
+
+    scanner=weekly  → record this week's swing picks (Option-A ledger PV).
+    scanner=monthly → rebalance the monthly composite ledger (PVM) to the top-N.
+    """
     from halal_screener import _require_api_key, validate_range
-    from app.services.paper_validation import record_weekly_picks
     _require_api_key(x_api_key)
     validate_range(account, "account", 100, 100_000_000)
-    funnel = funnel if funnel in ("pipeline", "ready") else "pipeline"
     from threading import Thread
+    if str(scanner).lower().startswith("month"):
+        from app.services.paper_validation import rebalance_monthly
+        validate_range(top, "top", 1, 50)
+        Thread(target=rebalance_monthly, kwargs={"top_n": top, "account": account},
+               daemon=True).start()
+        return {"Status": "Monthly rebalance started. Poll /paper_validation/status?scanner=monthly."}
+    from app.services.paper_validation import record_weekly_picks
+    funnel = funnel if funnel in ("pipeline", "ready") else "pipeline"
     Thread(target=record_weekly_picks,
            kwargs={"account": account, "top": top, "min_confidence": min_confidence, "funnel": funnel},
            daemon=True).start()
@@ -133,18 +143,30 @@ async def paper_validation_record(account: float = 10000.0, top: int = 15,
 
 @router.get("/paper_validation/mature")
 async def paper_validation_mature(x_api_key: OperatorAPIKey = None):
-    """Close any open paper-validation trade whose Option-A exit has fired."""
+    """Close any open WEEKLY paper trade whose Option-A exit has fired."""
     from halal_screener import _require_api_key
     from app.services.paper_validation import mature_open_paper_trades
     _require_api_key(x_api_key)
     return mature_open_paper_trades()
 
 
+@router.get("/paper_validation/rebalance")
+async def paper_validation_rebalance(top_n: int = 15, account: float = 10000.0,
+                                     x_api_key: OperatorAPIKey = None):
+    """Rebalance the MONTHLY composite ledger (PVM) to the current top-N picks."""
+    from halal_screener import _require_api_key, validate_range
+    from app.services.paper_validation import rebalance_monthly
+    _require_api_key(x_api_key)
+    validate_range(account, "account", 100, 100_000_000)
+    validate_range(top_n, "top_n", 1, 50)
+    return rebalance_monthly(top_n=top_n, account=account)
+
+
 @router.get("/paper_validation/status")
-async def paper_validation_status():
-    """Open/closed paper-ledger counts + the PV graduation status."""
-    from app.services.paper_validation import paper_ledger_status
-    return paper_ledger_status()
+async def paper_validation_status(scanner: str = "weekly"):
+    """Open/closed ledger counts + graduation for a scanner (weekly PV | monthly PVM)."""
+    from app.services.paper_validation import paper_ledger_status, _strategy_for
+    return paper_ledger_status(strategy_id=_strategy_for(scanner))
 
 
 @router.get("/refresh_consensus")

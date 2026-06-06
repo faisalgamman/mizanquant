@@ -135,6 +135,7 @@ def _scheduler_loop():
     last_pipeline_full = ""
     last_paper_record = ""
     last_paper_mature = ""
+    last_paper_rebalance = ""  # YYYY-MM — monthly composite rebalance (fires 1st trading day)
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
@@ -346,6 +347,23 @@ def _scheduler_loop():
                     mature_open_paper_trades()
                 except Exception as e:
                     logger.error(f"Paper validation mature failed: {e}", exc_info=True)
+
+            # --- MONTHLY COMPOSITE REBALANCE (simulated ledger "PVM") ---
+            # Fires on the FIRST trading day of each month at ~09:30 ET: the
+            # month-key dedup means the first weekday the scheduler sees in a new
+            # month triggers it once. Closes names that fell out of the top-N,
+            # opens new entrants, keeps the rest. No broker orders.
+            month_key = now.strftime("%Y-%m")
+            if (_is_weekday(now) and now.hour == 9 and 30 <= now.minute < 40
+                    and last_paper_rebalance != month_key):
+                last_paper_rebalance = month_key
+                logger.info("Paper validation: monthly composite rebalance (%s)...", month_key)
+                try:
+                    from app.services.paper_validation import rebalance_monthly
+                    res = rebalance_monthly()
+                    logger.info("Monthly rebalance: %s", res)
+                except Exception as e:
+                    logger.error(f"Paper validation monthly rebalance failed: {e}", exc_info=True)
 
             # Sleep 60 seconds between checks
             time.sleep(60)

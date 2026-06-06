@@ -39,6 +39,17 @@ function App() {
   const [forecast, setForecast]   = useState(null);  // {symbol, loading, data} — probabilistic price forecast
   const [forecastHorizon, setForecastHorizon] = useState(20);  // selectable forecast horizon (days)
 
+  // Two-scanner split: Weekly (swing /buys, Option-A) vs Monthly (composite
+  // deep-picks, rebalanced). Each scanner has its OWN simulated paper ledger
+  // (weekly=PV, monthly=PVM); real money for either half is released ONLY after
+  // its ledger graduates. The tab below switches the ScanColumn's source.
+  const [scanMode, setScanMode]   = useState(() =>
+    (typeof location !== "undefined" && location.hash.replace("#", "") === "monthly") ? "monthly" : "weekly");
+  const [monthly, setMonthly]     = useState([]);          // composite picks (real or honest empty)
+  const [monthlyStatus, setMonthlyStatus] = useState("computing"); // computing | ready | empty
+  const [ledgerW, setLedgerW]     = useState(null);        // weekly paper-ledger status (PV)
+  const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
+
   // Fetch /buys, map real rows. Returns true once real signals are loaded.
   const loadBuys = async () => {
     try {
@@ -165,6 +176,46 @@ function App() {
     } catch (_) {}
   };
 
+  // Monthly composite scanner — real deep-picks (technical + FUNDAMENTAL +
+  // sentiment + AI + halal). Honest empty/"computing" when the screener cache
+  // is still warming. Never fabricates rows.
+  const loadMonthly = async () => {
+    try {
+      const j = await (await fetch('/api/screener/deep-picks?limit=25')).json();
+      const rows = (j && Array.isArray(j.results)) ? j.results : [];
+      if (rows.length === 0) {
+        setMonthlyStatus((j && j.status === "scanning") ? "computing" : "empty");
+        return false;
+      }
+      setMonthly(rows.filter(r => r.symbol && r.price).map(r => ({
+        symbol:  r.symbol,
+        company: r.company_name || r.symbol,
+        price:   r.price || 0,
+        chg:     r.chg_1w || r.change_pct || 0,
+        score:   r.composite_score || 0,
+        verdict: r.signal_composite || verdictFromScore(r.composite_score || 0),
+        halal:   r.is_halal !== false,
+        sector:  r.sector || "—",
+        spark:   Array.isArray(r.spark) ? r.spark : [],
+        // Composite breakdown (real sub-scores from deep-picks)
+        tech:   r.score_tech, fund: r.score_fund, sent: r.score_sentiment,
+        ai:     r.score_ai,   halalS: r.score_halal, grade: r.f_grade,
+      })));
+      setMonthlyStatus("ready");
+      return true;
+    } catch (_) {
+      setMonthlyStatus("computing");
+      return false;
+    }
+  };
+
+  // Per-scanner paper-ledger status (graduation / open / closed) for the
+  // honest "not graduated → no real money" banner on each tab.
+  const loadLedgers = async () => {
+    try { setLedgerW(await (await fetch('/paper_validation/status?scanner=weekly')).json()); } catch (_) {}
+    try { setLedgerM(await (await fetch('/paper_validation/status?scanner=monthly')).json()); } catch (_) {}
+  };
+
   // Clock tick (ET)
   useEffect(() => {
     const tick = () => {
@@ -202,9 +253,45 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Load both paper-ledger statuses on mount, refresh every 60s.
+  useEffect(() => {
+    loadLedgers();
+    const id = setInterval(loadLedgers, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Sidebar "Weekly/Monthly Scanner" links set the hash → switch the tab live.
+  useEffect(() => {
+    const onHash = () => {
+      const h = location.hash.replace("#", "");
+      if (h === "weekly" || h === "monthly") setScanMode(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Lazily load the monthly composite scan the first time its tab is opened,
+  // polling until the screener cache warms (same pattern as weekly /buys).
+  useEffect(() => {
+    if (scanMode !== "monthly" || monthly.length > 0) return;
+    let tries = 0, stop = false;
+    (async () => {
+      const ok = await loadMonthly();
+      if (ok || stop) return;
+      const poll = setInterval(async () => {
+        tries += 1;
+        if (stop || await loadMonthly() || tries >= 12) clearInterval(poll);
+      }, 15000);
+    })();
+    return () => { stop = true; };
+  }, [scanMode]);
+
   // Real signals only — never fabricate. Empty → ScanColumn shows scanning state.
   const displaySignals = signals;
-  const selectedSym    = selectedSymbol || (displaySignals[0]?.symbol);
+  // The active list depends on the scanner tab; the selected symbol can come
+  // from either (Analyze/Forecast/Consensus are symbol-keyed, mode-agnostic).
+  const activeList     = scanMode === "monthly" ? monthly : displaySignals;
+  const selectedSym    = selectedSymbol || activeList[0]?.symbol || displaySignals[0]?.symbol;
 
   // Auto-clear toast
   useEffect(() => {
@@ -261,15 +348,19 @@ function App() {
     return () => { cancelled = true; };
   }, [selectedSym, forecastHorizon]);
 
-  const filteredSignals = useMemo(() => {
-    if (!query) return displaySignals;
+  const _filterByQuery = (list) => {
+    if (!query) return list;
     const q = query.toUpperCase();
-    return displaySignals.filter(s =>
-      s.symbol.includes(q) || (s.company || '').toUpperCase().includes(q)
-    );
-  }, [query, displaySignals]);
+    return list.filter(s => s.symbol.includes(q) || (s.company || '').toUpperCase().includes(q));
+  };
+  const filteredSignals = useMemo(() => _filterByQuery(displaySignals), [query, displaySignals]);
+  const filteredMonthly = useMemo(() => _filterByQuery(monthly), [query, monthly]);
 
-  const selected = displaySignals.find(s => s.symbol === selectedSym) || displaySignals[0];
+  const selected =
+    activeList.find(s => s.symbol === selectedSym) ||
+    displaySignals.find(s => s.symbol === selectedSym) ||
+    monthly.find(s => s.symbol === selectedSym) ||
+    activeList[0] || displaySignals[0];
 
   // Trigger the REAL pipeline and reflect its actual stage status (no fake
   // timed animation). Progress is shown from /api/v1/overview pipeline.stages.
@@ -334,11 +425,22 @@ function App() {
       <main className="main">
         <div className="workflow">
           <ScanColumn
+            scanMode={scanMode}
+            onScanMode={(m) => {
+              setScanMode(m);
+              if (typeof history !== "undefined" && history.replaceState) {
+                history.replaceState(null, "", "#" + m);
+              }
+            }}
             signals={filteredSignals}
+            monthlySignals={filteredMonthly}
             selectedSymbol={selectedSym}
             onSelect={setSelectedSymbol}
             market={market}
             signalsStatus={signalsStatus}
+            monthlyStatus={monthlyStatus}
+            ledgerWeekly={ledgerW}
+            ledgerMonthly={ledgerM}
           />
           <AnalyzeColumn
             signal={selected}
