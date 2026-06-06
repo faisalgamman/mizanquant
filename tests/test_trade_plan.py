@@ -161,3 +161,17 @@ class TestGenerateTradePlan:
         result = generate_trade_plan(df, portfolio_equity=100000)
         assert "error" in result
         assert "risk:reward" in result["error"]
+
+    def test_uses_option_a_exit(self, monkeypatch):
+        """Plan must use the validated Option-A exit: fixed 15% catastrophe stop
+        + 20-trading-day time exit — not the old tight ATR stop."""
+        monkeypatch.setattr("app.services.trade_plan.MIN_RR", 1.0)
+        df = _make_df(list(range(100, 200)))
+        result = generate_trade_plan(df, portfolio_equity=100000)
+        entry = result["entry"]
+        assert result["exit_mode"] == "option_a"
+        assert result["catastrophe_stop_pct"] == 15.0
+        assert result["time_exit_days"] == 20
+        assert result["stop_loss"] == round(entry * 0.85, 2)   # fixed 15% below entry
+        # TP ladder follows the wide stop: 1R/2R/3R → far targets (≈ +15/30/45%).
+        assert result["tp3"] == round(entry + 3 * (entry - result["stop_loss"]), 2)

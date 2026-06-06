@@ -88,4 +88,14 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
         plan["strategy"] = "WAIT"
         plan["strategy_reason"] = f"Strategy error: {e}"
 
+    # Make the per-strategy exit consistent with the validated Option-A plan from
+    # generate_trade_plan (fixed 15% catastrophe stop + 20-day time exit). The UI
+    # prefers strategy_* fields, so align them here; otherwise it would show the
+    # strategy's own (tighter) stop and contradict the validated exit policy.
+    if "stop_loss" in plan and "error" not in plan:
+        plan["strategy_stop"] = plan["stop_loss"]
+        for _k in ("tp1", "tp2", "tp3"):
+            if plan.get(_k) is not None:
+                plan["strategy_" + _k] = plan[_k]
+
     return plan

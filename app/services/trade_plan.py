@@ -110,22 +110,38 @@ def generate_trade_plan(
     portfolio_equity: float = 100000.0,
     atr_mult: float = 1.5,
 ) -> dict:
-    """Generate a complete trade plan for a symbol.
+    """Generate a complete trade plan using the validated Option-A exit.
+
+    Option-A = a FIXED wide catastrophe stop at entry·(1 − SWING_TRAIL_PCT),
+    default 15% below entry, plus a ~SWING_MAX_HOLD_DAYS (20) trading-day TIME
+    exit. The 2026-06 paired backtest (DSR 0.985) showed the edge is the time
+    hold + wide stop — the old tight ATR stop gets shaken out before the swing
+    develops. ``atr`` is still returned for reference only (no longer the stop).
 
     Args:
         df: OHLCV DataFrame.
         portfolio_equity: Current portfolio equity.
-        atr_mult: ATR multiplier for stop loss.
+        atr_mult: kept for the reference ATR value only.
 
     Returns:
-        Dict with entry, stop_loss, tp levels, position sizing, rr_ratio.
+        Dict with entry, stop_loss, tp levels, position sizing, rr_ratio,
+        plus exit_mode / catastrophe_stop_pct / time_exit_days.
     """
     if df is None or len(df) < 10:
         return {"error": "insufficient data"}
 
     entry = float(df["close"].iloc[-1])
-    stop_loss, atr_val = calculate_stop_loss(df, atr_mult)
+    _, atr_val = calculate_stop_loss(df, atr_mult)  # ATR kept for reference only
 
+    # Option-A exit parameters (from config, with safe fallbacks).
+    try:
+        from app.config import settings
+        stop_pct = float(getattr(settings, "SWING_TRAIL_PCT", 15.0))
+        hold_days = int(getattr(settings, "SWING_MAX_HOLD_DAYS", 20))
+    except Exception:
+        stop_pct, hold_days = 15.0, 20
+
+    stop_loss = round(entry * (1.0 - stop_pct / 100.0), 2)
     if stop_loss <= 0 or entry <= stop_loss:
         return {"error": "invalid stop loss"}
 
@@ -144,6 +160,9 @@ def generate_trade_plan(
         "entry": entry,
         "stop_loss": stop_loss,
         "atr": atr_val,
+        "exit_mode": "option_a",
+        "catastrophe_stop_pct": round(stop_pct, 2),
+        "time_exit_days": hold_days,
         **tp_levels,
         **sizing,
     }
