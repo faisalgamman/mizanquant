@@ -471,3 +471,48 @@ def get_score(row):
     if ((row["close"] - row["support"]) / row["support"] * 100) <= 2.0:
         s += 10
     return s
+
+
+def score_series(df: pd.DataFrame) -> pd.Series:
+    """Vectorised equivalent of ``df.apply(get_score, axis=1)``.
+
+    Produces the identical integer score per row as :func:`get_score`, but
+    column-wise (no Python-level row loop). The branch precedence of the
+    scalar function is preserved exactly via nested ``np.where`` (the ``elif``
+    arms map to the false branch). Equivalence is locked by
+    ``tests/test_score_series.py``.
+
+    Args:
+        df: DataFrame with the same columns get_score reads: 'close', 'ema21',
+            'rsi', 'rsi_prev', 'hist', 'hist_prev', 'vol_ratio', 'atr_v',
+            'support'.
+
+    Returns:
+        Integer pandas Series of scores (0-100), aligned to ``df.index``.
+    """
+    close, rsi_v, rsi_prev = df["close"], df["rsi"], df["rsi_prev"]
+    hist, hist_prev = df["hist"], df["hist_prev"]
+    vol, atr_v, support = df["vol_ratio"], df["atr_v"], df["support"]
+
+    trend = np.where(close > df["ema21"], 25, 0)
+
+    rsi_rising = rsi_v > rsi_prev
+    momentum = np.where(
+        rsi_rising & (rsi_v >= 40) & (rsi_v <= 60), 20,
+        np.where(rsi_rising & (rsi_v >= 35) & (rsi_v <= 65), 10, 0),
+    )
+
+    macd_hist = np.where(
+        (hist > 0) & (hist_prev <= 0), 20,
+        np.where((hist > 0) & (hist > hist_prev), 10, 0),
+    )
+
+    volume = np.where(vol >= 1.5, 15, np.where(vol >= 1.2, 8, 0))
+
+    atr_pct = atr_v / close * 100
+    volatility = np.where((atr_pct >= 1.0) & (atr_pct <= 4.0), 10, 0)
+
+    near_support = np.where((close - support) / support * 100 <= 2.0, 10, 0)
+
+    total = trend + momentum + macd_hist + volume + volatility + near_support
+    return pd.Series(total.astype(int), index=df.index)

@@ -1,6 +1,6 @@
-# PROJECT_MAP — openbb-trading
+# PROJECT_MAP — MizanQuant
 
-_Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M16 complete, V1 API deployed, Options 1-3 complete)_
+_Last updated: 2026-06-06 (Architectural review refresh: versions reconciled to requirements.txt, orphans registered) (M1-M16 complete, V1 API deployed, Options 1-3 complete)_
 
 > **Signal Expansion (Options 1+2+3):** ✅ Gate Toggle UI, ✅ Universe expanded to 660 symbols, ✅ Momentum Burst strategy added.
 
@@ -10,24 +10,25 @@ _Last updated: 2026-06-01 (Cleanup + Kalman + Bayesian Sharpe (SHAP)) (M1-M16 co
 
 | Layer | Technology | Version (latest stable) | Notes |
 |-------|-----------|------------------------|-------|
-| **Runtime** | Python 3.11-slim (Docker) | 3.11.11 | Deployed on Railway Hobby |
-| **Web** | FastAPI + Uvicorn | 0.136.1 / 0.46.0 | Async HTTP, lifespan mgmt |
-| **DB** | SQLAlchemy 2.0 | 2.0.49 | SQLite (dev) / PostgreSQL (Railway) |
+| **Runtime** | Python 3.11-slim (Docker) | 3.11.x | Deployed on Railway Hobby |
+| **Web** | FastAPI + Uvicorn | >=0.128.8 / >=0.40.0,<0.41.0 | Async HTTP, lifespan mgmt (uvicorn capped by openbb-core 1.6.x) |
+| **DB** | SQLAlchemy 2.0 | >=2.0.48 | SQLite (dev, aiosqlite) / PostgreSQL (Railway, asyncpg) |
 | **Broker** | Alpaca Markets (paper) | — | 4 accounts: default + A/B/C |
-| **Broker** | Interactive Brokers (ib_insync) | 0.9.86 | Adapter active (IB Gateway Docker on Railway, port 4002, paper) |
-| **ML** | PyTorch (CPU) | 2.11.0 | LSTM, Transformer models |
-| **ML** | scikit-learn | 1.8.0 | Ensemble, preprocessing |
-| **ML** | XGBoost | 3.2.0 | Stacking ensemble member |
-| **ML** | statsmodels | 0.14.6 | Cointegration, ADF, Hurst |
+| **Broker** | Interactive Brokers (ib_insync) | >=0.9.86 | Adapter active (IB Gateway Docker on Railway, port 4002, paper) |
+| **ML** | PyTorch (CPU) | >=2.7.0 | LSTM, Transformer models |
+| **ML** | scikit-learn | >=1.8.0 | Ensemble, preprocessing |
+| **ML** | XGBoost | >=3.2.0 | Stacking ensemble member |
+| **ML** | statsmodels | >=0.14.6 | Cointegration, ADF, Hurst |
 | **RL** | Custom (Double DQN, PG, ES) | — | In openbb_forecast/agents/ |
-| **Data** | yfinance + Alpaca IEX | — | Dual-source with fallback |
-| **AI Agent** | Anthropic Claude Sonnet 4-6 | 0.100.0 | Bilingual trading copilot |
-| **Notify** | Telegram Bot API (httpx) | — | Async queue-based dispatcher |
-| **Config** | pydantic-settings | 2.14.0 | Nested, env-based, fail-fast |
+| **Data** | yfinance + Alpaca IEX + Tiingo | yfinance >=1.2.0 | Multi-source with fallback chain |
+| **AI Agent** | Anthropic Claude Sonnet 4-6 | >=0.86.0 | Bilingual trading copilot |
+| **Notify** | Telegram Bot API (httpx) | httpx >=0.28.1 | Async queue-based dispatcher |
+| **Config** | pydantic-settings | >=2.13.1 | Nested, env-based, fail-fast |
 | **CI** | GitHub Actions | — | ruff, pytest (80% cov), gitleaks |
-| **Forecast Ext** | OpenBB (openbb_forecast) | 0.1.0 | Poetry package, extensions |
+| **Forecast Ext** | OpenBB core + providers | openbb-core ==1.6.9 | FRED/FMP/Tiingo pinned ==1.6.0 |
 
-> **✅ Fixed:** `requirements.txt` now pinned to `>=` with tested stable versions.
+> **✅ Versions reconciled to `requirements.txt` (2026-06-06).** Earlier table listed
+> aspirational/incorrect pins (e.g. PyTorch 2.11.0, FastAPI 0.136.1) — now mirrors actual constraints.
 
 ---
 
@@ -188,6 +189,10 @@ openbb-trading/
 | Cross-strategy Kelly | Deferred | — | See `docs/out_of_scope.md`, item 8 |
 | `keep_alive.py` | Moved to `app/services/keep_alive.py` | Reviewed — still needed for Railway health checks | ✅ Done |
 | `russell1000_halal.py` | Moved to `app/data/russell1000_halal.py` | Reviewed — correctly placed in `app/data/` | ✅ Done |
+| `gap_go` archetype | Stub (Phase 5) | `signal_archetypes.py:19` | Needs intraday data; explicitly deferred |
+| Forecast Consensus (0-30) | Placeholder | `workspace_server.py:3440` | RSI-based proxy, not a real forecast model |
+| `trade_plan.calculate_position_size()` | Deprecated | `trade_plan.py:87` | Live path is `risk_manager.calculate_position_size`; remove stale callers |
+| shadow-mode sizing flags | Code present, OFF | `config.py` (`KALMAN_/GARCH_/WAVELET_/SENTIMENT_/FACTOR_/MR_/PORTFOLIO_COV_/XGB_SIGNAL_GATE_…_LIVE`) | Intentional — pending validation before going LIVE |
 
 ---
 
@@ -241,3 +246,67 @@ openbb-trading/
 `pipeline_orchestrator.py`, `conviction_engine.py`, `PROJECT_MAP.md`
 **Files created:** `app/api/dashboard_api.py`
 **Files moved:** `_run_consensus.py`, `_run_scan.py` → `scripts/`; 4 reports → `docs/`
+
+
+## Recent Changes (2026-06-06 — Architectural Review v2: hardening)
+
+| Milestone | Change | Success criterion | Status |
+|-----------|--------|-------------------|--------|
+| **M-A** | PROJECT_MAP versions reconciled to `requirements.txt`; real orphans registered | No fictional versions; 4 orphans logged | ✅ |
+| **M-B** | Safety-net tests for the critical, previously-untested logic | 12 new cases green; no regression | ✅ |
+| **M-C** | Vectorise the scoring hot path (`get_score`) in both backtest engines | Byte-identical to scalar; ≥3× faster | ✅ (49× on 5k rows) |
+| **M-D** | Consolidate the 5 identical shadow-sizing layers in `execute_buy` | Golden-master byte-identical (qty + payload + diagnostics) | ✅ |
+| **M-E** | First safe extraction from the `halal_screener` monolith behind a re-export facade | Data byte-identical to HEAD; contract preserved; no regression | ✅ (increment 1) |
+
+**M-B coverage added:**
+- `tests/test_forward_pf.py` (+7): SELL-side exit, stop-precedence-over-time, exact-touch
+  boundary, guard clauses for `_simulate_fixed_exit`.
+- `tests/test_backtest_service.py` (new): locks the Chan no-look-ahead invariant —
+  signal on `close[i]` fills at `open[i+1]`.
+- `tests/test_risk_manager_sizing.py` (new): locks the position-cap invariant on the
+  LIVE sizing path (`risk_manager.calculate_position_size`).
+
+**M-C performance:**
+- `technical.score_series(df)` (new): column-wise scorer replacing
+  `df.apply(get_score, axis=1)` in `backtest_service.py` and `halal_screener.py`.
+  49× faster on 5k rows; `tests/test_score_series.py` proves byte-identical output
+  across 25 fuzzed seeds + branch-boundary rows. `get_score` (scalar) is retained as
+  the reference oracle.
+- **Deliberately NOT vectorised (Simplicity First):** the `iterrows`/`range(len(df))`
+  loops in `workspace_server.py` (≤25–500-row holder/price/upgrade tables),
+  `routers/screener.py` (`tail(200)`) and `chart_generator.py` (per-bar matplotlib
+  draw). These are bounded DataFrame→JSON serialisation / plotting on network-bound
+  endpoints — vectorising risks changing live output for negligible CPU gain.
+
+**M-D refactor (scoped to the recommended, lowest-risk option):**
+- `trading_engine._apply_shadow_qty(...)` (new helper): single source of truth for
+  the 5 byte-identical shadow-sizing layers (Wavelet, Kalman, MR, Sentiment, Factor).
+  The 5 inline branch blocks now call it. GARCH, portfolio-cov, and the XGB *gate*
+  were intentionally left inline — each differs (extra default keys / unconditional
+  compute / block-vs-multiply), so folding them in would change recorded diagnostics.
+- `tests/test_trading_engine_golden.py` (new): golden-master pinning the final `qty`,
+  the submitted order payload, and every shadow diagnostic key — proven green before
+  AND after the refactor (shadow path + live-apply path).
+- The full 4-way decomposition from the original plan was **declined** after reading
+  the code: its early-returns would need sentinel plumbing through the live order path
+  (higher risk, modest gain). Recorded here for transparency.
+
+**M-E decomposition (increment 1 — lowest-risk, behind a re-export facade):**
+- `app/data/halal_exclusions.py` (new): pure exclusion tables `HARAM_EXCLUDE` (144) +
+  `SP500_DELISTED_HALAL` (27), extracted verbatim (byte-identical to HEAD).
+- `app/api/request_validators.py` (new): the HTTP-layer `validate_symbol/validate_date/
+  validate_range` (raise `HTTPException(400)`). Distinct from `app.services.validators`
+  (the structured pre-trade variant) — kept separate by design.
+- `halal_screener` re-exports all moved names under their original spelling, so the wide
+  public contract (`from halal_screener import …` and `hs.<name>`) is unchanged.
+  Orphaned `import re` removed. `tests/test_halal_extraction.py` pins the contract.
+- **Deferred (deliberately):** deeper extraction of the consensus/ML runners and the
+  shared cache/rate-limiter state. The monolith's contract is wide and partly *dynamic*
+  (`hs.<attr>`) and several clusters mutate shared module globals — extraction there is
+  high-risk for low net gain (the re-export facade means the public surface doesn't
+  shrink). `_VERIFIED_HARAM` stays put: it is runtime state, not data.
+
+> **Baseline note:** 10 pre-existing suite failures (calibrate_thresholds, config,
+> dashboard_endpoints, ibkr_config, market_data, scheduler_hooks, trading_engine_entry)
+> exist on the clean tree under the local Python 3.14 interpreter (project targets 3.11/3.12).
+> They are unrelated to this review and were confirmed present before any change.

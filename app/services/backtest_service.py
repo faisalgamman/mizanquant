@@ -1,7 +1,7 @@
 """Standalone backtest engine — no halal_screener dependency."""
 from app.services.execution_costs import apply_costs as _apply_costs, BACKTEST_COST_BPS
 from app.services.market_data import fetch as fetch_market_data
-from app.services.technical import ema, rsi, macd, atr, calc_metrics, get_score
+from app.services.technical import ema, rsi, macd, atr, calc_metrics, score_series
 
 
 def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
@@ -26,7 +26,7 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
         df["vol_ratio"] = df["volume"] / df["volume"].rolling(20).mean()
         df["support"] = df["low"].rolling(10).min()
         df = df.dropna().reset_index(drop=True)
-        df["score"] = df.apply(get_score, axis=1)
+        df["score"] = score_series(df)
         trades = []
         port = portfolio
         in_trade = False

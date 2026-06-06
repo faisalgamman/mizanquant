@@ -340,6 +340,36 @@ def _strategy_label(strategy_id: str = None) -> str:
 # Trade execution logic
 # ---------------------------------------------------------------------------
 
+def _apply_shadow_qty(
+    sizing: dict,
+    qty: int,
+    mult: float,
+    *,
+    mult_key: str,
+    live_flag: str,
+    note_text: str,
+    shadow_key: str,
+) -> int:
+    """Shared tail of the identical shadow-sizing layers (Wavelet/Kalman/MR/
+    Sentiment/Factor).
+
+    Records the multiplier, then when it deviates from 1.0 either applies it to
+    the live ``qty`` (``live_flag`` enabled) or stores the would-be shadow size.
+    Returns the possibly-updated ``qty``. Behaviour is identical to the original
+    inline blocks — see ``tests/test_trading_engine_golden.py``.
+    """
+    sizing[mult_key] = mult
+    if mult != 1.0:
+        adj_qty = max(1, int(qty * mult))
+        if getattr(settings, live_flag, False):
+            qty = adj_qty
+            sizing["qty"] = qty
+            sizing["note"] = (sizing.get("note", "") + f" | {note_text}").strip(" | ")
+        else:
+            sizing[shadow_key] = adj_qty
+    return qty
+
+
 def execute_buy(
     symbol: str,
     price: float,
@@ -519,16 +549,11 @@ def execute_buy(
         sizing["wavelet_multiplier"] = 1.0
         try:
             from app.services.wavelet_denoise import get_wavelet_adjustment
-            wav_mult = get_wavelet_adjustment(symbol)
-            sizing["wavelet_multiplier"] = wav_mult
-            if wav_mult != 1.0:
-                wav_qty = max(1, int(qty * wav_mult))
-                if getattr(settings, "WAVELET_SIZING_LIVE", False):
-                    qty = wav_qty
-                    sizing["qty"] = qty
-                    sizing["note"] = (sizing.get("note", "") + " | Wavelet adjusted").strip(" | ")
-                else:
-                    sizing["wavelet_shadow_qty"] = wav_qty
+            qty = _apply_shadow_qty(
+                sizing, qty, get_wavelet_adjustment(symbol),
+                mult_key="wavelet_multiplier", live_flag="WAVELET_SIZING_LIVE",
+                note_text="Wavelet adjusted", shadow_key="wavelet_shadow_qty",
+            )
         except Exception as _wav_exc:
             logger.debug("wavelet_denoise: skipped for %s — %s", symbol, _wav_exc)
 
@@ -539,16 +564,11 @@ def execute_buy(
         sizing["kalman_multiplier"] = 1.0
         try:
             from app.services.kalman_filter import get_kalman_adjustment
-            kalman_mult = get_kalman_adjustment(symbol)
-            sizing["kalman_multiplier"] = kalman_mult
-            if kalman_mult != 1.0:
-                kalman_qty = max(1, int(qty * kalman_mult))
-                if getattr(settings, "KALMAN_SIZING_LIVE", False):
-                    qty = kalman_qty
-                    sizing["qty"] = qty
-                    sizing["note"] = (sizing.get("note", "") + " | Kalman adjusted").strip(" | ")
-                else:
-                    sizing["kalman_shadow_qty"] = kalman_qty
+            qty = _apply_shadow_qty(
+                sizing, qty, get_kalman_adjustment(symbol),
+                mult_key="kalman_multiplier", live_flag="KALMAN_SIZING_LIVE",
+                note_text="Kalman adjusted", shadow_key="kalman_shadow_qty",
+            )
         except Exception as _kal_exc:
             logger.debug("kalman_filter: skipped for %s — %s", symbol, _kal_exc)
 
@@ -600,16 +620,11 @@ def execute_buy(
         sizing["mr_multiplier"] = 1.0
         try:
             from app.services.mean_reversion_util import get_mr_multiplier
-            mr_mult = get_mr_multiplier(symbol)
-            sizing["mr_multiplier"] = mr_mult
-            if mr_mult != 1.0:
-                mr_qty = max(1, int(qty * mr_mult))
-                if getattr(settings, "MR_QUALITY_SIZING_LIVE", False):
-                    qty = mr_qty
-                    sizing["qty"] = qty
-                    sizing["note"] = (sizing.get("note", "") + " | MR quality adjusted").strip(" | ")
-                else:
-                    sizing["mr_shadow_qty"] = mr_qty
+            qty = _apply_shadow_qty(
+                sizing, qty, get_mr_multiplier(symbol),
+                mult_key="mr_multiplier", live_flag="MR_QUALITY_SIZING_LIVE",
+                note_text="MR quality adjusted", shadow_key="mr_shadow_qty",
+            )
         except Exception as _mr_exc:
             logger.debug("mr_util: skipped for %s — %s", symbol, _mr_exc)
 
@@ -620,16 +635,11 @@ def execute_buy(
         sizing["sentiment_multiplier"] = 1.0
         try:
             from app.services.sentiment_engine import get_sentiment_multiplier
-            sent_mult = get_sentiment_multiplier(symbol)
-            sizing["sentiment_multiplier"] = sent_mult
-            if sent_mult != 1.0:
-                sent_qty = max(1, int(qty * sent_mult))
-                if getattr(settings, "SENTIMENT_SIZING_LIVE", False):
-                    qty = sent_qty
-                    sizing["qty"] = qty
-                    sizing["note"] = (sizing.get("note", "") + " | Sentiment adjusted").strip(" | ")
-                else:
-                    sizing["sentiment_shadow_qty"] = sent_qty
+            qty = _apply_shadow_qty(
+                sizing, qty, get_sentiment_multiplier(symbol),
+                mult_key="sentiment_multiplier", live_flag="SENTIMENT_SIZING_LIVE",
+                note_text="Sentiment adjusted", shadow_key="sentiment_shadow_qty",
+            )
         except Exception as _sent_exc:
             logger.debug("sentiment_engine: skipped for %s — %s", symbol, _sent_exc)
 
@@ -640,16 +650,11 @@ def execute_buy(
         sizing["factor_multiplier"] = 1.0
         try:
             from app.services.factor_exposure import get_factor_multiplier
-            ff_mult = get_factor_multiplier(symbol)
-            sizing["factor_multiplier"] = ff_mult
-            if ff_mult != 1.0:
-                ff_qty = max(1, int(qty * ff_mult))
-                if getattr(settings, "FACTOR_SIZING_LIVE", False):
-                    qty = ff_qty
-                    sizing["qty"] = qty
-                    sizing["note"] = (sizing.get("note", "") + " | Factor adjusted").strip(" | ")
-                else:
-                    sizing["factor_shadow_qty"] = ff_qty
+            qty = _apply_shadow_qty(
+                sizing, qty, get_factor_multiplier(symbol),
+                mult_key="factor_multiplier", live_flag="FACTOR_SIZING_LIVE",
+                note_text="Factor adjusted", shadow_key="factor_shadow_qty",
+            )
         except Exception as _ff_exc:
             logger.debug("factor_exposure: skipped for %s — %s", symbol, _ff_exc)
 

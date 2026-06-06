@@ -43,3 +43,53 @@ def test_not_matured_returns_none():
     lows = [100, 101, 102, 103, 104]
     highs = [102, 103, 104, 105, 106]
     assert _simulate_fixed_exit(_bars(lows, highs, closes), 100.0, 20, 15.0, is_sell=False) is None
+
+
+def test_stop_takes_precedence_over_a_winning_time_exit():
+    # BUY @100: day 2 low pierces 85, even though day 20 close would be +20%.
+    closes = [99, 80] + [100 + i for i in range(1, 19)]   # 20 bars, day20 close=118
+    lows = [98, 84] + [c - 1 for c in closes[2:]]          # day2 low 84 <= 85
+    highs = [c + 1 for c in closes]
+    ret, exit_price = _simulate_fixed_exit(_bars(lows, highs, closes), 100.0, 20, 15.0, is_sell=False)
+    assert exit_price == 85.0                                # stop wins over the later time exit
+    assert ret == pytest.approx(-15.0)
+
+
+def test_sell_time_exit_is_direction_normalised():
+    # SELL @100: price drifts DOWN to 90 by day 20 -> short profits +10%.
+    closes = [100 - i * 0.5 for i in range(1, 21)]          # 99.5 .. 90.0
+    highs = [c + 0.5 for c in closes]                        # never >= 115 (stop)
+    lows = [c - 0.5 for c in closes]
+    ret, exit_price = _simulate_fixed_exit(_bars(lows, highs, closes), 100.0, 20, 15.0, is_sell=True)
+    assert exit_price == pytest.approx(closes[19])           # day-20 close
+    assert ret == pytest.approx(10.0)                        # short gains as price falls
+
+
+def test_sell_catastrophe_stop_when_price_rises():
+    # SELL @100: day 2 high pierces 115 -> short stopped out for -15%.
+    closes = [101, 116, 110, 108, 105]
+    highs = [103, 117, 112, 109, 106]                        # day2 high 117 >= 115
+    lows = [100, 109, 108, 106, 103]
+    ret, exit_price = _simulate_fixed_exit(_bars(lows, highs, closes), 100.0, 20, 15.0, is_sell=True)
+    assert exit_price == pytest.approx(115.0)
+    assert ret == pytest.approx(-15.0)
+
+
+def test_stop_triggers_on_exact_touch():
+    # Boundary: low == stop level counts as a hit (<=), not a miss.
+    closes = [100, 100, 100]
+    lows = [99, 90.0, 99]                                    # exactly 90 == 100*(1-0.10)
+    highs = [101, 101, 101]
+    ret, exit_price = _simulate_fixed_exit(_bars(lows, highs, closes), 100.0, 20, 10.0, is_sell=False)
+    assert exit_price == pytest.approx(90.0)
+    assert ret == pytest.approx(-10.0)
+
+
+@pytest.mark.parametrize("bad", [None, pd.DataFrame()])
+def test_guard_clauses_return_none(bad):
+    assert _simulate_fixed_exit(bad, 100.0, 20, 15.0, is_sell=False) is None
+
+
+def test_nonpositive_entry_returns_none():
+    closes, lows, highs = [100, 101], [99, 100], [101, 102]
+    assert _simulate_fixed_exit(_bars(lows, highs, closes), 0.0, 20, 15.0, is_sell=False) is None

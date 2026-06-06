@@ -1,4 +1,4 @@
-import asyncio, time, logging, os, uuid, threading, re, gc, json, pandas as pd, numpy as np
+import asyncio, time, logging, os, uuid, threading, gc, json, pandas as pd, numpy as np
 # NOTE: This module is a router/function provider for workspace_server,
 # which is the CANONICAL entry point (see railway.json → Dockerfile).
 # halal_screener is NOT independently deployable.
@@ -22,7 +22,7 @@ from app.core.config import app_cfg
 from app.services.market_data import fetch as fetch_market_data, fetch_alpaca_intraday
 from app.services.technical import (
     ema, rsi, macd, atr, calc_metrics,
-    safe_scale, walk_forward_split, prepare_sequences, get_score,
+    safe_scale, walk_forward_split, prepare_sequences, score_series,
 )
 from app.exceptions import DataFetchError, ModelTrainingError
 from app.db.database import init_db
@@ -169,23 +169,14 @@ async def with_timeout(coro, seconds=120):
         raise HTTPException(status_code=504, detail=f"Request timed out after {seconds}s")
 
 # --- 4.2 + 4.3: Input validation helpers ---
+# Extracted to app.api.request_validators (M-E). Re-exported here so the public
+# contract `from halal_screener import validate_symbol/validate_date/validate_range`
+# (and `hs.validate_*`) is preserved unchanged.
 VALID_SYMBOLS = set()  # populated after HALAL_STOCKS is defined
 
-def validate_symbol(symbol: str) -> str:
-    s = symbol.upper().strip()
-    if not re.match(r'^[A-Z]{1,6}(\.[A-Z])?$', s):
-        raise HTTPException(status_code=400, detail=f"Invalid symbol format: {symbol}")
-    return s
-
-def validate_date(d: str) -> str:
-    if not re.match(r'^\d{4}-\d{2}-\d{2}$', d):
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {d}. Use YYYY-MM-DD")
-    return d
-
-def validate_range(val, name, min_v, max_v):
-    if val < min_v or val > max_v:
-        raise HTTPException(status_code=400, detail=f"{name} must be between {min_v} and {max_v}, got {val}")
-    return val
+from app.api.request_validators import (  # noqa: E402
+    validate_symbol, validate_date, validate_range,
+)
 
 
 def _primary_broker_strategy_id() -> str | None:
@@ -216,37 +207,13 @@ def check_rate_limit(endpoint: str, max_concurrent: int = 2):
         _rate_limits[endpoint].append(time.time())
         return True
 
-# S&P 500 universe — excluding obvious haram sectors:
-# Banks/financials (interest-based), insurance, alcohol, gambling, tobacco, weapons
-# Each stock still goes through AAOIFI screening for final halal verification
-_HARAM_EXCLUDE = {
-    # Major banks & financial services (interest-based income)
-    "BAC","C","COF","CFG","FITB","GS","HBAN","JPM","KEY","MS","MTB",
-    "PNC","RF","SCHW","STT","TFC","USB","WFC","BK","BEN","BLK","BX",
-    "CBOE","CME","ICE","IVZ","KKR","MSCI","NDAQ","SPGI","TROW",
-    # Insurance
-    "ACGL","AFL","AIG","AIZ","ALL","AJG","BRO","CB","CI","CINF",
-    "CNC","COR","EG","ELV","ERIE","GL","HIG","HUM","L","MET",
-    "PFG","PGR","PRU","RJF","TRV","UNH","WRB","WTW",
-    # Alcohol & tobacco
-    "BF.B","STZ","TAP","MO","PM","SAM",
-    # Gambling & casinos
-    "WYNN","LVS","MGM","CCL","NCLH","RCL",
-    # Weapons/defense (controversial — kept some dual-use industrials)
-    "LMT","NOC","GD","RTX","HII","LHX","BA",
-    # Conventional media with haram content
-    "FOX","FOXA","NFLX","DIS","WBD","LYV",
-    # Utilities — almost all fail AAOIFI debt screen (>33% debt/market cap)
-    "AEE","AEP","AES","ATO","CEG","CMS","CNP","D","DTE","DUK","ED",
-    "EIX","ES","ETR","EVRG","EXC","FE","LNT","NEE","NI","NRG","PCG",
-    "PEG","PPL","SO","SRE","VST","WEC","XEL",
-    # REITs — interest-based income structure, high leverage
-    "AMT","ARE","AVB","BXP","CCI","CPT","DLR","DOC","EQIX","EQR",
-    "ESS","EXR","FRT","HST","INVH","IRM","KIM","MAA","O","PLD",
-    "PSA","REG","SBAC","SPG","UDR","VICI","VTR","WELL",
-    # Payment processors / fintech — significant interest income from credit
-    "AXP","SYF","CPAY",
-}
+# Sector-level haram exclusions — extracted to app.data.halal_exclusions (M-E)
+# and re-exported under the original name. Each surviving stock still goes through
+# AAOIFI screening for final halal verification in verify_halal.
+from app.data.halal_exclusions import (  # noqa: E402
+    HARAM_EXCLUDE as _HARAM_EXCLUDE,
+    SP500_DELISTED_HALAL as _SP500_DELISTED_HALAL,
+)
 
 # ── HALAL_STOCKS: now imported from universe module (single source of truth) ──
 from app.services.universe import (
@@ -273,41 +240,6 @@ try:
 except ImportError:
     def _universe_symbols():
         return HALAL_STOCKS
-
-# Survivorship bias mitigation: stocks removed from S&P 500 in 2023-2025
-# that were halal-compliant when removed. Including these in backtests
-# prevents inflating historical performance by only testing current winners.
-_SP500_DELISTED_HALAL = [
-    # Removed 2024-2025
-    "ATVI",  # Activision (acquired by MSFT)
-    "DISH",  # Dish Network (merged with EchoStar)
-    "FRC",   # First Republic (failed - but was in S&P)
-    "SIVB",  # SVB Financial (failed)
-    "LUMN",  # Lumen Technologies (removed)
-    "VFC",   # VF Corporation (removed)
-    "ALK",   # Alaska Air (removed)
-    "NCLH",  # Norwegian Cruise (moved to haram)
-    "SEE",   # Sealed Air (removed)
-    "NWL",   # Newell Brands (removed)
-    "OGN",   # Organon (removed)
-    "PARA",  # Paramount (removed / merged)
-    "SEDG",  # SolarEdge (removed)
-    "ENPH",  # Enphase (removed)
-    "BBWI",  # Bath & Body Works (removed)
-    "CTLT",  # Catalent (acquired)
-    "AAL",   # American Airlines (removed)
-    # Removed 2023
-    "TWTR",  # Twitter (acquired by Musk)
-    "SBNY",  # Signature Bank (failed)
-    "DISCA", # Discovery (merged into WBD)
-    "XLNX",  # Xilinx (acquired by AMD)
-    "CERN",  # Cerner (acquired by Oracle)
-    "FBHS",  # Fortune Brands Home (reorganized)
-    "RE",    # Everest Group (ticker changed)
-    "NLSN",  # Nielsen (taken private)
-    "DRE",   # Duke Realty (acquired)
-    "VIAC",  # ViacomCBS (now PARA)
-]
 
 VALID_SYMBOLS.update(HALAL_STOCKS)
 VALID_SYMBOLS.update(_SP500_DELISTED_HALAL)
@@ -575,7 +507,7 @@ def run_backtest(symbol, start_date, end_date, portfolio, risk_pct, hold_days):
         df["vol_ratio"] = df["volume"] / df["volume"].rolling(20).mean()
         df["support"] = df["low"].rolling(10).min()
         df = df.dropna().reset_index(drop=True)
-        df["score"] = df.apply(get_score, axis=1)
+        df["score"] = score_series(df)
         trades = []
         port = portfolio
         in_trade = False
