@@ -155,7 +155,7 @@ function LowerRow({ models, sectors, signal, consensus }) {
       </div>
       <div className="col">
         <div className="wf-section">
-          <div className="wf-head"><span className="wf-title">Sectors</span><span className="wf-sub">11 sector ETFs · halal-flagged</span></div>
+          <div className="wf-head"><span className="wf-title">Sectors</span><span className="wf-sub">11 sector ETFs · 1d change · halal-flagged</span></div>
           <SectorHeatmap sectors={sectors} />
         </div>
       </div>

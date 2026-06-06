@@ -142,7 +142,7 @@ function TradeColumn(props) {
         <PaperTradesList trades={paper} />
       </div>
       <div className="wf-section">
-        <div className="wf-head"><span className="wf-title">Pipeline</span><span className="wf-sub">{running ? "running" : "idle"} · 6 stages</span></div>
+        <div className="wf-head"><span className="wf-title">Pipeline</span><span className="wf-sub">{running ? "running" : "idle"} · {(pipeline || []).length} stages</span></div>
         <PipelineFlow stages={pipeline} running={running} dryRun={dryRun} setDryRun={setDryRun} onRun={onRunPipeline} />
       </div>
       <div className="wf-section">

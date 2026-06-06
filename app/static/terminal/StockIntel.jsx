@@ -24,7 +24,7 @@ function TrackRecordStrip({ overall }) {
   );
   return (
     <div className="si-track">
-      <span style={{ color: "var(--accent)", fontWeight: 700, letterSpacing: 0.5 }}>TRACK RECORD · 30d</span>
+      <span title="Real matured-signal outcomes. Profit factor < 1 means net-losing. Outcome basis is the live exit policy; older rows may use a legacy 5-day window, so treat the absolute number as indicative." style={{ color: "var(--accent)", fontWeight: 700, letterSpacing: 0.5 }}>TRACK RECORD · 30d</span>
       {cell("Win rate", (wr ?? 0) + "%", wrColor)}
       {cell("Avg return", ((avg ?? 0) >= 0 ? "+" : "") + (avg ?? 0) + "%", avgColor)}
       {cell("Profit factor", pf ?? "—")}

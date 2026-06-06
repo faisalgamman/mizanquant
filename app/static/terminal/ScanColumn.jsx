@@ -1,15 +1,18 @@
 // ScanColumn.jsx — Column 1 of the workflow: market · regime · signal cards · table
 
 function MarketCards({ market }) {
+  const m = market || {};
+  const reg = m.spy_regime || "—";
   const items = [
-    { lab: "VIX",     val: market.vix.toFixed(2),    sub: market.vix < 20 ? "calm" : market.vix < 30 ? "elevated" : "stress",
-      color: market.vix < 20 ? "var(--positive)" : market.vix < 30 ? "var(--warning)" : "var(--negative)" },
-    { lab: "SPY",     val: market.spy_regime,        sub: market.spy_trend,
-      color: market.spy_regime === "BULL" ? "var(--positive)" : "var(--negative)" },
-    { lab: "Breadth", val: market.breadth.toFixed(1) + "%", sub: "advance/decline",
-      color: market.breadth >= 50 ? "var(--positive)" : "var(--negative)" },
-    { lab: "Credit",  val: market.credit.toFixed(4), sub: "HYG / LQD", color: "var(--text-primary)" },
-    { lab: "Liq",     val: market.liquidity.toFixed(1) + "%", sub: market.market_open ? "open" : "closed", color: "var(--text-primary)" },
+    { lab: "VIX",     val: m.vix == null ? "—" : m.vix.toFixed(2),
+      sub: m.vix == null ? "—" : m.vix < 20 ? "calm" : m.vix < 30 ? "elevated" : "stress",
+      color: m.vix == null ? "var(--text-muted)" : m.vix < 20 ? "var(--positive)" : m.vix < 30 ? "var(--warning)" : "var(--negative)" },
+    { lab: "SPY",     val: reg,        sub: m.spy_trend || "",
+      color: reg === "BULL" ? "var(--positive)" : reg === "BEAR" ? "var(--negative)" : reg === "NEUTRAL" ? "var(--warning)" : "var(--text-secondary)" },
+    { lab: "Breadth", val: m.breadth == null ? "—" : m.breadth.toFixed(1) + "%", sub: "advance/decline",
+      color: m.breadth == null ? "var(--text-muted)" : m.breadth >= 50 ? "var(--positive)" : "var(--negative)" },
+    { lab: "Credit",  val: m.credit == null ? "—" : m.credit.toFixed(4), sub: "HYG / LQD", color: "var(--text-primary)" },
+    { lab: "Liq",     val: m.liquidity == null ? "—" : m.liquidity.toFixed(1) + "%", sub: m.market_open ? "open" : "closed", color: "var(--text-primary)" },
   ];
   return (
     <div className="mc-strip">
@@ -99,7 +102,7 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
         <table className="s-table">
           <thead>
             <tr>
-              <th>Symbol</th><th>Score</th><th>Signal</th><th>Price</th><th>Chg</th><th>Sector</th>
+              <th>Symbol</th><th>Score</th><th>Signal</th><th>Price</th><th>Chg 1w</th><th>Sector</th>
             </tr>
           </thead>
           <tbody>
