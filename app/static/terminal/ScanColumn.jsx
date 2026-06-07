@@ -102,7 +102,7 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
         <table className="s-table">
           <thead>
             <tr>
-              <th>Symbol</th><th>Score</th><th>Signal</th><th>Price</th><th>Chg 1w</th><th>Sector</th>
+              <th>Symbol</th><th>Score</th><th>Signal</th><th>Price</th><th>Chg 1w</th><th>Sector</th><th>USX</th>
             </tr>
           </thead>
           <tbody>
@@ -122,11 +122,24 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
                   <td className="mono">${s.price.toFixed(2)}</td>
                   <td className="mono" style={{ color: chgColor, fontWeight: 600 }}>{fmtPct(s.chg)}</td>
                   <td style={{ color: "var(--text-secondary)" }}>{s.sector}</td>
+                  <td>
+                    {s.usx_score != null ? (
+                      <span style={{ fontSize: 10, color: s.usx_pass ? "var(--positive)" : "var(--text-muted)" }}>
+                        {s.usx_score} {s.usx_pass ? "✓" : "·"}
+                        <span style={{ fontSize: 8, marginLeft: 3 }}>
+                          {(s.usx_signals || []).slice(0, 2).join(" ")}
+                        </span>
+                      </span>
+                    ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 9, color: "var(--text-muted)", textAlign: "center" }}>
+        USX early-entry overlay — leading signals, not a guarantee.
       </div>
     </>
   );

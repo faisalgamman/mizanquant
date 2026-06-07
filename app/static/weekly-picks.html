@@ -97,6 +97,13 @@ function render(rep){
   const picks = rep.picks || [];
   let rows = picks.map((p,i)=>{
     const cls = p.verdict === "STRONG BUY" ? "sb" : "b";
+    let usx = "—";
+    if (p.usx_score != null) {
+      const mark = p.usx_pass ? "✓" : "·";
+      const sigs = (p.usx_signals || []).slice(0, 2).join(" ");
+      const color = p.usx_pass ? "var(--pos)" : "var(--muted)";
+      usx = `<span style="color:${color}">${p.usx_score} ${mark}</span> <span style="font-size:8px;color:var(--muted)">${sigs}</span>`;
+    }
     return `<tr>
       <td class="mono">${i+1}</td>
       <td><b>${p.symbol}</b></td>
@@ -108,12 +115,13 @@ function render(rep){
       <td class="mono r">${p.shares??"—"}</td>
       <td class="mono r" style="color:var(--neg)">$${fmt(p.risk_amount)}</td>
       <td class="mono r">${p.votes||"—"}</td>
+      <td>${usx}</td>
     </tr>`;
   }).join("");
   const table = picks.length ? `<table>
     <thead><tr><th class="mono">#</th><th>Symbol</th><th>Verdict</th><th class="r">Conf</th>
       <th class="r">Entry</th><th class="r">Stop −15%</th><th class="r">Exit ~20d</th>
-      <th class="r">Shares</th><th class="r">Risk $</th><th class="r">Votes</th></tr></thead>
+      <th class="r">Shares</th><th class="r">Risk $</th><th class="r">Votes</th><th>USX</th></tr></thead>
     <tbody>${rows}</tbody></table>`
     : `<div class="empty">No qualifying candidates this week.</div>`;
 
@@ -126,7 +134,8 @@ function render(rep){
       <span><span class="k">Graduation</span> <b style="color:${grad.graduated?'var(--pos)':'var(--warn)'}">${gradTxt}</b></span>
       <span><span class="k">${rep.market_note||""}</span></span>
     </div>
-    ${table}`;
+    ${table}
+    <div style="margin-top:8px;font-size:10px;color:var(--muted);text-align:center;">USX early-entry overlay — leading signals, not a guarantee.</div>`;
 }
 
 function building(){

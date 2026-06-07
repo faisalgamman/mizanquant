@@ -193,6 +193,16 @@ def build_weekly_report(
             **plan,
         })
 
+    # USX early-entry overlay — annotate picks with leading-signal score + gates,
+    # then sort USX-passing picks first (stable within groups). Never crash the report.
+    try:
+        from app.services.usx_layer import enrich_picks_with_usx
+        picks = enrich_picks_with_usx(picks)
+        picks.sort(key=lambda p: (bool(p.get("usx_pass")), float(p.get("usx_score", 0) or 0)),
+                   reverse=True)
+    except Exception as exc:
+        logger.debug("weekly_report USX overlay failed: %s", exc)
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "asof": str(asof),
@@ -263,13 +273,21 @@ def format_report(report: dict) -> str:
         return "\n".join(lines)
 
     hdr = (f"{'#':>2} {'Symbol':<7}{'Verdict':<11}{'Conf':>5} {'Entry':>9} "
-           f"{'Stop-15%':>9} {'Exit~20d':>12} {'Shares':>7} {'Risk$':>9} {'Votes':>9}")
+           f"{'Stop-15%':>9} {'Exit~20d':>12} {'Shares':>7} {'Risk$':>9} {'Votes':>9} {'USX':>22}")
     lines.append(hdr)
     lines.append("-" * len(hdr))
     for i, p in enumerate(picks, 1):
+        usx = ""
+        if p.get("usx_score") is not None:
+            mark = "✓" if p.get("usx_pass") else "·"
+            sigs = ",".join(p.get("usx_signals", [])[:3])
+            usx = f"USX {p.get('usx_score', 0):>4} {mark} {sigs}"
         lines.append(
             f"{i:>2} {str(p['symbol']):<7}{str(p['verdict']):<11}"
             f"{p['confidence']:>4.0f}% {p['entry']:>9.2f} {p['catastrophe_stop']:>9.2f} "
-            f"{p['time_exit_date']:>12} {p['shares']:>7} {p['risk_amount']:>9.2f} {p['votes']:>9}"
+            f"{p['time_exit_date']:>12} {p['shares']:>7} {p['risk_amount']:>9.2f} {p['votes']:>9} {usx:<22}"
         )
+    lines.append("")
+    lines.append("USX = early-entry overlay (leading signals: squeeze/RS-high/vol-dry/52w). "
+                 "Not a guarantee — paper ledger judges.")
     return "\n".join(lines)
