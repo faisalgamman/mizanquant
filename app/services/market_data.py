@@ -186,20 +186,15 @@ def _is_paper() -> bool:
 
 
 def _data_bars_url(symbols: list[str]) -> tuple[str, dict]:
-    """Return (url, params) for a bars request.
-    
-    Paper trading uses single-symbol /v2/stocks/{s}/bars because the
-    multi-symbol batch endpoint is DATA-plan only (data.alpaca.markets).
-    Live with DATA keys uses the batch endpoint for efficiency.
+    """URL for an Alpaca bars request (always the batch endpoint).
+
+    Market data ALWAYS comes from data.alpaca.markets — for BOTH paper and live
+    accounts (paper keys work on the free IEX feed; verified 2026-06 against a
+    live paper key). The paper/live split applies only to the TRADING API
+    (paper-api vs api.alpaca.markets), NOT the data API. The caller sets the
+    ``symbols`` query param itself, so the extra dict is empty.
     """
-    if _is_paper():
-        # Single-symbol request — paper-api doesn't support /v2/stocks/bars
-        url = "https://paper-api.alpaca.markets/v2/stocks/" + symbols[0] + "/bars"
-        return url, {}
-    else:
-        # Batch endpoint for live data subscribers
-        url = "https://data.alpaca.markets/v2/stocks/bars"
-        return url, {"symbols": ",".join(symbols)}
+    return "https://data.alpaca.markets/v2/stocks/bars", {}
 
 
 
@@ -263,14 +258,10 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
     if not symbol:
         return None
 
-    # ── Paper trading: use yfinance (Alpaca paper lacks market data) ──
-    if _is_paper():
-        return fetch_yf(symbol, period, start, end)
-
     try:
         _dk, _ds = _alpaca_data_creds()
         if not _dk or not _ds:
-            return None
+            return None  # no data keys → caller falls through to Tiingo / yfinance
 
         import httpx
 
@@ -288,9 +279,7 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
             start = start_dt.strftime("%Y-%m-%d")
             end = end_dt.strftime("%Y-%m-%d")
 
-        url, _extra = _data_bars_url([symbol])
-        if _extra:
-            params.update(_extra)
+        url = _data_bars_url([symbol])[0]
         params = {
             "symbols": symbol,
             "timeframe": "1Day",
@@ -449,14 +438,8 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
     except Exception:
         return {}
 
-    # ── Yahoo Finance fallback for paper trading ──────────────────────
-    # Alpaca paper accounts don't include market data (v2/stocks/*/bars
-    # returns 401). For paper mode, use yfinance which is free and
-    # reliable enough for USX V4 filtering.
-    if _is_paper():
-        return _fetch_yf_batch(symbols, period)
-    # ──────────────────────────────────────────────────────────────────
-
+    # Market data is served from data.alpaca.markets for BOTH paper and live
+    # accounts (free IEX feed; paper keys verified working). No paper short-circuit.
     try:
         import httpx
     except ImportError:
@@ -573,14 +556,10 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
     if cached is not None:
         return cached
 
-    # ── Paper trading: use yfinance ───────────────────────────────────
-    if _is_paper():
-        return fetch_yf(symbol, str(days_back) + "d", start, end)
-
     try:
         _dk, _ds = _alpaca_data_creds()
         if not _dk or not _ds:
-            return None
+            return None  # no data keys → caller falls through to yfinance
 
         import httpx
         headers = {
@@ -591,9 +570,7 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
         end_dt = _utc_now() if end is None else pd.Timestamp(end).to_pydatetime()
         start_dt = (end_dt - timedelta(days=days_back)) if start is None else pd.Timestamp(start).to_pydatetime()
 
-        url, _extra = _data_bars_url([symbol])
-        if _extra:
-            params.update(_extra)
+        url = _data_bars_url([symbol])[0]
         params = {
             "symbols": symbol,
             "timeframe": timeframe,
