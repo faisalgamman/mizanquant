@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 
 from fastapi import APIRouter
 
@@ -10,6 +11,41 @@ from app.services.redis_client import get_redis
 logger = logging.getLogger("screener")
 
 router = APIRouter(tags=["v1-scoring"])
+
+
+def _to_jsonable(obj):
+    """Recursively coerce numpy/pandas scalars to JSON-native types.
+
+    FastAPI's ``jsonable_encoder`` cannot serialize numpy scalars — e.g. a
+    ``numpy.bool_`` (which it tries to ``dict()``/``vars()`` and 500s on). The
+    strategy ``details`` dict embedded in the trade plan can carry such values,
+    so we sanitize the whole payload before returning. NaN/Inf floats → None.
+    """
+    import numpy as np
+
+    if obj is None or isinstance(obj, (str, bool, int)):
+        return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_jsonable(v) for v in obj]
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        f = float(obj)
+        return f if math.isfinite(f) else None
+    if isinstance(obj, np.ndarray):
+        return [_to_jsonable(v) for v in obj.tolist()]
+    if hasattr(obj, "item"):  # any other numpy scalar
+        try:
+            return _to_jsonable(obj.item())
+        except Exception:
+            return str(obj)
+    return obj
 
 
 @router.get("/scoring/weighted")
@@ -98,4 +134,6 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
             if plan.get(_k) is not None:
                 plan["strategy_" + _k] = plan[_k]
 
-    return plan
+    # Sanitize numpy scalars (e.g. numpy.bool_ inside sig.details) so FastAPI's
+    # encoder can serialize the response instead of 500-ing.
+    return _to_jsonable(plan)

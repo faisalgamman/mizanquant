@@ -132,7 +132,7 @@ class FMPClient:
         "analyst-estimates": 86400,
         "stock-news": 3600,               # 1 hour
         "general-news": 3600,
-        "earning-calendar": 3600,         # 1 hour
+        "earnings-calendar": 3600,        # 1 hour (FMP stable endpoint name)
     }
 
     def __init__(self):
@@ -341,7 +341,7 @@ class FMPClient:
             "from": today.isoformat(),
             "to": (today + timedelta(days=30)).isoformat(),
         }
-        data = self._get("earning-calendar", params)
+        data = self._get("earnings-calendar", params)
         if not isinstance(data, list):
             return {}
 

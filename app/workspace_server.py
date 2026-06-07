@@ -4886,17 +4886,19 @@ def _run_scheduled_smart_scan():
     from datetime import datetime
     now = datetime.utcnow()
     try:
-        import httpx
-        base = f"http://127.0.0.1:{os.environ.get('WORKSPACE_PORT', '6910')}"
-        # Force refresh the smart screener (use_cache=false)
-        resp = httpx.get(f"{base}/api/stock/smart-screener", params={
-            "min_score": "80", "max_results": "15", "use_cache": "false",
-        }, timeout=600)
-        if resp.status_code != 200:
-            logger.error(f"Smart scan failed: {resp.status_code}")
+        # Run the screener IN-PROCESS. The old self-HTTP call to
+        # 127.0.0.1:{WORKSPACE_PORT|6910} failed with [Errno 111] Connection
+        # refused on Railway (the server binds $PORT, nothing listens on 6910),
+        # so this scheduled scan was silently dead. _smart_screener_impl is
+        # designed for direct calls (no Query objects).
+        import asyncio
+        data = asyncio.run(_smart_screener_impl(
+            min_score=80, max_results=15, use_cache="false",
+        ))
+        if not isinstance(data, dict):
+            logger.error("Smart scan failed: unexpected result type %s", type(data))
             return
 
-        data = resp.json()
         results = data.get("results", [])
         total = data.get("total_scanned", 0)
         halal_count = data.get("halal_count", 0)

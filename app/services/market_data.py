@@ -206,8 +206,27 @@ def _data_bars_url(symbols: list[str]) -> tuple[str, dict]:
 # ---------------------------------------------------------------------------
 # Symbol validation
 # ---------------------------------------------------------------------------
+# Symbols confirmed DELISTED / acquired / renamed as of 2026-06 (from the prod
+# log flood). Seeding these means they are skipped BEFORE the 3-retry yfinance
+# round-trip on every restart, instead of being re-discovered each deploy.
+# CONSERVATIVE: only unambiguous completed M&A / bankruptcies / ticker renames
+# are listed. Names that merely failed transiently but still trade (e.g. ZI, SKX,
+# SAGE, BPMC, LEV) are intentionally EXCLUDED — runtime auto-blacklist handles
+# any genuine death without us wrongly dropping a live halal stock.
+_KNOWN_DELISTED = {
+    "XLNX", "COUP", "DISH", "STOR", "XEC", "ZOES", "RIDE", "TCO", "AQUA", "HIBB",
+    "KAMN", "MANT", "AXNX", "ATRI", "IXYS", "PDCE", "CPE", "ESTE", "SWN", "ENLC",
+    "BDSI", "BNFT", "SBOW", "CNSL", "WRE", "PEAK", "OFC", "INT", "DRQ", "LPI",
+    "MNRL", "BRMK", "CEIX", "ARCH", "EXTN", "AVRO",
+}
+
 # Known bad symbols that cause issues (delisted, corrupted, etc.)
-_BAD_SYMBOLS = {"LIY", "LIYY", ""}
+_BAD_SYMBOLS = {"LIY", "LIYY", ""} | _KNOWN_DELISTED
+
+
+def _yf_symbol(symbol: str) -> str:
+    """Yahoo Finance share-class formatting: BRK.B -> BRK-B (yfinance uses '-')."""
+    return symbol.replace(".", "-")
 
 
 def _validate_symbol(symbol: str) -> str:
@@ -216,7 +235,9 @@ def _validate_symbol(symbol: str) -> str:
         return ""
     cleaned = symbol.upper().strip()
     if cleaned in _BAD_SYMBOLS:
-        logger.warning(f"Blocked bad symbol: {symbol!r}")
+        # Repeated every scan for already-known-bad symbols → debug, not warning,
+        # so the logs aren't flooded (was the #1 noise source in prod).
+        logger.debug("Blocked bad symbol: %r", symbol)
         return ""
     # Basic format check: 1-6 uppercase letters, optionally with dots (BRK.B)
     import re
@@ -391,7 +412,7 @@ def _fetch_yf_batch(symbols: list, period: str = "2y") -> dict:
         if not sym:
             continue
         try:
-            ticker = yf.Ticker(sym)
+            ticker = yf.Ticker(_yf_symbol(sym))  # BRK.B -> BRK-B for Yahoo
             df = ticker.history(start=start_dt, end=end_dt)
             if df is not None and len(df) >= 40:
                 # Normalize columns to match Alpaca format
@@ -663,10 +684,11 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
     import yfinance as yf
     _configure_yfinance_cache(yf)
 
+    yf_sym = _yf_symbol(symbol)  # BRK.B -> BRK-B for Yahoo
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            t = yf.Ticker(symbol)
+            t = yf.Ticker(yf_sym)
             if start and end:
                 df = t.history(start=start, end=end, auto_adjust=True)
             else:
