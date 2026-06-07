@@ -3713,14 +3713,28 @@ async def screener_deep_picks(
         if cached:
             return cached
 
-    # Pull from smart screener cache
+    # Pull from smart screener cache. If it is empty, KICK OFF the background
+    # scan here (same mechanism /api/stock/smart-screener uses) so the Monthly
+    # scanner is self-warming — otherwise this endpoint is passive and the tab
+    # shows "scanning" forever until the scheduled scan happens to run.
     screener_data = _cache_get("smart_screener", max_age=86400)
     if not screener_data or not screener_data.get("results"):
+        try:
+            import threading
+            if _screener_progress.get("status") != "scanning":
+                threading.Thread(
+                    target=_run_screener_bg, args=(list(_SMART_UNIVERSE),), daemon=True,
+                ).start()
+        except Exception as _scan_exc:
+            logger.debug("deep-picks could not start background scan: %s", _scan_exc)
+        _pct = round(_screener_progress.get("current", 0)
+                     / max(_screener_progress.get("total", 1), 1) * 100, 1)
         return {
             "status": "scanning",
-            "message": "Smart screener is initializing. Trigger /api/stock/smart-screener first.",
+            "message": "Scanning the halal universe in the background — results will appear shortly.",
             "results": [],
             "total": 0,
+            "scan_pct": _pct,
             "composite_max": 100,
         }
 
