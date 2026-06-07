@@ -1,12 +1,14 @@
-"""AAOIFI-standard Halal compliance screening.
+"""DJIM-standard Halal compliance screening.
 
-Implements the four AAOIFI screens using fundamental data from
-Financial Modeling Prep (FMP) free API (via consolidated FMPClient):
+Implements the Dow Jones Islamic Market (DJIM) 3-ratio financial
+screens using fundamental data from Financial Modeling Prep (FMP)
+free API (via consolidated FMPClient):
 
-1. Debt Screen:     Total Debt / Market Cap < 33%
-2. Interest Screen: Interest Income / Total Revenue < 5%
-3. Haram Revenue:   Sector/industry disqualification (SIC codes)
-4. Liquidity Screen: (Cash + Interest-Bearing Securities) / Market Cap < 33%
+1. Debt Screen:       Total Debt / avg_mcap_24m < 33%
+2. Interest Screen:   Interest Income / Total Revenue < 5%
+3. Haram Revenue:     Sector/industry disqualification (incl. REITs/real estate)
+4. Liquidity Screen:  (Cash + Interest-Bearing Securities) / avg_mcap_24m < 33%
+5. Receivables Screen: Net Receivables / avg_mcap_24m < 33%
 
 Free tier: 250 requests/day. Each symbol needs 3 API calls
 (balance sheet + income statement + profile), so ~83 symbols/day.
@@ -56,6 +58,7 @@ HARAM_SECTORS = {
     "financial",
     "banks",
     "insurance",
+    "real estate",          # REITs and real estate companies
 }
 
 HARAM_INDUSTRIES = {
@@ -70,6 +73,12 @@ HARAM_INDUSTRIES = {
     "insurance—diversified", "insurance—life", "insurance—property & casualty",
     "insurance—specialty", "insurance—reinsurance",
     "mortgage finance", "capital markets",
+    # Real Estate / REITs
+    "reit—diversified", "reit—healthcare facilities", "reit—hotel & motel",
+    "reit—industrial", "reit—mortgage", "reit—office", "reit—residential",
+    "reit—retail", "reit—specialty", "real estate—development",
+    "real estate—diversified", "real estate services",
+    "mortgage real estate investment trusts (reits)",
 }
 
 # Industries that require manual review per AAOIFI — not auto-disqualified.
@@ -102,6 +111,7 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
         total_debt = _safe_float(info.get("totalDebt"))
         cash_eq = _safe_float(info.get("totalCash"))
         short_inv = 0.0
+        net_receivables = 0.0
 
         try:
             bs = ticker.balance_sheet
@@ -110,6 +120,7 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 total_debt = _safe_float(latest.get("Total Debt"), total_debt)
                 cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
                 short_inv = _safe_float(latest.get("Other Short Term Investments"))
+                net_receivables = _safe_float(latest.get("Receivables")) or _safe_float(latest.get("Accounts Receivable"))
         except Exception as e:
             logger.error(f"{symbol}: balance_sheet fallback failed, using info-based values: {e}")
 
@@ -131,6 +142,8 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
         return {
             "profile": {
                 "marketCap": market_cap,
+                "sharesOutstanding": _safe_float(info.get("sharesOutstanding")),
+                "price": _safe_float(info.get("currentPrice")) or _safe_float(info.get("regularMarketPrice")),
                 "sector": info.get("sector", ""),
                 "industry": info.get("industry", ""),
                 "companyName": info.get("shortName", symbol),
@@ -140,6 +153,7 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 "cashAndCashEquivalents": cash_eq,
                 "shortTermInvestments": short_inv,
                 "cashAndShortTermInvestments": cash_eq + short_inv,
+                "netReceivables": net_receivables,  # extracted from yfinance balance sheet
             },
             "income": {
                 "revenue": revenue,
@@ -151,8 +165,38 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
     return _run_with_timeout(_do_yf, timeout=30, fallback=None)
 
 
+def _avg_market_cap_24m(symbol: str, shares: float, spot_mcap: float) -> tuple[float, str]:
+    """Compute trailing 24-month average market cap for DJIM ratio denominator.
+
+    Returns (avg_mcap, basis) where basis is 'avg_24m' or 'spot_fallback'.
+    Uses market_data.fetch(period='2y') to get 2 years of daily closes,
+    multiplies by shares_outstanding (assumed constant — labelled approximation).
+    Falls back to spot market cap if price history unavailable.
+    """
+    if shares <= 0 or spot_mcap <= 0:
+        return spot_mcap, "spot_fallback"
+    try:
+        from app.services import market_data as md
+        df = md.fetch(symbol, period="2y")
+        if df is None or df.empty or "close" not in df.columns:
+            return spot_mcap, "spot_fallback"
+        avg_close = float(df["close"].mean())
+        avg_mcap = avg_close * shares
+        if avg_mcap <= 0:
+            return spot_mcap, "spot_fallback"
+        return avg_mcap, "avg_24m"
+    except Exception as e:
+        logger.debug("_avg_market_cap_24m %s: %s — using spot", symbol, e)
+        return spot_mcap, "spot_fallback"
+
+
 def screen_symbol(symbol: str) -> Optional[dict]:
-    """Run AAOIFI Halal screening on a single symbol.
+    """Run DJIM-standard Halal screening on a single symbol.
+
+    Implements the Dow Jones Islamic Market 3-ratio financial screens
+    (debt, liquidity, receivables) each < 33% of trailing 24-month
+    average market cap, plus non-permissible income < 5% of revenue
+    and sector/industry exclusion (expanded: REITs/real estate added).
 
     Returns a dict with screening results, or None if data unavailable.
     Uses FMP API with yfinance fallback for premium-blocked symbols.
@@ -171,6 +215,12 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         used_fallback = False
 
     market_cap = _safe_float(profile.get("marketCap")) or _safe_float(profile.get("mktCap"))
+    # Shares outstanding for 24m avg mcap calculation
+    shares_outstanding = _safe_float(profile.get("sharesOutstanding"))
+    if shares_outstanding <= 0 and market_cap > 0:
+        price = _safe_float(profile.get("price"))
+        if price > 0:
+            shares_outstanding = market_cap / price
     sector = (profile.get("sector") or "").lower().strip()
     industry = (profile.get("industry") or "").lower().strip()
     company_name = profile.get("companyName", symbol)
@@ -178,6 +228,10 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     if market_cap <= 0:
         logger.warning(f"No market cap for {symbol}")
         return None
+
+    # DJIM: use trailing 24-month average market cap as ratio denominator
+    avg_mcap, mcap_basis = _avg_market_cap_24m(symbol, shares_outstanding, market_cap)
+    djim_denom = avg_mcap  # all 3 ratios use this denominator
 
     # 2. Haram sector/industry check
     haram_sector_flag = sector in HARAM_SECTORS
@@ -201,6 +255,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     cash_and_equivalents = _safe_float(bs.get("cashAndCashEquivalents"))
     short_term_investments = _safe_float(bs.get("shortTermInvestments"))
     cash_and_short_term = _safe_float(bs.get("cashAndShortTermInvestments"))
+    net_receivables = _safe_float(bs.get("netReceivables"))
 
     # 4. Fetch income statement (skip if already from yfinance)
     if not used_fallback:
@@ -221,26 +276,30 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     # AAOIFI Screens
     # ---------------------------------------------------------------------------
 
-    # Screen 1: Debt ratio — Total Debt / Market Cap < 33%
-    debt_ratio = (total_debt / market_cap * 100) if market_cap > 0 else 999
+    # ── DJIM Financial Screens (denominator = trailing 24-month avg market cap) ──
+
+    # Screen 1 (DJIM): Total Debt / avg_mcap_24m < 33%
+    debt_ratio = (total_debt / djim_denom * 100) if djim_denom > 0 else 999.0
     debt_pass = debt_ratio < 33.0
 
-    # Screen 2: Interest income — Interest Income / Revenue < 5%
-    # Use absolute value since interest_income can be reported differently
-    interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0
+    # Screen 2 (DJIM): Non-permissible income — Interest / Revenue < 5%
+    interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0.0
     interest_pass = interest_ratio < 5.0
 
-    # Screen 3: Haram revenue — sector/industry based (review-only industries don't auto-fail)
+    # Screen 3 (DJIM): Haram sector/industry (expanded: REITs/real-estate added)
     haram_pass = not (haram_sector_flag or haram_industry_flag)
 
-    # Screen 4: Liquidity — (Cash + Interest-Bearing Securities) / Market Cap < 33%
-    # Interest-bearing securities ≈ short-term investments
+    # Screen 4 (DJIM): Liquidity — (Cash + Interest-Bearing Securities) / avg_mcap_24m < 33%
     liquid_assets = cash_and_short_term if cash_and_short_term > 0 else (cash_and_equivalents + short_term_investments)
-    liquidity_ratio = (liquid_assets / market_cap * 100) if market_cap > 0 else 999
+    liquidity_ratio = (liquid_assets / djim_denom * 100) if djim_denom > 0 else 999.0
     liquidity_pass = liquidity_ratio < 33.0
 
-    # Final verdict
-    is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass
+    # Screen 5 (DJIM): Net Receivables / avg_mcap_24m < 33%
+    receivable_ratio = (net_receivables / djim_denom * 100) if djim_denom > 0 else 0.0
+    receivable_pass = receivable_ratio < 33.0
+
+    # Final DJIM verdict — all 5 screens must pass
+    is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass and receivable_pass
 
     result = {
         "symbol": symbol,
@@ -264,9 +323,17 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         "revenue": revenue,
         "interest_income": interest_income,
         "cash_and_short_term": liquid_assets,
+        # DJIM additions
+        "standard": "DJIM",
+        "avg_market_cap": round(avg_mcap, 0),
+        "mcap_basis": mcap_basis,
+        "net_receivables": net_receivables,
+        "receivable_ratio": round(receivable_ratio, 2),
+        "receivable_pass": receivable_pass,
+        "disclaimer": "Quantitative DJIM screen only — no named Sharia supervisory board.",
         # Metadata
-        "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass]),
-        "screens_total": 4,
+        "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass, receivable_pass]),
+        "screens_total": 5,
     }
 
     return result

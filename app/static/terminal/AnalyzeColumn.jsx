@@ -96,7 +96,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade 
             <div style={{ textAlign: "right" }}>
               <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
               <div style={{ marginTop: 4 }}>
-                <Badge kind={signal.halal ? "accent" : "red"}>{signal.halal ? "Halal · pass" : "Halal · fail"}</Badge>
+                <Badge kind={signal.halal ? "accent" : "red"}>{signal.halal ? "HALAL · DJIM" : "NON-COMPLIANT · DJIM"}</Badge>
               </div>
             </div>
           </div>

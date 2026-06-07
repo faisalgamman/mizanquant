@@ -530,10 +530,13 @@ async function openPanel(symbol) {
 
   // Halal card
   html += `<div style="margin-bottom:16px;padding:12px;background:var(--surface);border-radius:var(--radius);">
-    <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:${hc.is_halal ? 'var(--green)' : 'var(--red)'}">${hc.is_halal ? '✓ HALAL — ' + (hc.status||'Compliant') : '✗ NON-COMPLIANT'}</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:${hc.is_halal ? 'var(--green)' : 'var(--red)'}">${hc.is_halal ? '✓ HALAL · DJIM' : '✗ NON-COMPLIANT · DJIM'}</div>
     <div class="detail-row"><span class="label">Debt Ratio</span><span class="value">${fmtPct(hc.debt_ratio)} ${hc.debt_pass ? '✓' : '✗'}</span></div>
     <div class="detail-row"><span class="label">Interest Ratio</span><span class="value">${fmtPct(hc.interest_ratio)} ${hc.interest_pass ? '✓' : '✗'}</span></div>
-    <div class="detail-row"><span class="label">Screens</span><span class="value">${hc.screens_passed || 0} / ${hc.screens_total || 4}</span></div>
+    <div class="detail-row"><span class="label">Liquidity Ratio</span><span class="value">${fmtPct(hc.liquidity_ratio)} ${hc.liquidity_pass ? '✓' : '✗'}</span></div>
+    <div class="detail-row"><span class="label">Receivables Ratio</span><span class="value">${hc.receivable_ratio != null ? fmtPct(hc.receivable_ratio) : '—'} ${hc.receivable_pass ? '✓' : '✗'}</span></div>
+    <div class="detail-row"><span class="label">Screens</span><span class="value">${hc.screens_passed || 0} / ${hc.screens_total || 5} · ${hc.standard || 'DJIM'}</span></div>
+    <div style="margin-top:8px;font-size:10px;color:var(--muted);opacity:0.7;">${hc.disclaimer || 'Quantitative DJIM screen only — no named Sharia supervisory board.'}</div>
   </div>`;
 
   // Company info

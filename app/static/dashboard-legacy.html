@@ -5631,12 +5631,15 @@ async function checkHalal() {
   try {
     const data = await apiGet(`/api/halal-status?symbol=${sym}`);
     const isHalal = data.is_halal;
+    const standard = data.standard || "DJIM";
+    const mcapBasis = data.mcap_basis || "spot";
     document.getElementById('halalSingleResult').innerHTML = `
       <div style="text-align:center;padding:16px;">
         <div style="font-size:24px;font-weight:800;padding:12px 24px;border-radius:12px;display:inline-block;
           background:${isHalal?'rgba(34,197,94,0.15)':'rgba(239,68,68,0.15)'};color:${isHalal?'var(--green)':'var(--red)'}">
-          ${isHalal?'✅ HALAL — Compliant':'❌ NON-COMPLIANT'}
+          ${isHalal?'✅ HALAL · DJIM':'❌ NON-COMPLIANT · DJIM'}
         </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Ratio basis: ${mcapBasis === 'avg_24m' ? '24-month avg market cap' : 'spot market cap (fallback)'}</div>
         <div style="margin-top:12px;font-size:14px;color:var(--text-secondary);">${data.company_name} | ${data.sector} | ${data.industry}</div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
@@ -5656,8 +5659,17 @@ async function checkHalal() {
           <div style="font-weight:600;font-size:20px;">${data.liquidity_ratio?.toFixed(1)}%</div>
           <div style="font-size:11px;color:var(--text-muted);">Liquidity ${data.liquidity_pass?'✅':'❌'} (&lt;33%)</div>
         </div>
+        <div style="padding:10px;background:${data.receivable_pass != null ? (data.receivable_pass?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)') : 'rgba(100,100,100,0.08)'};border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:20px;">${data.receivable_ratio != null ? data.receivable_ratio.toFixed(1)+'%' : '---'}</div>
+          <div style="font-size:11px;color:var(--text-muted);">Receivables ${data.receivable_pass?'✅':'❌'} (&lt;33%)</div>
+        </div>
+        <div style="padding:10px;background:rgba(34,197,94,0.04);border-radius:8px;text-align:center;">
+          <div style="font-weight:600;font-size:16px;">${data.net_receivables != null ? '$'+(data.net_receivables/1e6).toFixed(0)+'M' : '---'}</div>
+          <div style="font-size:11px;color:var(--text-muted);">Net Receivables</div>
+        </div>
       </div>
-      <div style="margin-top:12px;text-align:center;font-size:12px;color:var(--text-muted);">Screens Passed: ${data.screens_passed}/${data.screens_total}</div>
+      <div style="margin-top:12px;text-align:center;font-size:12px;color:var(--text-muted);">Screens Passed: ${data.screens_passed}/${data.screens_total} · Standard: ${standard}</div>
+      <div style="margin-top:8px;text-align:center;font-size:10px;color:var(--text-muted);opacity:0.7;">${data.disclaimer || 'Quantitative DJIM screen only — no named Sharia supervisory board.'}</div>
     `;
   } catch(e) {
     document.getElementById('halalSingleResult').innerHTML = `<div class="alert alert-warning">${e.message}</div>`;

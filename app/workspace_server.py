@@ -1480,110 +1480,22 @@ async def _yf_info(symbol: str, timeout: float = 12.0) -> dict:
     return {}
 
 
-
-_HARAM_SECTORS = {
-    "financial services", "financial", "banks", "insurance",
-}
-
-_HARAM_INDUSTRIES = {
-    "beverages—brewers", "beverages—wineries & distilleries",
-    "tobacco", "gambling", "casinos & gaming", "resorts & casinos",
-    "banks—regional", "banks—diversified", "credit services",
-    "insurance—diversified", "insurance—life", "insurance—property & casualty",
-    "insurance—specialty", "insurance—reinsurance",
-    "mortgage finance", "capital markets",
-}
-
-
 def _screen_halal(symbol: str, info: dict | None = None) -> dict:
-    """AAOIFI 4-screen halal compliance check — FMP primary, yfinance fallback."""
+    """DJIM halal compliance — delegates to the canonical screen_symbol implementation.
+
+    The ``info`` parameter is accepted for backward-compatibility but ignored;
+    screen_symbol fetches its own data via FMP + yfinance fallback.
+    """
     from app.services.market_context import _run_with_timeout
+    from app.services.halal_screening import screen_symbol
 
     def _compute():
-        # ── FMP primary path (server-safe) ──────────────────────────────
-        profile = fmp_client.get_profile(symbol) or {}
-        if profile and _safe_float(profile.get("mktCap")) > 0:
-            market_cap = _safe_float(profile.get("mktCap"))
-            sector = (profile.get("sector") or "").lower().strip()
-            industry = (profile.get("industry") or "").lower().strip()
-            company_name = profile.get("companyName") or symbol
-
-            # Balance sheet → debt + cash
-            bs_list = fmp_client.get_balance_sheet(symbol, limit=1) or []
-            bs = bs_list[0] if bs_list else {}
-            total_debt = _safe_float(bs.get("totalDebt"))
-            cash_eq = _safe_float(bs.get("cashAndCashEquivalents"))
-            short_inv = _safe_float(bs.get("shortTermInvestments") or bs.get("otherCurrentAssets"))
-
-            # Income statement → revenue + interest
-            inc_list = fmp_client.get_income_statement(symbol, limit=1) or []
-            inc = inc_list[0] if inc_list else {}
-            revenue = _safe_float(inc.get("revenue"))
-            interest_income = _safe_float(inc.get("interestExpense"))
-
-            # Fallback to profile fields
-            if total_debt <= 0:
-                total_debt = _safe_float(profile.get("totalDebt"))
-            if revenue <= 0:
-                revenue = _safe_float(profile.get("revenue"))
-        else:
-            # ── yfinance fallback (works locally; fails on Railway) ──────
-            import yfinance as yf
-            with _yf_semaphore:
-                ticker = yf.Ticker(symbol)
-                info_local = info if info is not None else (ticker.info or {})
-
-            market_cap = _safe_float(info_local.get("marketCap"))
-            sector = (info_local.get("sector") or "").lower().strip()
-            industry = (info_local.get("industry") or "").lower().strip()
-            company_name = info_local.get("shortName") or info_local.get("longName") or symbol
-            total_debt = _safe_float(info_local.get("totalDebt"))
-            cash_eq = _safe_float(info_local.get("totalCash"))
-            short_inv = 0.0
-            try:
-                bs = ticker.balance_sheet
-                if bs is not None and not bs.empty:
-                    latest = bs.iloc[:, 0]
-                    total_debt = _safe_float(latest.get("Total Debt"), total_debt)
-                    cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
-                    short_inv = _safe_float(latest.get("Other Short Term Investments"))
-            except Exception:
-                pass
-            revenue = _safe_float(info_local.get("totalRevenue"))
-            interest_income = 0.0
-            try:
-                inc_stmt = ticker.income_stmt
-                if inc_stmt is not None and not inc_stmt.empty:
-                    latest_inc = inc_stmt.iloc[:, 0]
-                    revenue = _safe_float(latest_inc.get("Total Revenue"), revenue)
-                    interest_income = _safe_float(latest_inc.get("Interest Income"))
-            except Exception:
-                pass
-
-        if market_cap <= 0:
-            return {"symbol": symbol, "is_halal": False, "error": "No market cap data"}
-
-        debt_ratio = (total_debt / market_cap * 100) if market_cap > 0 else 999
-        debt_pass = debt_ratio < 33.0
-        interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0
-        interest_pass = interest_ratio < 5.0
-        haram_pass = not (sector in _HARAM_SECTORS or industry in _HARAM_INDUSTRIES)
-        liquid_assets = cash_eq + short_inv
-        liquidity_ratio = (liquid_assets / market_cap * 100) if market_cap > 0 else 999
-        liquidity_pass = liquidity_ratio < 33.0
-        is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass
-
-        return {
-            "symbol": symbol, "company_name": company_name, "sector": sector,
-            "industry": industry, "market_cap": market_cap, "is_halal": is_halal,
-            "status": "HALAL - Compliant" if is_halal else "NON-COMPLIANT",
-            "debt_ratio": round(debt_ratio, 2), "debt_pass": debt_pass,
-            "interest_ratio": round(interest_ratio, 2), "interest_pass": interest_pass,
-            "haram_pass": haram_pass, "liquidity_ratio": round(liquidity_ratio, 2),
-            "liquidity_pass": liquidity_pass,
-            "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass]),
-            "screens_total": 4,
-        }
+        result = screen_symbol(symbol)
+        if result is None:
+            return {"symbol": symbol, "is_halal": False, "error": "No data available"}
+        # Ensure backward-compat fields that callers expect
+        result.setdefault("status", "HALAL - Compliant" if result["is_halal"] else "NON-COMPLIANT")
+        return result
 
     result = _run_with_timeout(_compute, timeout=45, fallback=None)
     if result is None:

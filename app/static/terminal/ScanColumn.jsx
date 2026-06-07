@@ -61,7 +61,7 @@ function SignalHeroCard({ signal, selected, onSelect }) {
         <Sparkline points={signal.spark} color={chgColor} />
       </div>
       <div className="sfc-foot">
-        <span className="sfc-time">{signal.halal ? "halal · pass" : "halal · fail"}</span>
+        <span className="sfc-time">{signal.halal ? "halal · DJIM" : "halal · fail"}</span>
         <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
       </div>
     </div>
