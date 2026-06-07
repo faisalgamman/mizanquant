@@ -287,9 +287,11 @@ def fetch_alpaca(symbol, period="2y", start=None, end=None):
             "end": end,
             "limit": 10000,
             "adjustment": "split",
+            # Free tier MUST request the IEX feed. Omitting feed defaults to SIP,
+            # which 403s on recent data ("subscription does not permit querying
+            # recent SIP data"). IEX has no recent-data restriction (verified 2026-06).
+            "feed": "iex",
         }
-        # Omit feed param — Alpaca auto-selects best available feed.
-        # "iex" caused 404 on paper accounts for 300+ symbols including NVDA, AMD.
 
         max_retries = 3
         retry_delay = 2.0  # initial backoff seconds
@@ -470,8 +472,10 @@ def fetch_alpaca_batch(symbols: list, period: str = "2y") -> dict:
             "end":        end_s,
             "limit":      10000,
             "adjustment": "split",
+            # IEX feed (free). Without it Alpaca defaults to SIP and 403s on
+            # recent data — the whole batch returned 0/657 in prod (2026-06).
+            "feed":       "iex",
         }
-        # Omit feed param — Alpaca auto-selects best available feed.
 
         # Retry loop (batch-level, same backoff as single-symbol fetch)
         for attempt in range(3):
@@ -578,8 +582,9 @@ def fetch_alpaca_intraday(symbol, timeframe="15Min", days_back=10, start=None, e
             "end": end_dt.strftime("%Y-%m-%dT23:59:59Z"),
             "limit": 10000,
             "adjustment": "split",
+            # IEX feed (free) — avoids the SIP recent-data 403 on free accounts.
+            "feed": "iex",
         }
-        # Omit feed param — Alpaca auto-selects best available feed.
 
         _alpaca_semaphore.acquire()
         try:
