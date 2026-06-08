@@ -318,12 +318,35 @@ def fetch_yf(symbol, period="2y", start=None, end=None):
 _VERIFIED_HARAM = set()  # symbols confirmed haram via FMP
 _VERIFIED_HALAL = set()  # symbols confirmed halal via FMP or curated list
 _CURATED_SET = None      # lazy-built set for O(1) lookups
+_RATIO_EXCLUDED = None    # names the monthly financial re-screen flagged (debt/liquidity > 33%)
 
 def _get_curated_set():
     global _CURATED_SET
     if _CURATED_SET is None:
         _CURATED_SET = set(HALAL_STOCKS)
     return _CURATED_SET
+
+
+def _get_ratio_excluded() -> set:
+    """Names pruned by the AAOIFI financial re-screen (data/halal_excluded_by_ratio.json).
+
+    Curation only proves the SECTOR screen; a curated name can still breach the
+    debt/liquidity ratio (e.g. CLX ~39% > 33%). These are blocked here so the
+    curated fast-path can never re-pass a financially non-compliant name.
+    """
+    global _RATIO_EXCLUDED
+    if _RATIO_EXCLUDED is None:
+        _RATIO_EXCLUDED = set()
+        try:
+            import json
+            from pathlib import Path
+            p = Path(__file__).resolve().parent / "data" / "halal_excluded_by_ratio.json"
+            if p.exists():
+                data = json.loads(p.read_text())
+                _RATIO_EXCLUDED = {e["symbol"].upper() for e in data.get("excluded", []) if e.get("symbol")}
+        except Exception as e:
+            logger.debug("ratio-excluded load failed: %s", e)
+    return _RATIO_EXCLUDED
 
 def verify_halal(symbol: str) -> tuple[bool, str]:
     """Check if a symbol is verified halal. Returns (is_halal, reason).
@@ -340,6 +363,12 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
     # 1. Sector-level exclusion (instant reject)
     if sym in _HARAM_EXCLUDE:
         return False, "Excluded sector (banks/insurance/alcohol/gambling/weapons/utilities/REITs)"
+
+    # 1b. AAOIFI financial-ratio exclusion (from the monthly re-screen). Curation
+    # only proves the SECTOR screen, so a curated name that breached the debt or
+    # liquidity ratio (e.g. CLX ~39% > 33%) must still be blocked here.
+    if sym in _get_ratio_excluded():
+        return False, "AAOIFI financial ratio breach (debt/liquidity > 33%)"
 
     # 2. Session cache — fast path
     if sym in _VERIFIED_HALAL:
