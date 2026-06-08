@@ -24,16 +24,23 @@ function PortfolioStrip({ p }) {
 function PositionsTable({ positions }) {
   return (
     <table className="pos-table">
-      <thead><tr><th>Sym</th><th>Qty</th><th>Entry</th><th>Last</th><th style={{ textAlign: "right" }}>P&L</th></tr></thead>
+      <thead><tr><th>SYM</th><th>QTY</th><th>ENTRY</th><th>LAST</th><th>VALUE</th><th>P&L</th><th>P&L%</th></tr></thead>
       <tbody>
         {positions.map((p) => (
-          <tr key={p.sym}>
-            <td style={{ fontWeight: 600 }}>{p.sym}</td>
-            <td className="mono">{p.qty}</td>
-            <td className="mono">${p.entry.toFixed(2)}</td>
-            <td className="mono">${p.last.toFixed(2)}</td>
-            <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: p.pnl >= 0 ? "var(--positive)" : "var(--negative)" }}>
-              {(p.pnl >= 0 ? "+" : "") + p.pnl.toFixed(2)}
+          <tr key={p.sym}
+              onClick={() => window.selectIntelSymbol && window.selectIntelSymbol(p.sym)}
+              style={{ cursor: "pointer" }}
+              title="اعرض البطاقة">
+            <td style={{ fontWeight: 600 }}>{p.sym || "—"}</td>
+            <td className="mono">{p.qty != null ? p.qty : "—"}</td>
+            <td className="mono">{p.entry ? "$" + p.entry.toFixed(2) : "—"}</td>
+            <td className="mono">{p.last ? "$" + p.last.toFixed(2) : "—"}</td>
+            <td className="mono">{p.mktVal ? "$" + p.mktVal.toFixed(0) : "—"}</td>
+            <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: (p.pnl || 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
+              {p.pnl != null ? ((p.pnl >= 0 ? "+" : "") + p.pnl.toFixed(2)) : "—"}
+            </td>
+            <td className="mono" style={{ textAlign: "right", color: (p.pnlPct || 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
+              {p.pnlPct != null ? ((p.pnlPct >= 0 ? "+" : "") + p.pnlPct.toFixed(1) + "%") : "—"}
             </td>
           </tr>
         ))}

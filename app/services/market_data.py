@@ -990,3 +990,49 @@ def fetch(symbol, period="2y", start=None, end=None):
         _data_cache_set(cache_key, df)
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# Alpaca News API (Benzinga-sourced) — reliable on Railway, free with existing data keys
+# ---------------------------------------------------------------------------
+
+_ALPACA_NEWS_CACHE: dict[str, tuple[float, list]] = {}
+_ALPACA_NEWS_TTL = 900  # 15 min
+
+
+def get_alpaca_news(symbol: str, limit: int = 10) -> list[dict]:
+    """Return [{title, summary, publisher, link, published}] for a symbol, or []."""
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        return []
+    now = time.time()
+    hit = _ALPACA_NEWS_CACHE.get(sym)
+    if hit and now - hit[0] < _ALPACA_NEWS_TTL:
+        return hit[1]
+
+    key = os.environ.get("ALPACA_DATA_KEY") or os.environ.get("ALPACA_API_KEY", "")
+    sec = os.environ.get("ALPACA_DATA_SECRET") or os.environ.get("ALPACA_SECRET_KEY", "")
+    base = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets").rstrip("/")
+    out: list[dict] = []
+    if key and sec:
+        try:
+            import httpx
+            r = httpx.get(
+                f"{base}/v1beta1/news",
+                params={"symbols": sym, "limit": min(int(limit), 50), "sort": "desc"},
+                headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                for n in (r.json().get("news") or [])[:limit]:
+                    out.append({
+                        "title": n.get("headline", ""),
+                        "summary": (n.get("summary") or "")[:300],
+                        "publisher": n.get("source", "") or n.get("author", ""),
+                        "link": n.get("url", ""),
+                        "published": n.get("created_at", ""),
+                    })
+        except Exception as e:
+            logger.debug("alpaca news %s: %s", sym, e)
+    _ALPACA_NEWS_CACHE[sym] = (now, out)
+    return out

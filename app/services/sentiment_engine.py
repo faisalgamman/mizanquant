@@ -71,12 +71,22 @@ def get_sentiment_score(
 
         headlines: list[str] = []
 
-        # FMP primary for news
-        from app.services.fmp_client import fmp_client
-        fmp_news = fmp_client.get_stock_news(symbol, limit=10)
-        if fmp_news:
-            headlines = [n.get("title", "") or n.get("headline", "") for n in fmp_news[:10] if n]
-            headlines = [h for h in headlines if h]
+        # Alpaca News primary (Benzinga-sourced, reliable on Railway)
+        try:
+            from app.services.market_data import get_alpaca_news
+            headlines = [n.get("title", "") for n in (get_alpaca_news(symbol, 10) or []) if n.get("title")]
+        except Exception:
+            headlines = []
+
+        if not headlines:
+            # FMP fallback
+            from app.services.fmp_client import fmp_client
+            fmp_news = fmp_client.get_stock_news(symbol, limit=10)
+            if fmp_news:
+                headlines = [n.get("title", "") or n.get("headline", "") for n in fmp_news[:10] if n]
+                headlines = [h for h in headlines if h]
+                if headlines:
+                    details["news_source"] = "fmp"
 
         if not headlines:
             # yfinance fallback
@@ -85,8 +95,15 @@ def get_sentiment_score(
                 ticker_obj = yf.Ticker(symbol)
                 raw_news = ticker_obj.news or []
                 headlines = [a.get("title", "") for a in raw_news[:10] if a.get("title")]
+                if headlines:
+                    details["news_source"] = "yfinance"
             except Exception:
                 pass
+
+        if not headlines:
+            details["news_source"] = "none"
+        else:
+            details.setdefault("news_source", "alpaca")
 
         if headlines:
             sia = SentimentIntensityAnalyzer()

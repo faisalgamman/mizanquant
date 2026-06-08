@@ -114,11 +114,11 @@ TOOL_SCHEMAS = [
             "properties": {
                 "strategy": {
                     "type": "string",
-                    "enum": ["HANA", "marem", "mazem", "all"],
-                    "description": "Strategy name. Use 'all' for combined view."
+                    "enum": ["HANA", "marem", "mazem", "manual", "all"],
+                    "description": "Strategy name. Default 'manual' (IBKR account). Use 'all' for combined view."
                 }
             },
-            "required": ["strategy"]
+            "required": []
         }
     },
     {
@@ -206,14 +206,14 @@ DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 # Strategy name → ID mapping
 # ---------------------------------------------------------------------------
 
-_STRATEGY_MAP = {"HANA": "A", "marem": "B", "mazem": "C"}
+_STRATEGY_MAP = {"HANA": "A", "marem": "B", "mazem": "C", "manual": "MANUAL"}
 
 
 def _resolve_strategy(name: str) -> str | None:
-    """Convert strategy name to ID, or None for 'all'."""
+    """Convert strategy name to ID, or None for 'all'. Default: MANUAL (IBKR)."""
     if name and name.lower() == "all":
         return None
-    return _STRATEGY_MAP.get(name, "A")
+    return _STRATEGY_MAP.get(name, _STRATEGY_MAP.get("manual", "MANUAL"))
 
 
 # ---------------------------------------------------------------------------
@@ -336,19 +336,32 @@ def _exec_run_consensus(symbol: str) -> dict:
     }
 
 
-def _exec_get_portfolio(strategy: str = "all") -> dict:
-    """Portfolio status for one or all strategies."""
-    from app.services.alpaca_client import get_account, get_positions
+def _exec_get_portfolio(strategy: str = "manual") -> dict:
+    """Portfolio status for one or all strategies. Uses broker factory per-strategy."""
+    from app.services.broker.factory import get_broker
     from app.config import STRATEGY_CONFIGS
 
     sid = _resolve_strategy(strategy)
 
+    def _acct_pos(s_id):
+        b = get_broker(strategy_id=s_id)
+        if b is None:
+            return None, []
+        try:
+            acct = b.get_account(strategy_id=s_id)
+        except Exception:
+            acct = None
+        try:
+            pos = b.get_positions(strategy_id=s_id) or []
+        except Exception:
+            pos = []
+        return acct, pos
+
     if sid:
         # Single strategy
-        account = get_account(strategy_id=sid)
+        account, positions = _acct_pos(sid)
         if not account:
-            return {"error": f"Cannot connect to {strategy} account"}
-        positions = get_positions(strategy_id=sid)
+            return {"error": f"Cannot connect to {strategy} account (broker offline)"}
         return {
             "strategy": strategy,
             "equity": account["equity"],
@@ -358,10 +371,10 @@ def _exec_get_portfolio(strategy: str = "all") -> dict:
                 {
                     "symbol": p["symbol"],
                     "qty": p["qty"],
-                    "avg_entry": p["avg_entry_price"],
-                    "current_price": p["current_price"],
-                    "unrealized_pl": p["unrealized_pl"],
-                    "unrealized_pl_pct": p["unrealized_plpc"],
+                    "avg_entry": p.get("avg_entry_price", p.get("avg_cost", 0)),
+                    "current_price": p.get("current_price", 0),
+                    "unrealized_pl": p.get("unrealized_pl", 0),
+                    "unrealized_pl_pct": p.get("unrealized_plpc", 0),
                 }
                 for p in positions
             ],
@@ -370,16 +383,15 @@ def _exec_get_portfolio(strategy: str = "all") -> dict:
         # All strategies
         combined = []
         for s_id, cfg in STRATEGY_CONFIGS.items():
-            account = get_account(strategy_id=s_id)
+            account, positions = _acct_pos(s_id)
             if account:
-                positions = get_positions(strategy_id=s_id)
                 combined.append({
                     "strategy": cfg.name,
                     "equity": account["equity"],
                     "cash": account["cash"],
                     "positions_count": len(positions),
                     "positions": [
-                        {"symbol": p["symbol"], "qty": p["qty"], "unrealized_pl": p["unrealized_pl"]}
+                        {"symbol": p["symbol"], "qty": p["qty"], "unrealized_pl": p.get("unrealized_pl", 0)}
                         for p in positions
                     ],
                 })

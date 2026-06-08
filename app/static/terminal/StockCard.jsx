@@ -30,22 +30,25 @@ function StockCard({ symbol, account, onClose }) {
   const [card, setCard] = useState(null);
   const [plan, setPlan] = useState(null);
   const [fc, setFc] = useState(null);
+  const [news, setNews] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!symbol) return;
     let alive = true;
-    setLoading(true); setCard(null); setPlan(null); setFc(null);
+    setLoading(true); setCard(null); setPlan(null); setFc(null); setNews(null);
     const acct = account || 10000;
     Promise.allSettled([
       fetch(`/api/stock/card?symbol=${symbol}`).then(r => r.json()),
       fetch(`/api/v1/trade/plan?symbol=${symbol}&portfolio=${acct}`).then(r => r.json()),
       fetch(`/api/v1/forecast/${symbol}?horizon=20`).then(r => r.json()),
-    ]).then(([c, p, f]) => {
+      fetch(`/api/stock/news?symbol=${symbol}&limit=6`).then(r => r.json()),
+    ]).then(([c, p, f, n]) => {
       if (!alive) return;
       if (c.status === "fulfilled") setCard(c.value);
       if (p.status === "fulfilled") setPlan(p.value);
       if (f.status === "fulfilled") setFc(f.value);
+      if (n.status === "fulfilled") setNews(n.value);
       setLoading(false);
     });
     return () => { alive = false; };
@@ -144,6 +147,25 @@ function StockCard({ symbol, account, onClose }) {
               risk ${_n(plan.risk_amount, 0)} ({_n(plan.portfolio_pct, 1)}%)
             </span>
           ) : <span className="sc-strip-body" style={{ color: "var(--text-muted)" }}>—</span>}
+        </div>
+
+        {/* News block */}
+        <div className="sc-strip sc-news">
+          <span className="sc-strip-h">NEWS · {news && news.source ? news.source.toUpperCase() : "—"}</span>
+          {news && news.news && news.news.length > 0 ? (
+            <div className="sc-news-list">
+              {news.news.slice(0, 6).map((n, i) => (
+                <div key={i} className="sc-news-row" title={n.summary || ""}>
+                  <a href={n.link || "#"} target="_blank" rel="noopener" className="sc-news-title">{n.title || "—"}</a>
+                  <span className="sc-news-meta">
+                    {n.publisher || "—"}{n.published ? " · " + new Date(n.published).toLocaleDateString("en-US", {month:"short", day:"numeric"}) : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="sc-strip-body" style={{ color: "var(--text-muted)" }}>لا أخبار حديثة</span>
+          )}
         </div>
 
         <div className="sc-disc">

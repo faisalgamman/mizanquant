@@ -120,6 +120,7 @@ function App() {
           sym: p.symbol, qty: p.qty || 0, entry: p.avg_entry || 0,
           last: p.current_price || 0, pnl: p.unrealized_pl || 0,
           pnlPct: (p.unrealized_plpc || 0) * 100,
+          mktVal: p.market_value || 0,
         })));
       }
 

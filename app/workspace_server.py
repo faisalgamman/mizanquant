@@ -2092,10 +2092,15 @@ async def stock_news(
 ):
     """Latest news headlines for a stock symbol."""
     async def compute():
-        # FMP primary (server-safe, reliable)
+        # Alpaca News primary (Benzinga-sourced, reliable on Railway)
+        from app.services.market_data import get_alpaca_news
+        alpaca_news = await asyncio.to_thread(get_alpaca_news, symbol, limit)
+        if alpaca_news:
+            return {"symbol": symbol, "count": len(alpaca_news), "news": alpaca_news, "source": "alpaca"}
+        # FMP fallback (server-safe, rate-limited)
         fmp_news = await _fmp_call(fmp_client.get_stock_news, symbol, limit=limit)
         if fmp_news:
-            return {"symbol": symbol, "count": len(fmp_news), "news": fmp_news}
+            return {"symbol": symbol, "count": len(fmp_news), "news": fmp_news, "source": "fmp"}
         # yfinance fallback (works locally)
         news = []
         try:
@@ -2112,7 +2117,7 @@ async def stock_news(
                 })
         except Exception:
             pass
-        return {"symbol": symbol, "count": len(news), "news": news}
+        return {"symbol": symbol, "count": len(news), "news": news, "source": "yfinance"}
     return await cached_or_compute(f"stock:news:{symbol.upper()}:{limit}", 900, compute, compute_timeout=15)
 
 

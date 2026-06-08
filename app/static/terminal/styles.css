@@ -572,6 +572,14 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .sc-strip-h { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; min-width: 130px; }
 .sc-strip-body { font-family: var(--font-mono); color: var(--text-primary); }
 .sc-disc { color: var(--text-muted); font-size: 10px; line-height: 1.5; margin-top: 2px; }
+/* News block inside Stock ID Card */
+.sc-news { display: block; padding: 10px 12px; }
+.sc-news-list { max-height: 200px; overflow-y: auto; }
+.sc-news-row { padding: 4px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.sc-news-row:last-child { border-bottom: none; }
+.sc-news-title { font-size: 12px; color: var(--accent); text-decoration: none; line-height: 1.4; display: block; }
+.sc-news-title:hover { text-decoration: underline; }
+.sc-news-meta { font-size: 10px; color: var(--text-muted); }
 @media (max-width: 900px) { .sc-grid { grid-template-columns: 1fr; } }
 
 /* MizanAI floating widget */
