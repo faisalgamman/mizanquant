@@ -37,7 +37,6 @@ function App() {
   const [system, setSystem]       = useState(null);  // real system status (auto-trade/kill-switch/regime)
   const [realStages, setRealStages] = useState([]);  // real pipeline stages from /api/v1/overview
   const [analyze, setAnalyze]     = useState(null);  // {symbol, scoring, plan} — real scoring + trade plan
-  const [selectedSymbol, setSelectedSymbol] = useState(null);  // currently-selected symbol (shared across nav)
   const [forecast, setForecast]   = useState(null);  // {symbol, expected, prob_profit, ...} — ML forecast
   const [forecastHorizon, setForecastHorizon] = useState(20);  // selectable forecast horizon (days)
   const [risers, setRisers] = useState([]);     // predicted risers (Monte Carlo)
