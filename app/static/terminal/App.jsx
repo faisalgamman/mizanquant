@@ -40,6 +40,7 @@ function App() {
   const [forecast, setForecast]   = useState(null);  // {symbol, expected, prob_profit, ...} — ML forecast
   const [forecastHorizon, setForecastHorizon] = useState(20);  // selectable forecast horizon (days)
   const [risers, setRisers] = useState([]);     // predicted risers (Monte Carlo)
+  const [risersMeta, setRisersMeta] = useState({}); // market_soft flag etc.
   const [marketNews, setMarketNews] = useState([]);  // general market news
   const [indicators, setIndicators] = useState([]);  // main market indicators
   // Two-scanner split: Weekly (swing /buys, Option-A) vs Monthly (composite
@@ -324,7 +325,8 @@ function App() {
   // Fetch bottom panel: risers + market news + indicators
   useEffect(() => {
     const fetchAll = async () => {
-      try { setRisers((await (await fetch('/api/forecast/risers?limit=8')).json()).risers || []); } catch (_) {}
+      try { const r = await (await fetch('/api/forecast/risers?limit=8')).json();
+            setRisers(r.risers || []); setRisersMeta({market_soft: r.market_soft}); } catch (_) {}
       try { setMarketNews((await (await fetch('/api/market/news?limit=8')).json()).news || []); } catch (_) {}
       try { setIndicators((await (await fetch('/api/market/indicators')).json()).indicators || []); } catch (_) {}
     };
@@ -541,6 +543,7 @@ function App() {
           risers={risers}
           marketNews={marketNews}
           indicators={indicators}
+          risersMeta={risersMeta}
         />
       </main>
 

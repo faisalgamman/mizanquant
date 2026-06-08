@@ -655,6 +655,7 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .lr2-ind-lab { font-size: 10px; color: var(--text-muted, #8a8f99); margin-bottom: 4px; font-weight: 600; }
 .lr2-ind-price { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary, #e8e8e8); }
 .lr2-ind-chg { font-size: 11px; font-weight: 600; font-family: var(--font-mono); margin-top: 2px; }
+.lr2-ind-proxy { font-size: 8px; color: var(--text-muted, #8a8f99); margin-top: 2px; }
 
 /* Market news */
 .lr2-news-list { max-height: 260px; overflow-y: auto; }

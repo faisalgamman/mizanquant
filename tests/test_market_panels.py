@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.mark.asyncio
-async def test_risers_filters_by_expected_change_pct(monkeypatch):
-    """Only positive expected_change_pct returned, sorted desc."""
+async def test_risers_keeps_all_with_market_soft(monkeypatch):
+    """Both positive and negative expected_change_pct returned; market_soft when top <= 0."""
     async def fake_screener(*a, **k):
         return {
             "results": [
@@ -37,10 +37,12 @@ async def test_risers_filters_by_expected_change_pct(monkeypatch):
 
     from app.workspace_server import forecast_risers
     result = await forecast_risers(limit=5)
+    # Both now kept (no ec <= 0 filter); sorted desc: A (8%) first, B (-2%) second
     assert result["count"] >= 1
     symbols = [r["symbol"] for r in result["risers"]]
     assert "A" in symbols
-    assert "B" not in symbols
+    # market_soft is False because top (A) is +8% > 0
+    assert result["market_soft"] is False
     assert "disclaimer" in result
 
 
@@ -85,4 +87,4 @@ async def test_indicators_returns_structure(monkeypatch):
     assert inds["Nasdaq"]["change_pct"] == -0.3
     assert inds["VIX"]["price"] == 18.5
     # BTC has no real price without crypto API
-    assert inds["Bitcoin"]["symbol"] == "BTC"
+    assert inds["Bitcoin"]["symbol"] == "BTC/USD"

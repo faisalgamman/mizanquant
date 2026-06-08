@@ -12,12 +12,12 @@ function MarketCards({ market }) {
     { lab: "Breadth", val: m.breadth == null ? "—" : m.breadth.toFixed(1) + "%", sub: "advance/decline",
       color: m.breadth == null ? "var(--text-muted)" : m.breadth >= 50 ? "var(--positive)" : "var(--negative)" },
     { lab: "Credit",  val: m.credit == null ? "—" : m.credit.toFixed(4), sub: "HYG / LQD", color: "var(--text-primary)" },
-    { lab: "Liq",     val: m.liquidity == null ? "—" : m.liquidity.toFixed(1) + "%", sub: m.market_open ? "open" : "closed", color: "var(--text-primary)" },
+    { lab: "VOL",     val: m.liquidity == null ? "—" : m.liquidity.toFixed(1) + "%", sub: m.market_open ? "open" : "closed", color: "var(--text-primary)", title: "حجم اليوم ÷ متوسط 20 يوماً" },
   ];
   return (
     <div className="mc-strip">
       {items.map((i) => (
-        <div key={i.lab} className="mc-card">
+        <div key={i.lab} className="mc-card" title={i.title || ""}>
           <div className="mc-lab">{i.lab}</div>
           <div className="mc-val" style={{ color: i.color }}>{i.val}</div>
           <div className="mc-sub">{i.sub}</div>

@@ -1525,11 +1525,15 @@ async def stock_card(symbol: str = Query("AAPL", description="Stock symbol")):
     fetched by the client from their own endpoints. Defensive: missing data -> None.
     """
     sym = symbol.upper().strip()
-
     async def compute():
+        spy_df = None
+        try:
+            _, spy_df = _fetch_data("SPY", period="2mo")
+        except Exception:
+            pass
         a = {}
         try:
-            a = _analyze_smart(sym) or {}
+            a = _analyze_smart(sym, spy_df=spy_df) or {}
         except Exception as e:
             logger.debug("stock_card analyze %s: %s", sym, e)
         try:
@@ -4580,7 +4584,7 @@ async def forecast_risers(limit: int = Query(8, ge=1, le=20)):
                 return None
             fc = monte_carlo_forecast(prices, 20)
             ec = fc.get("expected_change_pct")
-            if ec is None or ec <= 0:
+            if ec is None:
                 return None
             return {"symbol": r["symbol"], "name": r.get("name") or r.get("company") or r["symbol"],
                     "price": fc.get("current_price") or r.get("price"),
@@ -4590,9 +4594,11 @@ async def forecast_risers(limit: int = Query(8, ge=1, le=20)):
             return None
     import asyncio
     rows = await asyncio.gather(*[asyncio.to_thread(_one, r) for r in cands])
-    rows = [x for x in rows if x]
-    rows.sort(key=lambda x: x.get("expected_change_pct", 0), reverse=True)
-    return {"count": len(rows[:limit]), "risers": rows[:limit],
+    rows = [x for x in rows if x and x.get("expected_change_pct") is not None]
+    rows.sort(key=lambda x: x["expected_change_pct"], reverse=True)
+    top = rows[:limit]
+    return {"count": len(top), "risers": top,
+            "market_soft": bool(top and top[0]["expected_change_pct"] <= 0),
             "disclaimer": "نطاق احتمالي من تذبذب السهم — ليس وعداً ولا نصيحة."}
 
 
@@ -4624,7 +4630,7 @@ async def market_indicators():
             ("S&P 500", "SPY"), ("Nasdaq", "QQQ"), ("Dow", "DIA"),
             ("Russell", "IWM"), ("Gold", "GLD"), ("Brent", "BNO"),
         ]
-        syms = [s for _, s in symbols_map]
+        syms = [s for _, s in symbols_map] + ["BTC/USD"]
         snaps = await asyncio.to_thread(get_alpaca_snapshots, syms)
 
         ms = {}
@@ -4633,22 +4639,31 @@ async def market_indicators():
         except Exception:
             pass
         vix_val = ms.get("vix")
+        vix_prev = ms.get("vix_prev")
 
         indicators = []
         for label, sym in symbols_map:
             snap = snaps.get(sym, {})
             indicators.append({
-                "label": label, "symbol": sym,
+                "label": label, "symbol": sym, "proxy": sym,
                 "price": snap.get("price"),
                 "change_pct": snap.get("change_pct"),
             })
+        # VIX: use current + prior if available for change%
+        vix_chg = None
+        if vix_val is not None and vix_prev is not None and vix_prev > 0:
+            vix_chg = round((vix_val / vix_prev - 1) * 100, 2)
         indicators.append({
-            "label": "VIX", "symbol": "VIX",
-            "price": vix_val, "change_pct": None,
+            "label": "VIX", "symbol": "VIX", "proxy": None,
+            "price": vix_val,
+            "change_pct": vix_chg,
         })
+        # Bitcoin from crypto snapshot
+        btc = snaps.get("BTC/USD", {})
         indicators.append({
-            "label": "Bitcoin", "symbol": "BTC",
-            "price": None, "change_pct": None,
+            "label": "Bitcoin", "symbol": "BTC/USD", "proxy": None,
+            "price": btc.get("price"),
+            "change_pct": btc.get("change_pct"),
         })
         return {"indicators": indicators}
     except Exception:

@@ -1074,8 +1074,9 @@ def get_alpaca_market_news(limit: int = 8) -> list[dict]:
 
 
 def get_alpaca_snapshots(symbols: list[str]) -> dict:
-    """Fetch daily-bar snapshots from Alpaca for a set of symbols.
-    Returns {symbol: {price, change_pct}} or {} on error."""
+    """Fetch daily-bar snapshots from Alpaca for stocks + crypto.
+    Returns {symbol: {price, change_pct}} or {} on error.
+    Symbols with '/' (e.g. BTC/USD) are routed to the crypto endpoint."""
     result: dict = {}
     if not symbols:
         return result
@@ -1084,26 +1085,47 @@ def get_alpaca_snapshots(symbols: list[str]) -> dict:
     base = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets").rstrip("/")
     if not key or not sec:
         return result
+
+    stocks = [s.strip().upper() for s in symbols if s and "/" not in s]
+    crypto = [s.strip().upper() for s in symbols if s and "/" in s]
+
+    def _parse_snapshot(snap):
+        db = snap.get("dailyBar") or {}
+        prev = snap.get("prevDailyBar") or {}
+        price = db.get("c") or snap.get("latestTrade", {}).get("p")
+        prev_c = prev.get("c")
+        change_pct = ((price / prev_c - 1) * 100) if price and prev_c else None
+        return {"price": price, "change_pct": round(change_pct, 2) if change_pct is not None else None}
+
     try:
         import httpx
-        joined = ",".join([s.strip().upper() for s in symbols if s and s.strip()])
-        if not joined:
-            return result
-        r = httpx.get(
-            f"{base}/v2/stocks/snapshots",
-            params={"symbols": joined},
-            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
-            timeout=8,
-        )
-        if r.status_code != 200:
-            return result
-        for sym, snap in (r.json() or {}).items():
-            db = snap.get("dailyBar") or {}
-            prev = snap.get("prevDailyBar") or {}
-            price = db.get("c") or snap.get("latestTrade", {}).get("p")
-            prev_c = prev.get("c")
-            change_pct = ((price / prev_c - 1) * 100) if price and prev_c else None
-            result[sym] = {"price": price, "change_pct": round(change_pct, 2) if change_pct is not None else None}
+
+        # Stocks path
+        if stocks:
+            joined = ",".join(stocks)
+            r = httpx.get(
+                f"{base}/v2/stocks/snapshots",
+                params={"symbols": joined},
+                headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                for sym, snap in (r.json() or {}).items():
+                    result[sym] = _parse_snapshot(snap)
+
+        # Crypto path
+        if crypto:
+            joined = ",".join(crypto)
+            r = httpx.get(
+                f"{base}/v1beta3/crypto/us/snapshots",
+                params={"symbols": joined},
+                headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                cryptos = (r.json() or {}).get("snapshots", {})
+                for sym, snap in cryptos.items():
+                    result[sym] = _parse_snapshot(snap)
     except Exception as e:
         logger.debug("alpaca snapshots error: %s", e)
     return result
