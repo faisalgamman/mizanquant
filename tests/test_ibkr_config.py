@@ -13,17 +13,24 @@ from app.services.broker.ibkr_config import (
 )
 
 
-def test_invalid_port_4004_rejected(monkeypatch):
-    """Port 4004 (the original bug) must be rejected and replaced with 4002."""
-    monkeypatch.setenv("IBKR_PORT", "4004")
+def test_invalid_port_rejected(monkeypatch):
+    """A genuinely invalid port must be rejected and replaced with the default 4002.
+
+    NOTE: 4004 is NOT invalid — it is the gnzsnz/ib-gateway socat-relay paper port and is
+    REQUIRED in production (cross-container connections reach the API via socat on 4003/4004,
+    not the localhost-only direct 4002). Verified live: connecting on 4004 returns connected.
+    So we guard against an actually-bogus port here, not 4004.
+    """
+    monkeypatch.setenv("IBKR_PORT", "1234")  # not in VALID_IBKR_PORTS
     cfg = get_ibkr_config()
     assert cfg["port"] == DEFAULT_IBKR_PORT
-    assert cfg["port"] != 4004
+    assert cfg["port"] != 1234
 
 
 def test_valid_ports_accepted(monkeypatch):
-    """All four legitimate IBKR ports must pass through unchanged."""
-    for port in (4001, 4002, 7496, 7497):
+    """All legitimate IBKR ports must pass through unchanged — including the
+    socat-relay ports 4003/4004 used by the gnzsnz/ib-gateway image on Railway."""
+    for port in (4001, 4002, 4003, 4004, 7496, 7497):
         monkeypatch.setenv("IBKR_PORT", str(port))
         assert get_ibkr_config()["port"] == port
 
