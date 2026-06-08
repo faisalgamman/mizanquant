@@ -11,6 +11,13 @@ function CommandBar({ etClock, symbolCount, query, setQuery, onRefresh }) {
             placeholder="Search symbol…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && query.trim()) {
+                const s = query.trim().toUpperCase();
+                if (window.selectIntelSymbol) window.selectIntelSymbol(s);
+                setQuery("");
+              }
+            }}
           />
           <span className="kbd">⌘K</span>
         </div>

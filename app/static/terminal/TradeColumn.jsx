@@ -1,4 +1,5 @@
 // TradeColumn.jsx — Column 3 of the workflow: portfolio, positions, paper, pipeline, guards, schedule
+const { useState } = React;
 
 function PortfolioStrip({ p }) {
   const cells = [
@@ -21,10 +22,16 @@ function PortfolioStrip({ p }) {
   );
 }
 
-function PositionsTable({ positions }) {
+function PositionsTable({ positions, onSell }) {
+  const [closing, setClosing] = useState(null);
+  const doSell = (sym) => {
+    if (!window.confirm("بيع كل مركز " + sym + "؟")) return;
+    setClosing(sym);
+    onSell && onSell(sym).finally(() => setClosing(null));
+  };
   return (
     <table className="pos-table">
-      <thead><tr><th>SYM</th><th>QTY</th><th>ENTRY</th><th>LAST</th><th>VALUE</th><th>P&L</th><th>P&L%</th></tr></thead>
+      <thead><tr><th>SYM</th><th>QTY</th><th>ENTRY</th><th>LAST</th><th>VALUE</th><th>P&L</th><th>P&L%</th><th></th></tr></thead>
       <tbody>
         {positions.map((p) => (
           <tr key={p.sym}
@@ -41,6 +48,12 @@ function PositionsTable({ positions }) {
             </td>
             <td className="mono" style={{ textAlign: "right", color: (p.pnlPct || 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
               {p.pnlPct != null ? ((p.pnlPct >= 0 ? "+" : "") + p.pnlPct.toFixed(1) + "%") : "—"}
+            </td>
+            <td onClick={(e) => e.stopPropagation()}>
+              <button className="pos-sell-btn" disabled={closing === p.sym}
+                      onClick={() => doSell(p.sym)} title="بيع">
+                {closing === p.sym ? "…" : "✕ بيع"}
+              </button>
             </td>
           </tr>
         ))}
@@ -133,7 +146,7 @@ function Schedule({ items }) {
 }
 
 function TradeColumn(props) {
-  const { portfolio, positions, paper, pipeline, running, dryRun, setDryRun, onRunPipeline, guards, schedule } = props;
+  const { portfolio, positions, paper, pipeline, running, dryRun, setDryRun, onRunPipeline, guards, schedule, onSell } = props;
   return (
     <div className="col col-trade">
       <div className="wf-section">
@@ -142,7 +155,7 @@ function TradeColumn(props) {
       </div>
       <div className="wf-section">
         <div className="wf-head"><span className="wf-title">Positions</span><span className="wf-sub">Open · real-time</span></div>
-        <PositionsTable positions={positions} />
+        <PositionsTable positions={positions} onSell={onSell} />
       </div>
       <div className="wf-section">
         <div className="wf-head"><span className="wf-title">Paper</span><span className="wf-sub">recent trades</span></div>

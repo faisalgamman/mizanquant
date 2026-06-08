@@ -338,6 +338,10 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .pos-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .pos-table th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; }
 .pos-table td { padding: 4px 6px; border-bottom: 1px solid var(--border-subtle); }
+.pos-sell-btn { background: none; border: 1px solid var(--negative, #f87171); color: var(--negative, #f87171);
+  border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-family: var(--font-arabic); }
+.pos-sell-btn:hover { background: var(--negative-dim, #3a1c1c); }
+.pos-sell-btn:disabled { opacity: .4; cursor: default; }
 
 .ptt-row {
   display: flex; align-items: center; gap: 8px;

@@ -415,16 +415,23 @@ def _exec_get_performance() -> dict:
 
 
 def _exec_get_risk_status() -> dict:
-    """Risk dashboard."""
-    from app.services.alpaca_client import get_account, get_positions
+    """Risk dashboard — uses IBKR MANUAL account."""
+    from app.services.broker.factory import get_broker
     from app.services.risk_manager import get_risk_status as _risk_status
-    from app.config import STRATEGY_CONFIGS
 
-    sid = next(iter(STRATEGY_CONFIGS), None)
-    account = get_account(strategy_id=sid)
+    b = get_broker(strategy_id="MANUAL")
+    if not b:
+        return {"error": "IBKR broker unavailable"}
+    try:
+        account = b.get_account(strategy_id="MANUAL")
+    except Exception:
+        return {"error": "Cannot connect to IBKR account"}
     if not account:
-        return {"error": "Cannot connect to Alpaca"}
-    positions = get_positions(strategy_id=sid)
+        return {"error": "Cannot connect to IBKR account"}
+    try:
+        positions = b.get_positions(strategy_id="MANUAL") or []
+    except Exception:
+        positions = []
     risk = _risk_status(account, positions)
     risk["auto_trade_enabled"] = settings.AUTO_TRADE_ENABLED
     return risk
@@ -513,7 +520,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "check_halal": lambda **kw: _exec_check_halal(kw["symbol"]),
     "get_buy_signals": lambda **kw: _exec_get_buy_signals(),
     "run_consensus": lambda **kw: _exec_run_consensus(kw["symbol"]),
-    "get_portfolio": lambda **kw: _exec_get_portfolio(kw.get("strategy", "all")),
+    "get_portfolio": lambda **kw: _exec_get_portfolio(kw.get("strategy", "manual")),
     "get_trade_history": lambda **kw: _exec_get_trade_history(kw.get("limit", 20)),
     "get_performance": lambda **kw: _exec_get_performance(),
     "get_risk_status": lambda **kw: _exec_get_risk_status(),

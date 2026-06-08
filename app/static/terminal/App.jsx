@@ -426,6 +426,24 @@ function App() {
     setPipelineRunning(false);
   };
 
+  const closePosition = async (symbol) => {
+    try {
+      const r = await fetch('/api/v1/broker/close', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol }),
+      });
+      const j = await r.json();
+      if (j && j.success) {
+        setToast({ kind: "ok", title: "نُفِّذ ✓", body: `بيع ${symbol} · id ${j.order_id}` });
+        await loadOverview();
+      } else {
+        setToast({ kind: "error", title: "فشل", body: `${symbol}: ${(j && j.reason) || "unknown"}` });
+      }
+    } catch (e) {
+      setToast({ kind: "error", title: "خطأ", body: `${symbol}: ${e}` });
+    }
+  };
+
   const sendToPaper = async (sig) => {
     if (!sig.halal) {
       setToast({ kind: "error", title: "Blocked", body: `${sig.symbol} failed the halal screen` });
@@ -451,8 +469,14 @@ function App() {
       });
       const j = await r.json();
       if (j && j.success) {
-        setToast({ kind: "ok", title: "IBKR paper order placed",
-                   body: `${sig.symbol} · BUY ${shares} sh · id ${j.broker_order_id}` });
+        const st = (j.status || "").toLowerCase();
+        if (st === "filled" || st === "fill") {
+          setToast({ kind: "ok", title: "نُفِّذ ✓", body: `${sig.symbol} · BUY ${shares} sh · id ${j.broker_order_id}` });
+        } else if (st === "submitted" || st === "presubmitted" || st === "accepted") {
+          setToast({ kind: "ok", title: "أُرسل — يُملأ عند فتح السوق", body: `${sig.symbol} · ${shares} sh · ${st} · id ${j.broker_order_id}` });
+        } else {
+          setToast({ kind: "ok", title: "IBKR paper order placed", body: `${sig.symbol} · BUY ${shares} sh · ${st} · id ${j.broker_order_id}` });
+        }
       } else {
         const why = (j && j.reason) === "broker_offline"
           ? "IB Gateway offline — start the gateway service"
@@ -529,6 +553,7 @@ function App() {
             onRunPipeline={runPipeline}
             guards={guards}
             schedule={schedule}
+            onSell={closePosition}
           />
         </div>
         <StockIntel />

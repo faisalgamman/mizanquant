@@ -209,6 +209,7 @@ class OrderManager:
         time_in_force: str = "gtc",
         trail_percent: Optional[float] = None,
         client_order_id: Optional[str] = None,
+        entry_type: str = "market",
     ) -> dict:
         """Create and submit a bracket order (parent + stop-loss + take-profit legs).
 
@@ -220,9 +221,9 @@ class OrderManager:
             symbol=symbol,
             side=side,
             qty=qty,
-            order_type="limit",
+            order_type=entry_type,
             time_in_force=time_in_force,
-            limit_price=limit_price,
+            limit_price=(limit_price if entry_type == "limit" else None),
             stop_loss_price=stop_loss_price,
             take_profit_price=take_profit_price,
             order_class="bracket",

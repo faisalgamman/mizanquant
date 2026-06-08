@@ -210,6 +210,7 @@ async def v1_broker_execute(body: BrokerExecuteRequest, db: AsyncSession | None 
             stop_loss_price=float(body.stop_loss),
             take_profit_price=float(body.take_profit),
             time_in_force="gtc",
+            entry_type="market",
         )
     try:
         res = await asyncio.to_thread(_submit)
@@ -251,3 +252,28 @@ async def v1_broker_execute(body: BrokerExecuteRequest, db: AsyncSession | None 
             "broker_order_id": broker_id, "status": res.get("status", "submitted"),
             "shares": body.shares, "entry_price": body.entry_price,
             "stop_loss": body.stop_loss, "take_profit": body.take_profit, "db_id": db_id}
+
+
+class BrokerCloseRequest(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=10)
+
+
+@router.post("/broker/close")
+async def v1_broker_close(body: BrokerCloseRequest):
+    """Market-close (sell) a position on the IBKR MANUAL account. Honest on failure."""
+    sym = body.symbol.upper().strip()
+
+    def _close():
+        from app.services.broker.factory import get_broker
+        b = get_broker(strategy_id="MANUAL")
+        return b.close_position(sym, strategy_id="MANUAL") if b else None
+
+    try:
+        res = await asyncio.to_thread(_close)
+    except Exception as e:
+        logger.error("broker/close %s: %s", sym, e)
+        return {"success": False, "reason": "broker_error", "detail": str(e)[:160], "symbol": sym}
+    if not res:
+        return {"success": False, "reason": "broker_offline", "symbol": sym}
+    return {"success": True, "symbol": sym, "order_id": res.get("id", ""),
+            "status": res.get("status", "submitted")}
