@@ -106,8 +106,10 @@ TOOL_SCHEMAS = [
     {
         "name": "get_portfolio",
         "description": (
-            "Get current portfolio status: equity, cash, buying power, open positions, "
-            "and P&L for each position. Shows data for a specific strategy account."
+            "Get current portfolio status: equity, cash, buying power, and EVERY open "
+            "position with its qty/entry/current price/P&L. Default 'manual' = the owner's "
+            "LIVE IBKR account (use this for 'my portfolio'). 'all' aggregates the automated "
+            "Alpaca strategies — only use it when the user explicitly asks about HANA/marem/mazem."
         ),
         "input_schema": {
             "type": "object",
