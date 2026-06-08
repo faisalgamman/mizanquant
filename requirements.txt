@@ -34,6 +34,12 @@ redis>=5.0,<6.0
 # ── Groq AI ──
 groq>=0.13.0,<2.0              # Groq LLM client (OpenAI-compatible, ultra-fast)
 
+# ── OpenAI SDK ──
+# REQUIRED by TradingAgent for DeepSeek (DeepSeek uses the OpenAI-compatible API).
+# Without it the agent fails at construction with "No module named 'openai'" and every
+# /agent/chat + Telegram query returns no answer. Tested locally with 2.24.0.
+openai>=1.40.0,<3.0
+
 # ── Phase 2: ML/RL Ops ──
 mlflow>=2.21.0
 # OpenBB 4.x — core + providers needed on Railway
