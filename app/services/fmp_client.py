@@ -117,22 +117,24 @@ class FMPClient:
     _cache: dict[str, Any] = {}
     _cache_expiry: dict[str, float] = {}
 
-    # TTL per endpoint pattern (seconds); fundamental data changes quarterly at most
+    # TTL per endpoint pattern (seconds); fundamental data changes quarterly at most,
+    # so cache it 30 days to stay well under the 250/day free-tier quota (the 657-symbol
+    # universe would otherwise re-blow the quota on every weekly re-warm → 429 floods).
     _CACHE_TTL: dict[str, int] = {
-        "profile": 604800,                # 7 days
-        "income-statement": 604800,       # 7 days
-        "balance-sheet-statement": 604800,
-        "cash-flow-statement": 604800,
-        "key-metrics": 604800,
-        "financial-ratios": 604800,
-        "dcf": 604800,
-        "historical-dividends": 604800,
-        "price-target-consensus": 86400,  # 1 day
-        "price-target": 86400,
-        "analyst-estimates": 86400,
+        "profile": 2592000,               # 30 days
+        "income-statement": 2592000,      # 30 days
+        "balance-sheet-statement": 2592000,
+        "cash-flow-statement": 2592000,
+        "key-metrics": 2592000,
+        "financial-ratios": 2592000,
+        "dcf": 2592000,
+        "historical-dividends": 2592000,
+        "price-target-consensus": 604800,  # 7 days
+        "price-target": 604800,
+        "analyst-estimates": 604800,
         "stock-news": 3600,               # 1 hour
         "general-news": 3600,
-        "earnings-calendar": 3600,        # 1 hour (FMP stable endpoint name)
+        "earnings-calendar": 86400,       # 1 day (FMP stable endpoint name)
     }
 
     def __init__(self):
@@ -160,7 +162,7 @@ class FMPClient:
         for pattern, ttl in self._CACHE_TTL.items():
             if pattern in endpoint:
                 return ttl
-        return 3600  # default 1 hour
+        return 86400  # default 1 day (was 1h) — spare the daily quota for uncategorised endpoints
 
     # ------------------------------------------------------------------
     # Database cache helpers (L2 — persistent across restarts)
