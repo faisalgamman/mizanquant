@@ -49,10 +49,10 @@ def _save_backtest_cache(key: str, value: dict):
 
 @router.get("/trading/summary")
 async def v1_trading_summary():
-    from app.config import STRATEGY_CONFIGS
+    import os
     from app.services.broker.factory import get_broker, _build
 
-    sid = next(iter(STRATEGY_CONFIGS), None)
+    sid = os.environ.get("DASHBOARD_STRATEGY", "MANUAL")
     broker = get_broker(strategy_id=sid)
 
     account = None

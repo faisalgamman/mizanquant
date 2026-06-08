@@ -54,10 +54,11 @@ async def _get_system_status():
 
 
 async def _get_portfolio():
-    from app.config import settings as cfg, STRATEGY_CONFIGS
+    import os
+    from app.config import settings as cfg
     from app.services.broker.factory import get_broker, _build
 
-    sid = next(iter(STRATEGY_CONFIGS), None)
+    sid = os.environ.get("DASHBOARD_STRATEGY", "MANUAL")
     broker = get_broker(strategy_id=sid)
     broker_label = broker.name if broker else "unknown"
 
