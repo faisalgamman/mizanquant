@@ -6676,6 +6676,14 @@ try:
     logger.info("Telegram webhook router registered — POST /api/v1/telegram/webhook")
 except Exception:
     logger.warning("telegram webhook router not available — skipped")
+try:
+    # Admin/agent router — serves the AiWidget's POST /agent/chat and GET /agent/health.
+    # It was defined but never mounted, so the floating assistant 404'd → showed "—".
+    from app.routers.admin import router as admin_router
+    app.include_router(admin_router)
+    logger.info("Admin/agent router registered — POST /agent/chat, GET /agent/health")
+except Exception as _e:
+    logger.warning("admin router not available — skipped: %s", _e)
 
 # ---------------------------------------------------------------------------
 # Public API endpoints for dashboard (no auth required)
