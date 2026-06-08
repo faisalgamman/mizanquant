@@ -321,14 +321,29 @@ def _trade_to_dict(trade) -> dict:
 
 
 def _position_to_dict(pos) -> dict:
-    """Translate an ib_insync Position into an Alpaca-compatible dict."""
+    """Translate an ib_insync PortfolioItem (preferred) or Position into an Alpaca-style dict.
+
+    PortfolioItem carries marketPrice/marketValue/unrealizedPNL (real-time P&L); a plain Position
+    does NOT (its market fields are 0 → market_value 0 → a false -100% P&L on every row). Read the
+    PortfolioItem fields with Position fallbacks so LAST / VALUE / P&L render correctly.
+    """
     contract = getattr(pos, "contract", None)
     qty = float(getattr(pos, "position", 0) or 0)
-    avg = float(getattr(pos, "avgCost", 0) or 0)
-    market = float(getattr(pos, "marketPrice", 0) or 0) if hasattr(pos, "marketPrice") else 0.0
-    market_value = float(getattr(pos, "marketValue", qty * market) or 0)
-    unrealized_pl = market_value - qty * avg if qty and avg else 0.0
-    cost_basis = qty * avg if qty and avg else 0.0
+    # PortfolioItem → averageCost (per share); Position → avgCost.
+    avg = float(getattr(pos, "averageCost", 0) or getattr(pos, "avgCost", 0) or 0)
+    market = float(getattr(pos, "marketPrice", 0) or 0)
+    market_value = float(getattr(pos, "marketValue", 0) or 0)
+    if market_value == 0 and qty and market:
+        market_value = qty * market
+    # Prefer IBKR's own unrealized P&L; derive only if absent AND a market value exists.
+    raw_upl = getattr(pos, "unrealizedPNL", None)
+    if raw_upl not in (None, "") and float(raw_upl) != 0:
+        unrealized_pl = float(raw_upl)
+    elif market_value and qty and avg:
+        unrealized_pl = market_value - qty * avg
+    else:
+        unrealized_pl = 0.0
+    cost_basis = abs(qty * avg) if qty and avg else 0.0
     unrealized_plpc = (unrealized_pl / cost_basis) if cost_basis else 0.0
     return {
         "symbol": getattr(contract, "symbol", ""),
@@ -389,7 +404,11 @@ class IBBroker:
         if ib is None:
             return []
         try:
-            positions = _call_ib(ib, "positions", timeout=15)
+            # portfolio() carries marketPrice/marketValue/unrealizedPNL (real P&L);
+            # positions() does not (→ false -100%). Prefer portfolio, fall back to positions.
+            positions = _call_ib(ib, "portfolio", timeout=15) or []
+            if not positions:
+                positions = _call_ib(ib, "positions", timeout=15) or []
             return [_position_to_dict(p) for p in positions if float(getattr(p, "position", 0) or 0) != 0]
         except Exception as exc:
             logger.error("IBKR get_positions failed: %s", exc)
