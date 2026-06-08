@@ -49,6 +49,7 @@ function App() {
   const [monthlyStatus, setMonthlyStatus] = useState("computing"); // computing | ready | empty
   const [ledgerW, setLedgerW]     = useState(null);        // weekly paper-ledger status (PV)
   const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
+  const [cardSymbol, setCardSymbol] = useState(null);      // Stock ID Card target symbol
 
   // Fetch /buys, map real rows. Returns true once real signals are loaded.
   const loadBuys = async () => {
@@ -260,6 +261,13 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Fix: define window.selectIntelSymbol so clicking a Stock Intelligence row
+  // actually opens the Stock ID Card (was called in StockIntel.jsx but never defined).
+  useEffect(() => {
+    window.selectIntelSymbol = (sym) => setCardSymbol(sym);
+    return () => { try { delete window.selectIntelSymbol; } catch (e) {} };
+  }, []);
+
   // Sidebar "Weekly/Monthly Scanner" links set the hash → switch the tab live.
   useEffect(() => {
     const onHash = () => {
@@ -464,6 +472,13 @@ function App() {
           />
         </div>
         <StockIntel />
+        {cardSymbol && (
+          <StockCard
+            symbol={cardSymbol}
+            account={(portfolio && portfolio.equity) || 10000}
+            onClose={() => setCardSymbol(null)}
+          />
+        )}
         <LowerRow
           models={models}
           sectors={sectors}

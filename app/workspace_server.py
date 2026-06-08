@@ -1513,6 +1513,70 @@ async def halal_status(
     return await cached_or_compute(f"halal:status:{symbol.upper()}", 86400, compute)
 
 
+@app.get("/api/stock/card")
+async def stock_card(symbol: str = Query("AAPL", description="Stock symbol")):
+    """Aggregated single-symbol profile for the Stock ID Card: profile + fundamental
+    + technical + sentiment + signal + full DJIM halal. Trade plan and forecast are
+    fetched by the client from their own endpoints. Defensive: missing data -> None.
+    """
+    sym = symbol.upper().strip()
+
+    async def compute():
+        a = {}
+        try:
+            a = _analyze_smart(sym) or {}
+        except Exception as e:
+            logger.debug("stock_card analyze %s: %s", sym, e)
+        try:
+            halal = _screen_halal(sym)
+        except Exception as e:
+            logger.debug("stock_card halal %s: %s", sym, e)
+            halal = {"symbol": sym, "is_halal": False, "error": "halal check failed"}
+
+        def g(key, default=None):
+            return a.get(key, default)
+
+        return {
+            "symbol": sym,
+            "profile": {
+                "name": g("company") or sym,
+                "sector": g("sector") or "",
+                "industry": g("industry") or "",
+                "price": g("price"),
+                "change_pct": g("change_pct"),
+                "market_cap": g("market_cap"),
+            },
+            "signal": {
+                "verdict": g("signal") or "—",
+                "smart_score": g("smart_score"),
+                "smart_max": 100,
+                "rs_vs_spy": g("rs_vs_spy") or "—",
+                "hard_gates_passed": g("hard_gates_passed", True),
+                "gates_failed": g("hard_gates_failed", []),
+            },
+            "fundamental": {
+                "score": g("fundamental_score"),
+                "max": 40,
+                "profitability": g("profitability_details", {}),
+                "valuation": g("valuation_details", {}),
+                "market": g("market_details", {}),
+            },
+            "technical": {
+                "score": g("momentum_score"),
+                "max": 30,
+                "details": g("momentum_details", {}),
+            },
+            "sentiment": g("sentiment") or g("sentiment_details") or {},
+            "halal": halal,
+            "disclaimers": [
+                "DJIM quantitative screen only — no named Sharia supervisory board.",
+                "Advisory only — manual execution. Not financial advice.",
+            ],
+        }
+
+    return await cached_or_compute(f"stock:card:{sym}", 300, compute)
+
+
 # ---------------------------------------------------------------------------
 # Stock Research — fundamental data, ratios, financials via yfinance
 # ---------------------------------------------------------------------------
