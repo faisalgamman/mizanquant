@@ -38,7 +38,7 @@ function _forecastFanSvg(fc) {
   );
 }
 
-function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade }) {
+function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth }) {
   if (!signal) {
     return (
       <div className="col col-analyze">
@@ -174,6 +174,12 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade 
             <i className="fas fa-paper-plane" style={{ marginRight: 6 }}></i>
             {!signal.halal ? "Blocked — halal fail" : canTrade ? "Send to paper trade" : loading ? "Loading plan…" : "Sizing unavailable"}
           </button>
+          {brokerHealth ? (
+            <div style={{ marginTop: 6, fontSize: 9, textAlign: "center", color: brokerHealth.connected ? "var(--positive)" : "var(--text-muted)" }}>
+              IBKR paper {brokerHealth.connected ? "✓" : "offline"}
+              {brokerHealth.account && brokerHealth.account.equity ? ` · $${Number(brokerHealth.account.equity).toLocaleString()}` : ""}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

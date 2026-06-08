@@ -134,3 +134,120 @@ async def v1_paper_close(trade_id: int, db: AsyncSession | None = Depends(get_as
         "status": trade.status,
         "closed_at": trade.closed_at.isoformat() if trade.closed_at else None,
     }
+
+
+# ── Broker health + real execution (IBKR paper, strategy "MANUAL") ──────────
+
+@router.get("/broker/health")
+async def v1_broker_health():
+    """Honest IBKR paper connectivity probe for the manual 'Send to paper' button.
+    connected=False (not an error) when the IB Gateway is unreachable.
+    """
+    import os
+    from app.services.broker.factory import get_broker
+    from app.services.broker.ibkr_config import get_ibkr_config
+
+    strategy = "MANUAL"
+    broker_name = os.environ.get("STRATEGY_BROKER_MANUAL", os.environ.get("BROKER_TYPE", "alpaca")).lower()
+    cfg = get_ibkr_config()
+    out = {"strategy": strategy, "broker": broker_name,
+           "host": cfg["host"], "port": cfg["port"], "mode": cfg["mode"],
+           "connected": False, "account": None}
+    try:
+        broker = get_broker(strategy_id=strategy)
+        acct = await asyncio.to_thread(broker.get_account, strategy)
+        if acct:
+            out["connected"] = True
+            out["account"] = {"equity": acct.get("equity"), "cash": acct.get("cash"),
+                              "buying_power": acct.get("buying_power"),
+                              "account_type": acct.get("account_type")}
+    except Exception as e:
+        logger.warning("broker health probe failed: %s", e)
+        out["error"] = str(e)[:160]
+    return out
+
+
+class BrokerExecuteRequest(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=10)
+    side: Literal["buy", "sell"] = Field(default="buy")
+    entry_price: float = Field(..., gt=0)
+    stop_loss: float = Field(..., gt=0)
+    take_profit: float = Field(..., gt=0)
+    shares: float = Field(..., gt=0)
+    risk_amount: float | None = None
+    confidence: float = Field(default=0, ge=0, le=1)
+
+
+@router.post("/broker/execute")
+async def v1_broker_execute(body: BrokerExecuteRequest, db: AsyncSession | None = Depends(get_async_db)):
+    """Place a REAL bracket order on the IBKR paper account (strategy 'MANUAL') and record it.
+
+    Honest failure modes:
+      - halal gate fail  -> 200 {success:false, reason:'halal_blocked'}
+      - broker offline    -> 200 {success:false, reason:'broker_offline', ...}  (no DB row)
+      - broker rejected   -> 200 {success:false, reason:<broker reason>}        (no DB row)
+    """
+    from datetime import datetime, timezone
+
+    sym = body.symbol.upper().strip()
+
+    # 1. Server-side halal guard (defense in depth; UI already gates).
+    try:
+        from app.services.halal_screening import verify_halal
+        ok_halal, halal_reason = verify_halal(sym)
+    except Exception:
+        ok_halal, halal_reason = True, "halal check unavailable"
+    if not ok_halal:
+        return {"success": False, "reason": "halal_blocked", "detail": halal_reason, "symbol": sym}
+
+    # 2. Submit bracket via the IBKR-routed manual order manager (sync -> thread).
+    def _submit():
+        from app.services.order_manager import get_order_manager
+        mgr = get_order_manager(strategy_id="MANUAL")
+        return mgr.submit_bracket(
+            symbol=sym, side=body.side, qty=int(body.shares),
+            limit_price=float(body.entry_price),
+            stop_loss_price=float(body.stop_loss),
+            take_profit_price=float(body.take_profit),
+            time_in_force="gtc",
+        )
+    try:
+        res = await asyncio.to_thread(_submit)
+    except Exception as e:
+        logger.error("broker/execute submit error for %s: %s", sym, e)
+        return {"success": False, "reason": "broker_error", "detail": str(e)[:160], "symbol": sym}
+
+    broker_id = (res or {}).get("order_id") or ""
+    if not res or not res.get("success") or not broker_id:
+        # Broker unreachable or rejected — do NOT write a misleading 'submitted' row.
+        reason = (res or {}).get("reason") or "broker_offline"
+        low = reason.lower()
+        tag = "broker_offline" if ("empty response" in low or "broker_error" in low or not res) else reason
+        return {"success": False, "reason": tag, "detail": reason, "symbol": sym}
+
+    # 3. Broker accepted -> record TradeHistory so the dashboard shows it.
+    db_id = None
+    if db is not None:
+        try:
+            from app.db.models import TradeHistory
+            trade = TradeHistory(
+                symbol=sym, side=body.side, entry_price=body.entry_price,
+                stop_loss=body.stop_loss, take_profit=body.take_profit,
+                qty=body.shares, position_value=body.shares * body.entry_price,
+                risk_amount=body.risk_amount, confidence=body.confidence,
+                status="submitted", strategy_id="MANUAL",
+                signal_details={"source": "manual_send_to_paper", "broker": "ibkr",
+                                "broker_order_id": broker_id, "order_class": "bracket"},
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(trade)
+            await db.commit()
+            await db.refresh(trade)
+            db_id = trade.id
+        except Exception as e:
+            logger.error("broker/execute DB record failed for %s: %s", sym, e)
+
+    return {"success": True, "symbol": sym, "broker": "ibkr",
+            "broker_order_id": broker_id, "status": res.get("status", "submitted"),
+            "shares": body.shares, "entry_price": body.entry_price,
+            "stop_loss": body.stop_loss, "take_profit": body.take_profit, "db_id": db_id}

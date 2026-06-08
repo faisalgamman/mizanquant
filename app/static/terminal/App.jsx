@@ -50,6 +50,7 @@ function App() {
   const [ledgerW, setLedgerW]     = useState(null);        // weekly paper-ledger status (PV)
   const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
   const [cardSymbol, setCardSymbol] = useState(null);      // Stock ID Card target symbol
+  const [brokerHealth, setBrokerHealth] = useState(null);    // IBKR paper connectivity
 
   // Fetch /buys, map real rows. Returns true once real signals are loaded.
   const loadBuys = async () => {
@@ -268,7 +269,18 @@ function App() {
     return () => { try { delete window.selectIntelSymbol; } catch (e) {} };
   }, []);
 
-  // Sidebar "Weekly/Monthly Scanner" links set the hash → switch the tab live.
+  // Fetch IBKR paper broker health on mount, refresh every 60s.
+  useEffect(() => {
+    const probe = async () => {
+      try { const r = await fetch('/api/v1/broker/health'); setBrokerHealth(await r.json()); }
+      catch (_) { setBrokerHealth({ connected: false }); }
+    };
+    probe();
+    const id = setInterval(probe, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Sidebar
   useEffect(() => {
     const onHash = () => {
       const h = location.hash.replace("#", "");
@@ -385,25 +397,42 @@ function App() {
     setPipelineRunning(false);
   };
 
-  const sendToPaper = (sig) => {
+  const sendToPaper = async (sig) => {
     if (!sig.halal) {
-      setToast({ kind: "error", title: "Blocked", body: `${sig.symbol} failed AAOIFI screen` });
+      setToast({ kind: "error", title: "Blocked", body: `${sig.symbol} failed the halal screen` });
       return;
     }
-    // Use the REAL risk-manager size from the loaded trade plan — never a
-    // 1000/price guess. If the plan hasn't loaded, block rather than mis-size.
+    // Real risk-based size + full bracket levels from the loaded trade plan.
     const plan = (analyze && analyze.symbol === sig.symbol) ? analyze.plan : null;
-    const size = plan ? (plan.shares ?? plan.qty) : null;
-    if (!size || size <= 0) {
-      setToast({ kind: "error", title: "Sizing unavailable", body: `Open ${sig.symbol} in Analyze to load its risk-based size first` });
+    const shares = plan ? (plan.shares ?? plan.qty) : null;
+    const entry  = plan ? (plan.strategy_entry ?? plan.entry_price ?? plan.entry ?? sig.price) : null;
+    const stop   = plan ? (plan.strategy_stop ?? plan.stop_loss ?? plan.stop) : null;
+    const tp     = plan ? (plan.strategy_tp1 ?? plan.take_profit ?? plan.tp1) : null;
+    if (!shares || shares <= 0 || !entry || !stop || !tp) {
+      setToast({ kind: "error", title: "Plan incomplete",
+                 body: `Open ${sig.symbol} in Analyze so its entry/stop/TP/size load first` });
       return;
     }
-    fetch('/api/v1/paper/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol: sig.symbol, side: 'buy', qty: size }),
-    }).catch(() => {});
-    setToast({ kind: "ok", title: "Paper trade sent", body: `${sig.symbol} · BUY · ${size} sh @ $${(sig.price || 0).toFixed(2)}` });
+    setToast({ kind: "ok", title: "Sending…", body: `${sig.symbol} → IBKR paper (bracket)` });
+    try {
+      const r = await fetch('/api/v1/broker/execute', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: sig.symbol, side: 'buy', entry_price: entry,
+                               stop_loss: stop, take_profit: tp, shares }),
+      });
+      const j = await r.json();
+      if (j && j.success) {
+        setToast({ kind: "ok", title: "IBKR paper order placed",
+                   body: `${sig.symbol} · BUY ${shares} sh · id ${j.broker_order_id}` });
+      } else {
+        const why = (j && j.reason) === "broker_offline"
+          ? "IB Gateway offline — start the gateway service"
+          : ((j && (j.detail || j.reason)) || "rejected");
+        setToast({ kind: "error", title: "Not placed", body: `${sig.symbol}: ${why}` });
+      }
+    } catch (e) {
+      setToast({ kind: "error", title: "Network error", body: `${sig.symbol}: ${e}` });
+    }
   };
 
   if (loading && displaySignals.length === 0) {
@@ -457,6 +486,7 @@ function App() {
             horizon={forecastHorizon}
             onHorizon={setForecastHorizon}
             onTrade={sendToPaper}
+            brokerHealth={brokerHealth}
           />
           <TradeColumn
             portfolio={portfolio}
