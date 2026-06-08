@@ -139,8 +139,20 @@ async def _get_portfolio():
         buying_power = float(account.get("buying_power", 0))
         portfolio_value = float(account.get("portfolio_value", 0))
         last_equity = float(account.get("last_equity", 0))
-        daily_pnl = round(equity - last_equity, 2) if last_equity else 0
-        daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
+        if last_equity:
+            # Alpaca-style: today's change vs yesterday's close equity.
+            daily_pnl = round(equity - last_equity, 2)
+            daily_pnl_pct = round((daily_pnl / last_equity * 100), 2) if last_equity > 0 else 0
+        else:
+            # IBKR has no last_equity — show OPEN P&L instead (account UnrealizedPnL,
+            # else the sum of position unrealized P&L) so gains/losses still display.
+            up = account.get("unrealized_pl")
+            try:
+                daily_pnl = round(float(up), 2) if up not in (None, "") else round(
+                    sum(float(p.get("unrealized_pl", 0) or 0) for p in (positions or [])), 2)
+            except (TypeError, ValueError):
+                daily_pnl = 0
+            daily_pnl_pct = round((daily_pnl / equity * 100), 2) if equity > 0 else 0
     else:
         equity = cash = buying_power = portfolio_value = daily_pnl = daily_pnl_pct = 0
 

@@ -334,6 +334,7 @@ def _position_to_dict(pos) -> dict:
         "symbol": getattr(contract, "symbol", ""),
         "qty": str(int(qty)),
         "avg_entry_price": str(avg),
+        "current_price": str(market),          # dashboard "LAST" column
         "market_value": str(market_value),
         "unrealized_pl": str(unrealized_pl),
         "unrealized_plpc": str(unrealized_plpc),
@@ -354,6 +355,10 @@ def _account_to_dict(values: list) -> dict:
             out["portfolio_value"] = str(val)
         elif tag == "BuyingPower":
             out["buying_power"] = str(val)
+        elif tag == "UnrealizedPnL":
+            out["unrealized_pl"] = str(val)      # open P&L → dashboard "Day P&L"
+        elif tag == "RealizedPnL":
+            out["realized_pl"] = str(val)
         elif tag == "AccountType":
             out["account_type"] = str(val)
     return out
