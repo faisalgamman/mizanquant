@@ -275,9 +275,9 @@ def _scheduler_loop():
             # --- SCREENER CACHE PRE-WARM: ~08:00 ET (so the Monthly tab opens warm) ---
             if _is_weekday(now) and now.hour == 8 and now.minute < 15 and last_screener_warm != today_str:
                 last_screener_warm = today_str
-                logger.info('Scheduler: pre-warming smart_screener cache (%d symbols)', len(_SMART_UNIVERSE))
                 try:
                     from app.workspace_server import _run_screener_bg, _SMART_UNIVERSE as _SU
+                    logger.info('Scheduler: pre-warming smart_screener cache (%d symbols)', len(_SU))
                     threading.Thread(target=_run_screener_bg, args=(list(_SU),),
                                      daemon=True, name='screener-warm').start()
                 except Exception as e:
