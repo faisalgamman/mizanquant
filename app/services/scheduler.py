@@ -138,6 +138,7 @@ def _scheduler_loop():
     last_paper_rebalance = ""  # YYYY-MM — monthly composite rebalance (fires 1st trading day)
     last_halal_rescreen = ""   # YYYY-MM — monthly AAOIFI financial re-screen of the universe
     last_outcome_match = ""   # YYYY-MM-DD — nightly decision-outcome matching
+    last_sentinel = ""        # YYYY-MM-DD:slot — 2x/day sentinel judgment cycle
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
@@ -275,6 +276,17 @@ def _scheduler_loop():
                     scheduler_metrics.record_cycle_end("pipeline_filter", success=False, error=str(e))
                     logger.error(f"Pipeline filter failed: {e}")
 
+            # --- AI SENTINEL — pre-market judgment (09:05 ET) ---
+            if _is_weekday(now) and now.hour == 9 and now.minute >= 5 and now.minute < 10 and last_sentinel != f"{today_str}:pre":
+                last_sentinel = f"{today_str}:pre"
+                logger.info("Sentinel: running pre-market judgment cycle...")
+                try:
+                    from app.services.ai_sentinel.sentinel import run_sentinel_cycle
+                    result = run_sentinel_cycle()
+                    logger.info("Sentinel pre-market: %s", result)
+                except Exception as e:
+                    logger.error(f"Sentinel pre-market failed: {e}")
+
             # --- PIPELINE STAGES 4-7: Full analysis + execution at 9:45 AM ET (once per day) ---
             if _is_weekday(now) and now.hour == 9 and now.minute >= 45 and last_pipeline_full != today_str:
                 last_pipeline_full = today_str
@@ -302,6 +314,17 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("post_market", success=False, error=str(e))
                     logger.error(f"Post-market report failed: {e}")
+
+            # --- AI SENTINEL — post-market judgment (16:15 ET) ---
+            if _is_weekday(now) and now.hour == 16 and now.minute >= 15 and now.minute < 20 and last_sentinel != f"{today_str}:post":
+                last_sentinel = f"{today_str}:post"
+                logger.info("Sentinel: running post-market judgment cycle...")
+                try:
+                    from app.services.ai_sentinel.sentinel import run_sentinel_cycle
+                    result = run_sentinel_cycle()
+                    logger.info("Sentinel post-market: %s", result)
+                except Exception as e:
+                    logger.error(f"Sentinel post-market failed: {e}")
 
             # --- INTRADAY SIGNALS: 10:30 / 12:00 / 14:30 / 16:30 ET ---
             # Independent block — runs alongside any other branch above.
