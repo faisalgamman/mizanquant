@@ -525,6 +525,7 @@ function App() {
           <div className="body">{toast.body}</div>
         </div>
       )}
+      <AiWidget />
     </>
   );
 }
