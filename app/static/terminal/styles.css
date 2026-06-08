@@ -623,3 +623,56 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .aiw-input button:disabled { opacity: .5; cursor: default; }
 .aiw-disc { font-size: 10px; color: var(--text-muted, #8a8f99); text-align: center; padding: 6px; }
 @media (max-width: 600px) { .aiw-panel { height: 70vh; } }
+
+/* WATCH list — near-miss stocks */
+.watch-banner { background: var(--warning-dim, #3a2e0e); border: 1px solid var(--warning, #e0a82e);
+  border-radius: 6px; padding: 6px 10px; font-size: 10px; color: var(--warning, #e0a82e);
+  margin-bottom: 8px; font-weight: 600; }
+.watch-list { max-height: 300px; overflow-y: auto; }
+.watch-row { padding: 6px 0; border-bottom: 1px solid var(--border, #2a2d36); cursor: pointer; }
+.watch-row:hover { background: var(--bg-raised, #1c1f27); }
+.watch-row:last-child { border-bottom: none; }
+.watch-top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.watch-sym { font-weight: 700; font-family: var(--font-mono); color: var(--accent, #e0a82e); min-width: 48px; }
+.watch-name { color: var(--text-secondary, #c2c6cf); flex: 1; }
+.watch-score { color: var(--warning, #e0a82e); font-weight: 600; font-family: var(--font-mono); }
+.watch-tech { font-size: 10px; color: var(--text-muted, #8a8f99); }
+.watch-reason { font-size: 10px; color: var(--text-muted, #8a8f99); padding-top: 2px; }
+.watch-note { font-size: 9px; color: var(--text-muted, #8a8f99); text-align: center; padding: 6px 0 0; }
+.watch-empty { font-size: 11px; color: var(--text-muted, #8a8f99); padding: 16px; text-align: center; }
+
+/* Bottom panel redesign — Risers + Indicators + News */
+.lr2 { display: flex; gap: 10px; }
+.lr2-col-a { flex: 0 0 40%; }
+.lr2-col-b { flex: 1; }
+.lr2-empty { font-size: 11px; color: var(--text-muted, #8a8f99); padding: 16px; text-align: center; }
+.lr2-disc { font-size: 9px; color: var(--text-muted, #8a8f99); text-align: center; padding: 6px 0 0; }
+
+/* Indicators strip */
+.lr2-indic-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.lr2-ind-tile { background: var(--bg-raised, #1c1f27); border: 1px solid var(--border, #2a2d36);
+  border-radius: 8px; padding: 8px 10px; flex: 1 1 100px; min-width: 80px; text-align: center; }
+.lr2-ind-lab { font-size: 10px; color: var(--text-muted, #8a8f99); margin-bottom: 4px; font-weight: 600; }
+.lr2-ind-price { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary, #e8e8e8); }
+.lr2-ind-chg { font-size: 11px; font-weight: 600; font-family: var(--font-mono); margin-top: 2px; }
+
+/* Market news */
+.lr2-news-list { max-height: 260px; overflow-y: auto; }
+.lr2-news-row { padding: 5px 0; border-bottom: 1px solid var(--border, #2a2d36); display: flex; flex-direction: column; gap: 1px; }
+.lr2-news-row:last-child { border-bottom: none; }
+.lr2-news-title { font-size: 12px; color: var(--accent, #e0a82e); text-decoration: none; line-height: 1.4; }
+.lr2-news-title:hover { text-decoration: underline; }
+.lr2-news-meta { font-size: 10px; color: var(--text-muted, #8a8f99); }
+
+/* Predicted risers */
+.lr2-risers-list { max-height: 340px; overflow-y: auto; }
+.lr2-riser-row { display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--border, #2a2d36); cursor: pointer; font-size: 12px; }
+.lr2-riser-row:hover { background: var(--bg-raised, #1c1f27); }
+.lr2-riser-row:last-child { border-bottom: none; }
+.lr2-riser-sym { font-weight: 700; font-family: var(--font-mono); color: var(--accent, #e0a82e); min-width: 48px; }
+.lr2-riser-name { color: var(--text-secondary, #c2c6cf); flex: 1; }
+.lr2-riser-price { font-family: var(--font-mono); color: var(--text-primary, #e8e8e8); min-width: 64px; text-align: right; }
+.lr2-riser-ec { font-family: var(--font-mono); font-weight: 600; min-width: 60px; text-align: right; }
+.lr2-riser-prob { font-size: 10px; color: var(--text-muted, #8a8f99); min-width: 64px; text-align: right; }
+@media (max-width: 900px) { .lr2 { flex-direction: column; } .lr2-col-a { flex: 1; } }

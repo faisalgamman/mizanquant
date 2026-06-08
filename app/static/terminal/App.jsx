@@ -33,12 +33,16 @@ function App() {
   const [consensus, setConsensus] = useState(null);
   const [guards, setGuards]       = useState([]);    // real guard rejections (no mock)
   const [schedule, setSchedule]   = useState([]);    // real daily schedule (no mock)
+  const [watch, setWatch] = useState({market_block:"", watch:[]});  // WATCH list — near-miss stocks
   const [system, setSystem]       = useState(null);  // real system status (auto-trade/kill-switch/regime)
   const [realStages, setRealStages] = useState([]);  // real pipeline stages from /api/v1/overview
   const [analyze, setAnalyze]     = useState(null);  // {symbol, scoring, plan} — real scoring + trade plan
-  const [forecast, setForecast]   = useState(null);  // {symbol, loading, data} — probabilistic price forecast
+  const [selectedSymbol, setSelectedSymbol] = useState(null);  // currently-selected symbol (shared across nav)
+  const [forecast, setForecast]   = useState(null);  // {symbol, expected, prob_profit, ...} — ML forecast
   const [forecastHorizon, setForecastHorizon] = useState(20);  // selectable forecast horizon (days)
-
+  const [risers, setRisers] = useState([]);     // predicted risers (Monte Carlo)
+  const [marketNews, setMarketNews] = useState([]);  // general market news
+  const [indicators, setIndicators] = useState([]);  // main market indicators
   // Two-scanner split: Weekly (swing /buys, Option-A) vs Monthly (composite
   // deep-picks, rebalanced). Each scanner has its OWN simulated paper ledger
   // (weekly=PV, monthly=PVM); real money for either half is released ONLY after
@@ -307,6 +311,29 @@ function App() {
     return () => { stop = true; };
   }, [scanMode]);
 
+  // Fetch WATCH list — near-miss stocks (display only, never traded)
+  useEffect(() => {
+    const fetchWatch = async () => {
+      try { const w = await (await fetch('/api/screener/watch?limit=20')).json(); setWatch(w); }
+      catch (_) {}
+    };
+    fetchWatch();
+    const id = setInterval(fetchWatch, 120000);  // every 2 min
+    return () => clearInterval(id);
+  }, []);
+
+  // Fetch bottom panel: risers + market news + indicators
+  useEffect(() => {
+    const fetchAll = async () => {
+      try { setRisers((await (await fetch('/api/forecast/risers?limit=8')).json()).risers || []); } catch (_) {}
+      try { setMarketNews((await (await fetch('/api/market/news?limit=8')).json()).news || []); } catch (_) {}
+      try { setIndicators((await (await fetch('/api/market/indicators')).json()).indicators || []); } catch (_) {}
+    };
+    fetchAll();
+    const id = setInterval(fetchAll, 120000);
+    return () => clearInterval(id);
+  }, []);
+
   // Real signals only — never fabricate. Empty → ScanColumn shows scanning state.
   const displaySignals = signals;
   // The active list depends on the scanner tab; the selected symbol can come
@@ -479,6 +506,7 @@ function App() {
             monthlyStatus={monthlyStatus}
             ledgerWeekly={ledgerW}
             ledgerMonthly={ledgerM}
+            watch={watch}
           />
           <AnalyzeColumn
             signal={selected}
@@ -511,10 +539,9 @@ function App() {
           />
         )}
         <LowerRow
-          models={models}
-          sectors={sectors}
-          signal={selected}
-          consensus={consensus}
+          risers={risers}
+          marketNews={marketNews}
+          indicators={indicators}
         />
       </main>
 

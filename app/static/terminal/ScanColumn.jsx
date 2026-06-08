@@ -274,7 +274,7 @@ function ScanEmpty({ status, mode }) {
 
 function ScanColumn(props) {
   const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
-          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly } = props;
+          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, watch } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
@@ -330,6 +330,37 @@ function ScanColumn(props) {
               />
             )}
           </>
+        )}
+      </div>
+      <div className="wf-section">
+        <div className="wf-head">
+          <span className="wf-title">WATCH — قريبون</span>
+          <span className="wf-sub">{watch && watch.watch ? watch.watch.length + " stocks" : "—"} · display only</span>
+        </div>
+        {watch && watch.watch && watch.watch.length > 0 ? (
+          <>
+            {watch.market_block ? (
+              <div className="watch-banner">لماذا ينتظر الجميع الآن: {watch.market_block}</div>
+            ) : null}
+            <div className="watch-list">
+              {watch.watch.map((w) => (
+                <div key={w.symbol} className="watch-row"
+                     onClick={() => window.selectIntelSymbol && window.selectIntelSymbol(w.symbol)}
+                     title="اعرض البطاقة">
+                  <div className="watch-top">
+                    <span className="watch-sym">{w.symbol}</span>
+                    <span className="watch-name">{w.name || "—"}</span>
+                    <span className="watch-score">{w.composite_score != null ? w.composite_score : "—"}/100</span>
+                    <span className="watch-tech">فني {w.score_tech != null ? w.score_tech : "—"}</span>
+                  </div>
+                  <div className="watch-reason">🔒 {w.watch_reason || "—"}</div>
+                </div>
+              ))}
+            </div>
+            <div className="watch-note">WATCH = إعداد قوي لكن بوّابة تقول انتظر — ليست إشارة شراء.</div>
+          </>
+        ) : (
+          <div className="watch-empty">لا قريبون الآن</div>
         )}
       </div>
     </div>

@@ -18,7 +18,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
 
 logger = logging.getLogger("screener")
 
@@ -1036,3 +1035,75 @@ def get_alpaca_news(symbol: str, limit: int = 10) -> list[dict]:
             logger.debug("alpaca news %s: %s", sym, e)
     _ALPACA_NEWS_CACHE[sym] = (now, out)
     return out
+
+
+def get_alpaca_market_news(limit: int = 8) -> list[dict]:
+    """General market news (no symbol filter). Reuses Alpaca data keys + 15-min cache."""
+    cache_key = "__market__"
+    now = time.time()
+    hit = _ALPACA_NEWS_CACHE.get(cache_key)
+    if hit and now - hit[0] < _ALPACA_NEWS_TTL:
+        return hit[1]
+
+    key = os.environ.get("ALPACA_DATA_KEY") or os.environ.get("ALPACA_API_KEY", "")
+    sec = os.environ.get("ALPACA_DATA_SECRET") or os.environ.get("ALPACA_SECRET_KEY", "")
+    base = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets").rstrip("/")
+    out: list[dict] = []
+    if key and sec:
+        try:
+            import httpx
+            r = httpx.get(
+                f"{base}/v1beta1/news",
+                params={"limit": min(int(limit), 50), "sort": "desc"},
+                headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                for n in (r.json().get("news") or [])[:limit]:
+                    out.append({
+                        "title": n.get("headline", ""),
+                        "summary": (n.get("summary") or "")[:300],
+                        "publisher": n.get("source", "") or n.get("author", ""),
+                        "link": n.get("url", ""),
+                        "published": n.get("created_at", ""),
+                    })
+        except Exception as e:
+            logger.debug("alpaca market news: %s", e)
+    _ALPACA_NEWS_CACHE[cache_key] = (now, out)
+    return out
+
+
+def get_alpaca_snapshots(symbols: list[str]) -> dict:
+    """Fetch daily-bar snapshots from Alpaca for a set of symbols.
+    Returns {symbol: {price, change_pct}} or {} on error."""
+    result: dict = {}
+    if not symbols:
+        return result
+    key = os.environ.get("ALPACA_DATA_KEY") or os.environ.get("ALPACA_API_KEY", "")
+    sec = os.environ.get("ALPACA_DATA_SECRET") or os.environ.get("ALPACA_SECRET_KEY", "")
+    base = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets").rstrip("/")
+    if not key or not sec:
+        return result
+    try:
+        import httpx
+        joined = ",".join([s.strip().upper() for s in symbols if s and s.strip()])
+        if not joined:
+            return result
+        r = httpx.get(
+            f"{base}/v2/stocks/snapshots",
+            params={"symbols": joined},
+            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return result
+        for sym, snap in (r.json() or {}).items():
+            db = snap.get("dailyBar") or {}
+            prev = snap.get("prevDailyBar") or {}
+            price = db.get("c") or snap.get("latestTrade", {}).get("p")
+            prev_c = prev.get("c")
+            change_pct = ((price / prev_c - 1) * 100) if price and prev_c else None
+            result[sym] = {"price": price, "change_pct": round(change_pct, 2) if change_pct is not None else None}
+    except Exception as e:
+        logger.debug("alpaca snapshots error: %s", e)
+    return result

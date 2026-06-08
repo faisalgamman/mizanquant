@@ -4487,6 +4487,175 @@ async def screener_near_miss():
 
 
 # ---------------------------------------------------------------------------
+# WATCH list — surface gate-blocked near-miss stocks with WHY they wait
+# ---------------------------------------------------------------------------
+
+def _market_gate_reason(ms: dict) -> str:
+    """Short Arabic reason the whole market is gated now, or '' when clear."""
+    if not ms:
+        return ""
+    status = str(ms.get("status", "")).upper()
+    bits = []
+    if ms.get("halt_pipeline") or "EXTREME" in status:
+        bits.append("توقّف (خوف شديد/VIX)")
+    elif "RISK-OFF" in status or "CAUTION" in status or "STRESS" in status:
+        bits.append(f"السوق {ms.get('status')}")
+    if str(ms.get("regime", "")).upper() == "BEAR":
+        bits.append("نظام هابط (BEAR)")
+    return " · ".join(bits)
+
+
+def _watch_reason(s: dict, market_block: str) -> str:
+    """Why this strong-ish stock is WATCH not BUY."""
+    parts = []
+    if market_block:
+        parts.append(market_block)
+    failed = s.get("hard_gates_failed") or []
+    if failed:
+        parts.append("بوّابة: " + "، ".join(str(f) for f in failed[:2]))
+    rs = s.get("rs_vs_spy")
+    try:
+        if rs is not None and float(rs) < 0:
+            parts.append("متأخّر عن SPY")
+    except (TypeError, ValueError):
+        pass
+    comp = s.get("composite_score", 0)
+    parts.append(f"الدرجة {comp}/100 < 55 (بوّابة BUY)")
+    return " · ".join(parts)
+
+
+@app.get("/api/screener/watch")
+async def screener_watch(limit: int = Query(20, ge=1, le=100)):
+    """Near-miss WATCH list — strong-ish halal stocks below the BUY gate, with WHY they wait.
+    Display only; the system never buys these."""
+    try:
+        data = await _smart_screener_impl(min_score=30, max_results=200, use_cache="true")
+    except Exception as e:
+        logger.debug("screener_watch: %s", e)
+        data = {}
+    try:
+        from app.services.market_context import get_market_status
+        ms = get_market_status()
+    except Exception:
+        ms = {}
+    market_block = _market_gate_reason(ms)
+    rows = data.get("results", []) if isinstance(data, dict) else []
+    watch = []
+    for s in rows:
+        comp = s.get("composite_score", 0) or 0
+        if s.get("signal_composite") == "WATCH" or (38 <= comp < 55):
+            watch.append({
+                "symbol": s.get("symbol"), "name": s.get("name") or s.get("company") or s.get("symbol"),
+                "price": s.get("price"), "composite_score": comp,
+                "score_tech": s.get("score_tech"), "score_fund": s.get("score_fund"),
+                "sector": s.get("sector"), "is_halal": s.get("is_halal"),
+                "watch_reason": _watch_reason(s, market_block),
+            })
+    watch.sort(key=lambda x: x.get("composite_score", 0) or 0, reverse=True)
+    return {"market_block": market_block, "count": len(watch[:limit]), "watch": watch[:limit]}
+
+
+# ---------------------------------------------------------------------------
+# Monte-Carlo forecast risers — top stocks by expected upside (probabilistic)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/forecast/risers")
+async def forecast_risers(limit: int = Query(8, ge=1, le=20)):
+    """Top stocks by Monte-Carlo EXPECTED upside (probabilistic — not advice)."""
+    try:
+        data = await _smart_screener_impl(min_score=45, max_results=60, use_cache="true")
+    except Exception as e:
+        logger.debug("risers screener: %s", e)
+        data = {}
+    cands = [r for r in (data.get("results", []) if isinstance(data, dict) else [])
+             if r.get("is_halal") and (r.get("composite_score", 0) or 0) >= 45][:25]
+
+    from app.services.price_forecast import monte_carlo_forecast
+    from app.services import market_data as md
+    def _one(r):
+        try:
+            df = md.fetch(r["symbol"], period="1y")
+            prices = df["close"].tolist() if df is not None and len(df) > 30 else None
+            if not prices:
+                return None
+            fc = monte_carlo_forecast(prices, 20)
+            ec = fc.get("expected_change_pct")
+            if ec is None or ec <= 0:
+                return None
+            return {"symbol": r["symbol"], "name": r.get("name") or r.get("company") or r["symbol"],
+                    "price": fc.get("current_price") or r.get("price"),
+                    "expected_change_pct": ec, "prob_profit_pct": fc.get("prob_profit_pct"),
+                    "is_halal": r.get("is_halal", True)}
+        except Exception:
+            return None
+    import asyncio
+    rows = await asyncio.gather(*[asyncio.to_thread(_one, r) for r in cands])
+    rows = [x for x in rows if x]
+    rows.sort(key=lambda x: x.get("expected_change_pct", 0), reverse=True)
+    return {"count": len(rows[:limit]), "risers": rows[:limit],
+            "disclaimer": "نطاق احتمالي من تذبذب السهم — ليس وعداً ولا نصيحة."}
+
+
+# ---------------------------------------------------------------------------
+# Market news + indicators — bottom panel data
+# ---------------------------------------------------------------------------
+
+@app.get("/api/market/news")
+async def market_news(limit: int = Query(8, ge=1, le=20)):
+    """General market news headlines (Alpaca primary, FMP fallback)."""
+    from app.services.market_data import get_alpaca_market_news
+    items = await asyncio.to_thread(get_alpaca_market_news, limit)
+    if not items:
+        fmp = await _fmp_call(fmp_client.get_general_news, limit=limit)
+        items = [{"title": n.get("title", ""), "summary": (n.get("text") or "")[:300],
+                  "publisher": n.get("site", ""), "link": n.get("url", ""),
+                  "published": n.get("publishedDate", "")} for n in (fmp or [])]
+    return {"count": len(items), "news": items}
+
+
+@app.get("/api/market/indicators")
+async def market_indicators():
+    """Main market indicators: SPY,QQQ,DIA,IWM,VIX,GLD,BNO,BTC."""
+    try:
+        from app.services.market_data import get_alpaca_snapshots
+        from app.services.market_context import get_market_status
+
+        symbols_map = [
+            ("S&P 500", "SPY"), ("Nasdaq", "QQQ"), ("Dow", "DIA"),
+            ("Russell", "IWM"), ("Gold", "GLD"), ("Brent", "BNO"),
+        ]
+        syms = [s for _, s in symbols_map]
+        snaps = await asyncio.to_thread(get_alpaca_snapshots, syms)
+
+        ms = {}
+        try:
+            ms = get_market_status() or {}
+        except Exception:
+            pass
+        vix_val = ms.get("vix")
+
+        indicators = []
+        for label, sym in symbols_map:
+            snap = snaps.get(sym, {})
+            indicators.append({
+                "label": label, "symbol": sym,
+                "price": snap.get("price"),
+                "change_pct": snap.get("change_pct"),
+            })
+        indicators.append({
+            "label": "VIX", "symbol": "VIX",
+            "price": vix_val, "change_pct": None,
+        })
+        indicators.append({
+            "label": "Bitcoin", "symbol": "BTC",
+            "price": None, "change_pct": None,
+        })
+        return {"indicators": indicators}
+    except Exception:
+        return {"indicators": []}
+
+
+# ---------------------------------------------------------------------------
 # AI Assistant — smart investment analyst (LLM-powered with template fallback)
 # ---------------------------------------------------------------------------
 
