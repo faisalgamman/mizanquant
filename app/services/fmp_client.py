@@ -77,7 +77,7 @@ class _CircuitBreaker:
             return False
 
 
-_FMP_BREAKER = _CircuitBreaker("fmp", threshold=5, reset=120.0)
+_FMP_BREAKER = _CircuitBreaker("fmp", threshold=5, reset=1800.0)  # once quota is spent, skip FMP 30 min
 
 
 # ---------------------------------------------------------------------------
@@ -223,16 +223,11 @@ class FMPClient:
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             if status == 429:
-                wait = 65  # 65s ensures the rate-limit window resets
-                logger.warning("FMP 429 rate limit — waiting %ds then retrying", wait)
-                time.sleep(wait)
-                try:
-                    resp2 = self._http.get(url, params=params)
-                    resp2.raise_for_status()
-                    _FMP_BREAKER.record_success()
-                    return resp2.json()
-                except Exception as retry_exc:
-                    logger.error("FMP retry after 429 also failed: %s", retry_exc)
+                # The free tier limit is per-DAY (~250), not per-minute — a 65s wait is
+                # futile (the 429 persists all day once the quota is spent) and stalls a
+                # 658-symbol scan for hours. Skip immediately and let the breaker trip after
+                # a few 429s so the rest of the scan flies through on the yfinance/cache fallback.
+                logger.warning("FMP 429 (daily quota) — skipping, using fallback")
             elif status == 402:
                 logger.debug("FMP 402 (premium endpoint) for %s — skipping", url)
             elif status == 403:
