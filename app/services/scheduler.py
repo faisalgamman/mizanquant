@@ -139,6 +139,8 @@ def _scheduler_loop():
     last_halal_rescreen = ""   # YYYY-MM — monthly AAOIFI financial re-screen of the universe
     last_outcome_match = ""   # YYYY-MM-DD — nightly decision-outcome matching
     last_sentinel = ""        # YYYY-MM-DD:slot — 2x/day sentinel judgment cycle
+    last_screener_warm = ""   # YYYY-MM-DD — daily screener cache pre-warm
+    _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
@@ -160,6 +162,17 @@ def _scheduler_loop():
         try:
             now = _get_eastern_now()
             today_str = now.strftime("%Y-%m-%d")
+
+            # --- STARTUP: Pre-warm smart_screener cache once on boot ---
+            if not _screener_warmed_startup:
+                _screener_warmed_startup = True
+                logger.info('Scheduler: pre-warming smart_screener cache on startup')
+                try:
+                    from app.workspace_server import _run_screener_bg, _SMART_UNIVERSE as _SU
+                    threading.Thread(target=_run_screener_bg, args=(list(_SU),),
+                                     daemon=True, name='screener-warm-startup').start()
+                except Exception as e:
+                    logger.warning('Scheduler: startup screener warm failed: %%s', e)
 
             # --- COST OPTIMIZATION: Sleep deeply outside active window ---
             if not _is_active_window(now):
@@ -258,6 +271,17 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("pipeline_data", success=False, error=str(e))
                     logger.error(f"Pipeline data collection failed: {e}")
+
+            # --- SCREENER CACHE PRE-WARM: ~08:00 ET (so the Monthly tab opens warm) ---
+            if _is_weekday(now) and now.hour == 8 and now.minute < 15 and last_screener_warm != today_str:
+                last_screener_warm = today_str
+                logger.info('Scheduler: pre-warming smart_screener cache (%d symbols)', len(_SMART_UNIVERSE))
+                try:
+                    from app.workspace_server import _run_screener_bg, _SMART_UNIVERSE as _SU
+                    threading.Thread(target=_run_screener_bg, args=(list(_SU),),
+                                     daemon=True, name='screener-warm').start()
+                except Exception as e:
+                    logger.warning('Scheduler: screener warm failed: %s', e)
 
             # --- PIPELINE STAGES 2-3: Halal + Smart filter at 8:30 AM ET (once per day) ---
             if _is_weekday(now) and now.hour == 8 and now.minute >= 30 and now.minute < 35 and last_pipeline_filter != today_str:

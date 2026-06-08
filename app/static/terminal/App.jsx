@@ -51,6 +51,7 @@ function App() {
     (typeof location !== "undefined" && location.hash.replace("#", "") === "monthly") ? "monthly" : "weekly");
   const [monthly, setMonthly]     = useState([]);          // composite picks (real or honest empty)
   const [monthlyStatus, setMonthlyStatus] = useState("computing"); // computing | ready | empty
+  const [monthlyScanPct, setMonthlyScanPct] = useState(0);
   const [ledgerW, setLedgerW]     = useState(null);        // weekly paper-ledger status (PV)
   const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
   const [cardSymbol, setCardSymbol] = useState(null);      // Stock ID Card target symbol
@@ -191,9 +192,11 @@ function App() {
       const j = await (await fetch('/api/screener/deep-picks?limit=25')).json();
       const rows = (j && Array.isArray(j.results)) ? j.results : [];
       if (rows.length === 0) {
-        setMonthlyStatus((j && j.status === "scanning") ? "computing" : "empty");
+        if (j && j.status === "scanning") { setMonthlyStatus("computing"); setMonthlyScanPct(j.scan_pct || 0); }
+        else setMonthlyStatus("empty");
         return false;
       }
+      setMonthlyScanPct(100);
       setMonthly(rows.filter(r => r.symbol && r.price).map(r => ({
         symbol:  r.symbol,
         company: r.company_name || r.symbol,
@@ -305,7 +308,7 @@ function App() {
       if (ok || stop) return;
       const poll = setInterval(async () => {
         tries += 1;
-        if (stop || await loadMonthly() || tries >= 12) clearInterval(poll);
+        if (stop || await loadMonthly() || tries >= 40) clearInterval(poll);
       }, 15000);
     })();
     return () => { stop = true; };
@@ -524,6 +527,8 @@ function App() {
             }}
             signals={filteredSignals}
             monthlySignals={filteredMonthly}
+            monthlyStatus={monthlyStatus}
+            monthlyScanPct={monthlyScanPct}
             selectedSymbol={selectedSym}
             onSelect={setSelectedSymbol}
             market={market}

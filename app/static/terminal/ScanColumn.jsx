@@ -244,7 +244,7 @@ function LedgerBanner({ ledger, kind }) {
   );
 }
 
-function ScanEmpty({ status, mode }) {
+function ScanEmpty({ status, mode, scanPct }) {
   const computing = status === "computing";
   const monthly = mode === "monthly";
   return (
@@ -259,22 +259,29 @@ function ScanEmpty({ status, mode }) {
         }}></div>
       )}
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>
-        {computing ? "Scanning the halal universe…" : (monthly ? "No composite picks right now" : "No buy signals right now")}
+        {computing ? (monthly ? `جارٍ مسح الكون الحلال… ${scanPct > 0 ? scanPct + "%" : ""}` : "Scanning the halal universe…") : (monthly ? "No composite picks right now" : "No buy signals right now")}
       </div>
       <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: 0.4 }}>
         {computing
-          ? "Screening ~650 symbols across AAOIFI gates · 1–2 min"
+          ? (monthly && scanPct > 0
+              ? `تم المسح ${scanPct}% من ~650 رمزاً`
+              : (monthly ? "جارٍ بدء المسح…" : "Screening ~650 symbols across AAOIFI gates · 1–2 min"))
           : (monthly
               ? "Composite screener cache is empty · trigger the smart screener first"
               : "Nothing scored ≥ 55 this cycle · check the watchlist")}
       </div>
+      {computing && monthly && scanPct > 0 && (
+        <div style={{ width: 200, height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+          <div style={{ width: scanPct + "%", height: "100%", background: "var(--accent)", transition: "width 0.5s" }}></div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ScanColumn(props) {
   const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
-          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, watch } = props;
+          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, watch, monthlyScanPct } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
@@ -309,7 +316,7 @@ function ScanColumn(props) {
         <ScanTabs mode={scanMode} onMode={onScanMode} />
         <LedgerBanner ledger={monthlyMode ? ledgerMonthly : ledgerWeekly} kind={monthlyMode ? "Monthly" : "Weekly"} />
         {empty ? (
-          <ScanEmpty status={status} mode={scanMode} />
+          <ScanEmpty status={status} mode={scanMode} scanPct={monthlyScanPct || 0} />
         ) : (
           <>
             <div className="signals-featured">
