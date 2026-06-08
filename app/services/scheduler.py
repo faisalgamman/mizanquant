@@ -136,6 +136,8 @@ def _scheduler_loop():
     last_paper_record = ""
     last_paper_mature = ""
     last_paper_rebalance = ""  # YYYY-MM — monthly composite rebalance (fires 1st trading day)
+    last_halal_rescreen = ""   # YYYY-MM — monthly AAOIFI financial re-screen of the universe
+    last_outcome_match = ""   # YYYY-MM-DD — nightly decision-outcome matching
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
     # Unified pipeline schedule (US/Eastern, weekdays only).
@@ -185,6 +187,17 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("train_models", success=False, error=str(e))
                     logger.error(f"Nightly retrain failed: {e}")
+
+            # --- AI SENTINEL — nightly outcome matching (02:15 ET) ---
+            if _is_weekday(now) and now.hour == 2 and now.minute >= 15 and now.minute < 20 and last_outcome_match != today_str:
+                last_outcome_match = today_str
+                logger.info("Sentinel: matching decision outcomes to paper P&L...")
+                try:
+                    from app.services.ai_sentinel.journal import match_outcomes
+                    result = match_outcomes()
+                    logger.info("Sentinel outcome match: %s", result)
+                except Exception as e:
+                    logger.error(f"Sentinel outcome match failed: {e}")
 
             if _is_weekday(now) and now.hour == 3 and last_pretrain_ml != today_str:
                 last_pretrain_ml = today_str
@@ -364,6 +377,27 @@ def _scheduler_loop():
                     logger.info("Monthly rebalance: %s", res)
                 except Exception as e:
                     logger.error(f"Paper validation monthly rebalance failed: {e}", exc_info=True)
+
+            # --- MONTHLY AAOIFI FINANCIAL RE-SCREEN (halal universe hygiene) ---
+            # 1st of the month ~02:30 ET (off-hours, heavy): recompute the debt /
+            # liquidity ratios for the curated universe and prune names that drifted
+            # over the 33% AAOIFI limit (the curated list only proves the SECTOR
+            # screen). Keeps the halal universe genuinely compliant over time.
+            if (now.day <= 3 and now.hour == 2 and 30 <= now.minute < 40
+                    and last_halal_rescreen != month_key):
+                last_halal_rescreen = month_key
+                logger.info("Halal re-screen: monthly AAOIFI financial check (%s)...", month_key)
+                try:
+                    from app.services.halal_rescreen import (
+                        rescreen_universe, apply_rescreen, load_universe,
+                    )
+                    res = rescreen_universe(load_universe(), sleep=0.2)
+                    plan = apply_rescreen(res, dry_run=False)
+                    logger.info("Halal re-screen: pruned %d (%d->%d); unknown=%d",
+                                len(plan["removed"]), plan["before_count"],
+                                plan["after_count"], len(res["unknown"]))
+                except Exception as e:
+                    logger.error(f"Halal monthly re-screen failed: {e}", exc_info=True)
 
             # Sleep 60 seconds between checks
             time.sleep(60)
