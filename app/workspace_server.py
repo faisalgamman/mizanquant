@@ -6665,6 +6665,12 @@ try:
     app.include_router(forecast_router)
 except Exception:
     logger.warning("forecast router not available — skipped")
+try:
+    from app.routers.telegram_webhook import router as telegram_webhook_router
+    app.include_router(telegram_webhook_router)
+    logger.info("Telegram webhook router registered — POST /api/v1/telegram/webhook")
+except Exception:
+    logger.warning("telegram webhook router not available — skipped")
 
 # ---------------------------------------------------------------------------
 # Public API endpoints for dashboard (no auth required)

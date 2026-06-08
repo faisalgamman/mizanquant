@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     # --- Notifications ---
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_WEBHOOK_SECRET: str = ""  # secret_token for setWebhook validation
 
     # --- Claude AI Agent ---
     ANTHROPIC_API_KEY: str = ""
