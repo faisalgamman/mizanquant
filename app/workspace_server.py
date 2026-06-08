@@ -3347,6 +3347,19 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
         # FMP primary (server-safe); yfinance fallback built into _get_smart_info
         info = _get_smart_info(symbol)
         price = _safe_float(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
+        # Resilience: when FMP is rate-limited (429), info is empty and carries no price.
+        # Fall back to the price-data source (Alpaca/Tiingo — works on Railway) so the
+        # TECHNICAL analysis still runs even though FMP fundamentals are unavailable.
+        # Without this the whole analysis aborts → the Stock card shows "—" everywhere.
+        if not price or price <= 0:
+            try:
+                _, _pdf = _fetch_data(symbol, period="1mo")
+                if _pdf is not None and len(_pdf) > 0:
+                    price = float(_pdf["close"].iloc[-1])
+                    info = dict(info or {})
+                    info.setdefault("currentPrice", price)
+            except Exception:
+                pass
         if not price or price <= 0:
             return None
         # Penny floor — exclude low-priced names (manipulation/liquidity risk).
