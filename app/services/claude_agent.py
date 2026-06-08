@@ -176,68 +176,60 @@ class TradingAgent:
                     choice = response.choices[0]
                     finish_reason = choice.finish_reason
                     
-                    # Build assistant message for history
-                    assistant_msg = {"role": "assistant"}
-                    text_parts = []
-                    tool_calls = []
-                    
-                    if choice.message.content:
-                        text_parts.append(choice.message.content)
-                    if choice.message.tool_calls:
-                        for tc in choice.message.tool_calls:
-                            tool_calls.append(tc)
-                    
-                    if tool_calls:
-                        # Convert to Anthropic-style content blocks for history
-                        content_blocks = []
-                        if text_parts:
-                            content_blocks.append({"type": "text", "text": "".join(text_parts)})
-                        for tc in tool_calls:
-                            content_blocks.append({
-                                "type": "tool_use",
+                    # Build the assistant message in OpenAI/DeepSeek-native format.
+                    # Preserve tool_calls — DeepSeek REQUIRES each to be answered by a
+                    # role="tool" message carrying the matching tool_call_id, otherwise
+                    # the next request 400s (this was the "no answers" bug).
+                    msg = choice.message
+                    assistant_entry = {"role": "assistant", "content": msg.content or ""}
+                    if msg.tool_calls:
+                        assistant_entry["content"] = msg.content or None
+                        assistant_entry["tool_calls"] = [
+                            {
                                 "id": tc.id,
-                                "name": tc.function.name,
-                                "input": json.loads(tc.function.arguments),
-                            })
-                        assistant_msg["content"] = content_blocks
-                    else:
-                        assistant_msg["content"] = choice.message.content or ""
-                    
-                    messages.append(assistant_msg)
-                    
-                    # Check if done
-                    if finish_reason == "stop":
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ]
+                    messages.append(assistant_entry)
+
+                    # Done — model returned a final answer with no tool calls.
+                    if finish_reason == "stop" or not msg.tool_calls:
                         return {
-                            "response": choice.message.content or "",
+                            "response": msg.content or "",
                             "conversation_id": cid,
                             "tools_used": tools_used,
                             "model": self.model,
                         }
-                    
-                    # Process tool calls
-                    if finish_reason == "tool_calls":
-                        tool_results = []
-                        for tc in tool_calls:
-                            tool_name = tc.function.name
-                            tool_input = json.loads(tc.function.arguments)
-                            
-                            logger.info(f"Agent calling tool: {tool_name}({tool_input})")
-                            tools_used.append(tool_name)
-                            
-                            result_str = await asyncio.to_thread(
-                                execute_tool, tool_name, tool_input
-                            )
-                            
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tc.id,
-                                "content": result_str,
-                            })
-                        
-                        messages.append({"role": "user", "content": tool_results})
-                    else:
-                        break
-                        
+
+                    # Execute each requested tool; append its result as a role="tool"
+                    # message keyed by tool_call_id (the OpenAI tool-calling contract).
+                    for tc in msg.tool_calls:
+                        tool_name = tc.function.name
+                        try:
+                            tool_input = json.loads(tc.function.arguments or "{}")
+                        except (ValueError, TypeError):
+                            tool_input = {}
+                        logger.info("Agent calling tool: %s(%s)", tool_name, tool_input)
+                        tools_used.append(tool_name)
+                        result_str = await asyncio.to_thread(
+                            execute_tool, tool_name, tool_input
+                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": str(result_str),
+                        })
+                    # Loop back for the next DeepSeek call. MUST continue — never fall
+                    # through to the legacy Anthropic-only block after the try/except,
+                    # which does response.content and crashes on a DeepSeek response
+                    # (this stray fall-through was why tool queries returned no answer).
+                    continue
+
                 else:  # anthropic
                     response = await asyncio.to_thread(
                         self._anthropic_client.messages.create,
@@ -362,43 +354,10 @@ class TradingAgent:
     def _call_deepseek(self, messages: list, tools: list):
         """Call DeepSeek API with tool definitions."""
         system_msg = _build_system_prompt()
-        # Inject system prompt as first message
-        api_messages = [{"role": "system", "content": system_msg}]
-        for m in messages:
-            role = m.get("role", "user")
-            content = m.get("content", "")
-            if isinstance(content, list):
-                # Flatten tool results / mixed content
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "tool_result":
-                            text_parts.append(block.get("content", ""))
-                        elif block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif block.get("type") == "tool_use":
-                            # Convert Anthropic tool_use to OpenAI assistant with tool_calls
-                            api_messages.append({
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [{
-                                    "id": block.get("id", ""),
-                                    "type": "function",
-                                    "function": {
-                                        "name": block.get("name", ""),
-                                        "arguments": json.dumps(block.get("input", {})),
-                                    }
-                                }]
-                            })
-                            # Then add tool result
-                            continue
-                    else:
-                        text_parts.append(str(block))
-                content = "\n".join(text_parts)
-                if not content.strip():
-                    continue
-            api_messages.append({"role": role, "content": content})
-        
+        # chat() now builds OpenAI/DeepSeek-native history (user / assistant+tool_calls /
+        # tool+tool_call_id), so just prepend the system message and pass it through.
+        api_messages = [{"role": "system", "content": system_msg}, *messages]
+
         return self._deepseek_client.chat.completions.create(
             model=self.model,
             messages=api_messages,
