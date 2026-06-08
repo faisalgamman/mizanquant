@@ -549,6 +549,11 @@ class DashboardAuthMiddleware(BaseHTTPMiddleware):
 
     _EXEMPT_PREFIXES = ("/login", "/logout", "/health", "/livez", "/readyz",
                         "/favicon", "/ws/",
+                        # Telegram calls this server-to-server with NO login cookie —
+                        # it is secured by its own secret-token header + owner chat_id
+                        # check, so it must bypass the browser login gate or every
+                        # bot update is rejected with 401 and two-way chat never works.
+                        "/api/v1/telegram/webhook",
                         # Public-facing marketing surfaces — institutional visitors
                         # must reach these WITHOUT a login (the gated terminal lives
                         # behind /login via the landing's Terminal Access vault).
