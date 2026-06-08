@@ -102,31 +102,48 @@ def get_or_create_conversation(conversation_id: Optional[str] = None) -> tuple[s
 # ---------------------------------------------------------------------------
 
 class TradingAgent:
-    """AI-powered trading assistant with tool use (DeepSeek or Claude)."""
+    """AI-powered trading assistant with tool use (DeepSeek, Groq, or Anthropic Claude)."""
 
     def __init__(self):
-        self._provider = None  # "deepseek" or "anthropic"
-        self._deepseek_client = None
+        import os
+
+        self._provider = None  # "deepseek", "groq", or "anthropic"
+        self._oai_client = None  # shared OpenAI-compatible client (DeepSeek / Groq)
         self._anthropic_client = None
         self._tools = None  # schema list for the active provider
 
-        if settings.DEEPSEEK_API_KEY:
+        pref = os.environ.get("AGENT_PROVIDER", "").lower().strip()
+
+        def _want(name):
+            return pref == name or pref == ""
+
+        if _want("deepseek") and settings.DEEPSEEK_API_KEY:
             self._provider = "deepseek"
-            self._deepseek_client = OpenAI(
+            self._oai_client = OpenAI(
                 api_key=settings.DEEPSEEK_API_KEY,
                 base_url="https://api.deepseek.com/v1",
             )
             self._tools = DEEPSEEK_TOOL_SCHEMAS
             self.model = settings.DEEPSEEK_MODEL
-            logger.info("TradingAgent: using DeepSeek (%s)", self.model)
-        elif settings.ANTHROPIC_API_KEY:
+        elif _want("groq") and settings.GROQ_API_KEY:
+            self._provider = "groq"
+            self._oai_client = OpenAI(
+                api_key=settings.GROQ_API_KEY,
+                base_url="https://api.groq.com/openai/v1",
+            )
+            self._tools = DEEPSEEK_TOOL_SCHEMAS  # identical OpenAI tool schema
+            self.model = settings.GROQ_MODEL
+        elif _want("anthropic") and settings.ANTHROPIC_API_KEY:
             self._provider = "anthropic"
             self._anthropic_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
             self._tools = TOOL_SCHEMAS
             self.model = settings.CLAUDE_MODEL
-            logger.info("TradingAgent: using Anthropic Claude (%s)", self.model)
         else:
-            raise ValueError("No LLM API key configured — set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY")
+            raise ValueError(
+                "No LLM provider available — set DEEPSEEK_API_KEY, GROQ_API_KEY, "
+                "or ANTHROPIC_API_KEY"
+            )
+        logger.info("TradingAgent: provider=%s model=%s", self._provider, self.model)
 
         self.max_iterations = 8  # max tool-use loop iterations
 
@@ -158,7 +175,7 @@ class TradingAgent:
 
             # Call LLM (run in thread pool to not block event loop)
             try:
-                if self._provider == "deepseek":
+                if self._provider in ("deepseek", "groq"):
                     response = await asyncio.to_thread(
                         self._call_deepseek,
                         messages=messages,
@@ -358,7 +375,7 @@ class TradingAgent:
         # tool+tool_call_id), so just prepend the system message and pass it through.
         api_messages = [{"role": "system", "content": system_msg}, *messages]
 
-        return self._deepseek_client.chat.completions.create(
+        return self._oai_client.chat.completions.create(
             model=self.model,
             messages=api_messages,
             tools=tools,

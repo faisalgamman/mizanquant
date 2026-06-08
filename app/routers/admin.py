@@ -218,9 +218,9 @@ async def optimize_parameters(n_stocks: int = 10, x_api_key: OperatorAPIKey = No
 
 @router.post("/agent/chat")
 async def agent_chat(payload: dict):
-    from halal_screener import settings, NON_FATAL_ANALYSIS_ERROR, logger
-    if not (settings.DEEPSEEK_API_KEY or settings.ANTHROPIC_API_KEY):
-        return {"error": "No LLM API key configured. Set DEEPSEEK_API_KEY or ANTHROPIC_API_KEY in Railway environment variables."}
+    from halal_screener import settings, logger
+    if not (settings.DEEPSEEK_API_KEY or settings.GROQ_API_KEY or settings.ANTHROPIC_API_KEY):
+        return {"error": "No LLM API key configured. Set DEEPSEEK_API_KEY, GROQ_API_KEY, or ANTHROPIC_API_KEY in Railway environment variables."}
     message = payload.get("message", "").strip()
     if not message:
         return {"error": "Message is required"}
@@ -230,9 +230,9 @@ async def agent_chat(payload: dict):
         agent = get_agent()
         result = await agent.chat(message, conversation_id=conversation_id)
         return result
-    except NON_FATAL_ANALYSIS_ERROR as e:
-        logger.error(f"Agent chat error: {e}")
-        return {"error": f"Agent error: {str(e)}"}
+    except Exception as e:
+        logger.error("Agent chat error: %s", e)
+        return {"error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
 @router.get("/agent/analyze")
@@ -257,14 +257,44 @@ async def agent_analyze(symbol: str = "AAPL"):
 @router.get("/agent/health")
 async def agent_health():
     from halal_screener import settings
-    from app.services.claude_tools import TOOL_SCHEMAS
-    configured = bool(settings.DEEPSEEK_API_KEY or settings.ANTHROPIC_API_KEY)
-    provider = "deepseek" if settings.DEEPSEEK_API_KEY else ("anthropic" if settings.ANTHROPIC_API_KEY else "none")
-    model = settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY else settings.CLAUDE_MODEL
-    tools = DEEPSEEK_TOOL_SCHEMAS if settings.DEEPSEEK_API_KEY else TOOL_SCHEMAS
-    return {"status": "ready" if configured else "not_configured", "provider": provider, "model": model,
-            "api_key_configured": configured, "tools_count": len(tools),
-            "tools": [t["name"] if "name" in t else t["function"]["name"] for t in tools]}
+    from app.services.claude_tools import TOOL_SCHEMAS, DEEPSEEK_TOOL_SCHEMAS
+    configured = bool(settings.DEEPSEEK_API_KEY or settings.GROQ_API_KEY or settings.ANTHROPIC_API_KEY)
+    provider = (
+        "deepseek" if settings.DEEPSEEK_API_KEY
+        else "groq" if settings.GROQ_API_KEY
+        else "anthropic" if settings.ANTHROPIC_API_KEY
+        else "none"
+    )
+    model = (
+        settings.DEEPSEEK_MODEL if settings.DEEPSEEK_API_KEY
+        else settings.GROQ_MODEL if settings.GROQ_API_KEY
+        else settings.CLAUDE_MODEL
+    )
+    tools = DEEPSEEK_TOOL_SCHEMAS if (settings.DEEPSEEK_API_KEY or settings.GROQ_API_KEY) else TOOL_SCHEMAS
+    out = {
+        "status": "ready" if configured else "not_configured",
+        "provider": provider,
+        "model": model,
+        "api_key_configured": configured,
+        "tools_count": len(tools),
+        "tools": [t["name"] if "name" in t else t["function"]["name"] for t in tools],
+    }
+    # live probe: import + a 1-token call
+    try:
+        import openai  # noqa: F401
+        out["openai_installed"] = True
+    except Exception as e:
+        out["openai_installed"] = False
+        out["openai_error"] = str(e)[:120]
+    try:
+        from app.services.claude_agent import get_agent
+        r = await get_agent().chat("ping (reply OK)", conversation_id="healthcheck")
+        out["live_ok"] = bool(r and not r.get("error"))
+        out["live_detail"] = (r or {}).get("error") or "ok"
+    except Exception as e:
+        out["live_ok"] = False
+        out["live_detail"] = f"{type(e).__name__}: {str(e)[:160]}"
+    return out
 
 
 from pydantic import BaseModel

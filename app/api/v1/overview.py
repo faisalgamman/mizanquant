@@ -81,18 +81,48 @@ async def _get_portfolio():
         _call_broker(broker.get_positions, strategy_id=sid, default=[]),
     )
 
-    # Resilience fallback — primary broker (e.g. IBKR gateway down) returns
-    # nothing → fall back to Alpaca so the portfolio panel shows live data.
-    if account is None and broker_label != "alpaca":
+    # Detect degraded IBKR account (gateway kicked → equity=0 with no positions).
+    ibkr_offline = False
+    ibkr_empty = (
+        broker_label == "ibkr"
+        and (
+            account is None
+            or (float(account.get("equity", 0)) <= 0 and not positions)
+        )
+    )
+
+    # Resilience fallback — primary broker (e.g. IBKR gateway down / kicked) returns
+    # nothing → fall back to a REAL Alpaca strategy ("A") so the dashboard shows data.
+    if ibkr_empty:
+        ibkr_offline = True
         try:
             alpaca = _build("alpaca")
             fb_account, fb_positions = await asyncio.gather(
                 asyncio.wait_for(
-                    asyncio.to_thread(alpaca.get_account, strategy_id=sid),
+                    asyncio.to_thread(alpaca.get_account, strategy_id="A"),
                     timeout=8.0,
                 ),
                 asyncio.wait_for(
-                    asyncio.to_thread(alpaca.get_positions, strategy_id=sid),
+                    asyncio.to_thread(alpaca.get_positions, strategy_id="A"),
+                    timeout=8.0,
+                ),
+            )
+            if fb_account:
+                account = fb_account
+                positions = fb_positions or []
+                broker_label = "alpaca (ibkr offline)"
+        except Exception:
+            pass
+    elif account is None and broker_label != "alpaca":
+        try:
+            alpaca = _build("alpaca")
+            fb_account, fb_positions = await asyncio.gather(
+                asyncio.wait_for(
+                    asyncio.to_thread(alpaca.get_account, strategy_id="A"),
+                    timeout=8.0,
+                ),
+                asyncio.wait_for(
+                    asyncio.to_thread(alpaca.get_positions, strategy_id="A"),
                     timeout=8.0,
                 ),
             )
@@ -128,6 +158,7 @@ async def _get_portfolio():
 
     return {
         "broker_type": broker_label,
+        "ibkr_offline": ibkr_offline,
         "equity": equity, "cash": cash, "buying_power": buying_power,
         "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
         "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
