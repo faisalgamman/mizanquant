@@ -722,8 +722,10 @@ def _records_to_df(records: list[dict]) -> pd.DataFrame:
 # Result Cache — 24h TTL, JSON file-backed
 # ---------------------------------------------------------------------------
 
-_cache_dir = Path(__file__).parent / ".cache"
-_cache_dir.mkdir(exist_ok=True)
+# CACHE_DIR lets Railway mount a PERSISTENT volume here so the warm screener/OHLCV
+# cache survives restarts (no heavy cold 650-symbol re-scan on every reboot).
+_cache_dir = Path(os.environ.get("CACHE_DIR") or (Path(__file__).parent / ".cache"))
+_cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _cache_key(name: str) -> str:
@@ -783,7 +785,9 @@ def _finish_progress():
 
 
 SCREENER_BATCH_SIZE = 50
-SCREENER_CACHE_TTL = 900  # 15 minutes
+SCREENER_CACHE_TTL = 3600  # 60 min — the 650-symbol scan is CPU-heavy on a small
+# container; it was re-running ~every 15 min while the dashboard was open (recurring
+# slowness). Hourly is plenty for a swing/monthly halal screener. Stale window = 2×.
 
 
 # ---------------------------------------------------------------------------
