@@ -135,6 +135,7 @@ class FMPClient:
         "stock-news": 3600,               # 1 hour
         "general-news": 3600,
         "earnings-calendar": 86400,       # 1 day (FMP stable endpoint name)
+        "quote": 900,                     # 15 min — indices/commodities, low FMP cost
     }
 
     def __init__(self):
@@ -616,6 +617,35 @@ class FMPClient:
             "profile": profile,
             "metrics": latest_metrics,
         }
+
+
+# ------------------------------------------------------------------
+# Bulk quote helper — real index/commodity levels
+# ------------------------------------------------------------------
+
+def get_quotes(symbols: list[str]) -> dict:
+    """Real-time quotes for index/commodity/ETF symbols via FMP /quote.
+
+    Returns {symbol: {"price": float|None, "change_pct": float|None}}; {} on any failure.
+    Cached ~15 min (indices/commodities move slowly → bounded FMP cost). No key in code.
+    """
+    if not symbols:
+        return {}
+    try:
+        joined = ",".join(symbols)
+        # BASE_URL is the *stable* API → query-param form (matches the proven existing
+        # call `_get("quote", {"symbol": "^VIX"})`, NOT a path). Comma-separated symbols =
+        # one cached call for the whole indicator strip (bounded FMP cost).
+        data = fmp_client._get("quote", {"symbol": joined})
+        out = {}
+        for q in (data or []):
+            sym = q.get("symbol")
+            if sym:
+                out[sym] = {"price": q.get("price"), "change_pct": q.get("changesPercentage")}
+        return out
+    except Exception as e:
+        logger.debug("get_quotes failed: %s", e)
+        return {}
 
 
 # Singleton

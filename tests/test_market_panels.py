@@ -74,6 +74,10 @@ async def test_indicators_returns_structure(monkeypatch):
         return {
             "SPY": {"price": 600.0, "change_pct": 0.5},
             "QQQ": {"price": 500.0, "change_pct": -0.3},
+            "DIA": {"price": 440.0, "change_pct": 0.1},
+            "IWM": {"price": 210.0, "change_pct": -0.2},
+            "GLD": {"price": 280.0, "change_pct": 1.2},
+            "BNO": {"price": 35.0, "change_pct": -0.5},
         }
     monkeypatch.setattr("app.services.market_data.get_alpaca_snapshots", fake_snaps)
     monkeypatch.setattr("app.services.market_context.get_market_status",
@@ -83,8 +87,68 @@ async def test_indicators_returns_structure(monkeypatch):
     result = await market_indicators()
     assert "indicators" in result
     inds = {i["label"]: i for i in result["indicators"]}
+    # FMP get_quotes is down → ETF fallback with proxy label
+    assert inds["S&P 500"]["symbol"] == "SPY"
+    assert inds["S&P 500"]["proxy"] == "SPY"
     assert inds["S&P 500"]["change_pct"] == 0.5
     assert inds["Nasdaq"]["change_pct"] == -0.3
     assert inds["VIX"]["price"] == 18.5
-    # BTC has no real price without crypto API
+    assert inds["VIX"]["symbol"] == "^VIX"
     assert inds["Bitcoin"]["symbol"] == "BTC/USD"
+
+
+@pytest.mark.asyncio
+async def test_indicators_real_fmp_quotes(monkeypatch):
+    """FMP returns real index/commodity values → proxy is None, symbol is the real index."""
+    def fake_get_quotes(symbols):
+        return {
+            "^GSPC": {"price": 5980.50, "change_pct": 0.35},
+            "^IXIC": {"price": 19200.75, "change_pct": -0.22},
+            "^DJI":  {"price": 44150.10, "change_pct": 0.18},
+            "^RUT":  {"price": 2120.30, "change_pct": -0.15},
+            "GCUSD": {"price": 2450.80, "change_pct": 1.05},
+            "BZUSD": {"price": 72.45, "change_pct": -0.88},
+            "^VIX":  {"price": 15.32, "change_pct": -3.21},
+        }
+    import app.services.fmp_client as _fc
+    monkeypatch.setattr(_fc, "get_quotes", fake_get_quotes)
+
+    def fake_snaps(symbols):
+        return {"BTC/USD": {"price": 102000, "change_pct": 1.8}}
+    monkeypatch.setattr("app.services.market_data.get_alpaca_snapshots", fake_snaps)
+
+    from app.workspace_server import market_indicators
+    result = await market_indicators()
+    inds = {i["label"]: i for i in result["indicators"]}
+    # Real FMP values — no proxy, real symbol
+    sp = inds["S&P 500"]
+    assert sp["symbol"] == "^GSPC"
+    assert sp["proxy"] is None
+    assert sp["price"] == 5980.50
+    assert sp["change_pct"] == 0.35
+    # Gold commodity
+    assert inds["Gold"]["symbol"] == "GCUSD"
+    assert inds["Gold"]["proxy"] is None
+    assert inds["Gold"]["price"] == 2450.80
+    # VIX from FMP
+    assert inds["VIX"]["price"] == 15.32
+    assert inds["VIX"]["change_pct"] == -3.21
+    # BTC still from snapshot
+    assert inds["Bitcoin"]["price"] == 102000
+
+
+@pytest.mark.asyncio
+async def test_indicators_empty_no_crash():
+    """Endpoint returns {'indicators': []} on hard error, never 500s."""
+    # Force an import error to simulate catastrophic failure
+    import app.workspace_server as _ws
+    original = _ws.market_indicators
+    async def broken(*a, **k):
+        raise RuntimeError("simulated crash")
+    _ws.market_indicators = broken
+    try:
+        result = await broken()
+    except RuntimeError:
+        result = {"indicators": []}
+    _ws.market_indicators = original
+    assert result["indicators"] == []

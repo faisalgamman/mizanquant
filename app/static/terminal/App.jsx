@@ -348,15 +348,27 @@ function App() {
 
   // Fetch bottom panel: risers + market news + indicators
   useEffect(() => {
-    const fetchAll = async () => {
-      try { const r = await (await fetch('/api/forecast/risers?limit=8')).json();
-            setRisers(r.risers || []); setRisersMeta({market_soft: r.market_soft}); } catch (_) {}
-      try { setMarketNews((await (await fetch('/api/market/news?limit=8')).json()).news || []); } catch (_) {}
-      try { setIndicators((await (await fetch('/api/market/indicators')).json()).indicators || []); } catch (_) {}
+    let cancelled = false, tries = 0, timer = null;
+    const loadBottom = async () => {
+      try {
+        const r = await (await fetch('/api/forecast/risers?limit=8')).json();
+        if (!cancelled) { setRisers(r.risers || []); setRisersMeta({market_soft: r.market_soft}); }
+        // Empty risers usually means the screener cache is still warming → retry.
+        if ((!r.risers || r.risers.length === 0) && tries < 16 && !cancelled) {
+          tries += 1; timer = setTimeout(loadBottom, 15000);
+        }
+      } catch (_) {}
+      try {
+        const ind = (await (await fetch('/api/market/indicators')).json()).indicators || [];
+        if (!cancelled) setIndicators(ind);
+      } catch (_) {}
+      try {
+        const n = (await (await fetch('/api/market/news?limit=8')).json()).news || [];
+        if (!cancelled) setMarketNews(n);
+      } catch (_) {}
     };
-    fetchAll();
-    const id = setInterval(fetchAll, 120000);
-    return () => clearInterval(id);
+    loadBottom();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   // Real signals only — never fabricate. Empty → ScanColumn shows scanning state.

@@ -10,19 +10,17 @@ function IndicStrip({ indicators }) {
         const chg = ind.change_pct;
         const chgColor = chg != null ? (chg >= 0 ? "var(--positive)" : "var(--negative)") : "var(--text-muted)";
         const chgStr = chg != null ? ((chg >= 0 ? "+" : "") + chg.toFixed(2) + "%") : "—";
-        const isVIX = ind.symbol === "VIX";
+        const isVIX = ind.symbol === "^VIX";
         const isBTC = ind.symbol === "BTC/USD";
+        const isIndex = ind.symbol && ind.symbol.startsWith("^");
         const priceStr = ind.price != null
-          ? (isVIX ? ind.price.toFixed(2) : (isBTC ? "$" + Number(ind.price).toLocaleString("en-US", {minimumFractionDigits: 0, maximumFractionDigits: 0}) : "$" + (ind.price >= 1 ? Number(ind.price).toFixed(0) : Number(ind.price).toFixed(2))))
+          ? (isVIX ? ind.price.toFixed(2) : (isBTC ? "$" + Number(ind.price).toLocaleString("en-US", {minimumFractionDigits: 0, maximumFractionDigits: 0}) : (isIndex ? Number(ind.price).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "$" + (ind.price >= 1 ? Number(ind.price).toFixed(0) : Number(ind.price).toFixed(2)))))
           : "—";
         return (
           <div key={ind.label} className="lr2-ind-tile">
-            <div className="lr2-ind-lab">{ind.label}</div>
+            <div className="lr2-ind-lab">{ind.label}{ind.proxy ? <span className="lr2-ind-proxy" style={{fontSize: 8}}> ({ind.proxy})</span> : null}</div>
             <div className="lr2-ind-price">{priceStr}</div>
             <div className="lr2-ind-chg" style={{ color: chgColor }}>{chgStr}</div>
-            {ind.proxy && ind.proxy !== ind.symbol ? (
-              <div className="lr2-ind-proxy">عبر {ind.proxy}</div>
-            ) : null}
           </div>
         );
       })}

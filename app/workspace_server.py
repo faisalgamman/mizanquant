@@ -4621,50 +4621,53 @@ async def market_news(limit: int = Query(8, ge=1, le=20)):
 
 @app.get("/api/market/indicators")
 async def market_indicators():
-    """Main market indicators: SPY,QQQ,DIA,IWM,VIX,GLD,BNO,BTC."""
+    """Main market indicators — REAL index/commodity levels (FMP), ETF proxy as honest fallback."""
     try:
         from app.services.market_data import get_alpaca_snapshots
-        from app.services.market_context import get_market_status
+        from app.services import fmp_client
 
-        symbols_map = [
-            ("S&P 500", "SPY"), ("Nasdaq", "QQQ"), ("Dow", "DIA"),
-            ("Russell", "IWM"), ("Gold", "GLD"), ("Brent", "BNO"),
+        # (label, real FMP symbol, ETF proxy fallback)
+        rows_def = [
+            ("S&P 500", "^GSPC", "SPY"), ("Nasdaq", "^IXIC", "QQQ"),
+            ("Dow", "^DJI", "DIA"), ("Russell", "^RUT", "IWM"),
+            ("Gold", "GCUSD", "GLD"), ("Brent", "BZUSD", "BNO"),
         ]
-        syms = [s for _, s in symbols_map] + ["BTC/USD"]
-        snaps = await asyncio.to_thread(get_alpaca_snapshots, syms)
-
-        ms = {}
+        real = {}
         try:
-            ms = get_market_status() or {}
+            real = await asyncio.to_thread(fmp_client.get_quotes,
+                                           [r[1] for r in rows_def] + ["^VIX"])
         except Exception:
-            pass
-        vix_val = ms.get("vix")
-        vix_prev = ms.get("vix_prev")
+            real = {}
+
+        etfs = [r[2] for r in rows_def]
+        snaps = await asyncio.to_thread(get_alpaca_snapshots, etfs + ["BTC/USD"])
 
         indicators = []
-        for label, sym in symbols_map:
-            snap = snaps.get(sym, {})
-            indicators.append({
-                "label": label, "symbol": sym, "proxy": sym,
-                "price": snap.get("price"),
-                "change_pct": snap.get("change_pct"),
-            })
-        # VIX: use current + prior if available for change%
-        vix_chg = None
-        if vix_val is not None and vix_prev is not None and vix_prev > 0:
-            vix_chg = round((vix_val / vix_prev - 1) * 100, 2)
-        indicators.append({
-            "label": "VIX", "symbol": "VIX", "proxy": None,
-            "price": vix_val,
-            "change_pct": vix_chg,
-        })
-        # Bitcoin from crypto snapshot
+        for label, fsym, etf in rows_def:
+            q = real.get(fsym) or {}
+            if q.get("price") is not None:
+                indicators.append({"label": label, "symbol": fsym, "proxy": None,
+                                   "price": q.get("price"), "change_pct": q.get("change_pct")})
+            else:
+                s = snaps.get(etf, {})
+                indicators.append({"label": label, "symbol": etf, "proxy": etf,  # honest ETF stand-in
+                                   "price": s.get("price"), "change_pct": s.get("change_pct")})
+
+        # VIX — FMP ^VIX, else market_status (no change% if unknown → "—", never faked)
+        v = real.get("^VIX") or {}
+        if v.get("price") is None:
+            try:
+                from app.services.market_context import get_market_status
+                v = {"price": (get_market_status() or {}).get("vix"), "change_pct": None}
+            except Exception:
+                v = {}
+        indicators.append({"label": "VIX", "symbol": "^VIX", "proxy": None,
+                           "price": v.get("price"), "change_pct": v.get("change_pct")})
+
+        # Bitcoin — crypto snapshot
         btc = snaps.get("BTC/USD", {})
-        indicators.append({
-            "label": "Bitcoin", "symbol": "BTC/USD", "proxy": None,
-            "price": btc.get("price"),
-            "change_pct": btc.get("change_pct"),
-        })
+        indicators.append({"label": "Bitcoin", "symbol": "BTC/USD", "proxy": None,
+                           "price": btc.get("price"), "change_pct": btc.get("change_pct")})
         return {"indicators": indicators}
     except Exception:
         return {"indicators": []}

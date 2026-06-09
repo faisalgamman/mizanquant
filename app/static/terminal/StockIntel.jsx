@@ -59,15 +59,30 @@ function StockIntel() {
   };
 
   useEffect(() => {
-    loadPicks(false);
+    let cancelled = false;
+    (async () => {
+      const ok = await loadPicks(false);
+      // Cold cache (post-deploy) → the screener is warming in the background.
+      // Auto-poll until it's ready so the panel fills itself — no manual Scan.
+      // Self-terminates after ~4 min so it can never loop forever.
+      if (!ok && !cancelled) {
+        setScanning(true);
+        let tries = 0;
+        const poll = setInterval(async () => {
+          tries += 1;
+          const got = await loadPicks(false);
+          if (got || tries >= 16 || cancelled) { clearInterval(poll); setScanning(false); }
+        }, 15000);
+      }
+    })();
     (async () => {
       try {
         const rows = await (await fetch("/signals/accuracy?period=30")).json();
-        setOverall(Array.isArray(rows) ? rows.find(r => r && r.Source === "OVERALL") : null);
+        if (!cancelled) setOverall(Array.isArray(rows) ? rows.find(r => r && r.Source === "OVERALL") : null);
       } catch (_) {}
       try {
         const rs = await (await fetch("/api/risk/status")).json();
-        setRiskStatus(rs || {});
+        if (!cancelled) setRiskStatus(rs || {});
       } catch (_) {}
       try {
         const rot = await (await fetch("/api/chart/rotation")).json();
@@ -77,9 +92,10 @@ function StockIntel() {
           const q = (d.quadrant || d.classification || "").toLowerCase();
           if (name && q) map[name] = q;
         });
-        setSectorRank(map);
+        if (!cancelled) setSectorRank(map);
       } catch (_) {}
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const onScan = async () => {
