@@ -277,3 +277,26 @@ async def v1_broker_close(body: BrokerCloseRequest):
         return {"success": False, "reason": "broker_offline", "symbol": sym}
     return {"success": True, "symbol": sym, "order_id": res.get("id", ""),
             "status": res.get("status", "submitted")}
+
+
+@router.post("/paper/record-now")
+async def v1_paper_record_now(scanner: str = Query("weekly")):
+    """Manually record the current scanner picks into the paper-validation ledger.
+
+    Session-gated (the dashboard login already protects /api/v1/*), so it needs NO operator
+    API key in the browser. Kicks off the same record/rebalance the scheduler runs.
+    """
+    import threading
+    s = (scanner or "weekly").lower()
+    try:
+        if s.startswith("month"):
+            from app.services.paper_validation import rebalance_monthly
+            threading.Thread(target=rebalance_monthly, daemon=True).start()
+        else:
+            from app.services.paper_validation import record_weekly_picks
+            threading.Thread(target=record_weekly_picks, daemon=True).start()
+        return {"status": "started", "scanner": s,
+                "message": "Recording started (1-3 min) — poll the ledger status."}
+    except Exception as e:
+        logger.error("paper record-now %s: %s", s, e)
+        return {"status": "error", "detail": str(e)[:160]}

@@ -227,6 +227,26 @@ function App() {
     try { setLedgerM(await (await fetch('/paper_validation/status?scanner=monthly')).json()); } catch (_) {}
   };
 
+  // Manual "Record now" — kick the session-gated record-now endpoint for the
+  // current scanner, then re-fetch the ledger status after the job has had time
+  // to run. Honest: the write is real (simulated trades), not a fake.
+  const [recording, setRecording] = useState(false);
+  const onRecordPaper = async () => {
+    const kind = scanMode === "monthly" ? "monthly" : "weekly";
+    setRecording(true);
+    setToast({ kind: "ok", title: "بدأ التسجيل", body: `${kind} · يستغرق 1-3 دقائق` });
+    try {
+      const r = await fetch(`/api/v1/paper/record-now?scanner=${kind}`, { method: "POST" });
+      const j = await r.json();
+      if (!j || j.status === "error") {
+        setToast({ kind: "error", title: "تعذّر التسجيل", body: (j && j.detail) || "حاول مجدداً" });
+      }
+    } catch (e) {
+      setToast({ kind: "error", title: "خطأ شبكة", body: String(e) });
+    }
+    setTimeout(() => { loadLedgers().finally(() => setRecording(false)); }, 90000);
+  };
+
   // Clock tick (ET)
   useEffect(() => {
     const tick = () => {
@@ -538,6 +558,8 @@ function App() {
             ledgerWeekly={ledgerW}
             ledgerMonthly={ledgerM}
             watch={watch}
+            onRecord={onRecordPaper}
+            recording={recording}
           />
           <AnalyzeColumn
             signal={selected}

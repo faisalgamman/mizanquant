@@ -220,7 +220,7 @@ function ScanTabs({ mode, onMode }) {
 }
 
 // Honest per-scanner paper-ledger banner: real money only after graduation.
-function LedgerBanner({ ledger, kind }) {
+function LedgerBanner({ ledger, kind, onRecord, recording }) {
   const g = (ledger && ledger.graduation) || {};
   const grad = !!g.graduated;
   const n = g.n_trades;
@@ -237,9 +237,23 @@ function LedgerBanner({ ledger, kind }) {
       <span style={{ color: "var(--text-secondary)" }}>
         {ledger ? `${ledger.open ?? 0} open · ${ledger.closed ?? 0} closed` : "loading…"}
       </span>
-      <span style={{ marginLeft: "auto", fontWeight: 700 }}>
+      <span style={{ fontWeight: 700 }}>
         {grad ? "GRADUATED" : "NOT graduated — no real money yet"}{n != null ? ` (n=${n})` : ""}
       </span>
+      {onRecord ? (
+        <button
+          onClick={onRecord}
+          disabled={recording}
+          title="سجّل توصيات الفاحص الآن في الدفتر الورقي (محاكاة)"
+          style={{
+            marginLeft: "auto", cursor: recording ? "default" : "pointer",
+            fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 5,
+            border: "1px solid var(--accent)", color: "var(--accent)",
+            background: "var(--accent-dim)", opacity: recording ? 0.6 : 1,
+          }}>
+          {recording ? "… يسجّل" : "سجّل الآن"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -281,7 +295,8 @@ function ScanEmpty({ status, mode, scanPct }) {
 
 function ScanColumn(props) {
   const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
-          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, watch, monthlyScanPct } = props;
+          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, watch, monthlyScanPct,
+          onRecord, recording } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
@@ -314,7 +329,8 @@ function ScanColumn(props) {
           <span className="wf-sub">{monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
         </div>
         <ScanTabs mode={scanMode} onMode={onScanMode} />
-        <LedgerBanner ledger={monthlyMode ? ledgerMonthly : ledgerWeekly} kind={monthlyMode ? "Monthly" : "Weekly"} />
+        <LedgerBanner ledger={monthlyMode ? ledgerMonthly : ledgerWeekly} kind={monthlyMode ? "Monthly" : "Weekly"}
+                      onRecord={onRecord} recording={recording} />
         {empty ? (
           <ScanEmpty status={status} mode={scanMode} scanPct={monthlyScanPct || 0} />
         ) : (
