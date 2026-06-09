@@ -36,10 +36,10 @@
      Four-tier ramp. Body copy is ~0.8125rem (13px) on dark — small for
      density. Numerals use --font-mono so columns align.
   ─────────────────────────────────────────────────────────────────────── */
-  --text-primary:   #e4e4ec;
-  --text-secondary: #9494a0;
-  --text-muted:     #5c5c6a;
-  --text-disabled:  #3c3c48;
+  --text-primary:   #e8e8f0;
+  --text-secondary: #b4b4c2;
+  --text-muted:     #8a8a99;
+  --text-disabled:  #54545f;
 
   /* ─── ACCENT — WARM GOLD ───────────────────────────────────────────────
      The brand color. Called out in the dashboard.html source as an
@@ -150,6 +150,11 @@
    Convenience classes used throughout the codebase. Always map UI roles
    to one of these — never set font properties ad-hoc.
    ============================================================================= */
+
+/* Global type scale — 18px root bumps every rem-based size ~12% for readability /
+   eye-comfort. Layout tokens (sidebar, command bar, status bar) are px, so the
+   grid dimensions are unaffected — only the TYPE grows. */
+html { font-size: 18px; }
 
 body, .body, p {
   font-family: var(--font-body);

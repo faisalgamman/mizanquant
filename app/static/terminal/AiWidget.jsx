@@ -8,6 +8,47 @@ const AI_QUICK = [
   { label: "محفظتي", q: "اعرض حالة محفظتي والمخاطر." },
 ];
 
+// Lightweight markdown → JSX so the agent's answers (## headings, **bold**, - bullets,
+// | tables |) render readably instead of as raw symbols. Pure function, no deps.
+function _aiInline(s) {
+  return String(s).split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+    (p.startsWith("**") && p.endsWith("**")) ? <strong key={j}>{p.slice(2, -2)}</strong> : p
+  );
+}
+function renderMarkdown(text) {
+  const lines = String(text || "").split("\n");
+  const out = [];
+  let list = null, k = 0;
+  const isSep = (s) => /-/.test(s) && /^[\s|:\-]+$/.test(s);
+  const cells = (s) => s.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  const flush = () => {
+    if (list) { out.push(<ul key={"u" + k++}>{list.map((x, j) => <li key={j}>{_aiInline(x)}</li>)}</ul>); list = null; }
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t.startsWith("|") && i + 1 < lines.length && isSep(lines[i + 1].trim())) {
+      flush();
+      const head = cells(t); i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) { rows.push(cells(lines[i])); i++; }
+      i--;
+      out.push(
+        <table key={"t" + k++}>
+          <thead><tr>{head.map((h, j) => <th key={j}>{_aiInline(h)}</th>)}</tr></thead>
+          <tbody>{rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci}>{_aiInline(c)}</td>)}</tr>)}</tbody>
+        </table>
+      );
+      continue;
+    }
+    if (/^#{1,6}\s/.test(t)) { flush(); out.push(<h3 key={"h" + k++}>{_aiInline(t.replace(/^#{1,6}\s/, ""))}</h3>); continue; }
+    if (/^[-*]\s/.test(t)) { (list = list || []).push(t.replace(/^[-*]\s/, "")); continue; }
+    if (t === "") { flush(); continue; }
+    flush(); out.push(<p key={"p" + k++}>{_aiInline(t)}</p>);
+  }
+  flush();
+  return <div className="aiw-md">{out}</div>;
+}
+
 function AiWidget() {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState([
@@ -65,7 +106,7 @@ function AiWidget() {
           <div className="aiw-body">
             {msgs.map((m, i) => (
               <div key={i} className={"aiw-msg aiw-" + m.role}>
-                <div className="aiw-bubble">{m.text}</div>
+                <div className="aiw-bubble">{m.role === "ai" ? renderMarkdown(m.text) : m.text}</div>
                 {m.tools && m.tools.length > 0 && (
                   <div className="aiw-tools">🔧 {m.tools.join(" · ")}</div>
                 )}
