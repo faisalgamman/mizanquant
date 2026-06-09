@@ -150,7 +150,14 @@ function TradeColumn(props) {
   return (
     <div className="col col-trade">
       <div className="wf-section">
-        <div className="wf-head"><span className="wf-title">Portfolio</span><span className="wf-sub">Equity · P&L</span></div>
+        <div className="wf-head">
+          <span className="wf-title">Portfolio</span>
+          <span className="wf-sub">
+            {(portfolio && portfolio.ibkrOffline)
+              ? <span style={{ color: "var(--negative)" }}>⚠️ IBKR منقطع — عرض Alpaca احتياطياً · أعد تشغيل gway</span>
+              : <span style={{ color: "var(--positive)" }}>IBKR ✓</span>}
+          </span>
+        </div>
         <PortfolioStrip p={portfolio} />
       </div>
       <div className="wf-section">
