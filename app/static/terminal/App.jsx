@@ -599,7 +599,10 @@ function App() {
             onSell={closePosition}
           />
         </div>
-        <StockIntel />
+        <div className="si-split">
+          <StockIntel />
+          <PriceChart symbol={cardSymbol || selectedSym || "SPY"} />
+        </div>
         {cardSymbol && (
           <StockCard
             symbol={cardSymbol}
