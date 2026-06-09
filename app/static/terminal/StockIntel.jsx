@@ -95,7 +95,10 @@ function StockIntel() {
         if (!cancelled) setSectorRank(map);
       } catch (_) {}
     })();
-    return () => { cancelled = true; };
+    // Periodic refresh so newly-scored picks appear without reloading the page.
+    // Reads the (re-warmed) cache every 5 min; does not force a costly re-scan.
+    const refresh = setInterval(() => { if (!cancelled) loadPicks(false); }, 300000);
+    return () => { cancelled = true; clearInterval(refresh); };
   }, []);
 
   const onScan = async () => {

@@ -368,7 +368,10 @@ function App() {
       } catch (_) {}
     };
     loadBottom();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    // Periodic refresh so new risers / indicators / news appear without reloading the
+    // page. 5 min is gentle on FMP (the indicator quotes are cached 15 min server-side).
+    const refresh = setInterval(loadBottom, 300000);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); clearInterval(refresh); };
   }, []);
 
   // Real signals only — never fabricate. Empty → ScanColumn shows scanning state.
