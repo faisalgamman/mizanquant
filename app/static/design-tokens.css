@@ -117,6 +117,15 @@
   --radius-xl: 12px;       /* hero panels, overlays */
   --radius:    var(--radius-md);
 
+  /* ─── SPACING — 4px base, used for ALL padding/margin/gap ─────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --gap:     var(--space-2);
+
   /* ─── MOTION ─────────────────────────────────────────────────────────
      Restrained. No bounces. No springs. ease-out for entrances,
      ease-in-out for state toggles. Durations are short — this is a
