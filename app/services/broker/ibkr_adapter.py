@@ -335,6 +335,8 @@ def _position_to_dict(pos) -> dict:
     market_value = float(getattr(pos, "marketValue", 0) or 0)
     if market_value == 0 and qty and market:
         market_value = qty * market
+    # Show a LAST that reconciles with IBKR's marketValue (paper/delayed marketPrice can lag).
+    display_price = (market_value / qty) if (market_value and qty) else market
     # Prefer IBKR's own unrealized P&L; derive only if absent AND a market value exists.
     raw_upl = getattr(pos, "unrealizedPNL", None)
     if raw_upl not in (None, "") and float(raw_upl) != 0:
@@ -349,7 +351,7 @@ def _position_to_dict(pos) -> dict:
         "symbol": getattr(contract, "symbol", ""),
         "qty": str(int(qty)),
         "avg_entry_price": str(avg),
-        "current_price": str(market),          # dashboard "LAST" column
+        "current_price": str(display_price),      # dashboard "LAST" column
         "market_value": str(market_value),
         "unrealized_pl": str(unrealized_pl),
         "unrealized_plpc": str(unrealized_plpc),

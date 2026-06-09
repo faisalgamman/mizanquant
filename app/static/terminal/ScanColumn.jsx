@@ -318,8 +318,8 @@ function ScanColumn(props) {
       </div>
       <div className="wf-section">
         <div className="wf-head">
-          <span className="wf-title">Regime</span>
-          <span className="wf-sub">current · {market.spy_regime}</span>
+          <span className="wf-title">SPY Trend</span>
+          <span className="wf-sub">price trend · {market.spy_regime}</span>
         </div>
         <RegimeBar regime={market.spy_regime} />
       </div>
