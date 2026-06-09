@@ -137,6 +137,15 @@ async def _lifespan(_app: FastAPI):
         stop_fill_watcher()
     except Exception:
         pass
+    # Cleanly drop the IBKR socket so the gateway frees our client_id immediately.
+    # Without this, every redeploy left the old client_id "in use" on gway, so the
+    # NEW container could not reconnect (client-id contention) → IBKR went offline
+    # after every deploy. A graceful SIGTERM now releases it → fast reconnect.
+    try:
+        from app.services.broker.ibkr_adapter import disconnect_all
+        disconnect_all()
+    except Exception:
+        pass
 
 
 app = FastAPI(
