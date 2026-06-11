@@ -233,8 +233,18 @@ def run_exit_lab(days=365):
 
         fold_rows.append({"month": str(m), "n": len(test), "selected": combo_key})
 
+    # Full in-sample grid (always compute for transparency — even on OOS failure)
+    all_post = df["post_bars"].tolist()
+    all_entries = df["entry"].tolist()
+    full_grid = _run_grid_on_subset(all_post, all_entries)
+
     if len(oos_adaptive_returns) < 10:
-        return {"verdict": "KEEP_OPTION_A", "error": "too few OOS returns"}
+        return {
+            "verdict": "KEEP_OPTION_A",
+            "error": f"too few OOS returns ({len(oos_adaptive_returns)}); {len(months)} months, {len(fold_rows)} folds",
+            "full_grid": full_grid,
+            "counts": {"signals": len(rows), "post_slices": len(df), "months": len(months), "folds": len(fold_rows)},
+        }
 
     # OOS metrics
     wins_a = [r for r in oos_adaptive_returns if r > 0]
@@ -254,11 +264,6 @@ def run_exit_lab(days=365):
 
     # Most-selected combo
     most_selected = max(best_select_count, key=best_select_count.get) if best_select_count else BASELINE
-
-    # In-sample grid (full period, for transparency)
-    all_post = df["post_bars"].tolist()
-    all_entries = df["entry"].tolist()
-    full_grid = _run_grid_on_subset(all_post, all_entries)
 
     return {
         "verdict": verdict,
@@ -290,6 +295,21 @@ def format_exit_report(result):
 
     if "error" in result:
         lines.append(f"**Error:** {result['error']}")
+        if "counts" in result:
+            c = result["counts"]
+            lines.append(f"  Signals: {c.get('signals')} · Post slices: {c.get('post_slices')} · Months: {c.get('months')} · Folds: {c.get('folds')}")
+        # Still show full grid for transparency
+        if result.get("full_grid"):
+            lines.append("")
+            lines.append("## Full Grid (in-sample, 8,783 signals — transparency only)")
+            lines.append("")
+            lines.append("| Stop% | Hold | Trail | PF | WR% | N |")
+            lines.append("|-------|------|-------|-----|------|---|")
+            for g in result["full_grid"]:
+                lines.append(
+                    f"| {g['stop']} | {g['hold']} | {g['trail']} | "
+                    f"{g['pf']:.2f} | {g['wr']:.1f} | {g['n']} |"
+                )
         return "\n".join(lines)
 
     oos = result["oos"]
