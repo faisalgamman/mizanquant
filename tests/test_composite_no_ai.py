@@ -1,8 +1,12 @@
+"""Phase 1: deep-picks composite excludes the unvalidated AI slice.
+
+Tests the REAL renormalizer used by /api/screener/deep-picks (parts list of
+(value, max) pairs — tech 30 / fund 25 / halal 10 / sentiment 20 when real),
+plus a source tripwire so the AI slice can't silently rejoin the composite.
 """
-Tests for Phase 1: _composite_from_parts — AI slice zeroed + renormalized.
-"""
-import sys
 import os
+import re
+import sys
 
 _PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJ not in sys.path:
@@ -11,35 +15,47 @@ if _PROJ not in sys.path:
 from app.workspace_server import _composite_from_parts  # noqa: E402
 
 
-class TestCompositeNoAi:
+class TestCompositeFromParts:
 
-    def test_max_all_three_with_sent_equals_100(self):
-        """Full marks (30T + 25F + 20S) = 75/75 * 100 = 100. AI value irrelevant."""
-        result = _composite_from_parts(30.0, 25.0, 20.0, 15.0)
-        assert result == 100.0, f"Expected 100.0, got {result}"
+    def test_full_marks_without_sentiment_is_100(self):
+        # tech 30/30 + fund 25/25 + halal 10/10 → 65/65
+        assert _composite_from_parts([(30, 30), (25, 25), (10, 10)]) == 100
 
-    def test_half_each_equals_50(self):
-        """Half marks (15T + 12.5F + 10S) = 37.5/75 * 100 = 50.0. AI ignored."""
-        result = _composite_from_parts(15.0, 12.5, 10.0, 15.0)
-        assert result == 50.0, f"Expected 50.0, got {result}"
+    def test_full_marks_with_sentiment_is_100(self):
+        assert _composite_from_parts([(30, 30), (25, 25), (10, 10), (20, 20)]) == 100
 
-    def test_ai_value_irrelevant(self):
-        """AI=0 or AI=15 gives same composite."""
-        a = _composite_from_parts(24.0, 20.0, 16.0, 0.0)
-        b = _composite_from_parts(24.0, 20.0, 16.0, 15.0)
-        assert a == b, f"AI should not affect composite: {a} != {b}"
+    def test_half_marks_is_50(self):
+        assert _composite_from_parts([(15, 30), (12.5, 25), (5, 10)]) == 50
 
-    def test_no_sentiment_uses_55_denominator(self):
-        """Without sentiment (sent=None): 30T + 25F = 55/55 = 100."""
-        result = _composite_from_parts(30.0, 25.0, -1.0, 15.0)  # sent=-1 → treated as absent
-        assert result == 100.0, f"Expected 100.0, got {result}"
+    def test_parts_only_no_ai_argument(self):
+        """The AI slice is excluded BY CONSTRUCTION — the renormalizer only sees
+        the parts the caller passes, and deep-picks never passes (ai, 15)."""
+        parts = [(24, 30), (20, 25), (8, 10)]
+        assert _composite_from_parts(parts) == round((24 + 20 + 8) / 65 * 100)
 
-    def test_sent_none_uses_55(self):
-        """sent=None falls back to 55 denominator."""
-        result = _composite_from_parts(27.5, 27.5, None, 10.0)  # 27.5+27.5=55/55=100
-        assert result == 100.0, f"Expected 100.0, got {result}"
+    def test_empty_parts_is_0(self):
+        assert _composite_from_parts([]) == 0
 
-    def test_zero_all(self):
-        """All zeros => 0."""
-        result = _composite_from_parts(0.0, 0.0, 0.0, 0.0)
-        assert result == 0.0
+    def test_caps_at_100(self):
+        assert _composite_from_parts([(40, 30), (30, 25), (15, 10)]) == 100
+
+
+class TestAiSliceStaysOut:
+
+    def test_deep_picks_parts_exclude_ai(self):
+        """Tripwire: the deep-picks parts list must NOT contain the AI slice.
+
+        Phase-0 measured the AI sub-score's source models at ~coin-flip accuracy;
+        Phase 1 removed `(ai, 15)` from the composite parts. If someone re-adds
+        it without out-of-sample validation, this test fails loudly.
+        """
+        src_path = os.path.join(_PROJ, "app", "workspace_server.py")
+        with open(src_path, encoding="utf-8") as f:
+            src = f.read()
+        m = re.search(r"parts\s*=\s*\[(.*?)\]", src)
+        assert m, "deep-picks parts list not found — composite structure changed, update this test"
+        assert "(ai" not in m.group(1).replace(" ", ""), (
+            "AI slice found back inside the composite parts — it must stay 0-weight "
+            "until validated out-of-sample (Phase-0 measured its models at coin-flip)."
+        )
+        assert "ai_counted" in src, "ai_counted honesty flag missing from the deep-picks payload"

@@ -3702,17 +3702,19 @@ async def smart_screener(
     )
 
 
-def _composite_from_parts(tech: float, fund: float, sent: float, ai: float) -> float:
-    """Composite 0-100 WITHOUT the unvalidated AI slice (Phase-1, measured decision).
+def _composite_from_parts(parts: list) -> int:
+    """Renormalize the deep-picks composite over its AVAILABLE (value, max) parts.
 
-    AI sub-score comes from the disabled coin-flip neural models — it is still
-    DISPLAYED for transparency but contributes 0 weight. Renormalize the
-    remaining pts (30T + 25F + 20S = 75, or 30T + 25F = 55 without sentiment)
-    back to a 0-100 scale so the existing band gates keep their meaning.
+    Phase 1 (measured decision): the caller's parts list intentionally EXCLUDES the
+    AI slice — it comes from the disabled coin-flip neural models, so it is still
+    displayed (score_ai / 'AI*') but contributes 0 weight. Sentiment is likewise
+    only included when real data exists. Renormalizing to 0-100 keeps the band
+    gates (72 STRONG BUY / 55 BUY / 38 WATCH) meaningful regardless of which
+    parts are present.
     """
-    if sent is not None and sent >= 0:
-        return round((tech + fund + sent) / 75.0 * 100.0, 1)
-    return round((tech + fund) / 55.0 * 100.0, 1)
+    got = sum(v for v, _ in parts)
+    mx = sum(m for _, m in parts)
+    return min(100, round(got / mx * 100)) if mx else 0
 
 
 @app.get("/api/screener/deep-picks")
@@ -3813,9 +3815,7 @@ async def screener_deep_picks(
         parts = [(tech, 30), (fund, 25), (halal_s, 10)]
         if sent_available:
             parts.append((sent_s, 20))
-        got_pts = sum(v for v, _ in parts)
-        max_pts = sum(m for _, m in parts)
-        composite = min(100, round(got_pts / max_pts * 100)) if max_pts else 0
+        composite = _composite_from_parts(parts)
 
         # Fundamental grade
         if fund >= 22: f_grade = "A"
