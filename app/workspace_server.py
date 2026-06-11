@@ -3798,8 +3798,19 @@ async def screener_deep_picks(
         sent = _sentiment_score(symbol, info)
         sent_available = sent.get("available", False)
 
-        # Rescale sub-scores to composite denominator
-        tech   = min(30, r.get("momentum_score", 0) + max(0, r.get("strategy_score", 0) - 50))
+        # Rescale sub-scores to composite denominator (Phase 3: gated v2 option)
+        tech = min(30, r.get("momentum_score", 0) + max(0, r.get("strategy_score", 0) - 50))
+        tech_version = "v1"
+        if os.environ.get("TECH_SCORE_VERSION", "v1").lower() == "v2":
+            try:
+                from app.services.tech_score_v2 import tech_score_v2
+                _, _df_sym = _fetch_data(symbol, period="1y")
+                _, _df_spy = _fetch_data("SPY", period="1y")
+                _v2, _ver = tech_score_v2(_df_sym, _df_spy)
+                if _v2 is not None:
+                    tech, tech_version = _v2, _ver
+            except Exception as _t2e:
+                logger.debug("tech v2 fallback to v1 for %s: %s", symbol, _t2e)
         fund40 = r.get("fundamental_score", 0)                       # original 0-40
         fund   = int(fund40 * 25 / 40)                               # → 0-25
         sent_s = sent["score"] if sent_available else None            # 0-20 or None
@@ -3848,6 +3859,7 @@ async def screener_deep_picks(
             # Composite breakdown
             "composite_score":    composite,
             "score_tech":         tech,
+            "tech_version":       tech_version,  # Phase 3: v1 or tech-v2-date
             "score_fund":         fund,
             "score_sentiment":    sent_s,
             "score_ai":           ai,
