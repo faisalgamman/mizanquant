@@ -72,14 +72,22 @@ def _fake_graduation():
     return {"graduated": False, "reason": "n_trades=0<30", "n_trades": 0}
 
 
-def test_report_enriches_filters_and_sorts():
+def test_report_enriches_filters_and_sorts(monkeypatch):
+    # Hermetic: neutralize the USX overlay (identity). Without this the test
+    # depended on LIVE/cached price data for ticker "AAA" (a real symbol), so
+    # its order assertion silently changed whenever USX weights changed (v1→v2).
+    # USX scoring itself is covered by tests/test_usx_layer.py.
+    import app.services.usx_layer as _usx
+    monkeypatch.setattr(_usx, "enrich_picks_with_usx", lambda picks, **kw: picks)
+
     rep = wr.build_weekly_report(
         10_000.0, top=15, min_confidence=45.0,
         _funnel_fn=_fake_funnel, _forward_pf_fn=_fake_forward_pf,
         _graduation_fn=_fake_graduation, asof=date(2026, 6, 8),
     )
     picks = rep["picks"]
-    # HOLD and the 20%-confidence BUY are dropped; STRONG BUY sorts first.
+    # HOLD and the 20%-confidence BUY are dropped; STRONG BUY sorts first
+    # (the report pre-sorts by verdict/confidence; the neutralized USX sort is stable).
     assert [p["symbol"] for p in picks] == ["BBB", "AAA"]
     bbb = picks[0]
     assert bbb["verdict"] == "STRONG BUY"

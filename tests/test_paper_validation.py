@@ -68,6 +68,34 @@ def test_record_inserts_open_and_dedups(tdb, monkeypatch):
         db.close()
 
 
+def test_record_also_persists_swing_signal_history(tdb, monkeypatch):
+    """C4: each inserted weekly pick is ALSO recorded to SignalHistory as a
+    'swing' signal (with the usx breakdown when present), and the PV open-trade
+    dedup prevents duplicate SignalHistory rows on a second run."""
+    p_a = _pick("AAA")
+    p_a.update({"usx_score": 72.0, "usx_pass": True,
+                "usx_signals": ["MACD+", "RS20"], "usx_version": "v2-2026-06"})
+    report = {"picks": [p_a, _pick("BBB"), _pick("CCC", shares=0)]}
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+
+    calls = []
+    import app.background.cache_manager as cm
+    monkeypatch.setattr(cm, "record_signal", lambda **kw: calls.append(kw))
+
+    r1 = pv.record_weekly_picks(account=10000)
+    assert r1["recorded"] == 2
+    assert len(calls) == 2, "record_signal must run once per INSERTED pick (not skipped ones)"
+    assert all(c["signal_type"] == "swing" for c in calls)
+    by_sym = {c["symbol"]: c for c in calls}
+    assert by_sym["AAA"]["breakdown"]["usx_score"] == 72.0
+    assert by_sym["AAA"]["breakdown"]["usx_version"] == "v2-2026-06"
+    assert by_sym["AAA"]["details"]["source"] == "weekly_scanner"
+    assert "usx_score" not in (by_sym["BBB"]["breakdown"] or {})  # BBB carries no usx fields
+
+    pv.record_weekly_picks(account=10000)   # AAA/BBB still open → PV dedup
+    assert len(calls) == 2, "second run must not duplicate SignalHistory rows"
+
+
 def _seed_open(tdb, symbol="AAA", entry=100.0, qty=10):
     db = tdb()
     try:
