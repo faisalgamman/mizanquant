@@ -74,7 +74,8 @@ def test_record_also_persists_swing_signal_history(tdb, monkeypatch):
     dedup prevents duplicate SignalHistory rows on a second run."""
     p_a = _pick("AAA")
     p_a.update({"usx_score": 72.0, "usx_pass": True,
-                "usx_signals": ["MACD+", "RS20"], "usx_version": "v2-2026-06"})
+                "usx_signals": ["MACD+", "RS20"], "usx_version": "v2-2026-06",
+                "usx_shadow": {"v1_score": 55.0, "v2_score": None, "active": "v2"}})
     report = {"picks": [p_a, _pick("BBB"), _pick("CCC", shares=0)]}
     monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
 
@@ -89,6 +90,7 @@ def test_record_also_persists_swing_signal_history(tdb, monkeypatch):
     by_sym = {c["symbol"]: c for c in calls}
     assert by_sym["AAA"]["breakdown"]["usx_score"] == 72.0
     assert by_sym["AAA"]["breakdown"]["usx_version"] == "v2-2026-06"
+    assert by_sym["AAA"]["breakdown"]["usx_shadow"]["v1_score"] == 55.0
     assert by_sym["AAA"]["details"]["source"] == "weekly_scanner"
     assert "usx_score" not in (by_sym["BBB"]["breakdown"] or {})  # BBB carries no usx fields
 

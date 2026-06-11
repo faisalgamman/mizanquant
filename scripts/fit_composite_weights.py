@@ -126,6 +126,12 @@ def fit_composite_weights(days: int = 365) -> dict:
     df["month"] = pd.to_datetime(df["created"]).dt.to_period("M")
     months = sorted(df["month"].unique())
 
+    if len(months) < 4:
+        return {"verdict": "INSUFFICIENT_DATA",
+                "error": f"only {len(months)} distinct outcome month(s) — walk-forward validation "
+                         f"requires >= 4; NO verdict on weights can be made from this data",
+                "months": len(months)}
+
     best_result = None
 
     for alpha in ALPHAS:

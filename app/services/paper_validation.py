@@ -123,7 +123,7 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                     confidence=float(p.get("confidence") or 0),
                     details={"source": "weekly_scanner", "hold_days": p.get("hold_days")},
                     breakdown={k: p.get(k) for k in
-                               ("usx_score", "usx_pass", "usx_signals", "usx_version", "swing_score")
+                               ("usx_score", "usx_pass", "usx_signals", "usx_version", "usx_shadow", "swing_score")
                                if p.get(k) is not None},
                 )
             except Exception:

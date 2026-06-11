@@ -128,7 +128,95 @@ def _run_grid_on_subset(post_bars_list, entries):
     return results
 
 
-# ── main ────────────────────────────────────────────────────────────────────
+# ── in-sample only ───────────────────────────────────────────────────────────
+
+def run_exit_lab_is_full(days=365):
+    """In-sample only: evaluate all 18 combos on the FULL dataset.
+    No walk-forward, no OOS split — descriptive transparency only.
+    """
+    print("Loading matured buy signals...")
+    signals = load_matured_signals(days=days)
+    print(f"  Loaded {len(signals)} signals")
+    signals, _ = apply_signal_filter(signals, "buy")
+    print(f"  Buy-side: {len(signals)}")
+
+    if len(signals) < 100:
+        return {"verdict": "KEEP_OPTION_A", "error": "too few signals"}
+
+    print("Fetching price data...")
+    price_data = fetch_prices_for_signals(signals)
+    print(f"  Got {len(price_data)} symbols")
+
+    # Slice post-signal bars
+    print("Slicing post-signal bars...")
+    rows = _slice_post_bars(signals, price_data)
+    print(f"  {len(rows)} valid post-signal slices")
+
+    all_post = [r["post_bars"] for r in rows]
+    all_entries = [r["entry"] for r in rows]
+    full_grid = _run_grid_on_subset(all_post, all_entries)
+
+    # Add avg_return to each grid row
+    for g in full_grid:
+        returns = []
+        for post_bars, entry in zip(all_post, all_entries):
+            sim = simulate_exit(post_bars, entry, g["stop"], g["hold"], g["trail"])
+            if sim is not None:
+                returns.append(sim[0])
+        g["avg_return"] = round(sum(returns) / len(returns), 2) if returns else 0.0
+
+    return {
+        "verdict": "IN_SAMPLE_ONLY",
+        "verdict_reason": "No walk-forward — full dataset in-sample only. Descriptive, not prescriptive.",
+        "full_grid": full_grid,
+        "counts": {"signals": len(rows)},
+    }
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _slice_post_bars(signals, price_data):
+    """Slice post-signal bars for all signals. Returns list of dicts with post_bars, entry, created, symbol."""
+    rows = []
+    for sig in signals:
+        sym = sig["symbol"]
+        created = sig["created_at"]
+        if created is None:
+            continue
+        df_sym = price_data.get(sym)
+        if df_sym is None:
+            continue
+        try:
+            ts = pd.Timestamp(created)
+            idx_tz = getattr(df_sym.index, "tz", None)
+            if ts.tzinfo is not None and idx_tz is None:
+                ts = ts.tz_localize(None)
+            elif ts.tzinfo is None and idx_tz is not None:
+                ts = ts.tz_localize(idx_tz)
+            post = df_sym[df_sym.index > ts]
+        except Exception:
+            continue
+        if len(post) < 5:
+            continue
+        post = post.iloc[:45]
+        entry = float(sig.get("price") or sig.get("entry") or 0)
+        if entry <= 0:
+            pre = df_sym[df_sym.index <= ts]
+            if len(pre) > 0:
+                entry = float(pre["close"].iloc[-1])
+            else:
+                continue
+        rows.append({
+            "symbol": sym,
+            "created": created,
+            "entry": entry,
+            "post_bars": post,
+            "outcome": sig.get("outcome_return_pct", 0),
+        })
+    return rows
+
+
+# ── main (walk-forward) ──────────────────────────────────────────────────────
 
 def run_exit_lab(days=365):
     print("Loading matured buy signals...")
@@ -144,58 +232,21 @@ def run_exit_lab(days=365):
     price_data = fetch_prices_for_signals(signals)
     print(f"  Got {len(price_data)} symbols")
 
-    # Slice post-signal bars for each signal
     print("Slicing post-signal bars...")
-    rows = []
-    skipped = 0
-    for sig in signals:
-        sym = sig["symbol"]
-        created = sig["created_at"]
-        if created is None:
-            skipped += 1
-            continue
-        df_sym = price_data.get(sym)
-        if df_sym is None:
-            skipped += 1
-            continue
-        # Slice STRICTLY after created_at
-        try:
-            ts = pd.Timestamp(created)
-            idx_tz = getattr(df_sym.index, "tz", None)
-            if ts.tzinfo is not None and idx_tz is None:
-                ts = ts.tz_localize(None)
-            elif ts.tzinfo is None and idx_tz is not None:
-                ts = ts.tz_localize(idx_tz)
-            post = df_sym[df_sym.index > ts]
-        except Exception:
-            skipped += 1
-            continue
-        if len(post) < 5:
-            skipped += 1
-            continue
-        # Keep first 45 bars
-        post = post.iloc[:45]
-        entry = float(sig.get("price") or sig.get("entry") or 0)
-        if entry <= 0:
-            # fallback: use the last pre-signal close
-            pre = df_sym[df_sym.index <= ts]
-            if len(pre) > 0:
-                entry = float(pre["close"].iloc[-1])
-            else:
-                skipped += 1
-                continue
-        rows.append({
-            "symbol": sym,
-            "created": created,
-            "entry": entry,
-            "post_bars": post,
-            "outcome": sig.get("outcome_return_pct", 0),
-        })
+    rows = _slice_post_bars(signals, price_data)
+    print(f"  {len(rows)} valid post-signal slices")
 
-    print(f"  {len(rows)} valid post-signal slices, {skipped} skipped")
     df = pd.DataFrame(rows)
     df["month"] = pd.to_datetime(df["created"]).dt.to_period("M")
     months = sorted(df["month"].unique())
+
+    if len(months) < 4:
+        full_grid = _run_grid_on_subset([r["post_bars"] for r in rows], [r["entry"] for r in rows])
+        return {"verdict": "INSUFFICIENT_DATA",
+                "error": f"only {len(months)} distinct outcome month(s) — walk-forward validation "
+                         f"requires >= 4; NO verdict on exits can be made from this data",
+                "full_grid": full_grid,
+                "counts": {"signals": len(rows), "post_slices": len(df), "months": len(months), "folds": 0}}
 
     # Walk-forward by month
     best_select_count = {}
@@ -312,6 +363,32 @@ def format_exit_report(result):
                 )
         return "\n".join(lines)
 
+    if result.get("verdict") == "IN_SAMPLE_ONLY":
+        lines.append(f"**Note:** {result.get('verdict_reason', 'In-sample only — no walk-forward.')}")
+        if "counts" in result:
+            lines.append(f"  Signals: {result['counts'].get('signals')}")
+        if result.get("full_grid"):
+            lines.append("")
+            lines.append("## Full Grid — All 18 Exit Combos (in-sample, full dataset)")
+            lines.append("")
+            lines.append("| Stop% | Hold | Trail | PF | WR% | AvgRet% | N |")
+            lines.append("|-------|------|-------|-----|------|---------|---|")
+            for g in result["full_grid"]:
+                avg_r = g.get("avg_return", 0.0)
+                lines.append(
+                    f"| {g['stop']} | {g['hold']} | {g['trail']} | "
+                    f"{g['pf']:.2f} | {g['wr']:.1f} | {avg_r:+.2f} | {g['n']} |"
+                )
+        lines.extend([
+            "",
+            "## Caveats",
+            "- **IN_SAMPLE_ONLY** — no walk-forward OOS validation. Descriptive, not prescriptive.",
+            "- Single mostly-bull year — exit policy may not generalize to bear markets.",
+            "- Slippage and fees not modeled — returns are theoretical.",
+            "- Trailing is research-only — the live _simulate_fixed_exit does not support it.",
+        ])
+        return "\n".join(lines)
+
     oos = result["oos"]
     lines.extend([
         "## OOS Adaptive vs Baseline",
@@ -383,6 +460,8 @@ def write_artifact(result, path="data/exit_policy_v2.json"):
             "trailing": result["most_selected"]["trail"],
             "oos": result["oos"],
         })
+    elif result["verdict"] == "IN_SAMPLE_ONLY":
+        art.update({"stop_pct": None, "hold_days": None, "trailing": None, "note": "in-sample-only — descriptive, not prescriptive"})
     else:
         # Non-PASS → consumer refuses
         art.update({"stop_pct": None, "hold_days": None, "trailing": None})
@@ -396,11 +475,16 @@ def write_artifact(result, path="data/exit_policy_v2.json"):
 def main():
     parser = argparse.ArgumentParser(description="Exit Lab — walk-forward exit policy grid")
     parser.add_argument("--days", type=int, default=365)
+    parser.add_argument("--in-sample-only", action="store_true",
+                        help="Run on full dataset only (no walk-forward) — descriptive transparency")
     parser.add_argument("--out", type=str, default="reports/exit_lab.md")
     parser.add_argument("--artifact", type=str, default="data/exit_policy_v2.json")
     args = parser.parse_args()
 
-    result = run_exit_lab(days=args.days)
+    if args.in_sample_only:
+        result = run_exit_lab_is_full(days=args.days)
+    else:
+        result = run_exit_lab(days=args.days)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as f:

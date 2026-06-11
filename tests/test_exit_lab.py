@@ -101,3 +101,35 @@ class TestGate:
     def test_wr_boundary_fail(self):
         """WR > 2 points below baseline → fail."""
         assert evaluate_adoption_exit(3.0, 2.0, 57, 60, 0.01, 0.8) == "KEEP_OPTION_A"
+
+
+# ── INSUFFICIENT_DATA guard test ────────────────────────────────────────────
+
+def test_insufficient_data_single_month(monkeypatch):
+    """All rows share one month → verdict must be INSUFFICIENT_DATA, never KEEP_*."""
+    from scripts.exit_lab import run_exit_lab
+
+    # Mock load_matured_signals → single-month signals (>100)
+    def _mock_load(days=365):
+        return [{"symbol": "AAPL", "created_at": "2026-05-01T10:00:00", "price": 150.0},
+                {"symbol": "MSFT", "created_at": "2026-05-15T10:00:00", "price": 400.0}] * 60  # 120 signals > 100
+    monkeypatch.setattr("scripts.exit_lab.load_matured_signals", _mock_load)
+    monkeypatch.setattr("scripts.exit_lab.apply_signal_filter", lambda s, d: (s, None))
+
+    # Mock price data → synthetic dataframe with date index
+    n = 260
+    closes = np.linspace(100, 120, n)
+    dates = pd.date_range("2026-01-01", periods=n, freq="B")
+    df_sym = pd.DataFrame({
+        "open": closes, "high": closes * 1.01, "low": closes * 0.99,
+        "close": closes, "volume": np.full(n, 1_000_000.0),
+    }, index=dates)
+    # Also add 'date' column for merge-based lookups
+    df_sym["date"] = dates
+    monkeypatch.setattr("scripts.exit_lab.fetch_prices_for_signals",
+                        lambda s: {"AAPL": df_sym, "MSFT": df_sym})
+
+    result = run_exit_lab(days=365)
+    assert result["verdict"] == "INSUFFICIENT_DATA", \
+        f"Expected INSUFFICIENT_DATA, got {result.get('verdict')}"
+    assert result["months"] == 1 if "months" in result else result["counts"]["months"] == 1
