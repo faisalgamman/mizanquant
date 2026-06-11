@@ -3702,6 +3702,19 @@ async def smart_screener(
     )
 
 
+def _composite_from_parts(tech: float, fund: float, sent: float, ai: float) -> float:
+    """Composite 0-100 WITHOUT the unvalidated AI slice (Phase-1, measured decision).
+
+    AI sub-score comes from the disabled coin-flip neural models — it is still
+    DISPLAYED for transparency but contributes 0 weight. Renormalize the
+    remaining pts (30T + 25F + 20S = 75, or 30T + 25F = 55 without sentiment)
+    back to a 0-100 scale so the existing band gates keep their meaning.
+    """
+    if sent is not None and sent >= 0:
+        return round((tech + fund + sent) / 75.0 * 100.0, 1)
+    return round((tech + fund) / 55.0 * 100.0, 1)
+
+
 @app.get("/api/screener/deep-picks")
 async def screener_deep_picks(
     limit: int = Query(15, description="Max results (halal, sorted by composite score)"),
@@ -3796,7 +3809,8 @@ async def screener_deep_picks(
         # Composite over AVAILABLE components only, rescaled to 0-100. When
         # sentiment has no real data it is excluded (not counted as a constant),
         # so the score reflects only signals we can actually stand behind.
-        parts = [(tech, 30), (fund, 25), (ai, 15), (halal_s, 10)]
+        # Phase 1: AI slice zeroed — measured coin-flip models; still DISPLAYED.
+        parts = [(tech, 30), (fund, 25), (halal_s, 10)]
         if sent_available:
             parts.append((sent_s, 20))
         got_pts = sum(v for v, _ in parts)
@@ -3837,6 +3851,7 @@ async def screener_deep_picks(
             "score_fund":         fund,
             "score_sentiment":    sent_s,
             "score_ai":           ai,
+            "ai_counted":         False,  # Phase 1: zero-weight, coin-flip models
             "score_halal":        halal_s,
             "f_grade":            f_grade,
             "signal_composite":   sig_composite,

@@ -95,6 +95,11 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             </div>
             <div style={{ textAlign: "right" }}>
               <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
+              {(verdict || "").includes("SELL") && (
+                <div style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.3 }}>
+                  ⚠ إشارات البيع تاريخياً معكوسة (دقة ~38%) — لا تُعتمد
+                </div>
+              )}
               <div style={{ marginTop: 4 }}>
                 <Badge kind={signal.halal ? "accent" : "red"}>{signal.halal ? "HALAL · DJIM" : "NON-COMPLIANT · DJIM"}</Badge>
               </div>

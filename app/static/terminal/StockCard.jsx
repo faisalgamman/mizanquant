@@ -83,6 +83,11 @@ function StockCard({ symbol, account, onClose }) {
         {/* Verdict banner */}
         <div className="sc-verdict" style={{ borderColor: _verdictColor(sig.verdict) }}>
           <span className="sc-verdict-tag" style={{ color: _verdictColor(sig.verdict) }}>● {sig.verdict || "—"}</span>
+          {(sig.verdict || "").includes("SELL") && (
+            <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 6 }}>
+              ⚠ إشارات البيع تاريخياً معكوسة (دقة ~38%) — لا تُعتمد
+            </span>
+          )}
           <span className="sc-verdict-meta">
             smart {sig.smart_score != null ? sig.smart_score : "—"}/100 ·
             RS {sig.rs_vs_spy || "—"} ·

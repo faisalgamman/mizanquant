@@ -3,7 +3,7 @@
 // Data: GET /api/screener/deep-picks (composite T/F/S/AI/Halal) + GET /signals/accuracy.
 // No fabricated data — real values or honest "—".
 
-function TrackRecordStrip({ overall }) {
+function TrackRecordStrip({ overall, buySide }) {
   if (!overall) {
     return (
       <div className="si-track" style={{ color: "var(--text-muted)" }}>
@@ -22,14 +22,22 @@ function TrackRecordStrip({ overall }) {
     <span><span style={{ color: "var(--text-muted)" }}>{label}</span>
       <strong style={{ color: color || "var(--text-primary)", marginLeft: 5 }}>{val}</strong></span>
   );
+  const bsWr = buySide ? buySide["Win Rate %"] : null;
+  const bsPf = buySide ? buySide["Profit Factor"] : null;
+  const bsPfColor = (bsPf ?? 0) >= 1 ? "var(--positive)" : "var(--negative)";
   return (
     <div className="si-track">
       <span title="Real matured-signal outcomes. Profit factor < 1 means net-losing. Outcome basis is the live exit policy; older rows may use a legacy 5-day window, so treat the absolute number as indicative." style={{ color: "var(--accent)", fontWeight: 700, letterSpacing: 0.5 }}>TRACK RECORD · 30d</span>
       {cell("Win rate", (wr ?? 0) + "%", wrColor)}
       {cell("Avg return", ((avg ?? 0) >= 0 ? "+" : "") + (avg ?? 0) + "%", avgColor)}
-      {cell("Profit factor", pf ?? "—")}
-      {cell("Evaluated", tot ?? 0)}
-      <span style={{ marginLeft: "auto", color: "var(--text-muted)", fontSize: 9 }}>real outcomes · matured signals only</span>
+      {cell("PF", pf ?? "—")}
+      {cell("N", tot ?? 0)}
+      {buySide && bsWr != null ? (
+        <span style={{ color: "var(--positive)", fontWeight: 700, marginLeft: 12, fontSize: 13 }}>
+          BUY-SIDE · WR {bsWr}% · PF {bsPf}
+        </span>
+      ) : null}
+      <span style={{ marginLeft: "auto", color: "var(--text-muted)", fontSize: 9 }}>overall (incl. sells) · real outcomes</span>
     </div>
   );
 }
@@ -44,6 +52,7 @@ const SI_ETF_TO_SECTOR = {
 function StockIntel() {
   const [data, setData]         = useState(null);
   const [overall, setOverall]   = useState(null);
+  const [buySide, setBuySide] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [filter, setFilter]     = useState("all");
   const [sort, setSort]         = useState({ key: "composite_score", dir: -1 });
@@ -78,7 +87,10 @@ function StockIntel() {
     (async () => {
       try {
         const rows = await (await fetch("/signals/accuracy?period=30")).json();
-        if (!cancelled) setOverall(Array.isArray(rows) ? rows.find(r => r && r.Source === "OVERALL") : null);
+        if (!cancelled) {
+          setOverall(Array.isArray(rows) ? rows.find(r => r && r.Source === "OVERALL") : null);
+          setBuySide(Array.isArray(rows) ? rows.find(r => r && r.Source === "BUY-SIDE") : null);
+        }
       } catch (_) {}
       try {
         const rs = await (await fetch("/api/risk/status")).json();
@@ -162,7 +174,7 @@ function StockIntel() {
         </button>
       </div>
 
-      <TrackRecordStrip overall={overall} />
+      <TrackRecordStrip overall={overall} buySide={buySide} />
 
       {computing ? (
         <div className="si-empty">
@@ -182,7 +194,7 @@ function StockIntel() {
                 <th onClick={() => setSortKey("score_tech")} style={{ cursor: "pointer" }} title="Technical">T{caret("score_tech")}</th>
                 <th onClick={() => setSortKey("score_fund")} style={{ cursor: "pointer" }} title="Fundamental">F{caret("score_fund")}</th>
                 <th title="Sentiment">S</th>
-                <th onClick={() => setSortKey("score_ai")} style={{ cursor: "pointer" }} title="AI/ML">AI{caret("score_ai")}</th>
+                <th onClick={() => setSortKey("score_ai")} style={{ cursor: "pointer" }} title="AI/ML — unvalidated">AI*{caret("score_ai")}</th>
                 <th>Grade</th>
                 <th>Analyst</th>
                 <th onClick={() => setSortKey("price")} style={{ cursor: "pointer" }}>Price{caret("price")}</th>
@@ -239,6 +251,9 @@ function StockIntel() {
               })}
             </tbody>
           </table>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", padding: "4px 0 0 4px", lineHeight: 1.5 }}>
+            AI* غير محتسب في الدرجة — نماذج غير مُتحقَّقة
+          </div>
         </div>
       )}
     </div>

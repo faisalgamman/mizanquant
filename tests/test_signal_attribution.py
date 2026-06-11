@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 # Ensure the project root is on sys.path so app.* imports work
 _PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -354,3 +355,140 @@ class TestMarkdownReport:
         assert "noise" in md
         assert "Caveat 1" in md
         assert "carries positive rank information" in md
+
+
+class TestSignalFilter:
+    """B1: --signal-filter buy|sell|all"""
+
+    def test_filter_buy_keeps_only_buyish(self):
+        from scripts.signal_attribution import apply_signal_filter
+        signals = [
+            {"signal": "STRONG BUY"}, {"signal": "BUY"}, {"signal": "WEAK BUY"},
+            {"signal": "STRONG SELL"}, {"signal": "SELL"}, {"signal": "WEAK SELL"},
+            {"signal": "NEUTRAL"}, {"signal": None}, {"signal": ""},
+        ]
+        filtered, n = apply_signal_filter(signals, "buy")
+        assert n == 3
+        assert all("BUY" in (s["signal"] or "").upper() for s in filtered)
+
+    def test_filter_sell_excludes_buy(self):
+        from scripts.signal_attribution import apply_signal_filter
+        signals = [
+            {"signal": "STRONG BUY"}, {"signal": "SELL"}, {"signal": "WEAK SELL"},
+            {"signal": "STRONG SELL"}, {"signal": "NEUTRAL"},
+        ]
+        filtered, n = apply_signal_filter(signals, "sell")
+        assert n == 3
+        # None of the sell rows should contain BUY
+        assert not any("BUY" in (s["signal"] or "").upper() for s in filtered)
+
+    def test_filter_all_passes_through(self):
+        from scripts.signal_attribution import apply_signal_filter
+        signals = [{"signal": "BUY"}, {"signal": "SELL"}]
+        filtered, n = apply_signal_filter(signals, "all")
+        assert n == 2
+
+
+class TestExcessVsSpy:
+    """B1: excess_vs_spy computation"""
+
+    def test_excess_flat_spy_equals_outcome(self):
+        """SPY flat (0% return) => excess == outcome_return_pct."""
+        n = 200
+        naive_idx = pd.DatetimeIndex(pd.date_range(end=datetime.now(), periods=n, freq="D"))
+        closes = np.full(n, 100.0)  # flat
+        spy_df = pd.DataFrame({
+            "open": closes, "high": closes, "low": closes,
+            "close": closes, "volume": np.full(n, 1_000_000.0),
+        }, index=naive_idx)
+
+        created = datetime.now(timezone.utc) - timedelta(days=30)
+        outcome_date = created + timedelta(days=5)
+        sig = {
+            "id": 1, "symbol": "TST", "signal_type": "swing", "signal": "BUY",
+            "score": 70.0, "price": 100.0,
+            "created_at": created,
+            "outcome_date": outcome_date,
+            "outcome_return_pct": 3.5,
+            "details": {},
+        }
+
+        from scripts.signal_attribution import _compute_features_for_signal
+        rng = np.random.default_rng(42)
+        rets = rng.normal(0.0005, 0.015, n)
+        stock_close = 100 * np.cumprod(1 + rets)
+        stock_df = pd.DataFrame({
+            "open": stock_close, "high": stock_close * 1.01,
+            "low": stock_close * 0.99, "close": stock_close,
+            "volume": np.full(n, 1_000_000.0),
+        }, index=naive_idx)
+
+        result = _compute_features_for_signal(sig, stock_df, spy_df)
+        assert result is not None
+        assert result["excess_vs_spy"] == pytest.approx(3.5, abs=0.5)
+
+    def test_excess_spy_up_2pct(self):
+        """SPY +2% => excess == outcome - 2."""
+        n = 200
+        naive_idx = pd.DatetimeIndex(pd.date_range(end=datetime.now(), periods=n, freq="D"))
+        spy_close = 100 * np.cumprod(1 + np.full(n, 0.0001))  # trending up
+        spy_df = pd.DataFrame({
+            "open": spy_close, "high": spy_close, "low": spy_close,
+            "close": spy_close, "volume": np.full(n, 1_000_000.0),
+        }, index=naive_idx)
+
+        rng = np.random.default_rng(99)
+        stock_close = 100 * np.cumprod(1 + rng.normal(0.0005, 0.015, n))
+        stock_df = pd.DataFrame({
+            "open": stock_close, "high": stock_close * 1.01,
+            "low": stock_close * 0.99, "close": stock_close,
+            "volume": np.full(n, 1_000_000.0),
+        }, index=naive_idx)
+
+        created = datetime.now(timezone.utc) - timedelta(days=30)
+        outcome_date = created + timedelta(days=5)
+        # Compute actual SPY return over the window
+        ts_c = pd.Timestamp(created).tz_localize(None)
+        ts_o = pd.Timestamp(outcome_date).tz_localize(None)
+        spy_sliced_c = spy_df[spy_df.index <= ts_c]
+        spy_sliced_o = spy_df[spy_df.index <= ts_o]
+        spy_ret = float((spy_sliced_o["close"].iloc[-1] / spy_sliced_c["close"].iloc[-1] - 1) * 100)
+
+        sig = {
+            "id": 2, "symbol": "TST2", "signal_type": "swing", "signal": "BUY",
+            "score": 70.0, "price": 100.0,
+            "created_at": created,
+            "outcome_date": outcome_date,
+            "outcome_return_pct": 5.0,
+            "details": {},
+        }
+
+        from scripts.signal_attribution import _compute_features_for_signal
+        result = _compute_features_for_signal(sig, stock_df, spy_df)
+        assert result is not None
+        expected = 5.0 - spy_ret
+        assert result["excess_vs_spy"] == pytest.approx(expected, abs=0.01)
+
+    def test_excess_none_when_outcome_date_missing(self):
+        """No outcome_date => excess is None."""
+        n = 200
+        naive_idx = pd.DatetimeIndex(pd.date_range(end=datetime.now(), periods=n, freq="D"))
+        closes = np.full(n, 100.0)
+        df = pd.DataFrame({
+            "open": closes, "high": closes, "low": closes,
+            "close": closes, "volume": np.full(n, 1_000_000.0),
+        }, index=naive_idx)
+
+        sig = {
+            "id": 3, "symbol": "TST3", "signal_type": "swing", "signal": "BUY",
+            "score": 70.0, "price": 100.0,
+            "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+            "outcome_date": None,  # missing
+            "outcome_return_pct": 2.0,
+            "details": {},
+        }
+        from scripts.signal_attribution import _compute_features_for_signal
+        result = _compute_features_for_signal(sig, df, df)
+        assert result is not None
+        assert result["excess_vs_spy"] is None
+

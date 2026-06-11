@@ -186,6 +186,23 @@ def get_accuracy_report(period_days: int = 30) -> list[dict]:
                 "Period": f"{period_days} days",
             })
 
+            # B5: Buy-side only (honest split — separates from broken sell side)
+            buy_returns = [s.outcome_return_pct for s in buy_signals if s.outcome_return_pct is not None]
+            buy_wins = [r for r in buy_returns if r > 0]
+            buy_losses = [r for r in buy_returns if r <= 0]
+            results.append({
+                "Source": "BUY-SIDE",
+                "Total Signals": len(buy_signals),
+                "Buy Signals": len(buy_signals),
+                "Sell Signals": 0,
+                "Avg Return %": round(np.mean(buy_returns), 2) if buy_returns else 0,
+                "Win Rate %": round(len(buy_wins) / len(buy_returns) * 100, 1) if buy_returns else 0,
+                "Avg Win %": round(np.mean(buy_wins), 2) if buy_wins else 0,
+                "Avg Loss %": round(np.mean(buy_losses), 2) if buy_losses else 0,
+                "Profit Factor": round(abs(sum(buy_wins)) / abs(sum(buy_losses)), 2) if buy_losses and sum(buy_losses) != 0 else (999 if not buy_losses else 0),
+                "Period": f"{period_days} days",
+            })
+
             # Per-type breakdown
             for signal_type, type_signals in sorted(by_type.items()):
                 returns = [s.outcome_return_pct for s in type_signals if s.outcome_return_pct is not None]

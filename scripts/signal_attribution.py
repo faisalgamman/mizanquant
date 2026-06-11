@@ -33,6 +33,7 @@ def load_matured_signals(days=365, db_override=None):
                 "id": r.id, "symbol": r.symbol, "signal_type": r.signal_type,
                 "signal": r.signal, "score": r.score or 0, "price": r.price or 0,
                 "created_at": r.created_at.replace(tzinfo=timezone.utc) if r.created_at else None,
+                "outcome_date": r.outcome_date.replace(tzinfo=timezone.utc) if r.outcome_date else None,
                 "outcome_return_pct": r.outcome_return_pct or 0,
                 "details": r.details or {},
             }
@@ -40,6 +41,21 @@ def load_matured_signals(days=365, db_override=None):
         ]
     finally:
         db.close()
+
+def apply_signal_filter(signals, direction):
+    """Filter signals by BUY/SELL direction. Returns filtered list and count."""
+    if direction == "all":
+        return signals, len(signals)
+    if direction == "buy":
+        filtered = [s for s in signals if "BUY" in (s.get("signal") or "").upper()]
+        return filtered, len(filtered)
+    if direction == "sell":
+        filtered = [s for s in signals
+                    if "SELL" in (s.get("signal") or "").upper()
+                    and "BUY" not in (s.get("signal") or "").upper()]
+        return filtered, len(filtered)
+    return signals, len(signals)
+
 
 def fetch_prices_for_signals(signals):
     """Fetch 2y price data once per unique symbol + SPY."""
@@ -160,6 +176,21 @@ def _compute_features_for_signal(signal, df, spy_df):
                 sym_ret_63 = float(close.iloc[-1] / close.iloc[-63]) if close.iloc[-63] != 0 else 1.0
                 spy_ret_63 = float(spy_sliced["close"].iloc[-1] / spy_sliced["close"].iloc[-63]) if spy_sliced["close"].iloc[-63] != 0 else 1.0
                 rs_spy_63 = round(sym_ret_63 / spy_ret_63, 4) if spy_ret_63 != 0 else 1.0
+        # Excess vs SPY (percentage points) — separates skill from beta
+        excess_vs_spy = None
+        outcome_date = signal.get("outcome_date")
+        if outcome_date is not None and spy_df is not None and len(spy_df) >= 2:
+            try:
+                spy_created = _cut(spy_df, created)
+                spy_outcome = _cut(spy_df, outcome_date)
+                if len(spy_created) >= 1 and len(spy_outcome) >= 1:
+                    spyc_entry = float(spy_created["close"].iloc[-1])
+                    spyc_exit = float(spy_outcome["close"].iloc[-1])
+                    if spyc_entry > 0:
+                        spy_ret_pct = (spyc_exit / spyc_entry - 1) * 100
+                        excess_vs_spy = round(signal["outcome_return_pct"] - spy_ret_pct, 2)
+            except Exception:
+                pass
         return {
             "signal_id": signal["id"],
             "symbol": signal["symbol"],
@@ -167,6 +198,7 @@ def _compute_features_for_signal(signal, df, spy_df):
             "signal": signal["signal"],
             "score": signal["score"],
             "outcome_return_pct": signal["outcome_return_pct"],
+            "excess_vs_spy": excess_vs_spy,
             "regime": signal["details"].get("regime", "Unknown") if signal["details"] else "Unknown",
             "forecast_agrees": signal["details"].get("forecast_agrees"),
             "rsi14": round(rsi14, 1),
@@ -221,9 +253,14 @@ def compute_attribution(features_df, signals, days=365, skipped=0):
     losses = ret[ret <= 0]
     overall_wr = round(len(profits) / len(ret) * 100, 1) if len(ret) > 0 else 0
     overall_pf = round(sum(profits) / abs(sum(losses)), 2) if len(losses) > 0 and sum(losses) != 0 else (999 if len(losses) == 0 else 0)
+    # Overall avg excess
+    excess_col = features_df.get("excess_vs_spy")
+    excess_vals = excess_col.dropna().values if excess_col is not None else np.array([])
+    overall_avg_excess = round(float(np.mean(excess_vals)), 2) if len(excess_vals) > 0 else None
     header = {
         "as_of": _utcnow().isoformat(), "days": days, "n": len(features_df),
         "overall_wr": overall_wr, "overall_pf": overall_pf,
+        "overall_avg_excess": overall_avg_excess,
         "skipped_symbols": skipped,
     }
     # Rank-IC
@@ -238,6 +275,21 @@ def compute_attribution(features_df, signals, days=365, skipped=0):
         ic = round(float(rank_feat.corr(rank_ret)), 4)
         ic_rows.append({"feature": col, "ic": ic, "n": int(mask.sum())})
     ic_rows.sort(key=lambda x: abs(x["ic"]), reverse=True)
+    # Rank-IC vs EXCESS return (skill, beta removed)
+    ic_excess_rows = []
+    if excess_col is not None and len(excess_vals) >= 30:
+        for col in all_num:
+            vals = features_df[col].values.astype(float)
+            mask = ~np.isnan(vals) & ~np.isinf(vals)
+            excess_mask = ~np.isnan(excess_col.values) & ~np.isinf(excess_col.values)
+            joint = mask & excess_mask
+            if joint.sum() < 30:
+                continue
+            rank_feat = pd.Series(vals[joint]).rank()
+            rank_exc = pd.Series(excess_col.values[joint]).rank()
+            ic = round(float(rank_feat.corr(rank_exc)), 4)
+            ic_excess_rows.append({"feature": col, "ic": ic, "n": int(joint.sum())})
+        ic_excess_rows.sort(key=lambda x: abs(x["ic"]), reverse=True)
     # Per-band
     per_band = []
     for (stype, sig), grp in features_df.groupby(["signal_type", "signal"]):
@@ -253,6 +305,8 @@ def compute_attribution(features_df, signals, days=365, skipped=0):
             "avg_ret": round(float(np.mean(gret)), 2) if n>0 else 0,
             "median_ret": round(float(np.median(gret)), 2) if n>0 else 0,
             "profit_factor": pf,
+            "avg_excess": round(float(grp["excess_vs_spy"].dropna().mean()), 2)
+            if "excess_vs_spy" in grp.columns and grp["excess_vs_spy"].dropna().any() else None,
         })
     per_band.sort(key=lambda x: (-x["n"], -x["win_rate"]))
     # Score decile
@@ -318,6 +372,7 @@ def compute_attribution(features_df, signals, days=365, skipped=0):
     }
     return {
         "header": header, "rank_ic": ic_rows,
+        "rank_ic_excess": ic_excess_rows,
         "per_band": per_band, "per_decile": per_decile,
         "per_regime": per_regime, "per_forecast": per_forecast,
         "verdict": verdict,
@@ -332,9 +387,10 @@ def format_markdown_report(summary):
         f"**Generated:** {h['as_of']}  ",
         f"**Period:** {h['days']} days  ",
         f"**Matured signals evaluated:** {h['n']}  ",
-        f"**Overall Win Rate:** {h['overall_wr']}%  ",
-        f"**Overall Profit Factor:** {h['overall_pf']}  ",
-        f"**Symbols skipped (no price data):** {h['skipped_symbols']}  ",
+        f"**Overall Win Rate:** {h['overall_wr']}%  \n",
+        f"**Overall Profit Factor:** {h['overall_pf']}  \n",
+        f"**Overall Avg Excess vs SPY:** {h.get('overall_avg_excess', '—')}%  \n" if h.get('overall_avg_excess') is not None else "",
+        f"**Symbols skipped (no price data):** {h['skipped_symbols']}  \n",
         "",
         "## Rank-IC (Spearman rank correlation with outcome_return_pct)",
         "",
@@ -352,15 +408,25 @@ def format_markdown_report(summary):
             assess = "marginal"
         lines.append(f"| {row['feature']} | {ic:+.4f} | {n} | {assess} |")
     lines.append("")
+    # Rank-IC vs EXCESS
+    if summary.get("rank_ic_excess"):
+        lines.append("## Rank-IC vs EXCESS return (skill, beta removed)")
+        lines.append("")
+        lines.append("| Feature | IC | N |")
+        lines.append("|---------|-----|---|")
+        for row in summary["rank_ic_excess"]:
+            lines.append(f"| {row['feature']} | {row['ic']:+.4f} | {row['n']} |")
+        lines.append("")
     # Per-band
     lines.append("## Per-Band Performance")
     lines.append("")
-    lines.append("| Signal Type | Signal | N | Win Rate | Avg Ret | Median Ret | PF |")
-    lines.append("|------------|--------|---|----------|---------|-----------|-----|")
+    lines.append("| Signal Type | Signal | N | Win Rate | Avg Ret | Median Ret | Avg Excess | PF |")
+    lines.append("|------------|--------|---|----------|---------|-----------|------------|-----|")
     for row in summary["per_band"]:
+        exc = f"{row['avg_excess']}%" if row.get("avg_excess") is not None else "—"
         lines.append(f"| {row['signal_type']} | {row['signal']} | {row['n']} | "
                      f"{row['win_rate']}% | {row['avg_ret']}% | {row['median_ret']}% | "
-                     f"{row['profit_factor']} |")
+                     f"{exc} | {row['profit_factor']} |")
     lines.append("")
     # Per-decile
     if summary["per_decile"]:
@@ -437,6 +503,9 @@ def format_stdout_report(summary):
 def main():
     parser = argparse.ArgumentParser(description="Phase 0 Signal Attribution")
     parser.add_argument("--days", type=int, default=365)
+    parser.add_argument("--signal-filter", type=str, default="all",
+                        choices=["all", "buy", "sell"],
+                        help="Filter signals by direction (all/buy/sell)")
     parser.add_argument("--out", type=str, default="reports/signal_attribution.md")
     parser.add_argument("--json-out", type=str, default="reports/signal_attribution.json")
     parser.add_argument("--db-url", type=str, default=None)
@@ -452,6 +521,11 @@ def main():
         print(f"Loading matured signals (last {args.days} days)...")
         signals = load_matured_signals(days=args.days)
         print(f"  Loaded {len(signals)} matured signals.")
+
+        # Apply signal-direction filter (B1)
+        if args.signal_filter != "all":
+            signals, filtered_n = apply_signal_filter(signals, args.signal_filter)
+            print(f"  After --signal-filter {args.signal_filter}: {filtered_n} signals.")
 
         if len(signals) < 50:
             print("  WARNING: Too few signals for meaningful attribution. Exiting.")
