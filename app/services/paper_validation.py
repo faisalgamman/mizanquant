@@ -108,6 +108,25 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                 continue
             db.add(TradeHistory(created_at=_utc_now(), **_paper_row_from_pick(p)))
             open_syms.add(sym)
+            # C4: Also persist to SignalHistory for the weekly scanner's track record
+            try:
+                from app.background.cache_manager import record_signal
+                record_signal(
+                    symbol=sym,
+                    signal_type="swing",
+                    signal=str(p.get("verdict") or "BUY"),
+                    score=float(p.get("confidence") or 0),
+                    price=float(p.get("entry") or 0),
+                    stop_loss=float(p.get("catastrophe_stop") or 0),
+                    take_profit=float(p.get("far_take_profit") or 0),
+                    confidence=float(p.get("confidence") or 0),
+                    details={"source": "weekly_scanner", "hold_days": p.get("hold_days")},
+                    breakdown={k: p.get(k) for k in
+                               ("usx_score", "usx_pass", "usx_signals", "usx_version", "swing_score")
+                               if p.get(k) is not None},
+                )
+            except Exception:
+                logger.debug("weekly pick SignalHistory record skipped", exc_info=True)
             recorded += 1
         db.commit()
         return {"recorded": recorded, "skipped": skipped}

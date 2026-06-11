@@ -492,3 +492,41 @@ class TestExcessVsSpy:
         assert result is not None
         assert result["excess_vs_spy"] is None
 
+
+class TestExcessExcludedFromIC:
+    """C1: excess_vs_spy must not appear in IC tables (outcome leak)."""
+
+    def test_excess_not_in_rank_ic(self):
+        """Features df with excess_vs_spy column → no IC row for that name."""
+        from scripts.signal_attribution import compute_attribution
+        rng = np.random.default_rng(77)
+        rows = []
+        for i in range(100):
+            rows.append({
+                "signal_id": i, "symbol": f"X{i:03d}",
+                "signal_type": "swing", "signal": "BUY",
+                "score": float(rng.integers(40, 90)),
+                "outcome_return_pct": round(float(rng.normal(0, 3)), 2),
+                "excess_vs_spy": round(float(rng.normal(0, 3)), 2),
+                "regime": "NEUTRAL", "forecast_agrees": None,
+                "rsi14": 50.0, "macd_hist": 0.002, "macd_hist_rising": False,
+                "adx14": 25.0, "di_bullish": True,
+                "bb_bandwidth_pctile": 50.0, "vol_ratio_20": 1.0,
+                "vol_dryup": 1.0, "prox_52w": 0.9,
+                "trend_above_ema50": True, "ema50_above_200": True,
+                "mom_1m": round(float(rng.normal(0, 0.02)), 4),
+                "mom_3m": 0.0, "rs_spy_20": 1.0, "rs_spy_63": 1.0,
+            })
+        features_df = pd.DataFrame(rows)
+        sigs = [{"id": i, "details": {}} for i in range(100)]
+        summary = compute_attribution(features_df, sigs, days=365, skipped=0)
+
+        ic_features = {r["feature"] for r in summary["rank_ic"]}
+        assert "excess_vs_spy" not in ic_features, \
+            f"excess_vs_spy leaked into rank_ic: {ic_features}"
+
+        ic_excess = {r["feature"] for r in summary.get("rank_ic_excess", [])}
+        assert "excess_vs_spy" not in ic_excess, \
+            f"excess_vs_spy leaked into rank_ic_excess: {ic_excess}"
+
+

@@ -242,7 +242,7 @@ def compute_attribution(features_df, signals, days=365, skipped=0):
     """Compute rank-IC, per-band, per-decile, per-regime statistics."""
     feat_cols = [c for c in features_df.columns
                  if c not in ("signal_id","symbol","signal_type","signal","score",
-                              "outcome_return_pct","regime","forecast_agrees")]
+                              "outcome_return_pct","excess_vs_spy","regime","forecast_agrees")]
     num_cols = [c for c in feat_cols if features_df[c].dtype in (np.float64, np.int64, float, int, np.bool_)]
     bool_cols = [c for c in feat_cols if features_df[c].dtype == np.bool_]
     # bool dtype matches BOTH lists above — dedupe so each feature gets ONE IC row.
