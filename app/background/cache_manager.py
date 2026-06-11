@@ -81,11 +81,20 @@ def record_signal(
     take_profit: float = 0,
     confidence: float = 0,
     details: dict | None = None,
+    breakdown: dict | None = None,
 ):
-    """Record a trading signal for auditing and accuracy tracking."""
+    """Record a trading signal for auditing and accuracy tracking.
+
+    If *breakdown* is provided, it is stored under details['breakdown']
+    so Phase 0 attribution can measure which scanner components predict
+    outcomes.  Callers pass this additively — no behaviour change.
+    """
     try:
         db = SessionLocal()
         try:
+            _det = dict(details or {})
+            if breakdown:
+                _det["breakdown"] = breakdown
             row = SignalHistory(
                 symbol=symbol,
                 signal_type=signal_type,
@@ -95,7 +104,7 @@ def record_signal(
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 confidence=confidence,
-                details=details,
+                details=_det if _det else None,
             )
             db.add(row)
             db.commit()

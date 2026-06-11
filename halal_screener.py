@@ -3097,6 +3097,13 @@ def _persist_consensus_result(symbol: str, profile: str, result: list[dict]) -> 
             payload = {
                 "profile": profile,
                 "rows": result[1:],
+                # Phase 0 instrumentation: numeric summary scores under
+                # details["breakdown"] so attribution can measure components
+                # exactly on future signals (additive — no behavior change).
+                "breakdown": {
+                    k: v for k, v in summary.items()
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)
+                },
             }
             db.add(
                 ConsensusLog(

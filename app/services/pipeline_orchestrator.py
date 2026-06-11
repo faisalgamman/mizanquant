@@ -479,6 +479,13 @@ class UnifiedPipeline:
                     correlation_id=sig.correlation_id, regime=regime, risk_posture=posture,
                     extra={"profile": sig.profile, "strategy_id": sig.strategy_id,
                            "rotation_quadrant": c.get("rotation_quadrant")},
+                    # Phase 0 instrumentation: persist whatever component scores the
+                    # candidate carries so future attribution is exact (additive only).
+                    breakdown={k: c.get(k) for k in (
+                        "swing_score", "context_adjusted_score", "composite_score",
+                        "score_tech", "score_fund", "score_sent", "score_ai",
+                        "rs_vs_spy", "rsi", "adx", "chg_1m",
+                    ) if c.get(k) is not None},
                 ).persist()
             stage.details["forecast_agreement"] = {"agree": agree, "disagree": disagree}
             logger.info("Pipeline stage 4: forecast agreement — agree=%d disagree=%d", agree, disagree)

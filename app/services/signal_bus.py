@@ -47,6 +47,8 @@ class TradingSignal:
     regime: Optional[str] = None
     risk_posture: Optional[str] = None
     extra: dict = field(default_factory=dict)
+    # Phase 0: scanner component breakdown for future attribution
+    breakdown: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,6 +63,18 @@ class TradingSignal:
             from app.db.models import SignalHistory
             db = SessionLocal()
             try:
+                _det = {
+                    "forecast_direction":  self.forecast_direction,
+                    "forecast_confidence": self.forecast_confidence,
+                    "forecast_agrees":     self.forecast_agrees,
+                    "source_module":       self.source_module,
+                    "correlation_id":      self.correlation_id,
+                    "regime":              self.regime,
+                    "risk_posture":        self.risk_posture,
+                    **(self.extra or {}),
+                }
+                if self.breakdown:
+                    _det["breakdown"] = self.breakdown
                 row = SignalHistory(
                     symbol=(self.symbol or "").upper(),
                     signal_type=self.signal_type,
@@ -70,16 +84,7 @@ class TradingSignal:
                     stop_loss=self.stop_loss,
                     take_profit=self.take_profit,
                     confidence=self.confidence,
-                    details={
-                        "forecast_direction":  self.forecast_direction,
-                        "forecast_confidence": self.forecast_confidence,
-                        "forecast_agrees":     self.forecast_agrees,
-                        "source_module":       self.source_module,
-                        "correlation_id":      self.correlation_id,
-                        "regime":              self.regime,
-                        "risk_posture":        self.risk_posture,
-                        **(self.extra or {}),
-                    },
+                    details=_det,
                 )
                 db.add(row)
                 db.commit()
