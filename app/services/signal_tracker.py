@@ -8,6 +8,7 @@ Must run for 2-4 weeks on paper trading to establish track record.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -74,8 +75,8 @@ def check_signal_outcomes(lookback_days: int | None = None):
     from app.services.market_data import fetch as fetch_market_data
     from app.config import settings as _cfg
 
-    hold_days = int(getattr(_cfg, "SIGNAL_OUTCOME_HOLD_DAYS", 20))
-    stop_pct = float(getattr(_cfg, "SIGNAL_OUTCOME_STOP_PCT", 15.0))
+    hold_days = int(os.environ.get("EXIT_HOLD_DAYS", getattr(_cfg, "SIGNAL_OUTCOME_HOLD_DAYS", 20)))
+    stop_pct = float(os.environ.get("EXIT_STOP_PCT", getattr(_cfg, "SIGNAL_OUTCOME_STOP_PCT", 15.0)))
     # Only consider signals old enough that the hold window could have elapsed
     # (trading days ≈ calendar·5/7, plus a holiday buffer). The per-signal
     # maturity check in _simulate_fixed_exit is the exact gate.

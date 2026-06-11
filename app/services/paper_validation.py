@@ -31,6 +31,7 @@ deployed history and the paper_trade_gate counter survive without a migration.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -143,8 +144,8 @@ def mature_open_paper_trades() -> dict:
     from app.services.market_data import fetch as fetch_market_data
     from app.services.signal_tracker import _simulate_fixed_exit
 
-    hold_days = int(getattr(settings, "SWING_MAX_HOLD_DAYS", 20))
-    stop_pct = float(getattr(settings, "SWING_TRAIL_PCT", 15.0))
+    hold_days = int(os.environ.get("EXIT_HOLD_DAYS", getattr(settings, "SWING_MAX_HOLD_DAYS", 20)))
+    stop_pct = float(os.environ.get("EXIT_STOP_PCT", getattr(settings, "SWING_TRAIL_PCT", 15.0)))
 
     db = SessionLocal()
     try:
