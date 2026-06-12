@@ -798,6 +798,18 @@ SCREENER_CACHE_TTL = 3600  # 60 min — the 650-symbol scan is CPU-heavy on a sm
 # container; it was re-running ~every 15 min while the dashboard was open (recurring
 # slowness). Hourly is plenty for a swing/monthly halal screener. Stale window = 2×.
 
+# ── Funnel gate (env-gated, default = off = full scan) ──
+_FUNNEL_TOP_N = int(os.environ.get("SCREENER_FUNNEL_TOP_N", "0"))
+
+
+def _funnel_select(symbols: list, rank_fn, top_n: int) -> list:
+    """Pure helper: pre-rank symbols and return the top-N (or all if top_n <= 0)."""
+    if top_n <= 0 or len(symbols) <= top_n:
+        return list(symbols)
+    scored = [(rank_fn(s), s) for s in symbols]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [s for _, s in scored[:top_n]]
+
 
 def _screener_is_stuck(progress: dict, now: float = None, max_age: float = 600) -> bool:
     """True when a 'scanning' run is older than max_age seconds (hung thread)."""
@@ -4371,6 +4383,77 @@ async def diagnose_data_sources(
     return diag
 
 
+def _quick_technical_rank(symbol: str, spy_df=None) -> float:
+    """Cheap technical pre-rank (0-100ish) using ONLY cached OHLCV bars.
+
+    No FMP, no network — reads the already-seeded _fetch_data cache from
+    the Alpaca batch prefetch. Uses the measured-useful signals from the
+    Phase-2 v1.1 IC analysis: MACD inflection, RS vs SPY, RSI, above-EMA50.
+    On any error returns -1.0 (sinks the symbol, never raises).
+    """
+    try:
+        from app.services.technical import rsi as _t_rsi, macd as _t_macd
+        from app.services.technical import relative_strength as _t_rs
+
+        ok, df = _fetch_data(symbol, period="1y")
+        if not ok or df is None or len(df) < 50:
+            return -1.0
+        close = df["close"].astype(float)
+        score = 0.0
+
+        # ── MACD inflection (histogram direction) — weight 35 ──
+        try:
+            _macd_line, _macd_sig, hist = _t_macd(close)
+            hv = hist.dropna().values
+            if len(hv) >= 3:
+                if hv[-1] > hv[-2] and hv[-2] <= hv[-3]:
+                    score += 35.0   # inflection upward (bullish cross)
+                elif hv[-1] > 0:
+                    score += 20.0   # positive histogram
+                elif hv[-1] > hv[-2]:
+                    score += 10.0   # improving (less negative)
+        except Exception:
+            pass
+
+        # ── RS vs SPY (20-day) — weight 25 ──
+        try:
+            if spy_df is not None and len(spy_df) >= 20:
+                rs = _t_rs(df, spy_df, period=20)
+                if rs > 1.05:
+                    score += 25.0
+                elif rs > 1.0:
+                    score += 15.0
+        except Exception:
+            pass
+
+        # ── RSI — weight 20 ──
+        try:
+            rsi_vals = _t_rsi(close, n=14).dropna()
+            if len(rsi_vals) > 0:
+                r = float(rsi_vals.iloc[-1])
+                if 40 <= r <= 60:
+                    score += 20.0
+                elif 30 <= r < 40:
+                    score += 12.0
+                elif 60 < r <= 70:
+                    score += 8.0
+        except Exception:
+            pass
+
+        # ── Above EMA50 — weight 20 ──
+        try:
+            ema50 = close.ewm(span=50).mean().dropna()
+            if len(ema50) > 0 and len(close) > 0:
+                if float(close.iloc[-1]) > float(ema50.iloc[-1]):
+                    score += 20.0
+        except Exception:
+            pass
+
+        return round(score, 1)
+    except Exception:
+        return -1.0
+
+
 def _run_screener_bg(scan_symbols: list):
     """Run screener scan in background thread, store results in cache."""
     cache_key = "smart_screener"
@@ -4430,8 +4513,20 @@ def _run_screener_bg(scan_symbols: list):
                 "ALL symbols (momentum=0, T=0). Check Alpaca/Tiingo/yfinance data feed."
             )
 
+        # ── Two-tier funnel (flag-gated, default = full scan) ──
+        # When _FUNNEL_TOP_N > 0: pre-rank the ENTIRE universe on cached bars only,
+        # then run the expensive _analyze_smart on just the top-N. FMP load stays
+        # bounded regardless of universe size. Default (0) = byte-identical full scan.
+        if _FUNNEL_TOP_N > 0:
+            def _rank_one(s):
+                return _quick_technical_rank(s, spy_df_shared)
+            original_count = len(scan_symbols)
+            scan_symbols = _funnel_select(scan_symbols, _rank_one, _FUNNEL_TOP_N)
+            logger.info("funnel: %d -> %d by technical pre-rank (top_n=%d)",
+                        original_count, len(scan_symbols), _FUNNEL_TOP_N)
+
         batch_size = SCREENER_BATCH_SIZE
-        batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]
+        batches = [scan_symbols[i:i+batch_size] for i in range(0, len(scan_symbols), batch_size)]
         for batch_idx, batch in enumerate(batches):
             _update_progress(batch_idx * batch_size + len(batch), batch_idx + 1)
             with ThreadPoolExecutor(max_workers=2) as pool:
