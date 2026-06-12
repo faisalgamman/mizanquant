@@ -301,6 +301,16 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     # Final DJIM verdict — all 5 screens must pass
     is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass and receivable_pass
 
+    # ── Data-confidence label (honesty layer — NO threshold change) ──
+    _low = []
+    if mcap_basis == "spot_fallback":
+        _low.append("no 24-month average (spot mcap used)")
+    if total_debt == 0 and liquid_assets == 0:
+        _low.append("balance-sheet data missing/zero")
+    if revenue <= 0:
+        _low.append("revenue unavailable")
+    halal_confidence = "high" if not _low else "partial"
+
     result = {
         "symbol": symbol,
         "company_name": company_name,
@@ -334,6 +344,11 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         # Metadata
         "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass, receivable_pass]),
         "screens_total": 5,
+        # ── Reliability v2 (additive display — no threshold/logic change) ──
+        "halal_confidence": halal_confidence,
+        "confidence_reasons": _low,
+        "purification_pct": round(interest_ratio, 2),
+        "purification_note": "طهّر هذه النسبة من أرباح هذا السهم (تقدير DJIM من دخل الفائدة/الإيراد)",
     }
 
     return result

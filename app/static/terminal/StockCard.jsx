@@ -120,12 +120,16 @@ function StockCard({ symbol, account, onClose }) {
           <div className="sc-block">
             <div className="sc-block-h">
               SHARIA · <b style={{ color: isHalal ? "var(--positive)" : "var(--negative)" }}>{isHalal ? "HALAL" : "NON-COMPLIANT"}</b>
+              {halal.halal_confidence === "partial"
+                ? <span title={(halal.confidence_reasons || []).join(" · ")} style={{ marginLeft: 8, padding: "1px 7px", borderRadius: 10, background: "var(--warning)", color: "#000", fontSize: 10, fontWeight: 700 }}>⚠ بيانات جزئية — ثقة أقل</span>
+                : null}
             </div>
             <CardStat label="Standard" value={halal.standard || "DJIM"} />
             <CardStat label="Debt" value={_n(halal.debt_ratio, 1) + "%"} sub={halal.debt_pass === false ? "> 33% ✗" : "< 33% ✓"} />
             <CardStat label="Liquidity" value={_n(halal.liquidity_ratio, 1) + "%"} sub={halal.liquidity_pass === false ? "> 33% ✗" : "< 33% ✓"} />
             <CardStat label="Receivables" value={_n(halal.receivable_ratio, 1) + "%"} sub={halal.receivable_pass === false ? "> 33% ✗" : "< 33% ✓"} />
             <CardStat label="Interest" value={_n(halal.interest_ratio, 1) + "%"} sub={"basis: " + (halal.mcap_basis || "—")} />
+            <CardStat label="تطهير" value={_n(halal.purification_pct, 2) + "%"} sub="طهّر من الأرباح" />
           </div>
         </div>
 
