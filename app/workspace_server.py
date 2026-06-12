@@ -4635,8 +4635,11 @@ async def forecast_risers(limit: int = Query(8, ge=1, le=20)):
     except Exception as e:
         logger.debug("risers screener: %s", e)
         data = {}
+    # NOTE: the smart-screener cache stores the score as "smart_score" — filtering on
+    # "composite_score" (which never exists here) left this panel EMPTY since launch.
     cands = [r for r in (data.get("results", []) if isinstance(data, dict) else [])
-             if r.get("is_halal") and (r.get("composite_score", 0) or 0) >= 45][:25]
+             if r.get("is_halal")
+             and (r.get("smart_score") or r.get("composite_score") or 0) >= 45][:25]
 
     from app.services.price_forecast import monte_carlo_forecast
     from app.services import market_data as md

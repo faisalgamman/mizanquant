@@ -10,8 +10,10 @@ async def test_risers_keeps_all_with_market_soft(monkeypatch):
     async def fake_screener(*a, **k):
         return {
             "results": [
-                {"symbol": "A", "is_halal": True, "composite_score": 50, "name": "Alpha", "price": 100},
-                {"symbol": "B", "is_halal": True, "composite_score": 55, "name": "Beta", "price": 200},
+                # REAL field name is smart_score (the composite_score fake here used to
+                # mirror a production bug that left the risers panel empty since launch).
+                {"symbol": "A", "is_halal": True, "smart_score": 50, "name": "Alpha", "price": 100},
+                {"symbol": "B", "is_halal": True, "smart_score": 55, "name": "Beta", "price": 200},
             ]
         }
     monkeypatch.setattr("app.workspace_server._smart_screener_impl", fake_screener)
