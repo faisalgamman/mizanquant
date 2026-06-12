@@ -4499,7 +4499,10 @@ def _run_screener_bg(scan_symbols: list):
         # Permanent "last good" copy — survives cache expiry and cold boots
         # so the dashboard can instantly serve results on open even when the
         # fresh+stale cache windows miss (deploy, overnight idle, etc.).
-        _cache_set("smart_screener_lastgood", {**cache_result, "lastgood_asof": time.time()})
+        # GUARD: only overwrite last_good with a NON-empty scan, so a degraded run
+        # (e.g. SPY feed down → 0 results) can't poison the instant-open cache.
+        if top:
+            _cache_set("smart_screener_lastgood", {**cache_result, "lastgood_asof": time.time()})
 
         # Roadmap 1.6 — Telegram alert for qualified signals
         if qualified_count > 0:
