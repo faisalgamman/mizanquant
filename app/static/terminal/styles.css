@@ -329,6 +329,21 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 }
 .an-trade:hover { background: var(--accent); color: var(--bg-root); }
 
+/* ─── analyze panel polish (H5) ─────────────────────── */
+.an-raw-val { font-size: 9px; color: var(--text-disabled); margin-left: 2px; }
+.an-agree-chip {
+  display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+  letter-spacing: 0.2px;
+}
+.an-agree-ok { background: color-mix(in srgb, var(--positive) 15%, transparent); color: var(--positive); }
+.an-agree-warn { background: color-mix(in srgb, var(--amber, #d4a72c) 15%, transparent); color: var(--amber, #d4a72c); }
+.an-range-bar { margin-top: 4px; }
+.an-range-bg { position: relative; height: 6px; background: var(--bg-root); border-radius: 3px; }
+.an-range-p5p95 { position: absolute; height: 100%; background: var(--accent); opacity: 0.18; border-radius: 3px; }
+/* equalized row spacing via tokens */
+.an-bar-row { margin-bottom: var(--space-1); }
+.an-grid .row { padding: var(--space-1) 0; }
+
 /* ─── TRADE COL ───────────────────────────────────────── */
 .pc { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1); }
 .pc-row {

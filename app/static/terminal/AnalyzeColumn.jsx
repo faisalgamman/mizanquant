@@ -5,9 +5,19 @@
 //   trade plan       → GET /api/v1/trade/plan         (entry/stop/tp/shares/rr)
 // There are NO synthesized sub-scores and NO mock trade plan. Anything the API
 // does not provide renders as "—" rather than an invented value.
+//
+// v1.1 accuracy + polish: points/max bars, measured values, plan tooltips,
+// signal⇄forecast agreement chip, WAIT-confirm guard, stale-entry guard.
 
 const _AN_MAX = { rs: 25, trend: 15, regime: 15, macd: 15, volume: 10, rsi: 8, adx: 7, bb: 5, vwap: 5, gap: 4 };
 const _AN_LAB = { rs: "RS vs SPY", trend: "Trend", regime: "Regime", macd: "MACD", volume: "Volume", rsi: "RSI", adx: "ADX", bb: "Bollinger", vwap: "VWAP", gap: "Gap" };
+const _AN_TOOLTIP = {
+  rs: "قوة السهم النسبية مقابل SPY — كلما ارتفعت زاد التفوق", trend: "اتجاه السهم (فوق/تحت المتوسطات الرئيسية)",
+  regime: "حالة السوق العامة (صاعد/محايد/هابط)", macd: "تقاطع MACD الأخير — إشارة زخم",
+  volume: "تأكيد الحجم — ارتفاع الحجم يدعم الحركة", rsi: "مؤشر القوة النسبية RSI — ذروة شراء/بيع",
+  adx: "قوة الاتجاه ADX — فوق 20 = اتجاه قوي", bb: "Bollinger Bands — موقع السعر داخل النطاق",
+  vwap: "متوسط السعر المرجح بالحجم VWAP — دعم/مقاومة", gap: "فجوة سعرية — قياس الانحراف عن الإغلاق السابق"
+};
 const _anFx = (n, p = 2) => (n == null || isNaN(Number(n))) ? "—" : "$" + Number(n).toFixed(p);
 
 // Probabilistic forecast fan chart: P5–P95 + P25–P75 ribbons + median line, with a
@@ -38,6 +48,25 @@ function _forecastFanSvg(fc) {
   );
 }
 
+// P5-P95 range bar mini-visual under forecast numbers
+function _rangeBar(p5, p50, p95, currentPrice) {
+  const lo = Math.min(p5, currentPrice);
+  const hi = Math.max(p95, currentPrice);
+  const span = (hi - lo) || 1;
+  const pos = v => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
+  const p50Pct = pos(p50);
+  const currPct = pos(currentPrice);
+  return (
+    <div className="an-range-bar">
+      <div className="an-range-bg">
+        <div className="an-range-p5p95" style={{ left: pos(p5) + "%", width: (pos(p95) - pos(p5)) + "%" }} />
+        <div className="an-range-median" style={{ left: p50Pct + "%", position: "absolute", width: 1, height: "100%", background: "var(--accent)" }} />
+        <div className="an-range-current" style={{ left: currPct + "%", position: "absolute", width: 4, height: 4, borderRadius: 2, background: "var(--text)", top: "50%", marginTop: -2 }} />
+      </div>
+    </div>
+  );
+}
+
 function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth }) {
   if (!signal) {
     return (
@@ -60,12 +89,18 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const verdict  = verdictFromScore(score);
   const chgColor = signal.chg >= 0 ? "var(--positive)" : "var(--negative)";
 
-  // Real per-factor score components (points). Empty until scoring loads.
+  // Raw measured values from momentum_details (if present in signal payload)
+  const mom = signal.momentum_details || {};
+
+  // Real per-factor score components (points). Show points/max.
   const comps = (scoring && scoring.components) || {};
   const compRows = Object.keys(comps).filter(k => _AN_MAX[k]).map(k => {
     const v = Number(comps[k]) || 0;
-    const pct = Math.max(0, Math.min(100, (v / _AN_MAX[k]) * 100));
-    return { lab: _AN_LAB[k] || k, v, pct };
+    const max = _AN_MAX[k];
+    const pct = Math.max(0, Math.min(100, (v / max) * 100));
+    // Measured value: ADAPT to real keys from signal/scoring payload
+    const rawVal = mom[k + "_raw"] ?? mom[k] ?? null;
+    return { lab: _AN_LAB[k] || k, k, v, max, pct, rawVal };
   });
 
   // Real trade plan (strategy plan preferred, base ATR plan as fallback).
@@ -79,6 +114,29 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const rr       = plan ? (plan.rr_ratio ?? plan.strategy_rr) : null;
   const strat    = plan ? (plan.strategy || "") : "";
   const canTrade = signal.halal && shares != null && Number(shares) > 0;
+  const isWait   = verdict === "WAIT" || !/(?:BUY|STRONG)/i.test(verdict);
+
+  // Stale-entry: entry price vs current price divergence > 1%
+  const priceNow = Number(signal.price) || 0;
+  const entryNow = Number(entry) || 0;
+  const stalePct = priceNow && entryNow ? Math.abs(entryNow - priceNow) / priceNow * 100 : 0;
+  const isStale = stalePct > 1;
+
+  // Risk as % of equity
+  const equity = brokerHealth && brokerHealth.account ? brokerHealth.account.equity : null;
+  const riskPctEq = equity && riskAmt ? (Number(riskAmt) / Number(equity) * 100).toFixed(2) : null;
+
+  // H3: Signal⇄Forecast agreement
+  const fcForChip = (forecast && forecast.data && !forecast.data.error) ? forecast.data : null;
+  const fcDir = fcForChip ? (fcForChip.expected_change_pct >= 0 ? "up" : "down") : null;
+  const sigDir = verdict.includes("SELL") ? "down" : verdict.includes("BUY") ? "up" : null;
+  const agreeChip = fcDir && sigDir ? (fcDir === sigDir ? "agree" : "disagree") : null;
+
+  // H4: WAIT-confirm guard
+  const handleTrade = (sig) => {
+    if (isWait && !window.confirm("الخطة تقول WAIT — متأكد من الإرسال؟")) return;
+    if (onTrade) onTrade(sig);
+  };
 
   return (
     <div className="col col-analyze">
@@ -94,7 +152,9 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
               <div className="an-co">{signal.company}</div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
+              <span title={verdict === "WAIT" ? "التحليل لا يعطي إشارة شراء واضحة — انتظر تأكيداً أقوى" : verdict.includes("SELL") ? "إشارة بيع — دقة تاريخية منخفضة" : "إشارة شراء بناءً على نقاط السكور"}>
+                <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
+              </span>
               {(verdict || "").includes("SELL") && (
                 <div style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.3 }}>
                   ⚠ إشارات البيع تاريخياً معكوسة (دقة ~38%) — لا تُعتمد
@@ -111,6 +171,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           </div>
           <Sparkline points={signal.spark} color={chgColor} height={36} />
 
+          {/* H1: Score bars with points/max */}
           <div className="an-sect-title">
             Score breakdown{scoring && scoring.total != null ? " · " + score + "/100" : ""}
           </div>
@@ -119,15 +180,29 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           ) : scErr ? (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Scoring unavailable</span></div>
           ) : compRows.length ? compRows.map((c) => (
-            <div key={c.lab} className="an-bar-row">
-              <span className="lab">{c.lab}</span>
+            <div key={c.lab} className="an-bar-row" title={_AN_TOOLTIP[c.k] || ""}>
+              <span className="lab">
+                {c.lab}
+                {c.rawVal != null && <span className="an-raw-val"> · {typeof c.rawVal === "number" ? c.rawVal.toFixed(1) : c.rawVal}</span>}
+              </span>
               <div className="bar"><div style={{ width: c.pct + "%", background: scoreColor(c.pct) }}></div></div>
-              <span className="num" style={{ color: scoreColor(c.pct) }}>{c.v}</span>
+              <span className="num" style={{ color: scoreColor(c.pct) }}>{c.v}/{c.max}</span>
             </div>
           )) : (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>—</span></div>
           )}
 
+          {/* H3: Signal⇄Forecast agreement chip */}
+          {agreeChip && (
+            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+              <span className={"an-agree-chip" + (agreeChip === "agree" ? " an-agree-ok" : " an-agree-warn")}
+                    title="قياس أوّلي (n=902): الصفقات الموافقة كانت أفضل — عيّنة صغيرة، ليس ضماناً">
+                {agreeChip === "agree" ? "✓ التوقّع يوافق الإشارة" : "⚠ التوقّع يخالف الإشارة"}
+              </span>
+            </div>
+          )}
+
+          {/* H2: Trade plan accuracy */}
           <div className="an-sect-title">Trade plan{strat ? " · " + strat : ""}</div>
           <div className="an-grid">
             <div className="row"><span className="l">Entry</span><span className="v">{_anFx(entry)}</span></div>
@@ -136,9 +211,27 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             <div className="row"><span className="l">Target 1</span><span className="v txt-positive">{_anFx(tp1)}</span></div>
             <div className="row"><span className="l">Target 2</span><span className="v txt-positive">{_anFx(tp2)}</span></div>
             <div className="row"><span className="l">Target 3</span><span className="v txt-positive">{_anFx(tp3)}</span></div>
-            <div className="row"><span className="l">R / R</span><span className="v">{rr != null ? "1 : " + Number(rr).toFixed(1) : "—"}</span></div>
-            <div className="row"><span className="l">Risk $</span><span className="v txt-negative">{riskAmt != null ? "$" + Number(riskAmt).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</span></div>
+            <div className="row">
+              <span className="l">R / R</span>
+              <span className="v" title="1:1.7 = نسبة مرجّحة لخطة خروج متدرّجة (50% عند TP1، 30% TP2، 20% TP3) — ليست نسبة TP1 وحده">
+                {rr != null ? "1 : " + Number(rr).toFixed(1) : "—"}
+              </span>
+            </div>
+            <div className="row">
+              <span className="l">Risk</span>
+              <span className="v txt-negative">
+                {riskAmt != null ? "$" + Number(riskAmt).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}
+                {riskPctEq != null && <span style={{ fontSize: 8, color: "var(--text-muted)", marginLeft: 4 }}>({riskPctEq}% equity)</span>}
+              </span>
+            </div>
           </div>
+
+          {/* H2: Stale-entry guard */}
+          {isStale && (
+            <div style={{ fontSize: 8.5, color: "var(--amber)", marginTop: 6, lineHeight: 1.4 }}>
+              ⚠ الخطة محسوبة على ${Number(entry).toFixed(2)} — السعر الآن ${Number(signal.price).toFixed(2)}
+            </div>
+          )}
 
           {(() => {
             const fc = (forecast && forecast.data && !forecast.data.error) ? forecast.data : null;
@@ -158,6 +251,8 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                 ) : fc ? (
                   <>
                     {_forecastFanSvg(fc)}
+                    {/* H5: P5-P95 range bar mini-visual */}
+                    {last && _rangeBar(last.p5, last.median, last.p95, fc.current_price)}
                     <div className="an-grid" style={{ marginTop: 6 }}>
                       <div className="row"><span className="l">Expected</span><span className="v">{_anFx(fc.expected_price)} <span style={{ fontSize: 9, color: fc.expected_change_pct >= 0 ? "var(--positive)" : "var(--negative)" }}>{fmtPct(fc.expected_change_pct)}</span></span></div>
                       <div className="row"><span className="l">Prob profit</span><span className="v">{fc.prob_profit_pct}%</span></div>
@@ -175,7 +270,8 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             );
           })()}
 
-          <button className="an-trade" onClick={() => onTrade(signal)} disabled={!canTrade}>
+          {/* H4: WAIT-confirm guard on buy button */}
+          <button className="an-trade" onClick={() => handleTrade(signal)} disabled={!canTrade}>
             <i className="fas fa-paper-plane" style={{ marginRight: 6 }}></i>
             {!signal.halal ? "Blocked — halal fail" : canTrade ? "Send to paper trade" : loading ? "Loading plan…" : "Sizing unavailable"}
           </button>
