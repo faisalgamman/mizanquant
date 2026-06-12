@@ -3690,6 +3690,18 @@ async def _smart_screener_impl(
         if effective_min_score > 0 and market_status.get("halt_pipeline"):
             result["halt_pipeline"] = True
         return result
+    # --- last_good permanent cache ---
+    # When the fresh+stale windows both miss (deploy, overnight idle), serve the
+    # last completed result immediately with honest source/asof stamps. The
+    # background re-kick already ran above, so refreshing is truthful.
+    lastgood = _cache_get("smart_screener_lastgood", max_age=10 * 365 * 86400)
+    if lastgood:
+        pct = round(_screener_progress.get("current", 0) / max(_screener_progress.get("total", 1), 1) * 100, 1)
+        return {**lastgood, "source": "last_good", "refreshing": True, "scan_pct": pct,
+                "asof": lastgood.get("lastgood_asof")}
+
+
+
     return {
         "source": "scanning",
         "status": "scanning",
@@ -4483,6 +4495,11 @@ def _run_screener_bg(scan_symbols: list):
             "results": top,
         }
         _cache_set(cache_key, cache_result)
+
+        # Permanent "last good" copy — survives cache expiry and cold boots
+        # so the dashboard can instantly serve results on open even when the
+        # fresh+stale cache windows miss (deploy, overnight idle, etc.).
+        _cache_set("smart_screener_lastgood", {**cache_result, "lastgood_asof": time.time()})
 
         # Roadmap 1.6 — Telegram alert for qualified signals
         if qualified_count > 0:

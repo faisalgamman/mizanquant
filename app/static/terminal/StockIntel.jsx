@@ -49,6 +49,19 @@ const SI_ETF_TO_SECTOR = {
   XLY: "Consumer Discretionary",
 };
 
+// ── tiny relative-time helper (Arabic) ───────────────────────────────
+function _rel(ts) {
+  if (!ts) return "";
+  const sec = (Date.now() - new Date(ts * 1000).getTime()) / 1000;
+  if (sec < 60) return "الآن";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `منذ ${min} د`;
+  const hr = Math.round(sec / 3600);
+  if (hr < 24) return `منذ ${hr} س`;
+  const dy = Math.round(sec / 86400);
+  return `منذ ${dy} يوم`;
+}
+
 function StockIntel() {
   const [data, setData]         = useState(null);
   const [overall, setOverall]   = useState(null);
@@ -130,7 +143,8 @@ function StockIntel() {
   };
 
   const results = (data && Array.isArray(data.results)) ? data.results : [];
-  const computing = !data || data.status === "scanning" || (scanning && results.length === 0);
+  const isLastGood = data && data.source === "last_good";
+  const computing = !data || (data.status === "scanning" && !isLastGood) || (scanning && results.length === 0);
 
   // filter + sort
   let rows = results.slice();
@@ -159,7 +173,9 @@ function StockIntel() {
       <div className="wf-head">
         <span className="wf-title"><i className="fas fa-satellite-dish" style={{ marginRight: 6, color: "var(--accent)" }}></i>Stock Intelligence</span>
         <span className="wf-sub">
-          {data && data.total != null ? `${data.total} picks · ${data.scanned || 0} scanned` : "composite · T/F/S/AI/Halal"}
+          {isLastGood && data.asof
+            ? <span style={{color: "var(--text-muted)", fontFamily: "var(--font-mono)"}}>آخر مسح: {_rel(data.asof)} · يُحدَّث الآن</span>
+            : data && data.total != null ? `${data.total} picks · ${data.scanned || 0} scanned` : "composite · T/F/S/AI/Halal"}
         </span>
       </div>
 
