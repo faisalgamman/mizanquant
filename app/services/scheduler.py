@@ -140,6 +140,7 @@ def _scheduler_loop():
     last_outcome_match = ""   # YYYY-MM-DD — nightly decision-outcome matching
     last_sentinel = ""        # YYYY-MM-DD:slot — 2x/day sentinel judgment cycle
     last_screener_warm = ""   # YYYY-MM-DD — daily screener cache pre-warm
+    last_intraday_warm = ""  # YYYY-MM-DD:HH — intraday screener re-warm slots
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
@@ -282,6 +283,18 @@ def _scheduler_loop():
                                      daemon=True, name='screener-warm').start()
                 except Exception as e:
                     logger.warning('Scheduler: screener warm failed: %s', e)
+
+            # Intraday screener re-warm — keep the dashboard fresh without a redeploy.
+            # Gentle cadence (every ~2h in market hours) — the 650-symbol scan is heavy, so NOT more often.
+            if _is_weekday(now) and now.hour in (11, 13, 15) and now.minute < 8                     and last_intraday_warm != f"{today_str}:{now.hour}":
+                last_intraday_warm = f"{today_str}:{now.hour}"
+                try:
+                    from app.workspace_server import _run_screener_bg, _SMART_UNIVERSE as _SU
+                    threading.Thread(target=_run_screener_bg, args=(list(_SU),), daemon=True,
+                                     name="screener-warm-intraday").start()
+                    logger.info("Scheduler: intraday screener re-warm (%d symbols)", len(_SU))
+                except Exception as e:
+                    logger.warning("Scheduler: intraday screener warm failed: %s", e)
 
             # --- PIPELINE STAGES 2-3: Halal + Smart filter at 8:30 AM ET (once per day) ---
             if _is_weekday(now) and now.hour == 8 and now.minute >= 30 and now.minute < 35 and last_pipeline_filter != today_str:

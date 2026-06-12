@@ -777,7 +777,7 @@ _yf_semaphore = threading.Semaphore(2)  # max 2 concurrent yfinance calls
 
 def _reset_progress(total: int):
     global _screener_progress
-    _screener_progress = {"current": 0, "total": total, "status": "scanning", "batch": 0}
+    _screener_progress = {"current": 0, "total": total, "status": "scanning", "batch": 0, "started": time.time()}
 
 
 def _update_progress(n: int, batch: int = 0):
@@ -797,6 +797,16 @@ SCREENER_BATCH_SIZE = 50
 SCREENER_CACHE_TTL = 3600  # 60 min — the 650-symbol scan is CPU-heavy on a small
 # container; it was re-running ~every 15 min while the dashboard was open (recurring
 # slowness). Hourly is plenty for a swing/monthly halal screener. Stale window = 2×.
+
+
+def _screener_is_stuck(progress: dict, now: float = None, max_age: float = 600) -> bool:
+    """True when a 'scanning' run is older than max_age seconds (hung thread)."""
+    if now is None:
+        now = time.time()
+    if progress.get("status") != "scanning":
+        return False
+    started = progress.get("started", 0)
+    return (now - started) > max_age
 
 
 # ---------------------------------------------------------------------------
@@ -3665,7 +3675,12 @@ async def _smart_screener_impl(
 
     # Kick off background scan; return current cache or scanning status
     import threading
-    if _screener_progress.get("status") not in ("scanning",):
+    _prog = _screener_progress
+    _stuck = _screener_is_stuck(_prog)
+    if _prog.get("status") != "scanning" or _stuck:
+        if _stuck:
+            logger.warning("Screener: stuck scan detected (%d min) — re-kicking",
+                           int((time.time() - _prog.get("started", 0)) / 60))
         t = threading.Thread(target=_run_screener_bg, args=(scan_symbols,), daemon=True)
         t.start()
     stale = _cache_get(cache_key, max_age=SCREENER_CACHE_TTL * 2)
@@ -4349,142 +4364,151 @@ def _run_screener_bg(scan_symbols: list):
     cache_key = "smart_screener"
     total = len(scan_symbols)
     _reset_progress(total)
-    logger.info("Background scan starting for %d symbols", total)
-    all_results = []
-
-    # Load current watchlist to flag watched symbols
-    from app.services.watchlist_service import get_watchlist_set
-    watchlist_set = get_watchlist_set()
-
-    # ── Alpaca batch pre-fetch ───────────────────────────────────────────────
-    # Pre-fetch all symbol bars in one pass (~7 batched Alpaca requests for 650
-    # symbols instead of 650 individual ones). Results are written into the
-    # _fetch_data disk cache so every subsequent _fetch_data(sym, "1y") call
-    # during _analyze_smart + _score_momentum hits the cache immediately —
-    # zero additional Alpaca requests, no 429s.
     try:
-        from app.services.market_data import fetch_alpaca_batch as _alpaca_batch
-        logger.info("Alpaca batch pre-fetch for %d symbols…", len(scan_symbols))
-        prefetched = _alpaca_batch(scan_symbols, period="1y")
-        seeded = 0
-        for sym, df in prefetched.items():
-            try:
-                records = df.to_dict("records")
-                _cache_set(f"ohlcv_{_cache_key(sym)}_1y", records)
-                seeded += 1
-            except Exception:
-                pass
-        logger.info("Alpaca batch pre-fetch done: %d/%d symbols cached", seeded, len(scan_symbols))
-    except Exception as _pre_exc:
-        logger.warning("Alpaca batch pre-fetch failed (%s) — falling back to per-symbol fetch", _pre_exc)
+        logger.info("Background scan starting for %d symbols", total)
+        all_results = []
 
-    # Fetch SPY data once per batch (reused for all symbols). SPY is REQUIRED:
-    # the RS-vs-SPY hard gate fails closed when SPY is missing, which zeroes
-    # momentum for EVERY symbol (universal T=0). So we retry via the alternate
-    # data path and emit a loud WARNING rather than silently degrading.
-    spy_df_shared = None
-    try:
-        _, spy_df_shared = _fetch_data("SPY", period="2mo")
-    except Exception as _spy_exc:
-        logger.warning("SPY primary fetch failed: %s", _spy_exc)
-    if spy_df_shared is None or len(spy_df_shared) < 20:
+        # Load current watchlist to flag watched symbols
+        from app.services.watchlist_service import get_watchlist_set
+        watchlist_set = get_watchlist_set()
+
+        # ── Alpaca batch pre-fetch ───────────────────────────────────────────────
+        # Pre-fetch all symbol bars in one pass (~7 batched Alpaca requests for 650
+        # symbols instead of 650 individual ones). Results are written into the
+        # _fetch_data disk cache so every subsequent _fetch_data(sym, "1y") call
+        # during _analyze_smart + _score_momentum hits the cache immediately —
+        # zero additional Alpaca requests, no 429s.
         try:
-            import halal_screener as _hs
-            _alt = _hs.fetch_yf("SPY", period="3mo")
-            if _alt is not None and len(_alt) >= 20:
-                spy_df_shared = _alt
-                logger.info("SPY recovered via halal_screener.fetch_yf fallback (%d bars)", len(_alt))
-        except Exception as _spy_alt_exc:
-            logger.warning("SPY fallback fetch failed: %s", _spy_alt_exc)
-    if spy_df_shared is None or len(spy_df_shared) < 20:
-        logger.error(
-            "SPY frame UNAVAILABLE — RS-vs-SPY hard gate will fail closed for "
-            "ALL symbols (momentum=0, T=0). Check Alpaca/Tiingo/yfinance data feed."
-        )
+            from app.services.market_data import fetch_alpaca_batch as _alpaca_batch
+            logger.info("Alpaca batch pre-fetch for %d symbols…", len(scan_symbols))
+            prefetched = _alpaca_batch(scan_symbols, period="1y")
+            seeded = 0
+            for sym, df in prefetched.items():
+                try:
+                    records = df.to_dict("records")
+                    _cache_set(f"ohlcv_{_cache_key(sym)}_1y", records)
+                    seeded += 1
+                except Exception:
+                    pass
+            logger.info("Alpaca batch pre-fetch done: %d/%d symbols cached", seeded, len(scan_symbols))
+        except Exception as _pre_exc:
+            logger.warning("Alpaca batch pre-fetch failed (%s) — falling back to per-symbol fetch", _pre_exc)
 
-    batch_size = SCREENER_BATCH_SIZE
-    batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]
-    for batch_idx, batch in enumerate(batches):
-        _update_progress(batch_idx * batch_size + len(batch), batch_idx + 1)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {pool.submit(_analyze_smart, sym, watchlist_set, spy_df_shared): sym for sym in batch}
-            for f in as_completed(futures):
-                r = f.result()
-                if r:
-                    all_results.append(r)
-    _finish_progress()
-    logger.info("Background scan complete: %d halal results from %d symbols",
-                sum(1 for r in all_results if r.get("is_halal")), total)
-
-    # Filter, sort, build result
-    filtered = [r for r in all_results if r.get("is_halal")]
-    filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
-    # Cap forecast symbols when torch not available (ARIMA-only is fast; DL is heavier)
-    _forecast_cap = 20 if _HAS_TORCH else 10
-    top = filtered[:50]
-    top_for_forecast = top[:_forecast_cap]
-
-    # Parallelism: more workers when torch models are available
-    _forecast_workers = 2 if _HAS_TORCH else 1
-    with ThreadPoolExecutor(max_workers=_forecast_workers) as pool:
-        f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top_for_forecast}
-        for ff in as_completed(f_futures):
-            r = f_futures[ff]
-            try:
-                fc = ff.result()
-                if fc:
-                    proxy = r.get("forecast_proxy", 0)
-                    r["forecast_score"] = fc.get("score", 0)
-                    r["forecast_details"] = fc.get("details", {})
-                    r["smart_score"] = min(100, r.get("smart_score", 0) - proxy + fc.get("score", 0))
-            except Exception:
-                pass
-
-    # Market status for gates
-    try:
-        from app.services.market_context import get_market_status
-        market_status = get_market_status()
-    except Exception:
-        market_status = {"status": "RISK ON", "regime": "NEUTRAL", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
-
-    qualified_count = sum(1 for r in top if r.get("smart_score", 0) >= market_status.get("strong_gate", 75))
-    watch_count = sum(1 for r in top if market_status.get("min_gate", 60) <= r.get("smart_score", 0) < market_status.get("strong_gate", 75))
-
-    cache_result = {
-        "total_scanned": total,
-        "halal_count": sum(1 for r in all_results if r.get("is_halal")),
-        "results_count": len(top),
-        "qualified_count": qualified_count,
-        "watch_count": watch_count,
-        "min_score": market_status.get("min_gate", 60),
-        "strong_gate": market_status.get("strong_gate", 75),
-        "market_status": market_status.get("status", "RISK ON"),
-        "regime": market_status.get("regime", "NEUTRAL"),  # BULL/NEUTRAL/BEAR
-        "halt_pipeline": market_status.get("halt_pipeline", False),
-        "results": top,
-    }
-    _cache_set(cache_key, cache_result)
-
-    # Roadmap 1.6 — Telegram alert for qualified signals
-    if qualified_count > 0:
+        # Fetch SPY data once per batch (reused for all symbols). SPY is REQUIRED:
+        # the RS-vs-SPY hard gate fails closed when SPY is missing, which zeroes
+        # momentum for EVERY symbol (universal T=0). So we retry via the alternate
+        # data path and emit a loud WARNING rather than silently degrading.
+        spy_df_shared = None
         try:
-            from app.services.telegram_alert import alert_qualified_signal
-            for r in top[:3]:
-                if r.get("smart_score", 0) >= market_status.get("strong_gate", 75):
-                    alert_qualified_signal(
-                        symbol=r.get("symbol", "?"),
-                        company=r.get("company", ""),
-                        score=r.get("smart_score", 0),
-                        price=r.get("price", 0) or 0,
-                        strategy=r.get("strategy", "N/A"),
-                        stop_loss=0,
-                        take_profits=[],
-                        rr_ratio=0,
-                        top_indicators=[r.get("signal", "N/A")],
-                        halal_status="HALAL" if r.get("is_halal") else "NON-HALAL",
-                    )
-        except Exception as e:
-            logger.warning("Qualified signal alert failed: %s", e)
+            _, spy_df_shared = _fetch_data("SPY", period="2mo")
+        except Exception as _spy_exc:
+            logger.warning("SPY primary fetch failed: %s", _spy_exc)
+        if spy_df_shared is None or len(spy_df_shared) < 20:
+            try:
+                import halal_screener as _hs
+                _alt = _hs.fetch_yf("SPY", period="3mo")
+                if _alt is not None and len(_alt) >= 20:
+                    spy_df_shared = _alt
+                    logger.info("SPY recovered via halal_screener.fetch_yf fallback (%d bars)", len(_alt))
+            except Exception as _spy_alt_exc:
+                logger.warning("SPY fallback fetch failed: %s", _spy_alt_exc)
+        if spy_df_shared is None or len(spy_df_shared) < 20:
+            logger.error(
+                "SPY frame UNAVAILABLE — RS-vs-SPY hard gate will fail closed for "
+                "ALL symbols (momentum=0, T=0). Check Alpaca/Tiingo/yfinance data feed."
+            )
+
+        batch_size = SCREENER_BATCH_SIZE
+        batches = [scan_symbols[i:i+batch_size] for i in range(0, total, batch_size)]
+        for batch_idx, batch in enumerate(batches):
+            _update_progress(batch_idx * batch_size + len(batch), batch_idx + 1)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {pool.submit(_analyze_smart, sym, watchlist_set, spy_df_shared): sym for sym in batch}
+                for f in as_completed(futures):
+                    try:
+                        r = f.result()
+                    except Exception:
+                        logger.debug("_run_screener_bg: symbol %s failed", futures[f], exc_info=True)
+                        continue
+                    if r:
+                        all_results.append(r)
+        logger.info("Background scan complete: %d halal results from %d symbols",
+                    sum(1 for r in all_results if r.get("is_halal")), total)
+
+        # Filter, sort, build result
+        filtered = [r for r in all_results if r.get("is_halal")]
+        filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
+        # Cap forecast symbols when torch not available (ARIMA-only is fast; DL is heavier)
+        _forecast_cap = 20 if _HAS_TORCH else 10
+        top = filtered[:50]
+        top_for_forecast = top[:_forecast_cap]
+
+        # Parallelism: more workers when torch models are available
+        _forecast_workers = 2 if _HAS_TORCH else 1
+        with ThreadPoolExecutor(max_workers=_forecast_workers) as pool:
+            f_futures = {pool.submit(_score_forecast_consensus, r["symbol"]): r for r in top_for_forecast}
+            for ff in as_completed(f_futures):
+                r = f_futures[ff]
+                try:
+                    fc = ff.result()
+                    if fc:
+                        proxy = r.get("forecast_proxy", 0)
+                        r["forecast_score"] = fc.get("score", 0)
+                        r["forecast_details"] = fc.get("details", {})
+                        r["smart_score"] = min(100, r.get("smart_score", 0) - proxy + fc.get("score", 0))
+                except Exception:
+                    pass
+
+        # Market status for gates
+        try:
+            from app.services.market_context import get_market_status
+            market_status = get_market_status()
+        except Exception:
+            market_status = {"status": "RISK ON", "regime": "NEUTRAL", "min_gate": 60, "strong_gate": 75, "halt_pipeline": False}
+
+        qualified_count = sum(1 for r in top if r.get("smart_score", 0) >= market_status.get("strong_gate", 75))
+        watch_count = sum(1 for r in top if market_status.get("min_gate", 60) <= r.get("smart_score", 0) < market_status.get("strong_gate", 75))
+
+        cache_result = {
+            "total_scanned": total,
+            "halal_count": sum(1 for r in all_results if r.get("is_halal")),
+            "results_count": len(top),
+            "qualified_count": qualified_count,
+            "watch_count": watch_count,
+            "min_score": market_status.get("min_gate", 60),
+            "strong_gate": market_status.get("strong_gate", 75),
+            "market_status": market_status.get("status", "RISK ON"),
+            "regime": market_status.get("regime", "NEUTRAL"),  # BULL/NEUTRAL/BEAR
+            "halt_pipeline": market_status.get("halt_pipeline", False),
+            "results": top,
+        }
+        _cache_set(cache_key, cache_result)
+
+        # Roadmap 1.6 — Telegram alert for qualified signals
+        if qualified_count > 0:
+            try:
+                from app.services.telegram_alert import alert_qualified_signal
+                for r in top[:3]:
+                    if r.get("smart_score", 0) >= market_status.get("strong_gate", 75):
+                        alert_qualified_signal(
+                            symbol=r.get("symbol", "?"),
+                            company=r.get("company", ""),
+                            score=r.get("smart_score", 0),
+                            price=r.get("price", 0) or 0,
+                            strategy=r.get("strategy", "N/A"),
+                            stop_loss=0,
+                            take_profits=[],
+                            rr_ratio=0,
+                            top_indicators=[r.get("signal", "N/A")],
+                            halal_status="HALAL" if r.get("is_halal") else "NON-HALAL",
+                        )
+            except Exception as e:
+                logger.warning("Qualified signal alert failed: %s", e)
+    finally:
+        try:
+            _finish_progress()
+        except Exception:
+            _screener_progress["status"] = "done"
 
 
 @app.get("/api/screener/progress")
