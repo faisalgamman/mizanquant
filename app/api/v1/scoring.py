@@ -72,6 +72,20 @@ async def v1_weighted_score(symbol: str = "AAPL"):
     result_dict = _score_to_dict(result)
     result_dict["symbol"] = symbol.upper()
 
+    # Smart score (RS-vs-SPY gate) — same path as the scanner
+    smart = {}
+    try:
+        from app.workspace_server import _analyze_smart
+        smart = _analyze_smart(symbol, spy_df=spy_df) or {}
+    except Exception as exc:
+        logger.debug("_analyze_smart failed for %s: %s", symbol, exc)
+        result_dict["rs_unavailable"] = True
+    if smart:
+        result_dict["smart_score"] = smart.get("smart_score", 0)
+        result_dict["smart_verdict"] = smart.get("verdict", "")
+    elif "rs_unavailable" not in result_dict:
+        result_dict["rs_unavailable"] = True
+
     if redis is not None:
         try:
             await redis.setex(cache_key, 300, json.dumps(result_dict, default=str))
