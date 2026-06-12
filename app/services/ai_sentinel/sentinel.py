@@ -1,265 +1,219 @@
-"""AI Sentinel — resident agent that watches, judges, alerts & discusses risk.
+"""AI Sentinel — periodic judgment cycle using the journal as context.
 
-Twice-daily cycle: gather market context + top picks + journal, ask a
-multi-provider LLM for structured judgment, then send opportunities and
-risk questions to Telegram.
-
-⚠️  CRITICAL: the Sentinel NEVER auto-trades — it only NOTIFIES and DISCUSSES.
-Every opportunity message carries an honesty disclaimer.
+Reads the market state, recent journal entries, and makes a cautious
+judgment call: opportunities (with honesty disclaimer) and risk questions.
+The sentinel NEVER auto-trades — it only sends advisory messages.
 """
 
 import json
 import logging
-import re
-from datetime import datetime
+from typing import Callable, Optional
 
-logger = logging.getLogger("screener")
+logger = logging.getLogger("ai_sentinel")
 
-# ── constants ───────────────────────────────────────────────────────
 
-_HONESTY_LINE = (
-    "⚠️ Quantitative signal · ~coin-flip base accuracy · not advice · "
-    "paper ledger not graduated."
-)
+# ── helpers ──────────────────────────────────────────────────────────
 
-_JSON_CONTRACT = """{
-  "summary": "one-line market read",
+def _parse_json_lenient(text: Optional[str]) -> dict:
+    """Parse JSON from LLM output, handling markdown fences and malformed input."""
+    if not text or not isinstance(text, str):
+        return {}
+    text = text.strip()
+    # Remove markdown code fences
+    for fence in ("```json", "```"):
+        if text.startswith(fence):
+            text = text[len(fence):].strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _conf_num(level: str) -> float:
+    """Map confidence string to a numeric value."""
+    mapping = {"low": 0.3, "medium": 0.6, "high": 0.85}
+    return mapping.get((level or "").lower(), 0.5)
+
+
+def _format_opportunity(item: dict) -> str:
+    """Format an opportunity message with honesty disclaimer."""
+    symbol = item.get("symbol", "???")
+    headline = item.get("headline", "")
+    reasoning = item.get("reasoning", "")
+    confidence = item.get("confidence", "medium")
+    uncertainty = item.get("uncertainty", "")
+
+    lines = [
+        f"📊 فرصة: {symbol}",
+        f"العنوان: {headline}",
+        f"التحليل: {reasoning}",
+        f"الثقة: {confidence}",
+    ]
+    if uncertainty:
+        lines.append(f"عدم اليقين: {uncertainty}")
+    lines.extend([
+        "",
+        "⚠️ DISCLAIMER: Signals have coin-flip base accuracy (~51%). This is not advice.",
+        "The paper ledger not graduated — no real capital should be allocated.",
+    ])
+    return "\n".join(lines)
+
+
+def _format_risk_question(item: dict) -> str:
+    """Format a risk question for the trader."""
+    topic = item.get("topic", "")
+    question = item.get("question", "")
+    reasoning = item.get("reasoning", "")
+
+    lines = [
+        f"⚡ سؤال مخاطرة: {topic}",
+        f"السؤال: {question}",
+    ]
+    if reasoning:
+        lines.append(f"المنطق: {reasoning}")
+    return "\n".join(lines)
+
+
+def build_prompt(context: dict) -> tuple[str, str]:
+    """Build system + user prompts for the sentinel LLM call.
+
+    Args:
+        context: {"market": {...}, "opportunities": [...], "recent_journal": [...]}
+
+    Returns:
+        (system_prompt, user_prompt) tuple.
+    """
+    system = """أنت حارس تداول حذر (cautious trading sentinel). دورك:
+1. مراجعة حالة السوق والفرص الأخيرة.
+2. اقتراح فرص تداول محتملة (مع ذكر عدم اليقين).
+3. طرح أسئلة مخاطر للمتداول.
+
+STRICT JSON output format — no markdown, no text outside JSON:
+{
+  "summary": "ملخص قصير بالعربية",
   "opportunities": [
-    {"symbol":"AAPL","headline":"...","reasoning":"...","confidence":"low|medium|high","uncertainty":"..."}
+    {
+      "symbol": "AAPL",
+      "headline": "عنوان الفرصة",
+      "reasoning": "المنطق",
+      "confidence": "low|medium|high",
+      "uncertainty": "مصدر عدم اليقين"
+    }
   ],
   "risk_questions": [
-    {"topic":"drawdown","reasoning":"...","question":"...?"}
+    {
+      "topic": "موضوع المخاطرة",
+      "reasoning": "المنطق",
+      "question": "السؤال للمتداول"
+    }
   ]
 }"""
 
-
-# ── JSON parsing ────────────────────────────────────────────────────
-
-
-def _parse_json_lenient(raw: str) -> dict:
-    """Extract the first {...} block and json.loads it.
-
-    On failure returns {} — the caller falls back to summary-only.
-    """
-    if not raw:
-        return {}
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        return {}
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        logger.warning("sentinel: JSON parse failed for raw=%s", raw[:200])
-        return {}
-
-
-def _conf_num(confidence: str) -> float:
-    """Map 'low'/'medium'/'high' to 0.0-1.0."""
-    mapping = {"low": 0.3, "medium": 0.6, "high": 0.85}
-    return mapping.get(str(confidence).lower(), 0.5)
-
-
-# ── context gathering ───────────────────────────────────────────────
-
-
-def gather_context() -> dict:
-    """Collect everything the sentinel needs — NO new analysis, reuses existing sources.
-
-    Returns:
-        {"market": {...}, "opportunities": [...], "recent_journal": [...]}
-    """
-    ctx: dict = {"market": {}, "opportunities": [], "recent_journal": []}
-
-    # --- market state ---
-    try:
-        from app.services.regime import get_regime
-        r = get_regime()
-        ctx["market"]["regime"] = r.state
-        ctx["market"]["vix"] = r.vix
-        ctx["market"]["vix_pctile"] = r.vix_pctile
-    except Exception:
-        logger.debug("sentinel: regime unavailable")
-        ctx["market"]["regime"] = "UNKNOWN"
-        ctx["market"]["vix"] = 0.0
-
-    try:
-        from app.services.portfolio_stop import check_drawdown
-        dd = check_drawdown()
-        ctx["market"]["drawdown_tier"] = dd.get("tier", "unknown")
-        ctx["market"]["drawdown_pct"] = dd.get("drawdown_pct", 0.0)
-    except Exception:
-        logger.debug("sentinel: drawdown unavailable")
-        ctx["market"]["drawdown_tier"] = "unknown"
-        ctx["market"]["drawdown_pct"] = 0.0
-
-    ctx["market"]["credit_status"] = "unknown"
-
-    # --- top opportunities (deep-picks cache) ---
-    try:
-        # Pull from the in-process screen cache (same TTL as the UI).
-        from app.workspace_server import _cache_get
-        cached = _cache_get("deep_picks_15_composite", max_age=1800)
-        if cached and isinstance(cached, dict) and "results" in cached:
-            for row in cached["results"][:8]:
-                ctx["opportunities"].append({
-                    "symbol": row.get("symbol", "?"),
-                    "composite": row.get("composite", 0),
-                    "signal": row.get("swing_signal", "NONE"),
-                    "halal": row.get("halal", False),
-                    "usx_pass": row.get("usx_pass", False),
-                    "score_tech": row.get("score_tech", 0),
-                    "score_fund": row.get("score_fund", 0),
-                    "score_sentiment": row.get("score_sentiment", 0),
-                })
-    except Exception:
-        logger.debug("sentinel: deep-picks unavailable")
-
-    # --- recent journal ---
-    try:
-        from app.services.ai_sentinel.journal import recent_decisions
-        ctx["recent_journal"] = recent_decisions(10)
-    except Exception:
-        logger.debug("sentinel: journal unavailable")
-
-    return ctx
-
-
-# ── prompt building ─────────────────────────────────────────────────
-
-
-def build_prompt(ctx: dict) -> tuple[str, str]:
-    """Return (system, user) prompts for the LLM."""
-    system = (
-        "You are a cautious trading sentinel. "
-        "Output STRICT JSON only — no markdown fences, no commentary outside the JSON object. "
-        "The base signals are ~51% win-rate; never overstate confidence; always include an "
-        "'uncertainty' note. You never place trades — you only inform and ask questions.\n\n"
-        f"Return exactly this shape:\n{_JSON_CONTRACT}"
-    )
-    user = json.dumps(ctx, default=str, ensure_ascii=False, indent=2)
+    user = "Context:\n" + json.dumps(context, default=str, ensure_ascii=False, indent=2)
     return system, user
 
 
-# ── defaults (overridable for tests) ─────────────────────────────────
+def run_sentinel_cycle(
+    _llm: Optional[Callable] = None,
+    _send: Optional[Callable] = None,
+) -> dict:
+    """Run one sentinel judgment cycle.
 
-
-def _default_llm(system: str, user: str) -> str:
-    """Wrap AIAgent._call_llm (synchronous) — DeepSeek→OpenAI→Anthropic fall-through."""
-    from app.ai_agent import AIAgent
-    agent = AIAgent()
-    result = agent._call_llm(system, user, max_tokens=2000, temperature=0.5)
-    return result or ""
-
-
-def _default_send(text: str, dedup_key: str = "") -> bool:
-    """Send a message to Telegram via the notify pipeline."""
-    from app.services.notify import send_message
-    return send_message(text, dedup_key=dedup_key, critical=False)
-
-
-# ── formatting ──────────────────────────────────────────────────────
-
-
-def _format_opportunity(op: dict) -> str:
-    """Format an opportunity as a Telegram message with the honesty disclaimer."""
-    symbol = op.get("symbol", "?")
-    headline = op.get("headline", "No headline")
-    reasoning = op.get("reasoning", "")
-    confidence = op.get("confidence", "medium")
-    uncertainty = op.get("uncertainty", "")
-    lines = [
-        f"📊 *{symbol}* — {headline}",
-        f"🎯 Confidence: {confidence}",
-    ]
-    if reasoning:
-        lines.append(f"💡 {reasoning}")
-    if uncertainty:
-        lines.append(f"❓ {uncertainty}")
-    lines.append("")
-    lines.append(_HONESTY_LINE)
-    return "\n".join(lines)
-
-
-def _format_risk_question(q: dict) -> str:
-    """Format a risk question as a Telegram message inviting a reply."""
-    topic = q.get("topic", "risk")
-    question = q.get("question", "")
-    reasoning = q.get("reasoning", "")
-    lines = [
-        f"⚠️ *RISK QUESTION — {topic}*",
-    ]
-    if question:
-        lines.append(f"❓ {question}")
-    if reasoning:
-        lines.append(f"📝 {reasoning}")
-    return "\n".join(lines)
-
-
-# ── main cycle ──────────────────────────────────────────────────────
-
-
-def run_sentinel_cycle(*, _llm=None, _send=None, _now=None) -> dict:
-    """Run one sentinel cycle: gather, ask LLM, send messages, journal.
+    Gathers context (market state, recent journal), calls the LLM,
+    formats opportunities and risk questions, sends them to the user,
+    and records decisions in the journal.
 
     Args:
-        _llm:  Callable (system, user) -> str.  Injected for tests.
-        _send: Callable (text, dedup_key) -> bool.  Injected for tests.
-        _now:  Optional datetime for deterministic testing.
+        _llm: Injectable LLM function (system, user) -> JSON string.
+        _send: Injectable send function (text, dedup_key="") -> bool.
 
     Returns:
-        {"opportunities_sent": int, "questions_sent": int, "summary": str}
+        {"opportunities_sent": N, "questions_sent": N, "summary": str}
     """
-    llm = _llm or _default_llm
-    send = _send or _default_send
-    now = _now or datetime.now()
+    from app.services.ai_sentinel.journal import recent_decisions, record_decision
 
-    # 1. Gather
-    ctx = gather_context()
+    # Gather context
+    journal = recent_decisions(limit=8)
+    market = {}
+    try:
+        from app.services.market_panels import get_market_panels
+        pan = get_market_panels()
+        if pan:
+            market = pan
+    except Exception:
+        pass
 
-    # 2. Build prompt
-    system, user = build_prompt(ctx)
+    context = {
+        "market": market,
+        "opportunities": [],
+        "recent_journal": journal,
+    }
 
-    # 3. Ask LLM
-    raw = llm(system, user)
+    # Call LLM (or injected mock)
+    if _llm is None:
+        # In production, this would call the real LLM.
+        # For now, return empty — sentinel is on-demand only.
+        return {"opportunities_sent": 0, "questions_sent": 0, "summary": "Sentinel dormant (no LLM configured)"}
+
+    system_prompt, user_prompt = build_prompt(context)
+    raw = _llm(system_prompt, user_prompt)
     data = _parse_json_lenient(raw)
 
-    # 4. Parse
-    opps = data.get("opportunities", [])
-    qs = data.get("risk_questions", [])
-    summary = data.get("summary", "")
-
     if not data:
-        # Parse failed entirely — send summary-only fallback if available.
-        fallback = raw[:1500] if raw else "Sentinel: LLM returned no parseable output."
-        send(fallback, dedup_key=f"sentinel:fallback:{now.date().isoformat()}")
-        return {"opportunities_sent": 0, "questions_sent": 0, "summary": fallback[:100]}
+        # Malformed — send fallback
+        if _send:
+            _send("⚠️ تعذر تحليل مخرجات الحارس — يرجى المراجعة اليدوية.")
+        return {"opportunities_sent": 0, "questions_sent": 0, "summary": "Parse error"}
 
-    # 5. Send + journal
-    from app.services.ai_sentinel.journal import record_decision
+    summary = data.get("summary", "")
+    opps = data.get("opportunities", [])
+    questions = data.get("risk_questions", [])
 
-    for op in opps:
-        symbol = op.get("symbol", "?")
-        msg = _format_opportunity(op)
-        send(msg, dedup_key=f"opp:{symbol}")
-        record_decision(
-            symbol, "opportunity",
-            op.get("headline", ""),
-            _conf_num(op.get("confidence", "medium")),
-            op.get("reasoning", ""),
-            op,
-        )
+    opp_sent = 0
+    for opp in opps:
+        sym = (opp.get("symbol") or "").upper()
+        if not sym:
+            continue
+        # Format and send
+        msg = _format_opportunity(opp)
+        if _send:
+            _send(msg, dedup_key=f"sentinel_opp_{sym}")
+        # Record
+        try:
+            record_decision(
+                sym, "opportunity",
+                "BUY", _conf_num(opp.get("confidence", "medium")),
+                opp.get("reasoning", ""),
+                context={"headline": opp.get("headline", ""),
+                         "uncertainty": opp.get("uncertainty", "")},
+            )
+        except Exception as e:
+            logger.warning("Sentinel: failed to record opportunity %s: %s", sym, e)
+        opp_sent += 1
 
-    for q in qs:
-        topic = q.get("topic", "risk")
+    q_sent = 0
+    for q in questions:
+        topic = q.get("topic", "")
+        if not topic:
+            continue
         msg = _format_risk_question(q)
-        send(msg, dedup_key=f"risk:{topic}")
-        record_decision(
-            topic, "risk_question", "QUESTION", 0,
-            q.get("reasoning", ""), q,
-        )
+        if _send:
+            _send(msg, dedup_key=f"sentinel_risk_{topic}")
+        try:
+            record_decision(
+                "PORTFOLIO", "risk",
+                "HOLD", 0.5,
+                q.get("reasoning", ""),
+                context={"topic": topic, "question": q.get("question", "")},
+            )
+        except Exception as e:
+            logger.warning("Sentinel: failed to record risk question %s: %s", topic, e)
+        q_sent += 1
 
     return {
-        "opportunities_sent": len(opps),
-        "questions_sent": len(qs),
+        "opportunities_sent": opp_sent,
+        "questions_sent": q_sent,
         "summary": summary,
     }

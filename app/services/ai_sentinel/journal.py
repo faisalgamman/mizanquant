@@ -1,217 +1,201 @@
-"""Decision journal + outcome matching (honest retrieval memory).
+"""Agent journal — retrieval memory (honest, NOT learning).
 
-⚠️  DESIGN NOTE — this is retrieval memory for self-review, NOT learning;
-it does not improve predictive accuracy. The journal records decisions and
-re-injects them as context for future sentinel cycles so the AI can reference
-its own past reasoning and outcomes. LLMs do not learn from use; the journal
-provides honest attribution, not model improvement.
+Records agent decisions, retrieves recent decisions with outcomes, and
+matches past recommendations against actual trade P&L or price movement.
+This is retrieval memory, NOT learning — the agent does NOT place trades.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-logger = logging.getLogger("screener")
+logger = logging.getLogger("agent_journal")
+
+_KIND_LABELS = {
+    "opportunity": "فرصة",
+    "risk": "خطر",
+}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def record_decision(
     symbol: str,
-    kind: str,  # "opportunity" | "risk_question"
+    kind: str,
     verdict: str,
     confidence: float,
     rationale: str,
-    context: dict | None = None,
-    _session_factory=None,
-) -> int | None:
-    """Persist a sentinel decision to the AgentDecision table.
+    context: Optional[dict] = None,
+) -> int:
+    """Record an agent decision and return its ID.
 
     Args:
-        symbol: Ticker or topic identifier.
-        kind:  "opportunity" or "risk_question".
-        verdict: Short headline / verdict text.
-        confidence: 0.0–1.0 (or 0 for questions).
-        rationale: LLM reasoning string.
-        context: Arbitrary extra data stored in the ``snapshot`` JSON column.
-        _session_factory: Optional injection point for tests.
-
-    Returns:
-        The new row ``id``, or None on failure.
+        symbol: Stock ticker
+        kind: "opportunity" or "risk"
+        verdict: BUY, STRONG BUY, SELL, etc.
+        confidence: 0-1 or 0-100
+        rationale: Why the agent made this recommendation
+        context: Optional extra snapshot data
     """
-    factory = _session_factory
-    if factory is None:
-        from app.db.database import SessionLocal
-        factory = SessionLocal
-    session = factory()
+    from app.db.database import SessionLocal
+    from app.db.models import AgentDecision
+
+    # Normalise confidence: if > 1, treat as 0-100 scale
+    if confidence > 1:
+        confidence = confidence / 100.0
+
+    snapshot = context or {}
+    snapshot["kind"] = kind
+
+    db = SessionLocal()
     try:
-        from app.db.models import AgentDecision
-
-        snap = (context or {}).copy()
-        snap["kind"] = kind
-
         dec = AgentDecision(
-            symbol=symbol.upper() if kind == "opportunity" else symbol,
-            verdict=verdict,
+            symbol=symbol.upper(),
+            verdict=verdict.upper(),
             confidence=confidence,
             rationale=rationale,
-            snapshot=snap,
+            snapshot=snapshot,
         )
-        session.add(dec)
-        session.commit()
-        return dec.id
+        db.add(dec)
+        db.commit()
+        dec_id = dec.id
+        return dec_id
     except Exception:
-        logger.exception("record_decision failed for %s (%s)", symbol, kind)
-        session.rollback()
-        return None
+        db.rollback()
+        raise
     finally:
-        session.close()
+        db.close()
 
 
-def recent_decisions(
-    limit: int = 10,
-    _session_factory=None,
-) -> list[dict]:
-    """Return the most-recent sentinel decisions with any matched outcome.
+def recent_decisions(limit: int = 8) -> list[dict]:
+    """Return most recent decisions with any outcome info.
 
-    Feeds the sentinel prompt so it can reference prior calls.
+    Returns list of dicts with keys: id, symbol, verdict, confidence,
+    kind, created_at, outcome_label, outcome_pct, rationale.
     """
-    factory = _session_factory
-    if factory is None:
-        from app.db.database import SessionLocal
-        factory = SessionLocal
-    session = factory()
+    from app.db.database import SessionLocal
+    from app.db.models import AgentDecision
+
+    db = SessionLocal()
     try:
-        from app.db.models import AgentDecision
         rows = (
-            session.query(AgentDecision)
+            db.query(AgentDecision)
             .order_by(AgentDecision.created_at.desc())
             .limit(limit)
             .all()
         )
-        results: list[dict] = []
-        for r in reversed(rows):  # oldest→newest for the prompt
-            d = {
-                "id": r.id,
-                "symbol": r.symbol,
-                "verdict": r.verdict,
-                "confidence": r.confidence,
-                "rationale": r.rationale,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "kind": (r.snapshot or {}).get("kind", "opportunity"),
-            }
-            if r.snapshot:
-                outcome = r.snapshot.get("outcome_pct")
-                outcome_label = r.snapshot.get("outcome_label")
-                if outcome is not None or outcome_label:
-                    d["outcome"] = {
-                        "pct": outcome,
-                        "label": outcome_label,
-                    }
-            results.append(d)
+        results = []
+        for row in rows:
+            snap = row.snapshot or {}
+            results.append({
+                "id": row.id,
+                "symbol": row.symbol,
+                "verdict": row.verdict,
+                "confidence": row.confidence,
+                "kind": snap.get("kind", ""),
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+                "outcome_label": snap.get("outcome_label", ""),
+                "outcome_pct": snap.get("outcome_pct"),
+                "rationale": (row.rationale or "")[:120],
+            })
         return results
-    except Exception:
-        logger.exception("recent_decisions failed")
-        return []
     finally:
-        session.close()
+        db.close()
 
 
-def match_outcomes(
-    lookback_days: int = 30,
-    _session_factory=None,
-) -> dict:
-    """Link open opportunity decisions to realised paper P&L or price moves.
+def match_outcomes(lookback_days: int = 30) -> dict:
+    """Match past decisions against trade P&L or price movement.
 
-    For each "opportunity"-kind ``AgentDecision`` lacking an outcome:
-      1. Prefer a CLOSED ``TradeHistory`` row for the same symbol whose
-         ``created_at`` is after the decision date — use ``pnl_pct``.
-      2. Else compute price move via ``market_data.fetch(symbol)`` from
-         decision date → now.
+    For each BUY-ish decision without an outcome in the lookback window:
+    1. Check TradeHistory for a closed trade on the same symbol near the
+       decision date → label win/loss from pnl_pct.
+    2. Fall back: if no matching trade, try market_data.fetch to compute
+       the price move since the decision.
 
-    The outcome (``outcome_pct`` + ``outcome_label``) is written into the
-    ``snapshot`` JSON column.
+    Writes outcome_label + outcome_pct into the decision's snapshot JSON.
 
-    Returns: ``{"matched": int, "still_open": int}``.
+    Returns {"matched": N, "still_open": N}.
     """
-    factory = _session_factory
-    if factory is None:
-        from app.db.database import SessionLocal
-        factory = SessionLocal
-    session = factory()
-    matched = 0
-    still_open = 0
-    try:
-        from app.db.models import AgentDecision, TradeHistory
-        from app.services.market_data import fetch as md_fetch
+    from app.db.database import SessionLocal
+    from app.db.models import AgentDecision, TradeHistory
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-        rows = (
-            session.query(AgentDecision)
+    cutoff = _utc_now() - timedelta(days=lookback_days)
+
+    db = SessionLocal()
+    try:
+        # Decisions without outcomes in the lookback window
+        pending = (
+            db.query(AgentDecision)
             .filter(AgentDecision.created_at >= cutoff)
-            .order_by(AgentDecision.created_at)
+            .order_by(AgentDecision.created_at.desc())
             .all()
         )
-        opportunity_rows = [
-            r for r in rows
-            if (r.snapshot or {}).get("kind") == "opportunity"
-            and not (r.snapshot or {}).get("outcome_label")
-        ]
-        for r in opportunity_rows:
-            outcome_pct = None
-            outcome_label = "open"
 
-            # Prefer a closed trade for the same symbol after decision date.
+        # Filter to those without an outcome label in snapshot
+        unmatched = [
+            d for d in pending
+            if not (d.snapshot or {}).get("outcome_label")
+        ]
+
+        if not unmatched:
+            return {"matched": 0, "still_open": 0}
+
+        matched = 0
+        still_open = 0
+
+        for dec in unmatched:
+            # Strategy 1: look for a closed TradeHistory on same symbol
+            # within 30 days after the decision
             trade = (
-                session.query(TradeHistory)
+                db.query(TradeHistory)
                 .filter(
-                    TradeHistory.symbol == r.symbol,
+                    TradeHistory.symbol == dec.symbol,
                     TradeHistory.status == "closed",
-                    TradeHistory.created_at >= r.created_at,
-                    TradeHistory.pnl_pct is not None,
+                    TradeHistory.pnl_pct.isnot(None),
+                    TradeHistory.created_at >= dec.created_at,
+                    TradeHistory.created_at <= dec.created_at + timedelta(days=30),
                 )
-                .order_by(TradeHistory.created_at)
+                .order_by(TradeHistory.created_at.asc())
                 .first()
             )
+
             if trade is not None:
-                outcome_pct = float(trade.pnl_pct)
-                outcome_label = (
-                    "win" if outcome_pct > 0 else "loss" if outcome_pct < 0 else "flat"
-                )
-            else:
-                # Fall back to price move since decision date.
-                try:
-                    df = md_fetch(r.symbol, period="2y",
-                                  start=r.created_at, end=datetime.now(timezone.utc))
-                    if df is not None and len(df) >= 2:
-                        entry = float(df["close"].iloc[0] if "close" in df.columns
-                                      else df.iloc[0]["close"])
-                        exit_ = float(df["close"].iloc[-1] if "close" in df.columns
-                                      else df.iloc[-1]["close"])
-                        if entry and entry > 0:
-                            outcome_pct = round((exit_ - entry) / entry * 100, 2)
-                            outcome_label = (
-                                "win" if outcome_pct > 0
-                                else "loss" if outcome_pct < 0
-                                else "flat"
-                            )
-                except Exception:
-                    logger.debug("price-move fallback failed for %s", r.symbol)
-
-            if outcome_label != "open":
+                pnl = float(trade.pnl_pct)
+                label = "win" if pnl > 0 else ("loss" if pnl < 0 else "flat")
+                snap = dict(dec.snapshot or {})
+                snap["outcome_label"] = label
+                snap["outcome_pct"] = pnl
+                dec.snapshot = snap
                 matched += 1
-            else:
-                still_open += 1
+                continue
 
-            # Persist outcome into the snapshot JSON column.
-            snap = dict(r.snapshot or {})
-            snap["outcome_pct"] = outcome_pct
-            snap["outcome_label"] = outcome_label
-            r.snapshot = snap
+            # Strategy 2: fall back to market_data price move
+            try:
+                from app.services.market_data import fetch as _md_fetch
+                df = _md_fetch(dec.symbol, period="1mo")
+                if df is not None and len(df) >= 2:
+                    entry_price = float(df["close"].iloc[0])
+                    exit_price = float(df["close"].iloc[-1])
+                    if entry_price > 0:
+                        pnl = round((exit_price / entry_price - 1.0) * 100, 2)
+                        label = "win" if pnl > 0 else ("loss" if pnl < 0 else "flat")
+                        snap = dict(dec.snapshot or {})
+                        snap["outcome_label"] = label
+                        snap["outcome_pct"] = pnl
+                        dec.snapshot = snap
+                        matched += 1
+                        continue
+            except Exception:
+                pass
 
-        session.commit()
-        logger.info("match_outcomes: matched=%d still_open=%d", matched, still_open)
+            still_open += 1
+
+        db.commit()
         return {"matched": matched, "still_open": still_open}
     except Exception:
-        logger.exception("match_outcomes failed")
-        session.rollback()
-        return {"matched": 0, "still_open": 0}
+        db.rollback()
+        raise
     finally:
-        session.close()
+        db.close()

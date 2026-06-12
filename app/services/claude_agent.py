@@ -46,6 +46,10 @@ RULES:
    quantity, entry, current price and unrealized P&L — never summarize to a single position,
    never invent totals. Do NOT call strategy="all" or report the automated Alpaca strategies
    (HANA/marem/mazem) UNLESS the user explicitly asks about them. If the broker is offline, say so.
+10. MEASUREMENT FACTS: عند تحليل أي سهم، استشهد بحقائق القياس من أداة get_measurement_facts
+   وحدودها — العيّنة شهر واحد فقط (~8,849 إشارة شراء). صرّح دائماً أن دقة الإشارات ~51%
+   (حدّ العملة المعدنية) ولا تتنبأ بالأسعار. الحقائق الثابتة (static_measured) موسومة
+   بـ "ONE month — weak evidence" ويجب ذكر هذا القيد كل مرة.
 
 AVAILABLE STRATEGIES:
 - HANA (A): Concentrated trend-following, 3 max positions, 45% min confidence
@@ -107,13 +111,13 @@ def get_or_create_conversation(conversation_id: Optional[str] = None) -> tuple[s
 # ---------------------------------------------------------------------------
 
 class TradingAgent:
-    """AI-powered trading assistant with tool use (DeepSeek, Groq, or Anthropic Claude)."""
+    """AI-powered trading assistant with tool use (DeepSeek, Groq, OpenRouter, or Anthropic Claude)."""
 
     def __init__(self):
         import os
 
-        self._provider = None  # "deepseek", "groq", or "anthropic"
-        self._oai_client = None  # shared OpenAI-compatible client (DeepSeek / Groq)
+        self._provider = None  # "deepseek", "groq", "openrouter", or "anthropic"
+        self._oai_client = None  # shared OpenAI-compatible client (DeepSeek / Groq / OpenRouter)
         self._anthropic_client = None
         self._tools = None  # schema list for the active provider
 
@@ -129,7 +133,7 @@ class TradingAgent:
                 base_url="https://api.deepseek.com/v1",
             )
             self._tools = DEEPSEEK_TOOL_SCHEMAS
-            self.model = settings.DEEPSEEK_MODEL
+            self.model = settings.AGENT_MODEL or settings.DEEPSEEK_MODEL
         elif _want("groq") and settings.GROQ_API_KEY:
             self._provider = "groq"
             self._oai_client = OpenAI(
@@ -137,7 +141,15 @@ class TradingAgent:
                 base_url="https://api.groq.com/openai/v1",
             )
             self._tools = DEEPSEEK_TOOL_SCHEMAS  # identical OpenAI tool schema
-            self.model = settings.GROQ_MODEL
+            self.model = settings.AGENT_MODEL or settings.GROQ_MODEL
+        elif _want("openrouter") and settings.OPENROUTER_API_KEY:
+            self._provider = "openrouter"
+            self._oai_client = OpenAI(
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+            )
+            self._tools = DEEPSEEK_TOOL_SCHEMAS
+            self.model = settings.AGENT_MODEL or "anthropic/claude-sonnet-4.6"
         elif _want("anthropic") and settings.ANTHROPIC_API_KEY:
             self._provider = "anthropic"
             self._anthropic_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -146,7 +158,7 @@ class TradingAgent:
         else:
             raise ValueError(
                 "No LLM provider available — set DEEPSEEK_API_KEY, GROQ_API_KEY, "
-                "or ANTHROPIC_API_KEY"
+                "OPENROUTER_API_KEY, or ANTHROPIC_API_KEY"
             )
         logger.info("TradingAgent: provider=%s model=%s", self._provider, self.model)
 
@@ -169,8 +181,37 @@ class TradingAgent:
         """
         cid, messages = get_or_create_conversation(conversation_id)
 
+        # --- Retrieval memory context (honest, NOT learning) ---
+        # Prepend recent decisions + outcomes so the agent knows what it
+        # recommended before and how those played out. Failure is silent —
+        # this is retrieval memory and must never break chat.
+        journal_context = ""
+        try:
+            from app.services.ai_sentinel.journal import recent_decisions
+            recs = recent_decisions(limit=8)
+            if recs:
+                parts = ["ذاكرتك الأخيرة (قرارات + نتائج حقيقية):"]
+                for r in recs:
+                    outcome = ""
+                    if r.get("outcome_label"):
+                        outcome = f" ← {r['outcome_label']} ({r.get('outcome_pct', '?')}%)" if r.get('outcome_pct') is not None else f" ← {r['outcome_label']}"
+                    parts.append(
+                        f"• {r['symbol']} | {r['verdict']} ({r['confidence']:.0%}) | "
+                        f"{r.get('kind','')} | {r.get('created_at','')[:10]}{outcome}"
+                    )
+                journal_context = "\n".join(parts)
+                if len(journal_context) > 600:
+                    journal_context = journal_context[:597] + "..."
+        except Exception:
+            pass  # journal failure must never break chat
+
+        # Build the effective user message
+        effective_message = user_message
+        if journal_context:
+            effective_message = journal_context + "\n\n---\n\n" + user_message
+
         # Add user message
-        messages.append({"role": "user", "content": user_message})
+        messages.append({"role": "user", "content": effective_message})
 
         tools_used = []
         iterations = 0
@@ -180,7 +221,7 @@ class TradingAgent:
 
             # Call LLM (run in thread pool to not block event loop)
             try:
-                if self._provider in ("deepseek", "groq"):
+                if self._provider in ("deepseek", "groq", "openrouter"):
                     response = await asyncio.to_thread(
                         self._call_deepseek,
                         messages=messages,

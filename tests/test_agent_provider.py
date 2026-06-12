@@ -35,6 +35,7 @@ class TestAgentProvider:
         """With all keys empty, TradingAgent() raises ValueError."""
         monkeypatch.setattr("halal_screener.settings.DEEPSEEK_API_KEY", "")
         monkeypatch.setattr("halal_screener.settings.GROQ_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.OPENROUTER_API_KEY", "")
         monkeypatch.setattr("halal_screener.settings.ANTHROPIC_API_KEY", "")
 
         # Force fresh agent
@@ -43,6 +44,46 @@ class TestAgentProvider:
 
         with pytest.raises(ValueError):
             ca.TradingAgent()
+
+    def test_openrouter_when_only_openrouter_key(self, monkeypatch):
+        """With only OPENROUTER_API_KEY set, provider=openrouter, default model."""
+        monkeypatch.setattr("halal_screener.settings.DEEPSEEK_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.ANTHROPIC_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.GROQ_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.OPENROUTER_API_KEY", "sk-or-test")
+
+        import app.services.claude_agent as ca
+        ca._agent = None
+        agent = ca.TradingAgent()
+        assert agent._provider == "openrouter"
+        assert agent.model == "anthropic/claude-sonnet-4.6"
+
+    def test_openrouter_with_agent_model_override(self, monkeypatch):
+        """AGENT_MODEL overrides openrouter default model."""
+        monkeypatch.setattr("halal_screener.settings.DEEPSEEK_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.ANTHROPIC_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.GROQ_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.OPENROUTER_API_KEY", "sk-or-test")
+        monkeypatch.setattr("halal_screener.settings.AGENT_MODEL", "openai/gpt-4o")
+
+        import app.services.claude_agent as ca
+        ca._agent = None
+        agent = ca.TradingAgent()
+        assert agent._provider == "openrouter"
+        assert agent.model == "openai/gpt-4o"
+
+    def test_deepseek_with_agent_model_override(self, monkeypatch):
+        """AGENT_MODEL overrides deepseek default model."""
+        monkeypatch.setattr("halal_screener.settings.DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setattr("halal_screener.settings.ANTHROPIC_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.GROQ_API_KEY", "")
+        monkeypatch.setattr("halal_screener.settings.AGENT_MODEL", "deepseek-v4-pro")
+
+        import app.services.claude_agent as ca
+        ca._agent = None
+        agent = ca.TradingAgent()
+        assert agent._provider == "deepseek"
+        assert agent.model == "deepseek-v4-pro"
 
 
 class TestAgentChatError:

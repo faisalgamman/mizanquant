@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "llama-3.3-70b-versatile"  # fast + function calling
 
+    # --- OpenRouter provider (prepared, dormant — switch via AGENT_PROVIDER=openrouter) ---
+    OPENROUTER_API_KEY: str = ""
+
+    # --- Agent model override (when set, overrides the provider's default model) ---
+    AGENT_MODEL: str = ""
+
     # --- Unified ecosystem integration ---
     # When False (default), the MarketContextBundle conditioning (macro-scaled
     # risk sizing, rotation sector boost) is computed and logged in SHADOW MODE

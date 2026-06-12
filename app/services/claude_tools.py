@@ -177,6 +177,15 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "get_measurement_facts",
+        "description": "Get MEASURED facts from OUR system: signal accuracy (OVERALL + BUY-SIDE), paper-trade graduation status, active USX version+weights, and static measured ICs from 8,849 buy outcomes (ONE month — weak evidence). Always cite this with its caveat: ~51% accuracy, no price prediction.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "get_accuracy_report",
         "description": "Get trailing accuracy of each signal source (technical, fundamental, ML, consensus) over the last N days. Used to weight sources dynamically.",
         "input_schema": {
@@ -517,6 +526,69 @@ def _exec_record_recommendation(symbol: str, verdict: str,
         return {"status": "error", "message": str(e)}
 
 
+# --- Static measured facts (2026-06, 8,849 buy outcomes, ONE month) ---
+
+STATIC_MEASURED = {
+    "asof": "2026-06",
+    "sample": "8,849 buy outcomes, ONE month — weak evidence",
+    "useful_ics": {"macd_hist_rising": 0.15, "rs_spy_20": 0.05, "rsi": 0.085},
+    "negative_ics": {"prox_52w": -0.21, "ema50_above_200": -0.17, "adx": -0.07},
+    "sell_side": "38% accuracy — historically inverted",
+    "forecast_agree": "PF 4.34 vs 2.48 (n=902, small)",
+}
+
+
+def _exec_get_measurement_facts() -> dict:
+    """Return measured facts from OUR system — live calls + static IC block."""
+    result = {"static_measured": STATIC_MEASURED}
+
+    # Signal accuracy (OVERALL + BUY-SIDE)
+    try:
+        from app.services.signal_tracker import get_accuracy_report
+        report = get_accuracy_report(30)
+        overall = next((r for r in report if r.get("Source") == "OVERALL"), None)
+        buy_side = next((r for r in report if r.get("Source") == "BUY-SIDE"), None)
+        result["signal_accuracy"] = {
+            "overall": overall,
+            "buy_side": buy_side,
+            "note": "Buy-side is the honest split; sell-side historically inverted (~38%).",
+        }
+    except Exception as e:
+        result["signal_accuracy"] = {"error": str(e)}
+
+    # Paper-trade graduation (PV + PVM)
+    try:
+        from app.services.paper_trade_gate import paper_trade_status
+        pv = paper_trade_status("PV").as_dict()
+        pvm = paper_trade_status("PVM").as_dict()
+        result["paper_trade"] = {"PV": pv, "PVM": pvm}
+    except Exception as e:
+        result["paper_trade"] = {"error": str(e)}
+
+    # USX active version + weights
+    try:
+        from app.services import usx_layer
+        ver = usx_layer.USX_ACTIVE_VERSION
+        if ver == "v2":
+            weights = {
+                "MACD": usx_layer.V2_W_MACD, "RS20": usx_layer.V2_W_RS20,
+                "RSI": usx_layer.V2_W_RSI, "EMA50": usx_layer.V2_W_EMA50,
+                "SQUEEZE": usx_layer.V2_W_SQUEEZE, "VOLDRY": usx_layer.V2_W_VOLDRY,
+                "52W": usx_layer.V2_W_52W, "ADX": usx_layer.V2_W_ADX,
+            }
+        else:
+            weights = {
+                "SQUEEZE": usx_layer.V1_W_SQUEEZE, "RS": usx_layer.V1_W_RS,
+                "VOLDRY": usx_layer.V1_W_VOLDRY, "52W": usx_layer.V1_W_52W,
+                "MACD": usx_layer.V1_W_MACD, "ADX": usx_layer.V1_W_ADX,
+            }
+        result["usx"] = {"active_version": ver, "weights": weights}
+    except Exception as e:
+        result["usx"] = {"error": str(e)}
+
+    return result
+
+
 TOOL_REGISTRY: dict[str, Any] = {
     "analyze_stock": lambda **kw: _exec_analyze_stock(kw["symbol"]),
     "check_halal": lambda **kw: _exec_check_halal(kw["symbol"]),
@@ -528,6 +600,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_risk_status": lambda **kw: _exec_get_risk_status(),
     "get_deep_picks": lambda **kw: _exec_get_deep_picks(kw.get("symbol"), kw.get("top_n", 10)),
     "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
+    "get_measurement_facts": lambda **kw: _exec_get_measurement_facts(),
     "record_recommendation": lambda **kw: _exec_record_recommendation(kw["symbol"], kw["verdict"], kw["confidence"], kw["rationale"]),
 }
 
