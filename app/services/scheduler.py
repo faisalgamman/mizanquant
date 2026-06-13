@@ -141,6 +141,7 @@ def _scheduler_loop():
     last_sentinel = ""        # YYYY-MM-DD:slot — 2x/day sentinel judgment cycle
     last_screener_warm = ""   # YYYY-MM-DD — daily screener cache pre-warm
     last_intraday_warm = ""  # YYYY-MM-DD:HH — intraday screener re-warm slots
+    last_db_backup = ""      # YYYY-MM-DD — daily DB backup of measurement tables
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
@@ -174,6 +175,29 @@ def _scheduler_loop():
                                      daemon=True, name='screener-warm-startup').start()
                 except Exception as e:
                     logger.warning('Scheduler: startup screener warm failed: %%s', e)
+
+            # --- DAILY DB BACKUP: ~03:30 ET (every day, before active-window guard) ---
+            # SignalHistory, TradeHistory, AgentDecision, ConsensusLog → gzip JSONL
+            # to the Railway persistent volume. Runs EVERY day (including weekends)
+            # because the data accumulates 24/7 and a DB loss on Sunday is just as
+            # catastrophic as a DB loss on Tuesday.
+            if now.hour == 3 and now.minute >= 30 and now.minute < 35 and last_db_backup != today_str:
+                last_db_backup = today_str
+                logger.info("DB backup: exporting measurement tables...")
+                try:
+                    from scripts.backup_db import backup_tables, rotate_backups
+                    res = backup_tables()
+                    rotate_backups(res.get("dir"))
+                    logger.info("DB backup: %s", res.get("tables"))
+                    if res.get("errors"):
+                        raise RuntimeError(f"partial backup: {res['errors']}")
+                except Exception as e:
+                    logger.error("DB backup FAILED: %s", e)
+                    try:
+                        from app.services.telegram_alert import alert_system_health
+                        alert_system_health(f"⚠️ DB backup failed: {str(e)[:160]}", severity="CRITICAL")
+                    except Exception:
+                        pass
 
             # --- COST OPTIMIZATION: Sleep deeply outside active window ---
             if not _is_active_window(now):
