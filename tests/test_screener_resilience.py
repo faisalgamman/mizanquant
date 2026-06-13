@@ -33,10 +33,25 @@ class TestScreenerIsStuck:
         )
 
     def test_no_started_key(self):
-        """Missing 'started' key → stuck (0 - now > 600 is True)."""
+        """Missing 'started' key → stuck (no advance since epoch is far past stall)."""
         now = time.time()
         assert ws._screener_is_stuck(
             {"status": "scanning"}, now=now,
+        )
+
+    def test_not_stuck_when_advancing(self):
+        """A slow-but-ADVANCING scan (old start, recent batch) is NOT stuck — the
+        real ~12-min full scan must be allowed to finish instead of being re-kicked."""
+        now = time.time()
+        assert not ws._screener_is_stuck(
+            {"status": "scanning", "started": now - 900, "last_advance": now - 20}, now=now,
+        )
+
+    def test_stuck_when_stalled(self):
+        """No batch advanced in > stall seconds → stuck, even if it started recently."""
+        now = time.time()
+        assert ws._screener_is_stuck(
+            {"status": "scanning", "started": now - 600, "last_advance": now - 500}, now=now,
         )
 
 

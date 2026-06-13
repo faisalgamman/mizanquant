@@ -777,11 +777,17 @@ _yf_semaphore = threading.Semaphore(2)  # max 2 concurrent yfinance calls
 
 def _reset_progress(total: int):
     global _screener_progress
-    _screener_progress = {"current": 0, "total": total, "status": "scanning", "batch": 0, "started": time.time()}
+    _now = time.time()
+    _screener_progress = {"current": 0, "total": total, "status": "scanning", "batch": 0,
+                          "started": _now, "last_advance": _now}
 
 
 def _update_progress(n: int, batch: int = 0):
     global _screener_progress
+    # Track the last time progress ADVANCED — the stuck-detector uses this to tell a
+    # slow-but-moving scan apart from a genuinely hung one (see _screener_is_stuck).
+    if n > _screener_progress.get("current", 0):
+        _screener_progress["last_advance"] = time.time()
     _screener_progress["current"] = n
     if batch:
         _screener_progress["batch"] = batch
@@ -811,14 +817,27 @@ def _funnel_select(symbols: list, rank_fn, top_n: int) -> list:
     return [s for _, s in scored[:top_n]]
 
 
-def _screener_is_stuck(progress: dict, now: float = None, max_age: float = 600) -> bool:
-    """True when a 'scanning' run is older than max_age seconds (hung thread)."""
+def _screener_is_stuck(progress: dict, now: float = None,
+                       max_age: float = 3600, stall: float = 420) -> bool:
+    """True when a 'scanning' run is HUNG — not merely slow.
+
+    A full ~657-symbol FMP scan legitimately takes ~12 min. The old check used a
+    600s ABSOLUTE age, so it declared the healthy scan 'stuck' at batch ~11 and
+    re-kicked it from scratch on the next request — forever. It never completed, so
+    the result cache and `smart_screener_lastgood` were never written (instant-open
+    stayed broken and the Monte-Carlo risers panel stayed empty). Now a scan counts
+    as stuck only if no batch has ADVANCED in `stall` seconds, with a generous
+    absolute `max_age` backstop for pathological hangs. A run with no `last_advance`
+    (e.g. an old idle flag) falls back to `started`, so a truly stale scan is still
+    caught.
+    """
     if now is None:
         now = time.time()
     if progress.get("status") != "scanning":
         return False
     started = progress.get("started", 0)
-    return (now - started) > max_age
+    last = progress.get("last_advance", started)
+    return (now - last) > stall or (now - started) > max_age
 
 
 # ---------------------------------------------------------------------------
