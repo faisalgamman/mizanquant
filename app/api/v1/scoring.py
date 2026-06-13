@@ -80,11 +80,19 @@ async def v1_weighted_score(symbol: str = "AAPL"):
     except Exception as exc:
         logger.debug("_analyze_smart failed for %s: %s", symbol, exc)
         result_dict["rs_unavailable"] = True
-    if smart:
-        result_dict["smart_score"] = smart.get("smart_score", 0)
+    if smart and smart.get("smart_score"):
+        result_dict["smart_score"] = smart.get("smart_score")
         result_dict["smart_verdict"] = smart.get("verdict", "")
-    elif "rs_unavailable" not in result_dict:
-        result_dict["rs_unavailable"] = True
+    else:
+        # Smart layer unavailable → derive a display score from the component
+        # points already in result_dict (the exact values the Analyze bars
+        # render), so the header never shows 0/100 over full bars. Display-only:
+        # does NOT touch weighted_score / _analyze_smart / gates / trades.
+        comps = result_dict.get("components") or {}
+        pts = sum(float(v) for v in comps.values() if isinstance(v, (int, float)))
+        result_dict["smart_score"] = min(100, round(pts))
+        if "rs_unavailable" not in result_dict:
+            result_dict["rs_unavailable"] = True
 
     if redis is not None:
         try:

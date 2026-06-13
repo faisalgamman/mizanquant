@@ -146,7 +146,7 @@ function Schedule({ items }) {
 }
 
 function TradeColumn(props) {
-  const { portfolio, positions, paper, pipeline, running, dryRun, setDryRun, onRunPipeline, guards, schedule, onSell } = props;
+  const { portfolio, positions, paper, onSell } = props;
   return (
     <div className="col col-trade">
       <div className="wf-section">
@@ -168,6 +168,17 @@ function TradeColumn(props) {
         <div className="wf-head"><span className="wf-title">Paper</span><span className="wf-sub">recent trades</span></div>
         <PaperTradesList trades={paper} />
       </div>
+    </div>
+  );
+}
+
+// OpsBand — Pipeline · Guards · Schedule, pulled out of the tall Trade column
+// into a full-width 3-up row so the workflow columns stay balanced (kills the
+// black L-void). Reuses the same sub-components as before.
+function OpsBand(props) {
+  const { pipeline, running, dryRun, setDryRun, onRunPipeline, guards, schedule } = props;
+  return (
+    <div className="ops-band">
       <div className="wf-section">
         <div className="wf-head"><span className="wf-title">Pipeline</span><span className="wf-sub">{running ? "running" : "idle"} · {(pipeline || []).length} stages</span></div>
         <PipelineFlow stages={pipeline} running={running} dryRun={dryRun} setDryRun={setDryRun} onRun={onRunPipeline} />
@@ -184,4 +195,4 @@ function TradeColumn(props) {
   );
 }
 
-Object.assign(window, { TradeColumn });
+Object.assign(window, { TradeColumn, OpsBand });

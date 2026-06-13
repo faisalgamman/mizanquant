@@ -501,7 +501,13 @@ def run_screener():
         from app.services.market_context_bundle import apply_context_shadow, get_symbol_sectors
         from app.config import settings as _cfg
         syms = [r["symbol"] for r in results if isinstance(r, dict) and r.get("symbol")]
-        apply_context_shadow(results, symbol_sectors=get_symbol_sectors(syms))
+        sym_sectors = get_symbol_sectors(syms)
+        apply_context_shadow(results, symbol_sectors=sym_sectors)
+        # Wire the sector name onto each row so /buys (and the Overview scanner
+        # table) can display it — display-only; does NOT affect swing_score.
+        for r in results:
+            if isinstance(r, dict) and r.get("symbol") and not r.get("sector"):
+                r["sector"] = sym_sectors.get(str(r["symbol"]).upper(), "")
         if getattr(_cfg, "CONTEXT_CONDITIONING_LIVE", False):
             results.sort(key=lambda x: x.get("context_adjusted_score", x["swing_score"]), reverse=True)
     except Exception as _ctx_exc:

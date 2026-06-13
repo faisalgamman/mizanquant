@@ -85,7 +85,11 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const plan    = ready ? analyze.plan : null;
   const scErr   = scoring && scoring.error;
 
-  const score    = Math.round((scoring && (scoring.smart_score ?? scoring.total ?? scoring.weighted_score)) ?? signal.score ?? 0);
+  // smart_score is the score that matches the bars (component points). A 0/null
+  // smart_score must NOT win over the real score — `??` doesn't skip 0 — so a
+  // gate-zeroed `scoring.total` is only the last resort, never the headline.
+  const _ss      = scoring ? Number(scoring.smart_score) : 0;
+  const score    = Math.round((_ss > 0 ? _ss : null) ?? signal.score ?? (scoring && scoring.total) ?? 0);
   const verdict  = verdictFromScore(score);
   const chgColor = signal.chg >= 0 ? "var(--positive)" : "var(--negative)";
 

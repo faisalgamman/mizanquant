@@ -589,16 +589,18 @@ function App() {
             portfolio={portfolio}
             positions={positions}
             paper={paper}
-            pipeline={realStages.length ? realStages : pipeline}
-            running={pipelineRunning}
-            dryRun={dryRun}
-            setDryRun={setDryRun}
-            onRunPipeline={runPipeline}
-            guards={guards}
-            schedule={schedule}
             onSell={closePosition}
           />
         </div>
+        <OpsBand
+          pipeline={realStages.length ? realStages : pipeline}
+          running={pipelineRunning}
+          dryRun={dryRun}
+          setDryRun={setDryRun}
+          onRunPipeline={runPipeline}
+          guards={guards}
+          schedule={schedule}
+        />
         <div className="si-split">
           <StockIntel />
           <PriceChart symbol={cardSymbol || selectedSym || "SPY"} />

@@ -700,7 +700,7 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .lr2-disc { font-size: 11px; color: var(--text-muted, #8a8f99); text-align: center; padding: 6px 0 0; }
 
 /* Indicators strip */
-.lr2-ind-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px,1fr)); gap: var(--space-2); padding: var(--space-1) 0; }
+.lr2-indic-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px,1fr)); gap: var(--space-2); padding: var(--space-1) 0; }
 .lr2-ind-tile { background: var(--bg-raised, #1c1f27); border: 1px solid var(--border, #2a2d36);
   border-radius: var(--radius-md); padding: var(--space-1) var(--space-2); text-align: center; }
 .lr2-ind-lab { font-size: 10px; color: var(--text-muted, #8a8f99); margin-bottom: 2px; font-weight: 600; }
@@ -728,6 +728,12 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .lr2-riser-ec { font-family: var(--font-mono); font-weight: 600; min-width: 60px; text-align: right; }
 .lr2-riser-prob { font-size: 12px; color: var(--text-muted, #8a8f99); min-width: 64px; text-align: right; }
 @media (max-width: 900px) { .lr2 { flex-direction: column; } .lr2-col-a, .lr2-col-b { flex: 1; } }
+
+/* Ops band — Pipeline · Guards · Schedule moved out of the tall Trade column
+   into a full-width 3-up row so the workflow columns stay balanced (no L-void). */
+.ops-band { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3);
+  align-items: start; margin-bottom: var(--space-3); }
+@media (max-width: 900px) { .ops-band { grid-template-columns: 1fr; } }
 
 /* Stock Intelligence ⟂ Price chart — 50/50 split */
 .si-split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); align-items: start; }
