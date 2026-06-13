@@ -209,6 +209,23 @@ TOOL_SCHEMAS = [
             "required": ["symbol", "verdict", "confidence", "rationale"]
         }
     },
+    {
+        "name": "get_signal_agreement",
+        "description": (
+            "Cross-check ONE symbol across INDEPENDENT sources (weekly technical, monthly composite, "
+            "Monte-Carlo forecast direction) and return a CALIBRATED confidence "
+            "(INSUFFICIENT / LOW / LOW-MEDIUM / MEDIUM — never higher; the system is ~51% coin-flip) "
+            "plus any CONFLICTS (e.g. BUY vs falling RSI, BUY vs negative forecast). "
+            "Use this to STATE confidence — never invent a confidence number yourself."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker symbol (e.g. AAPL)"}
+            },
+            "required": ["symbol"]
+        }
+    },
 ]
 DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
@@ -260,20 +277,29 @@ def _exec_check_halal(symbol: str) -> dict:
     if result is None:
         return {"error": f"Could not retrieve financial data for {symbol}"}
 
+    # Data completeness — the agent must NOT assert a clean "halal" when the ratios
+    # that the verdict depends on are missing (they render as "—" in the UI).
+    debt = result.get("debt_ratio")
+    interest = result.get("interest_ratio")
+    data_complete = debt is not None and interest is not None
     return {
         "symbol": symbol,
         "status": "HALAL" if result.get("is_halal") else "HARAM",
         "company": result.get("company_name", symbol),
         "sector": result.get("sector", ""),
-        "debt_ratio_pct": result.get("debt_ratio", 0),
+        "debt_ratio_pct": debt if debt is not None else "—",
         "debt_pass": result.get("debt_pass", False),
-        "interest_ratio_pct": result.get("interest_ratio", 0),
+        "interest_ratio_pct": interest if interest is not None else "—",
         "interest_pass": result.get("interest_pass", False),
         "haram_sector": result.get("haram_revenue", False),
         "sector_pass": result.get("haram_pass", False),
         "liquidity_ratio_pct": result.get("liquidity_ratio", 0),
         "liquidity_pass": result.get("liquidity_pass", False),
         "screens_passed": f"{result.get('screens_passed', 0)}/4",
+        "halal_confidence": result.get("halal_confidence", "partial" if not data_complete else "high"),
+        "data_complete": data_complete,
+        "data_note": "Assert 'halal' only if status=HALAL AND data_complete=true AND "
+                     "halal_confidence='high'. Otherwise say 'حلال مبدئياً — بيانات ناقصة'.",
     }
 
 
@@ -290,6 +316,9 @@ def _exec_get_buy_signals() -> dict:
     watches = [r for r in results if 35 <= r.get("swing_score", 0) < 55][:10]
 
     return {
+        "scanner": "weekly",
+        "scanner_note": "WEEKLY swing scanner (technical swing_score). NOT the Monthly composite "
+                        "scanner — for monthly use get_deep_picks; never present these as monthly.",
         "buy_count": len(buys),
         "watch_count": len(watches),
         "top_buys": [
@@ -486,9 +515,117 @@ def _exec_get_deep_picks(symbol: str = None, top_n: int = 10) -> dict:
             except Exception:
                 continue
         enriched.sort(key=lambda x: x.get("composite_score") or 0, reverse=True)
-        return {"status": "ok", "count": len(enriched[:top_n]), "picks": enriched[:top_n]}
+        if not enriched:
+            return {"scanner": "monthly", "status": "not_ready", "count": 0, "picks": [],
+                    "message": "Monthly composite scan has no results yet (still warming / cold "
+                               "cache). Tell the user the MONTHLY scan is not ready — do NOT "
+                               "substitute weekly (get_buy_signals) results."}
+        return {"scanner": "monthly",
+                "scanner_note": "MONTHLY composite scanner (fundamental+technical+sentiment). "
+                                "Different scale from the weekly swing_score.",
+                "status": "ok", "count": len(enriched[:top_n]), "picks": enriched[:top_n]}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"scanner": "monthly", "status": "error", "message": str(e)}
+
+
+def _exec_get_signal_agreement(symbol: str) -> dict:
+    """Cross-check a symbol across independent sources → a CALIBRATED confidence.
+
+    Not a confident tone — measured agreement only. The heavy run_consensus is NOT
+    called here (it is slow); use it separately if needed. Sources that are cold or
+    unavailable are reported as such, never guessed. The honest ceiling is MEDIUM:
+    the system is ~51% (coin-flip) on one month of data and does not predict prices.
+    """
+    import halal_screener as hs
+    symbol = symbol.upper().strip()
+    sources: dict = {}
+    bull = 0
+    avail = 0
+    conflicts: list[str] = []
+
+    # 1) Weekly technical (fast, reliable)
+    weekly_buy = False
+    try:
+        df = hs.fetch_yf(symbol)
+        row = hs.analyze(symbol, df) if df is not None else None
+        if row:
+            sig = str(row.get("swing_signal", "")).upper()
+            weekly_buy = "BUY" in sig
+            sources["weekly_technical"] = {
+                "signal": row.get("swing_signal"), "swing_score": row.get("swing_score"),
+                "rsi": row.get("rsi"), "rsi_trend": row.get("rsi_trend"),
+            }
+            avail += 1
+            if weekly_buy:
+                bull += 1
+                if row.get("rsi_trend") == "Falling":
+                    conflicts.append("weekly BUY but RSI is falling (possible bearish divergence)")
+        else:
+            sources["weekly_technical"] = {"available": False}
+    except Exception:
+        sources["weekly_technical"] = {"available": False}
+
+    # 2) Monthly composite (may be cold / not ready)
+    try:
+        dp = _exec_get_deep_picks(symbol=symbol, top_n=1)
+        picks = dp.get("picks") or []
+        if picks and picks[0].get("composite_score") is not None:
+            comp = picks[0]["composite_score"]
+            sources["monthly_composite"] = {"composite_score": comp,
+                                            "confirmations": picks[0].get("confirmation_count")}
+            avail += 1
+            if comp >= 65:
+                bull += 1
+        else:
+            sources["monthly_composite"] = {"available": False, "note": "monthly scan not ready"}
+    except Exception:
+        sources["monthly_composite"] = {"available": False}
+
+    # 3) Forecast direction (fast Monte-Carlo — magnitude/range, not a price call)
+    try:
+        from app.services.price_forecast import monte_carlo_forecast
+        from app.services import market_data as md
+        df2 = md.fetch(symbol, period="1y")
+        prices = df2["close"].tolist() if df2 is not None and len(df2) > 30 else None
+        if prices:
+            fc = monte_carlo_forecast(prices, 20)
+            ec = fc.get("expected_change_pct")
+            if ec is not None:
+                avail += 1
+                sources["forecast"] = {"expected_change_pct": ec,
+                                       "prob_profit_pct": fc.get("prob_profit_pct")}
+                if ec > 0:
+                    bull += 1
+                elif ec < 0 and weekly_buy:
+                    conflicts.append("weekly BUY but Monte-Carlo expected change is negative")
+        else:
+            sources["forecast"] = {"available": False}
+    except Exception:
+        sources["forecast"] = {"available": False}
+
+    # Calibrated confidence — conservative by design; ceiling MEDIUM.
+    if avail < 2:
+        conf = "INSUFFICIENT"
+    elif conflicts:
+        conf = "LOW"
+    elif bull == avail and bull >= 3:
+        conf = "MEDIUM"
+    elif bull >= 2:
+        conf = "LOW-MEDIUM"
+    else:
+        conf = "LOW"
+
+    return {
+        "symbol": symbol,
+        "sources_available": avail,
+        "bullish_sources": bull,
+        "calibrated_confidence": conf,
+        "conflicts": conflicts,
+        "sources": sources,
+        "caveat": ("Calibrated confidence is RELATIVE source agreement only. System accuracy is "
+                   "~51% (coin-flip) on ONE month of data and does NOT predict prices. Real "
+                   "statistical confidence requires paper-ledger graduation (not yet reached)."),
+    }
 
 
 def _exec_get_accuracy_report(period_days: int = 30) -> dict:
@@ -599,6 +736,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_performance": lambda **kw: _exec_get_performance(),
     "get_risk_status": lambda **kw: _exec_get_risk_status(),
     "get_deep_picks": lambda **kw: _exec_get_deep_picks(kw.get("symbol"), kw.get("top_n", 10)),
+    "get_signal_agreement": lambda **kw: _exec_get_signal_agreement(kw["symbol"]),
     "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
     "get_measurement_facts": lambda **kw: _exec_get_measurement_facts(),
     "record_recommendation": lambda **kw: _exec_record_recommendation(kw["symbol"], kw["verdict"], kw["confidence"], kw["rationale"]),
