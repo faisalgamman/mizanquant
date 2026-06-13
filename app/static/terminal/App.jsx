@@ -351,7 +351,7 @@ function App() {
     let cancelled = false, tries = 0, timer = null;
     const loadBottom = async () => {
       try {
-        const r = await (await fetch('/api/forecast/risers?limit=8')).json();
+        const r = await (await fetch('/api/risers?limit=8')).json();
         if (!cancelled) { setRisers(r.risers || []); setRisersMeta({market_soft: r.market_soft}); }
         // Empty risers usually means the screener cache is still warming → retry.
         if ((!r.risers || r.risers.length === 0) && tries < 16 && !cancelled) {

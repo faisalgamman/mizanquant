@@ -48,6 +48,20 @@ async def test_risers_keeps_all_with_market_soft(monkeypatch):
     assert "disclaimer" in result
 
 
+def test_risers_route_not_shadowed_by_forecast_model():
+    """The risers endpoint must NOT live under /api/forecast/ — that namespace is
+    owned by the earlier-registered /api/forecast/{model_name} route, which matched
+    'risers' as a model name ('Unknown model risers') and left the panel empty since
+    launch. The unit test above calls the function directly, so it never caught this;
+    this test checks the actual HTTP route registration."""
+    from app.workspace_server import app, forecast_risers
+    paths = {getattr(r, "path", None): getattr(r, "endpoint", None) for r in app.routes}
+    assert "/api/risers" in paths, "risers must be reachable at the non-colliding /api/risers"
+    assert paths["/api/risers"] is forecast_risers
+    # Must NOT sit under the shadowed /api/forecast/ prefix.
+    assert "/api/forecast/risers" not in paths
+
+
 @pytest.mark.asyncio
 async def test_market_news_uses_fmp_fallback(monkeypatch):
     """FMP fallback when Alpaca news returns empty."""

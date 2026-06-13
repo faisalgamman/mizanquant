@@ -4762,9 +4762,15 @@ async def screener_watch(limit: int = Query(20, ge=1, le=100)):
 # Monte-Carlo forecast risers — top stocks by expected upside (probabilistic)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/forecast/risers")
+@app.get("/api/risers")
 async def forecast_risers(limit: int = Query(8, ge=1, le=20)):
-    """Top stocks by Monte-Carlo EXPECTED upside (probabilistic — not advice)."""
+    """Top stocks by Monte-Carlo EXPECTED upside (probabilistic — not advice).
+
+    NOTE: path is /api/risers, NOT /api/forecast/risers — the latter is shadowed by
+    the earlier-registered /api/forecast/{model_name} route (FastAPI matches in
+    registration order), which silently returned "Unknown model 'risers'" and left
+    this panel empty since launch. Keep this off the /api/forecast/ namespace.
+    """
     try:
         data = await _smart_screener_impl(min_score=45, max_results=60, use_cache="true")
     except Exception as e:
