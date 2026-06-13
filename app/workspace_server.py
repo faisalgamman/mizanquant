@@ -4757,6 +4757,24 @@ async def forecast_risers(limit: int = Query(8, ge=1, le=20)):
              if r.get("is_halal")
              and (r.get("smart_score") or r.get("composite_score") or 0) >= 45][:25]
 
+    # FALLBACK: the smart-screener is the heavy FMP-fundamentals scan over ~657 symbols;
+    # it rarely completes before a restart/deploy, so its cache (and last_good) is usually
+    # cold — which is the REAL reason this panel showed nothing since launch. When it has
+    # no candidates, use the fast technical weekly screener (/buys), which is reliably warm,
+    # as the Monte-Carlo candidate universe. `_one` reads symbol/price/name from each row,
+    # which the weekly rows provide (name falls back to the symbol).
+    if not cands:
+        try:
+            from halal_screener import _get_cached as _wk_cached
+            wk, _ = _wk_cached("screener")
+            if isinstance(wk, list):
+                wk = [r for r in wk if r.get("symbol") and not r.get("Status")
+                      and r.get("halal") in (True, "Yes")]
+                wk.sort(key=lambda r: r.get("swing_score", 0), reverse=True)
+                cands = wk[:25]
+        except Exception as e:
+            logger.debug("risers weekly fallback: %s", e)
+
     from app.services.price_forecast import monte_carlo_forecast
     from app.services import market_data as md
     def _one(r):
