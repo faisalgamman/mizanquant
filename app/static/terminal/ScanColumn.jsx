@@ -102,7 +102,7 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
         <table className="s-table">
           <thead>
             <tr>
-              <th>Symbol</th><th>Score</th><th>Signal</th><th>Price</th><th>Chg 1w</th><th>Sector</th>
+              <th>Symbol</th><th>Score</th><th>Signal</th><th>Price</th><th>Chg 1w</th>
             </tr>
           </thead>
           <tbody>
@@ -121,7 +121,6 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
                   <td><Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge></td>
                   <td className="mono">${s.price.toFixed(2)}</td>
                   <td className="mono" style={{ color: chgColor, fontWeight: 600 }}>{fmtPct(s.chg)}</td>
-                  <td style={{ color: "var(--text-secondary)" }}>{s.sector || "—"}</td>
                 </tr>
               );
             })}
