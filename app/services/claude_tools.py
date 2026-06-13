@@ -484,48 +484,57 @@ def _exec_get_risk_status() -> dict:
 from app.config import settings
 
 def _exec_get_deep_picks(symbol: str = None, top_n: int = 10) -> dict:
-    """Return deep-picks with composite/conviction/RRG for top symbols or a specific one."""
+    """Return deep-picks from the SAME warm composite cache the UI Monthly Scanner shows.
+
+    The previous version recomputed via hs.compute_one / hs._score_one (which do not
+    exist) and ALWAYS returned empty — so the agent reported "monthly not ready" even
+    when the UI was full of picks. We now read the real /api/screener/deep-picks
+    endpoint function (the pattern paper_validation already uses), run in a fresh
+    thread so a new event loop is safe regardless of caller context.
+    """
+    import asyncio
+    import concurrent.futures
+    limit = max(int(top_n or 10), 1)
     try:
-        import halal_screener as hs
-        from app.services.conviction_engine import detect_confirmations
-        results = []
-        universe = list(hs._universe_symbols())[:80]
-        # Use the screener compute path
-        enriched = []
-        for sym in (universe if symbol is None else [symbol.upper()]):
-            try:
-                row = hs.compute_one(sym) if hasattr(hs, "compute_one") else None
-                if row is None:
-                    row = hs._score_one(sym) if hasattr(hs, "_score_one") else {}
-                if not row:
-                    continue
-                confirms = detect_confirmations(row, row.get("rotation_quadrant", "unknown"))
-                enriched.append({
-                    "symbol": sym,
-                    "composite_score": row.get("composite_score"),
-                    "context_adjusted_score": row.get("context_adjusted_score"),
-                    "conviction_score": row.get("conviction_score"),
-                    "rotation_quadrant": row.get("rotation_quadrant"),
-                    "sector": row.get("sector"),
-                    "f_grade": row.get("f_grade"),
-                    "confirmations": confirms,
-                    "confirmation_count": len(confirms),
-                    "strong_buy_qualified": len(confirms) >= 3,
-                })
-            except Exception:
-                continue
-        enriched.sort(key=lambda x: x.get("composite_score") or 0, reverse=True)
-        if not enriched:
-            return {"scanner": "monthly", "status": "not_ready", "count": 0, "picks": [],
-                    "message": "Monthly composite scan has no results yet (still warming / cold "
-                               "cache). Tell the user the MONTHLY scan is not ready — do NOT "
-                               "substitute weekly (get_buy_signals) results."}
-        return {"scanner": "monthly",
-                "scanner_note": "MONTHLY composite scanner (fundamental+technical+sentiment). "
-                                "Different scale from the weekly swing_score.",
-                "status": "ok", "count": len(enriched[:top_n]), "picks": enriched[:top_n]}
+        from app.workspace_server import screener_deep_picks
+
+        def _call():
+            return asyncio.run(screener_deep_picks(limit=max(limit, 15), use_cache="true"))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            res = ex.submit(_call).result(timeout=40)
     except Exception as e:
         return {"scanner": "monthly", "status": "error", "message": str(e)}
+
+    rows = res.get("results") if isinstance(res, dict) else None
+    if not rows:
+        return {"scanner": "monthly", "status": "not_ready", "count": 0, "picks": [],
+                "scan_pct": res.get("scan_pct") if isinstance(res, dict) else None,
+                "message": "Monthly composite scan has no results yet (cold cache / still "
+                           "scanning). Tell the user the MONTHLY scan is not ready — do NOT "
+                           "substitute weekly (get_buy_signals) results."}
+    if symbol:
+        sym = symbol.upper().strip()
+        rows = [r for r in rows if str(r.get("symbol", "")).upper() == sym] or rows[:1]
+    picks = [{
+        "symbol": r.get("symbol"),
+        "composite_score": r.get("composite_score") if r.get("composite_score") is not None
+                           else r.get("smart_score"),
+        "signal": r.get("signal") or r.get("signal_composite"),
+        "score_tech": r.get("score_tech"),
+        "score_fund": r.get("score_fund"),
+        "f_grade": r.get("f_grade"),
+        "sector": r.get("sector"),
+        "conviction_score": r.get("conviction_score"),
+        "rotation_quadrant": r.get("rotation_quadrant"),
+        "confirmation_count": r.get("confirmation_count"),
+        "is_halal": r.get("is_halal", True),
+        "price": r.get("price"),
+    } for r in rows[:limit]]
+    return {"scanner": "monthly",
+            "scanner_note": "MONTHLY composite scanner (fundamental+technical+sentiment) — same "
+                            "source as the UI Monthly Scanner.",
+            "source": res.get("source"), "status": "ok", "count": len(picks), "picks": picks}
 
 
 def _exec_get_signal_agreement(symbol: str) -> dict:
