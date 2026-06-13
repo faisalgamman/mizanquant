@@ -618,7 +618,7 @@ function App() {
         />
       </main>
 
-      <StatusBar pipelineRunning={pipelineRunning} system={system} />
+      <StatusBar pipelineRunning={pipelineRunning} system={system} portfolio={portfolio} brokerHealth={brokerHealth} />
 
       {toast && (
         <div className={"toast" + (toast.kind === "error" ? " error" : "")}>

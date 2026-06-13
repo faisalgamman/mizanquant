@@ -3906,6 +3906,7 @@ async def screener_deep_picks(
             "score_halal":        halal_s,
             "f_grade":            f_grade,
             "signal_composite":   sig_composite,
+            "sector":             (info or {}).get("sector") or r.get("sector") or "",
         }
         # ── Conviction layer (additive; same pure code the backtest uses) ──────
         # Computes context_adjusted_score, confirmations, conviction_score,
@@ -4798,6 +4799,22 @@ async def market_news(limit: int = Query(8, ge=1, le=20)):
         items = [{"title": n.get("title", ""), "summary": (n.get("text") or "")[:300],
                   "publisher": n.get("site", ""), "link": n.get("url", ""),
                   "published": n.get("publishedDate", "")} for n in (fmp or [])]
+    # Dedup by normalized title — keep first occurrence only.
+    # Optionally drop obvious clickbait headlines.
+    _clickbait = {"if you invested $1000", "10 years ago", "what if you invested",
+                  "how much would", "here's how much"}
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for n in items:
+        t = (n.get("title") or "").strip().lower()
+        if not t or t in seen:
+            continue
+        # Drop clickbait
+        if any(cb in t for cb in _clickbait):
+            continue
+        seen.add(t)
+        deduped.append(n)
+    items = deduped
     return {"count": len(items), "news": items}
 
 

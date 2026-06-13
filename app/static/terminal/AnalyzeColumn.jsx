@@ -85,7 +85,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const plan    = ready ? analyze.plan : null;
   const scErr   = scoring && scoring.error;
 
-  const score    = Math.round((scoring && (scoring.total ?? scoring.weighted_score)) ?? signal.score ?? 0);
+  const score    = Math.round((scoring && (scoring.smart_score ?? scoring.total ?? scoring.weighted_score)) ?? signal.score ?? 0);
   const verdict  = verdictFromScore(score);
   const chgColor = signal.chg >= 0 ? "var(--positive)" : "var(--negative)";
 
@@ -176,7 +176,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             Score breakdown{scoring && scoring.total != null ? " · " + score + "/100" : ""}
           </div>
           {loading ? (
-            <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Loading…</span></div>
+            <div className="an-bar-row"><div className="an-skel-bar" style={{width:"100%",height:4,borderRadius:2,background:"var(--bg-raised)",animation:"pulse 1.5s ease-in-out infinite"}}></div></div>
           ) : scErr ? (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Scoring unavailable</span></div>
           ) : compRows.length ? compRows.map((c) => (
@@ -193,14 +193,16 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           )}
 
           {/* H3: Signal⇄Forecast agreement chip */}
-          {agreeChip && (
+          {agreeChip ? (
             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
               <span className={"an-agree-chip" + (agreeChip === "agree" ? " an-agree-ok" : " an-agree-warn")}
                     title="قياس أوّلي (n=902): الصفقات الموافقة كانت أفضل — عيّنة صغيرة، ليس ضماناً">
                 {agreeChip === "agree" ? "✓ التوقّع يوافق الإشارة" : "⚠ التوقّع يخالف الإشارة"}
               </span>
             </div>
-          )}
+          ) : (fcForChip && !agreeChip) ? (
+            <div style={{ marginTop: 6, fontSize: 9, color: "var(--text-muted)" }}>—</div>
+          ) : null}
 
           {/* H2: Trade plan accuracy */}
           <div className="an-sect-title">Trade plan{strat ? " · " + strat : ""}</div>
@@ -247,7 +249,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                   </select>
                 </div>
                 {fcLoading ? (
-                  <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Simulating…</span></div>
+                  <div className="an-bar-row"><div className="an-skel-bar" style={{width:"100%",height:4,borderRadius:2,background:"var(--bg-raised)",animation:"pulse 1.5s ease-in-out infinite"}}></div></div>
                 ) : fc ? (
                   <>
                     {_forecastFanSvg(fc)}
@@ -273,7 +275,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           {/* H4: WAIT-confirm guard on buy button */}
           <button className="an-trade" onClick={() => handleTrade(signal)} disabled={!canTrade}>
             <i className="fas fa-paper-plane" style={{ marginRight: 6 }}></i>
-            {!signal.halal ? "Blocked — halal fail" : canTrade ? "Send to paper trade" : loading ? "Loading plan…" : "Sizing unavailable"}
+            {!signal.halal ? "Blocked — halal fail" : canTrade ? "Send to paper trade" : loading ? <span className="pulse" style={{opacity:0.5}}>Loading plan…</span> : "Sizing unavailable"}
           </button>
           {brokerHealth ? (
             <div style={{ marginTop: 6, fontSize: 9, textAlign: "center", color: brokerHealth.connected ? "var(--positive)" : "var(--text-muted)" }}>

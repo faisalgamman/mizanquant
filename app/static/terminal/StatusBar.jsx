@@ -2,9 +2,17 @@
 // Every value is REAL, from /api/v1/overview .system (auto_trading, kill_switch,
 // regime, broker). Nothing here is hardcoded; shows "—" until status loads.
 
-function StatusBar({ pipelineRunning, system }) {
-  const brokerRaw = (system && (system.broker_type || system.broker)) || "";
-  const broker = brokerRaw ? brokerRaw.charAt(0).toUpperCase() + brokerRaw.slice(1) : "—";
+function StatusBar({ pipelineRunning, system, portfolio, brokerHealth }) {
+  // Broker label driven by the SAME truth the Portfolio panel uses:
+  // brokerHealth connected → "IBKR ✓", portfolio.ibkrOffline → "Alpaca (IBKR offline)", else "IBKR"
+  const brokerConnected = brokerHealth && brokerHealth.connected;
+  const ibkrOffline = portfolio && portfolio.ibkrOffline;
+  let brokerLabel = "IBKR";
+  if (brokerConnected) {
+    brokerLabel = "IBKR ✓";
+  } else if (ibkrOffline) {
+    brokerLabel = "Alpaca (IBKR offline)";
+  }
 
   const at = system && system.auto_trading;
   const autoTrade = at === "enabled" ? "ON" : at === "disabled" ? "OFF" : "—";
@@ -21,8 +29,8 @@ function StatusBar({ pipelineRunning, system }) {
   return (
     <div className="status-bar">
       <div className="sb-side">
-        <span className={"dot " + (broker !== "—" ? "dot-green" : "")}></span>
-        <span>Broker · {broker}</span>
+        <span className={"dot " + (brokerConnected ? "dot-green" : "")}></span>
+        <span>Broker · {brokerLabel}</span>
         <span className="sep">·</span>
         <span>Auto-trade <span style={{ color: autoColor, fontWeight: 600 }}>{autoTrade}</span></span>
         <span className="sep">·</span>
