@@ -8,7 +8,11 @@ numpy>=2.4.2,<3.0
 # Every torch import is guarded (_HAS_TORCH) and falls back to ARIMA; the core Monte-Carlo
 # engine (risers/forecast) is pure numpy. To re-enable DL models, add back:
 #   torch>=2.7.0,<3.0
-xgboost>=3.2.0,<4.0
+# xgboost REMOVED for Railway cost: guarded by _HAS_XGB in signal_classifier.py
+# (`if not _HAS_XGB: return None`). It only powers the secondary trade-history signal
+# classifier (activates after 30+ closed trades; the AI sub-score is already discounted
+# as ~coin-flip). With it gone the classifier returns None and the rest is unaffected.
+# Re-add `xgboost>=3.2.0,<4.0` to reactivate.
 scikit-learn>=1.8.0,<2.0
 requests>=2.32.5,<3.0
 httpx>=0.28.1,<1.0
