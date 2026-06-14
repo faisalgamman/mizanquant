@@ -125,11 +125,14 @@ HALAL_STOCKS_BACKTEST_FALLBACK = [s for s in HALAL_STOCKS_FALLBACK if s not in _
 
 
 def get_universe_symbols(db: Session) -> list[str]:
-    """Return all active symbols from DB.  Falls back to old constants if empty."""
+    """Return all active symbols from DB. Falls back to the expanded halal universe
+    (halal_universe_v2.json, ~657 symbols) when the DB table is empty — so the
+    weekly and monthly scanners run on the SAME universe regardless of DB state."""
     rows = db.query(Universe.symbol).filter(Universe.is_active.is_(True)).all()
     if rows:
         return [r[0] for r in rows]
-    logger.warning("Universe table empty — using fallback HALAL_STOCKS (~240 symbols)")
+    logger.warning("Universe table empty — using fallback universe (%d symbols)",
+                   len(HALAL_STOCKS_FALLBACK))
     return list(HALAL_STOCKS_FALLBACK)
 
 

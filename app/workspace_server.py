@@ -2984,7 +2984,8 @@ async def get_assistant_page():
 # Smart Screener — halal + profitability + fair price scoring (0-100)
 # ---------------------------------------------------------------------------
 
-# Full 357 halal S&P 500 universe — used by smart screener
+# Full expanded halal universe (~657, from halal_universe_v2.json) — the SAME list
+# the weekly screener uses (both resolve to HALAL_STOCKS_FALLBACK).
 _SMART_UNIVERSE = HALAL_STOCKS_FALLBACK
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -3697,11 +3698,12 @@ async def _smart_screener_impl(
     watchlist_set = get_watchlist_set()
     watchlist_syms = [s for s in watchlist_set if s in _SMART_UNIVERSE]
 
-    # Use watchlist symbols if provided, otherwise full 357 halal universe
+    # Use watchlist symbols if provided, otherwise the full expanded halal universe (~657)
     if watchlist:
         scan_symbols = [s.strip().upper() for s in watchlist.split(",") if s.strip()]
     else:
-        # Prioritize watchlist symbols first, then fill remaining from universe
+        # Prioritize watchlist symbols first, then fill remaining from the full
+        # expanded halal universe (~657 — same list the weekly screener scans).
         scan_symbols = list(_SMART_UNIVERSE)
 
     # Kick off background scan; return current cache or scanning status
