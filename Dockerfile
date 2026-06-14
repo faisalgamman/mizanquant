@@ -5,13 +5,13 @@ WORKDIR /app
 # Copy project
 COPY . .
 
-# Step 1 — CPU-only PyTorch first (no CUDA drivers → ~250 MB vs 1.9 GB for CUDA wheel).
-# Must run BEFORE requirements.txt so pip sees torch already satisfied and skips reinstall.
-# DISABLED for Railway cost savings: RUN pip install --no-cache-dir torch \
-# --index-url https://download.pytorch.org/whl/cpu
-
-# Step 2 — openbb-forecast (no deps) + all other requirements
-# torch in requirements.txt is already satisfied by the CPU build above.
+# torch was REMOVED from requirements.txt for Railway cost (~300-500MB resident RAM +
+# ~2GB image). DL forecast models fall back to ARIMA (_HAS_TORCH guard); the core
+# Monte-Carlo engine is pure numpy. To re-enable DL models, add torch back to
+# requirements.txt (prefer the CPU wheel: --index-url https://download.pytorch.org/whl/cpu).
+#
+# openbb-forecast (installed --no-deps; its Monte-Carlo submodule needs only numpy) +
+# all other requirements.
 RUN pip install --no-cache-dir --no-deps ./openbb_forecast && \
     pip install --no-cache-dir -r requirements.txt && \
     rm -rf openbb_forecast

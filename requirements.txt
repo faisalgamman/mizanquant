@@ -3,7 +3,11 @@ uvicorn>=0.40.0,<0.41.0          # openbb-core 1.6.x requires uvicorn<0.41.0
 yfinance>=1.2.0,<2.0.0          # openbb-yfinance 1.6.x requires >=1.2.0
 pandas>=2.3.3,<3.0
 numpy>=2.4.2,<3.0
-torch>=2.7.0,<3.0
+# torch REMOVED for Railway cost: it was imported at startup (~300-500MB resident RAM
+# + ~2GB image) but only powers the secondary DL forecast endpoints (/api/forecast/{model}).
+# Every torch import is guarded (_HAS_TORCH) and falls back to ARIMA; the core Monte-Carlo
+# engine (risers/forecast) is pure numpy. To re-enable DL models, add back:
+#   torch>=2.7.0,<3.0
 xgboost>=3.2.0,<4.0
 scikit-learn>=1.8.0,<2.0
 requests>=2.32.5,<3.0
@@ -41,7 +45,9 @@ groq>=0.13.0,<2.0              # Groq LLM client (OpenAI-compatible, ultra-fast)
 openai>=1.40.0,<3.0
 
 # ── Phase 2: ML/RL Ops ──
-mlflow>=2.21.0
+# mlflow REMOVED for Railway cost: only imported when MLFLOW_TRACKING_URI is set
+# (mlflow_tracker.py) — never in the live serving path. Re-add `mlflow>=2.21.0` if you
+# wire experiment tracking back on.
 # OpenBB 4.x — core + providers needed on Railway
 # NOTE: pin exact versions to avoid ResolutionImpossible on Railway build
 openbb-core==1.6.9
