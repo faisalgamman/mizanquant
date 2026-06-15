@@ -15,6 +15,9 @@ Free tier: 250 requests/day. Each symbol needs 3 API calls
 """
 
 import logging
+import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -26,6 +29,43 @@ from app.db.models import ScreeningResult
 from app.services.fmp_client import fmp_client
 
 logger = logging.getLogger("screener")
+
+# ── yfinance fundamentals circuit breaker ────────────────────────────────────
+# FMP free tier covers only ~83 symbols/day, so a 657-symbol screen leans heavily
+# on the yfinance fundamentals fallback. When Yahoo throttles/blocks the server IP
+# every call burns its full timeout — observed: 365 × 30–45s timeouts crawling one
+# monthly scan into oblivion (then the stall-detector re-kicks it from scratch).
+# This breaker fails fast once yfinance is clearly down: after N consecutive misses
+# we skip yfinance for a cooldown so the bulk scan COMPLETES (degraded coverage)
+# instead of hanging. It self-heals — any success resets it, and it reopens to
+# yfinance after the cooldown. No effect when yfinance is healthy (just a tighter
+# per-call timeout). All knobs are env-overridable.
+_YF_TIMEOUT: float = float(os.environ.get("HALAL_YF_TIMEOUT", "8"))
+_YF_CB_THRESHOLD: int = int(os.environ.get("HALAL_YF_CB_THRESHOLD", "12"))
+_YF_CB_COOLDOWN: float = float(os.environ.get("HALAL_YF_CB_COOLDOWN", "300"))
+_YF_CB_LOCK = threading.Lock()
+_YF_CB = {"fails": 0, "until": 0.0}
+
+
+def _yf_cb_is_open() -> bool:
+    with _YF_CB_LOCK:
+        return time.time() < _YF_CB["until"]
+
+
+def _yf_cb_record(success: bool) -> None:
+    with _YF_CB_LOCK:
+        if success:
+            _YF_CB["fails"] = 0
+            return
+        _YF_CB["fails"] += 1
+        if _YF_CB["fails"] >= _YF_CB_THRESHOLD:
+            _YF_CB["until"] = time.time() + _YF_CB_COOLDOWN
+            _YF_CB["fails"] = 0
+            logger.warning(
+                "halal: yfinance fundamentals circuit OPEN (%d consecutive misses) — "
+                "skipping yfinance for %.0fs so the scan completes",
+                _YF_CB_THRESHOLD, _YF_CB_COOLDOWN,
+            )
 
 
 def _utc_now() -> datetime:
@@ -90,7 +130,13 @@ _REVIEW_INDUSTRIES = {
 }
 
 def _yf_fallback(symbol: str) -> Optional[dict]:
-    """Fallback: fetch fundamental data from yfinance when FMP fails (premium block)."""
+    """Fallback: fetch fundamental data from yfinance when FMP fails (premium block).
+
+    Guarded by a circuit breaker: when yfinance is systematically blocked we skip it
+    immediately (return None) rather than paying the per-call timeout on every symbol.
+    """
+    if _yf_cb_is_open():
+        return None
     from app.services.market_context import _run_with_timeout
 
     def _do_yf():
@@ -162,7 +208,9 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
             },
         }
 
-    return _run_with_timeout(_do_yf, timeout=30, fallback=None)
+    result = _run_with_timeout(_do_yf, timeout=_YF_TIMEOUT, fallback=None)
+    _yf_cb_record(result is not None)
+    return result
 
 
 def _avg_market_cap_24m(symbol: str, shares: float, spot_mcap: float) -> tuple[float, str]:

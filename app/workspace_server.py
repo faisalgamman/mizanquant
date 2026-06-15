@@ -1556,7 +1556,10 @@ def _screen_halal(symbol: str, info: dict | None = None) -> dict:
         result.setdefault("status", "HALAL - Compliant" if result["is_halal"] else "NON-COMPLIANT")
         return result
 
-    result = _run_with_timeout(_compute, timeout=45, fallback=None)
+    # Backstop timeout. The inner yfinance fundamentals fallback now fails fast via
+    # its own breaker (see halal_screening._yf_fallback), so 45s was just dead wait on
+    # a blocked Yahoo — 20s comfortably covers the FMP + price paths.
+    result = _run_with_timeout(_compute, timeout=20, fallback=None)
     if result is None:
         return {"symbol": symbol, "is_halal": False, "error": "Halal check timed out"}
     return result
