@@ -58,6 +58,26 @@ _CACHE_PATH = Path(os.environ.get("PAIRS_SCAN_CACHE", "pairs_scan_cache.json"))
 _cache_pairs: list["PairReport"] | None = None
 _cache_ts: float = 0.0
 
+# Diagnostics from the most recent *real* scan (not cache hits). Surfaced by the
+# API so "zero pairs" is explainable: is the stats engine present, how many
+# candidates were tested, and how close did the best pair get to the gates.
+_last_scan_stats: dict = {}
+
+
+def coint_engine_available() -> bool:
+    """True iff statsmodels (the Engle–Granger test) is importable. When false,
+    every p-value is forced to 1.0 and the scanner can NEVER find a pair."""
+    try:
+        from app.services.cointegration import _HAS_COINT
+        return bool(_HAS_COINT)
+    except Exception:
+        return False
+
+
+def last_scan_stats() -> dict:
+    """Funnel + gates from the last real scan (empty until one has run)."""
+    return dict(_last_scan_stats)
+
 
 # ── Data object ───────────────────────────────────────────────────────────────
 
@@ -212,10 +232,19 @@ def find_cointegrated_pairs(
 
     from app.services.cointegration import cointegration_report
 
+    global _last_scan_stats
     sectors = _group_by_sector()
     logger.info("pairs_scanner: scanning %d sectors for cointegrated pairs", len(sectors))
 
     results: list[PairReport] = []
+    # Scan funnel — so a "zero pairs" outcome is explainable rather than mysterious.
+    n_symbols_with_data = 0
+    n_candidate_pairs = 0          # within-sector combinations considered
+    n_passed_corr = 0             # survived the |corr| pre-filter
+    n_eg_tested = 0               # Engle–Granger actually run
+    n_passed_pvalue = 0           # p ≤ threshold (ignoring half-life)
+    best_pvalue = 1.0
+    best_pair = None
 
     for sector, symbols in sectors.items():
         # Fetch each symbol's closes once for this sector
@@ -225,13 +254,16 @@ def find_cointegrated_pairs(
             if s is not None:
                 closes[sym] = s
         avail = sorted(closes.keys())
+        n_symbols_with_data += len(avail)
         if len(avail) < 2:
             continue
 
         for a, b in combinations(avail, 2):
+            n_candidate_pairs += 1
             # Correlation pre-filter (cheap) before the EG test (expensive)
             if _returns_correlation(closes[a], closes[b]) < PAIRS_CORRELATION_MIN:
                 continue
+            n_passed_corr += 1
             try:
                 import pandas as pd
                 joined = pd.concat([closes[a], closes[b]], axis=1, join="inner").dropna()
@@ -244,6 +276,12 @@ def find_cointegrated_pairs(
                     pvalue_threshold=PAIRS_PVALUE_MAX,
                     max_half_life_bars=PAIRS_MAX_HALF_LIFE,
                 )
+                n_eg_tested += 1
+                if rep.pvalue < best_pvalue:
+                    best_pvalue = rep.pvalue
+                    best_pair = f"{a}/{b}"
+                if rep.pvalue <= PAIRS_PVALUE_MAX:
+                    n_passed_pvalue += 1
                 if rep.is_cointegrated:
                     results.append(PairReport(
                         y_symbol=a, x_symbol=b, sector=sector,
@@ -261,7 +299,31 @@ def find_cointegrated_pairs(
     _cache_ts = time.time()
     _save_cache(results)
 
-    logger.info("pairs_scanner: found %d cointegrated pairs", len(results))
+    _last_scan_stats = {
+        "ts": time.time(),
+        "statsmodels_available": coint_engine_available(),
+        "sectors": len(sectors),
+        "symbols_with_data": n_symbols_with_data,
+        "candidate_pairs": n_candidate_pairs,
+        "passed_correlation": n_passed_corr,
+        "eg_tested": n_eg_tested,
+        "passed_pvalue": n_passed_pvalue,
+        "cointegrated": len(results),
+        "best_pvalue": round(best_pvalue, 4),
+        "best_pair": best_pair,
+        "gates": {
+            "pvalue_max": PAIRS_PVALUE_MAX,
+            "max_half_life_bars": PAIRS_MAX_HALF_LIFE,
+            "correlation_min": PAIRS_CORRELATION_MIN,
+        },
+    }
+
+    logger.info(
+        "pairs_scanner: found %d cointegrated pairs "
+        "(statsmodels=%s, %d candidates, %d passed corr, %d EG-tested, best p=%.3f)",
+        len(results), _last_scan_stats["statsmodels_available"],
+        n_candidate_pairs, n_passed_corr, n_eg_tested, best_pvalue,
+    )
     return results[:max_pairs]
 
 
@@ -277,4 +339,10 @@ def clear_cache() -> None:
         pass
 
 
-__all__ = ["PairReport", "find_cointegrated_pairs", "clear_cache"]
+__all__ = [
+    "PairReport",
+    "find_cointegrated_pairs",
+    "clear_cache",
+    "last_scan_stats",
+    "coint_engine_available",
+]

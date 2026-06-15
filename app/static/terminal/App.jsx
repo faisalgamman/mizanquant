@@ -237,7 +237,10 @@ function App() {
     if (scanMode !== "pairs") return;
     let cancelled = false;
     (async () => {
-      try { const p = await (await fetch('/api/v1/pairs/signals')).json(); if (!cancelled) setPairsData(p); } catch (_) {}
+      // null = still scanning; {error} = fetch failed; {signals,…} = scan returned.
+      // Distinguishing these stops the UI from showing "scanning…" forever.
+      try { const p = await (await fetch('/api/v1/pairs/signals')).json(); if (!cancelled) setPairsData(p || {}); }
+      catch (e) { if (!cancelled) setPairsData({ error: String(e) }); }
       try { const l = await (await fetch('/paper_validation/status?scanner=pairs')).json(); if (!cancelled) setLedgerP(l); } catch (_) {}
     })();
     return () => { cancelled = true; };

@@ -541,14 +541,14 @@ async def v1_pairs_candidates(force_refresh: bool = False, max_pairs: int = 20):
     Returns p-value, hedge ratio, OU half-life, and live z-score per pair.
     """
     try:
-        from app.services.pairs_scanner import find_cointegrated_pairs
+        from app.services.pairs_scanner import find_cointegrated_pairs, last_scan_stats
 
         def _scan():
             pairs = find_cointegrated_pairs(max_pairs=max_pairs, force_refresh=force_refresh)
             return [p.as_dict() for p in pairs]
 
         pairs = await asyncio.to_thread(_scan)
-        return {"count": len(pairs), "pairs": pairs}
+        return {"count": len(pairs), "pairs": pairs, "diagnostics": last_scan_stats()}
     except Exception as exc:
         logger.exception("pairs/candidates failed")
         return {"error": str(exc)}
@@ -564,6 +564,7 @@ async def v1_pairs_signals():
     """
     try:
         from app.services import pairs_strategy as ps
+        from app.services.pairs_scanner import last_scan_stats
 
         def _signals():
             sigs = ps.compute_signals()
@@ -578,6 +579,7 @@ async def v1_pairs_signals():
             "count": len(signals),
             "actionable": len(actionable),
             "signals": signals,
+            "diagnostics": last_scan_stats(),
         }
     except Exception as exc:
         logger.exception("pairs/signals failed")

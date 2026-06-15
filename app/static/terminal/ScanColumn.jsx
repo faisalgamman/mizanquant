@@ -249,11 +249,60 @@ function LedgerBanner({ ledger, kind, onRecord, recording }) {
 
 // Halal long-only pairs (cointegration) — relative-value signals + the PVP ledger.
 function PairsList({ pairs }) {
-  const sigs = (pairs && pairs.signals) || [];
-  if (sigs.length === 0) {
+  const muted = "var(--text-muted)";
+  // 1) still scanning (no response yet) — the only case that should say "scanning".
+  if (pairs == null) {
     return (
-      <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
+      <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>
         جارٍ مسح الأزواج المتكاملة (cointegration)…
+      </div>
+    );
+  }
+  // 2) the fetch failed.
+  if (pairs.error) {
+    return (
+      <div style={{ padding: "28px 12px", textAlign: "center", fontSize: 12, color: "var(--red)" }}>
+        تعذّر مسح الأزواج: {String(pairs.error).slice(0, 120)}
+      </div>
+    );
+  }
+  const sigs = pairs.signals || [];
+  // 3) scan completed but no signals — show WHY (the funnel) instead of a fake "scanning…".
+  if (sigs.length === 0) {
+    const d = pairs.diagnostics || {};
+    const g = d.gates || {};
+    const hasFunnel = d.eg_tested != null;
+    const engineMissing = d.statsmodels_available === false;
+    const Row = ({ k, v }) => (
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "2px 0" }}>
+        <span style={{ color: muted }}>{k}</span><span className="mono">{v}</span>
+      </div>
+    );
+    return (
+      <div style={{ padding: "20px 12px", fontSize: 12, color: "var(--text-secondary)" }}>
+        <div style={{ textAlign: "center", fontWeight: 600, marginBottom: 4 }}>
+          تم المسح — لا توجد أزواج متكاملة قابلة للتداول الآن
+        </div>
+        {engineMissing ? (
+          <div style={{ color: "var(--red)", fontSize: 11, textAlign: "center", margin: "8px 0", fontWeight: 600 }}>
+            ⚠ محرّك الإحصاء (statsmodels) غير متوفر في النشر — لا يمكن اكتشاف أي زوج. هذا عطل يلزم إصلاحه.
+          </div>
+        ) : hasFunnel ? (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", margin: "8px 0" }}>
+            <div style={{ fontSize: 9, color: muted, marginBottom: 4, letterSpacing: 0.4 }}>
+              SCAN FUNNEL · محرّك الإحصاء {d.statsmodels_available ? "✓" : "✗"}
+            </div>
+            <Row k="رموز ببيانات" v={d.symbols_with_data} />
+            <Row k="أزواج مرشحة (داخل القطاع)" v={d.candidate_pairs} />
+            <Row k={`اجتازت فلتر الارتباط ≥${g.correlation_min}`} v={d.passed_correlation} />
+            <Row k="اختُبرت إحصائياً (Engle–Granger)" v={d.eg_tested} />
+            <Row k={`اجتازت p ≤ ${g.pvalue_max}`} v={d.passed_pvalue} />
+            <Row k="أفضل زوج" v={d.best_pair ? `${d.best_pair} · p=${d.best_pvalue}` : "—"} />
+          </div>
+        ) : null}
+        <div style={{ fontSize: 10, color: muted, textAlign: "center", lineHeight: 1.6 }}>
+          الصفر نتيجة أمينة: البوابات صارمة (p≤{g.pvalue_max ?? "0.05"} · نصف-عمر≤{g.max_half_life_bars ?? 30} يوماً · ارتباط≥{g.correlation_min ?? 0.7}) لمنع الأزواج الزائفة (مكافحة الـoverfitting — Chan). التكامل المشترك نادر؛ ليس عطلاً.
+        </div>
       </div>
     );
   }
