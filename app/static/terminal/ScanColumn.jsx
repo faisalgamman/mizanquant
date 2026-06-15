@@ -46,7 +46,9 @@ function RegimeBar({ regime }) {
 }
 
 function SignalHeroCard({ signal, selected, onSelect }) {
-  const verdict = verdictFromScore(signal.score);
+  // Use the scanner's own verdict (same as the table) — not a re-derived threshold,
+  // which made the top cards show WAIT while the table showed BUY for the same score.
+  const verdict = signal.verdict || verdictFromScore(signal.score);
   const chgColor = signal.chg >= 0 ? "var(--positive)" : "var(--negative)";
   return (
     <div className={"sfc" + (selected ? " selected" : "")} onClick={() => onSelect(signal.symbol)}>
@@ -71,7 +73,7 @@ function SignalHeroCard({ signal, selected, onSelect }) {
 function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilterSignal, filterScore, setFilterScore, halalOnly, setHalalOnly }) {
   const filtered = signals.filter((s) => {
     if (halalOnly && !s.halal) return false;
-    const verdict = verdictFromScore(s.score);
+    const verdict = s.verdict || verdictFromScore(s.score);
     if (filterSignal !== "all" && verdict !== filterSignal) return false;
     if (s.score < Number(filterScore)) return false;
     return true;
@@ -107,7 +109,7 @@ function SignalTable({ signals, selectedSymbol, onSelect, filterSignal, setFilte
           </thead>
           <tbody>
             {filtered.map((s) => {
-              const verdict = verdictFromScore(s.score);
+              const verdict = s.verdict || verdictFromScore(s.score);
               const chgColor = s.chg >= 0 ? "var(--positive)" : "var(--negative)";
               return (
                 <tr key={s.symbol} className={s.symbol === selectedSymbol ? "selected" : ""} onClick={() => onSelect(s.symbol)}>

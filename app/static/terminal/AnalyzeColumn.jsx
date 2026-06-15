@@ -85,12 +85,13 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const plan    = ready ? analyze.plan : null;
   const scErr   = scoring && scoring.error;
 
-  // smart_score is the score that matches the bars (component points). A 0/null
-  // smart_score must NOT win over the real score — `??` doesn't skip 0 — so a
-  // gate-zeroed `scoring.total` is only the last resort, never the headline.
-  const _ss      = scoring ? Number(scoring.smart_score) : 0;
-  const score    = Math.round((_ss > 0 ? _ss : null) ?? signal.score ?? (scoring && scoring.total) ?? 0);
-  const verdict  = verdictFromScore(score);
+  // HEADLINE = the SAME score + verdict as the scanner row the user clicked, so the
+  // Analyze panel NEVER contradicts the scanner. Previously it recomputed a different
+  // score (smart_score) with a different threshold → a scanner BUY (e.g. composite 61)
+  // showed here as AVOID (smart_score 49). The weighted-score bars below are a TECHNICAL
+  // sub-view shown with their OWN total — not the headline number.
+  const score    = Math.round(Number(signal.score) || (scoring && (scoring.smart_score ?? scoring.total)) || 0);
+  const verdict  = signal.verdict || verdictFromScore(score);
   const chgColor = signal.chg >= 0 ? "var(--positive)" : "var(--negative)";
 
   // Raw measured values from momentum_details (if present in signal payload)
@@ -106,6 +107,20 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
     const rawVal = mom[k + "_raw"] ?? mom[k] ?? null;
     return { lab: _AN_LAB[k] || k, k, v, max, pct, rawVal };
   });
+  // Technical sub-total (the bars' own scale, distinct from the headline verdict).
+  const techSum = compRows.reduce((a, c) => a + (Number(c.v) || 0), 0);
+  const techMax = compRows.reduce((a, c) => a + (Number(c.max) || 0), 0);
+  const techStrong = techMax > 0 && techSum / techMax >= 0.65;     // technically strong
+  const verdictBuy = /(?:BUY|STRONG)/i.test(verdict);
+  // Honest reconciliation note: the headline (composite/smart) weighs fundamentals the
+  // technical bars don't, so the two lenses can disagree — say so plainly.
+  const techNote = (compRows.length && scoring && !scErr)
+    ? (techStrong && !verdictBuy
+        ? "قوي فنياً، لكن الأساسيات/النظام تكبح المحصّلة"
+        : (!techStrong && verdictBuy
+            ? "المحصّلة شراء بفضل الأساسيات رغم ضعف الفنّي"
+            : ""))
+    : "";
 
   // Real trade plan (strategy plan preferred, base ATR plan as fallback).
   const entry    = plan ? (plan.strategy_entry ?? plan.entry_price ?? plan.entry ?? signal.price) : null;
@@ -159,6 +174,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
               <span title={verdict === "WAIT" ? "التحليل لا يعطي إشارة شراء واضحة — انتظر تأكيداً أقوى" : verdict.includes("SELL") ? "إشارة بيع — دقة تاريخية منخفضة" : "إشارة شراء بناءً على نقاط السكور"}>
                 <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
               </span>
+              {score > 0 ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 6, color: "var(--text-secondary)" }} title="درجة الماسح — نفس الرقم في جدول الفاحص">{score}/100</span> : null}
               {(verdict || "").includes("SELL") && (
                 <div style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.3 }}>
                   ⚠ إشارات البيع تاريخياً معكوسة (دقة ~38%) — لا تُعتمد
@@ -177,7 +193,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
 
           {/* H1: Score bars with points/max */}
           <div className="an-sect-title">
-            Score breakdown{scoring && scoring.total != null ? " · " + score + "/100" : ""}
+            Technical factors{compRows.length ? " · " + techSum + "/" + techMax : ""}
           </div>
           {loading ? (
             <div className="an-bar-row"><div className="an-skel-bar" style={{width:"100%",height:4,borderRadius:2,background:"var(--bg-raised)",animation:"pulse 1.5s ease-in-out infinite"}}></div></div>
@@ -195,6 +211,12 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           )) : (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>—</span></div>
           )}
+
+          {techNote ? (
+            <div style={{ marginTop: 4, fontSize: 9, color: "var(--text-muted)", lineHeight: 1.4 }}>
+              ⓘ {techNote}
+            </div>
+          ) : null}
 
           {/* H3: Signal⇄Forecast agreement chip */}
           {agreeChip ? (
