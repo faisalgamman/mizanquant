@@ -137,6 +137,7 @@ def _scheduler_loop():
     last_paper_mature = ""
     last_paper_rebalance = ""  # YYYY-MM — monthly composite rebalance (fires 1st trading day)
     last_halal_rescreen = ""   # YYYY-MM — monthly AAOIFI financial re-screen of the universe
+    last_weight_fit = ""       # YYYY-MM — monthly Chan walk-forward composite-weight fit (auto-adopt)
     last_outcome_match = ""   # YYYY-MM-DD — nightly decision-outcome matching
     last_sentinel = ""        # YYYY-MM-DD:slot — 2x/day sentinel judgment cycle
     last_screener_warm = ""   # YYYY-MM-DD — daily screener cache pre-warm
@@ -248,6 +249,18 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("pretrain_ml", success=False, error=str(e))
                     logger.error(f"ML pretrain failed: {e}")
+
+            # --- Composite-weight fit (Chan walk-forward) — monthly; auto-adopts v2 ONLY
+            #     when OOS rank-IC > baseline + permutation p<0.05 + DSR>=0.6, else stays v1.
+            _month_str = now.strftime("%Y-%m")
+            if (_is_weekday(now) and now.day <= 5 and now.hour == 3
+                    and 40 <= now.minute < 45 and last_weight_fit != _month_str):
+                last_weight_fit = _month_str
+                logger.info("Composite-weight fit: walk-forward Ridge (self-gated on >=3 months)...")
+                try:
+                    _run_weight_fit()
+                except Exception as e:
+                    logger.error("weight fit failed: %s", e)
 
             if _is_weekday(now) and now.hour == 16 and now.minute >= 30 and last_signal_audit != today_str:
                 last_signal_audit = today_str
@@ -967,6 +980,26 @@ def _run_reference_data_refresh():
     if symbols:
         refresh_earnings_calendar(symbols[:355])
     logger.info("reference-data refresh completed: symbols=%s", len(symbols))
+
+
+def _run_weight_fit():
+    """Monthly walk-forward composite-weight fit (Chan, Ch.1-2-4) — the validation LOOP.
+
+    Self-gating: needs >=100 buy signals + >=3 training months + OOS rank-IC > baseline +
+    permutation p<0.05 + DSR>=0.6. Writes the artifact to the DURABLE CACHE_DIR so
+    tech_score_v2 auto-adopts v2 ONLY when it passes OOS; otherwise it stays on v1
+    (literature priors). No-op-safe on thin data — this OPERATIONALIZES the loop without
+    overfitting on insufficient data (it does nothing until ~3 months exist).
+    """
+    import os as _os
+    from scripts.fit_composite_weights import fit_composite_weights, write_artifact
+
+    cache_dir = _os.environ.get("CACHE_DIR") or _os.path.join(_repo_root(), ".cache")
+    _os.makedirs(cache_dir, exist_ok=True)
+    artifact = _os.path.join(cache_dir, "tech_v2_weights.json")
+    result = fit_composite_weights(days=365)
+    write_artifact(result, path=artifact)
+    logger.info("Composite-weight fit verdict=%s -> %s", result.get("verdict"), artifact)
 
 
 def start_scheduler():

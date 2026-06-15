@@ -17,31 +17,44 @@ import numpy as np
 
 logger = logging.getLogger("screener")
 
-_ARTIFACT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "tech_v2_weights.json",
-)
+_PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The monthly walk-forward fitter writes the OOS-validated artifact to the DURABLE
+# CACHE_DIR (Railway /data volume) so an adopted v2 survives restarts; we fall back to
+# the repo copy. mtime-aware so a freshly-fitted artifact is picked up WITHOUT a restart.
+_CACHE_DIR = os.environ.get("CACHE_DIR") or os.path.join(_PROJ_ROOT, ".cache")
+_DURABLE_PATH = os.path.join(_CACHE_DIR, "tech_v2_weights.json")
+_REPO_PATH = os.path.join(_PROJ_ROOT, "data", "tech_v2_weights.json")
 
 _artifact_cache: dict | None = None
+_artifact_mtime: float = -1.0
 _cache_lock = threading.Lock()
 
 
+def _artifact_file() -> str:
+    return _DURABLE_PATH if os.path.exists(_DURABLE_PATH) else _REPO_PATH
+
+
 def _load_artifact() -> dict | None:
-    global _artifact_cache
-    if _artifact_cache is not None:
+    global _artifact_cache, _artifact_mtime
+    path = _artifact_file()
+    try:
+        mtime = os.path.getmtime(path) if os.path.exists(path) else -1.0
+    except OSError:
+        mtime = -1.0
+    if _artifact_cache is not None and mtime == _artifact_mtime:
         return _artifact_cache
     with _cache_lock:
-        if _artifact_cache is not None:
+        if _artifact_cache is not None and mtime == _artifact_mtime:
             return _artifact_cache
+        _artifact_mtime = mtime
         try:
-            if not os.path.exists(_ARTIFACT_PATH):
-                logger.debug("tech_score_v2: no artifact at %s", _ARTIFACT_PATH)
+            if not os.path.exists(path):
                 _artifact_cache = {}
             else:
-                with open(_ARTIFACT_PATH) as f:
+                with open(path) as f:
                     art = json.load(f)
                 if art.get("verdict") != "PASS":
-                    logger.debug("tech_score_v2: artifact verdict is %s", art.get("verdict"))
+                    logger.debug("tech_score_v2: artifact verdict is %s (staying v1)", art.get("verdict"))
                     _artifact_cache = {}
                 else:
                     required = ["features", "means", "stds", "coefs", "intercept", "calibration_quantiles"]
@@ -51,6 +64,7 @@ def _load_artifact() -> dict | None:
                         _artifact_cache = {}
                     else:
                         _artifact_cache = art
+                        logger.info("tech_score_v2: adopted OOS-validated v2 weights (%s)", art.get("version"))
         except Exception as e:
             logger.debug("tech_score_v2: artifact load failed: %s", e)
             _artifact_cache = {}
