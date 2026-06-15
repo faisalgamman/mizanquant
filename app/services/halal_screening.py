@@ -342,10 +342,13 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         logger.warning(f"No market cap for {symbol}")
         return None
 
-    # Trailing 24-month average market cap (still computed — it's the DJIM denominator
-    # and a displayed stat). The active denominator is chosen below once total assets
-    # are known (AAOIFI = total assets; DJIM = this avg market cap).
-    avg_mcap, mcap_basis = _avg_market_cap_24m(symbol, shares_outstanding, market_cap)
+    # Trailing 24-month avg market cap is the DJIM denominator. Under AAOIFI the
+    # denominator is total assets, so SKIP the (slow, often yfinance-blocked) 2-year
+    # price fetch entirely — it was the main cause of screen timeouts on AAOIFI.
+    if HALAL_STANDARD == "aaoifi":
+        avg_mcap, mcap_basis = market_cap, "spot_aaoifi"
+    else:
+        avg_mcap, mcap_basis = _avg_market_cap_24m(symbol, shares_outstanding, market_cap)
 
     # 2. Activity (sector/industry) classification — three-state (haram/doubtful/clean).
     activity, activity_reason = _classify_activity(sector, industry)
