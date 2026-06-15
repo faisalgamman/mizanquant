@@ -56,6 +56,7 @@ function App() {
   const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
   const [ledgerP, setLedgerP]     = useState(null);        // pairs paper-ledger status (PVP)
   const [pairsData, setPairsData] = useState(null);        // halal pairs signals (cointegration)
+  const [backtest, setBacktest]   = useState(null);        // on-demand 2y backtest for the selected symbol
   const [cardSymbol, setCardSymbol] = useState(null);      // Stock ID Card target symbol
   const [brokerHealth, setBrokerHealth] = useState(null);    // IBKR paper connectivity
 
@@ -424,6 +425,7 @@ function App() {
   useEffect(() => {
     if (!selectedSym) { setAnalyze(null); return; }
     let cancelled = false;
+    setBacktest(null);  // backtest is on-demand per stock — clear stale result on symbol change
     setAnalyze({ symbol: selectedSym, scoring: null, plan: null, loading: true });
     (async () => {
       const [scoring, plan] = await Promise.all([
@@ -450,6 +452,25 @@ function App() {
     })();
     return () => { cancelled = true; };
   }, [selectedSym, forecastHorizon]);
+
+  // On-demand 2-year walk-forward backtest for the selected stock (reuses /api/v1/backtest:
+  // no look-ahead + transaction costs + Deflated Sharpe + permutation p-value). NOT auto —
+  // only on the user's click — so the Analyze panel stays fast/cheap.
+  const runBacktest = async (sym) => {
+    if (!sym) return;
+    const end = new Date().toISOString().slice(0, 10);
+    const start = new Date(Date.now() - 730 * 864e5).toISOString().slice(0, 10);
+    setBacktest({ symbol: sym, loading: true });
+    try {
+      const data = await (await fetch(
+        '/api/v1/backtest?symbol=' + encodeURIComponent(sym) +
+        '&start_date=' + start + '&end_date=' + end + '&hold_days=12&risk_pct=1.0'
+      )).json();
+      setBacktest({ symbol: sym, data });
+    } catch (e) {
+      setBacktest({ symbol: sym, error: String(e) });
+    }
+  };
 
   const _filterByQuery = (list) => {
     if (!query) return list;
@@ -601,6 +622,8 @@ function App() {
             onHorizon={setForecastHorizon}
             onTrade={sendToPaper}
             brokerHealth={brokerHealth}
+            backtest={backtest}
+            onBacktest={runBacktest}
           />
           <TradeColumn
             portfolio={portfolio}

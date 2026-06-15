@@ -67,7 +67,7 @@ function _rangeBar(p5, p50, p95, currentPrice) {
   );
 }
 
-function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth }) {
+function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth, backtest, onBacktest }) {
   if (!signal) {
     return (
       <div className="col col-analyze">
@@ -295,6 +295,48 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                   <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Forecast unavailable</span></div>
                 )}
               </>
+            );
+          })()}
+
+          {/* On-demand backtest (Chan Ch.2) — historical OOS evidence, run only on click */}
+          {(() => {
+            const bt = (backtest && backtest.symbol === signal.symbol) ? backtest : null;
+            const s0 = bt && Array.isArray(bt.data) && bt.data.length ? bt.data[0] : null;
+            const err = bt && (bt.error || (s0 && (s0.Error || s0.Message)));
+            const _n = (v, d = 2) => (v == null || isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
+            return (
+              <div style={{ marginTop: 8 }}>
+                <div className="an-sect-title">Backtest · 2y walk-forward</div>
+                {!bt ? (
+                  <button onClick={() => onBacktest && onBacktest(signal.symbol)}
+                          title="backtest سيري سنتين — بلا look-ahead، بتكاليف، Deflated Sharpe"
+                          style={{ width: "100%", padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                                   borderRadius: 6, border: "1px solid var(--accent)", color: "var(--accent)", background: "var(--accent-dim)" }}>
+                    🔬 شغّل Backtest (سنتان)
+                  </button>
+                ) : bt.loading ? (
+                  <div className="an-bar-row"><div className="an-skel-bar" style={{ width: "100%", height: 4, borderRadius: 2, background: "var(--bg-raised)", animation: "pulse 1.5s ease-in-out infinite" }}></div></div>
+                ) : err ? (
+                  <div style={{ fontSize: 9, color: "var(--text-muted)" }}>تعذّر الـbacktest: {String(err).slice(0, 80)}</div>
+                ) : s0 ? (
+                  <>
+                    <div className="an-grid">
+                      <div className="row"><span className="l">Win rate</span><span className="v">{_n(s0["Win Rate %"], 1)}%</span></div>
+                      <div className="row"><span className="l">Profit factor</span><span className="v">{_n(s0["Profit Factor"])}</span></div>
+                      <div className="row"><span className="l">Trades</span><span className="v">{s0["Total Trades"] != null ? s0["Total Trades"] : "—"}</span></div>
+                      <div className="row"><span className="l">Return</span><span className="v">{_n(s0["Return %"], 1)}%</span></div>
+                      <div className="row"><span className="l">Max drawdown</span><span className="v txt-negative">{_n(s0["Max Drawdown %"], 1)}%</span></div>
+                      <div className="row"><span className="l" title="Deflated Sharpe — يعاقب تعدّد المحاولات (Bailey & López de Prado)">Deflated Sharpe</span><span className="v">{_n(s0["Deflated Sharpe"])}</span></div>
+                      <div className="row"><span className="l">Permutation p</span><span className="v">{_n(s0["Permutation p-value"], 3)}</span></div>
+                    </div>
+                    <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.4 }}>
+                      تاريخي OOS · سنتان · بلا look-ahead · بتكاليف — ليس وعداً. الحَكَم النهائي هو الدفتر الورقي الأمامي.
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 9, color: "var(--text-muted)" }}>لا نتائج</div>
+                )}
+              </div>
             );
           })()}
 
