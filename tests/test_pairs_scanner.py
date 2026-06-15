@@ -114,3 +114,40 @@ def test_clear_cache_resets(monkeypatch):
     scn.clear_cache()
     assert scn._cache_pairs is None
     assert scn._cache_ts == 0.0
+
+
+def test_resolve_sectors_db_then_cache(monkeypatch):
+    """The cascade resolves from the DB first, then the durable cache — so a
+    sparsely-seeded Universe.sector column no longer zeroes the whole scan."""
+    import app.services.market_context_bundle as mcb
+    from app.services import pairs_scanner as scn
+
+    # DB knows AA; durable cache knows BB; CC remains unknown (no FMP in this test).
+    monkeypatch.setattr(mcb, "get_symbol_sectors", lambda syms: {"AA": "Technology"})
+    monkeypatch.setattr(scn, "_load_sector_cache", lambda: {"BB": "Healthcare"})
+    monkeypatch.setattr(scn, "_save_sector_cache", lambda m: None)
+    # Block the FMPCache + live-FMP legs so the test stays hermetic/offline.
+    monkeypatch.setattr(scn, "PAIRS_SECTOR_FMP_CAP", 0)
+
+    smap = scn._resolve_sectors(["AA", "BB", "CC"])
+    assert smap.get("AA") == "Technology"
+    assert smap.get("BB") == "Healthcare"
+    assert "CC" not in smap  # genuinely unresolved → excluded (not a fake bucket)
+
+
+def test_group_by_sector_drops_unknown_and_tiny(monkeypatch):
+    from app.services import pairs_scanner as scn
+
+    # KO/PEP/MDLZ resolve to Staples (≥ MIN_SECTOR_SIZE); XX has no sector; ZZ
+    # is a lone Energy name (below MIN_SECTOR_SIZE) — both must be dropped.
+    monkeypatch.setattr(scn, "PAIRS_MIN_SECTOR_SIZE", 3)
+    # _group_by_sector imports get_universe_symbols locally → patch it at the source module.
+    import app.services.universe as uni
+    monkeypatch.setattr(uni, "get_universe_symbols", lambda db: ["KO", "PEP", "MDLZ", "XX", "ZZ"])
+    monkeypatch.setattr(scn, "_resolve_sectors", lambda syms: {
+        "KO": "Staples", "PEP": "Staples", "MDLZ": "Staples", "ZZ": "Energy",
+    })
+
+    groups = scn._group_by_sector()
+    assert set(groups.keys()) == {"Staples"}
+    assert sorted(groups["Staples"]) == ["KO", "MDLZ", "PEP"]

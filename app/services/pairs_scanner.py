@@ -51,8 +51,17 @@ PAIRS_MAX_PAIRS: int = int(os.environ.get("PAIRS_MAX_PAIRS", "20"))
 PAIRS_SCAN_TTL: float = float(os.environ.get("PAIRS_SCAN_TTL", "86400"))
 PAIRS_SCAN_LOOKBACK: str = os.environ.get("PAIRS_SCAN_LOOKBACK", "1y")
 PAIRS_MIN_SECTOR_SIZE: int = int(os.environ.get("PAIRS_MIN_SECTOR_SIZE", "3"))
+# Cost cap on the live-FMP step of sector resolution. The DB + FMPCache + durable
+# cache normally cover the universe (the screener fetches profiles daily), so the
+# live step rarely binds; the cap is a safety valve against a cold first run.
+PAIRS_SECTOR_FMP_CAP: int = int(os.environ.get("PAIRS_SECTOR_FMP_CAP", "400"))
 
 _CACHE_PATH = Path(os.environ.get("PAIRS_SCAN_CACHE", "pairs_scan_cache.json"))
+# Resolved symbol→sector map persists to the durable volume (CACHE_DIR=/data on
+# Railway) so the one-time sector lookup survives restarts and never re-pays.
+_SECTOR_CACHE_PATH = Path(
+    os.environ.get("CACHE_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+) / "pairs_sector_map.json"
 
 # Module-level cache
 _cache_pairs: list["PairReport"] | None = None
@@ -133,21 +142,102 @@ def _close_series(symbol: str, lookback: str):
         return None
 
 
+def _load_sector_cache() -> dict[str, str]:
+    try:
+        if _SECTOR_CACHE_PATH.exists():
+            return json.loads(_SECTOR_CACHE_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_sector_cache(smap: dict[str, str]) -> None:
+    try:
+        _SECTOR_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _SECTOR_CACHE_PATH.write_text(json.dumps(smap))
+    except Exception as exc:
+        logger.debug("pairs_scanner: sector cache save failed: %s", exc)
+
+
+def _resolve_sectors(symbols: list[str]) -> dict[str, str]:
+    """symbol(UPPER) → sector, resolved through a cost-aware cascade:
+    DB Universe (batched) → durable cache → FMPCache profiles → live FMP (capped).
+
+    The naive per-symbol DB lookup returns nothing when ``Universe.sector`` is
+    unpopulated (fresh/unseeded DB) — which silently zeroed the whole scan. This
+    cascade mirrors the proven backtest sector-map resolver and persists results
+    so the heavy lookup is one-time. Returns only non-empty sectors.
+    """
+    ups = [s.upper() for s in symbols if s]
+    smap: dict[str, str] = {}
+
+    # 1) DB Universe — single batched query (no N+1)
+    try:
+        from app.services.market_context_bundle import get_symbol_sectors
+        smap.update({k.upper(): v for k, v in (get_symbol_sectors(ups) or {}).items() if v})
+    except Exception as exc:
+        logger.debug("pairs_scanner: DB sector map failed: %s", exc)
+
+    # 2) durable cache (CACHE_DIR) — free, survives restarts
+    cached = _load_sector_cache()
+    for s in ups:
+        if s not in smap and cached.get(s):
+            smap[s] = cached[s]
+
+    # 3) FMPCache profiles from prior screening — free (the screener fetches these daily)
+    missing = [s for s in ups if s not in smap]
+    if missing:
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models import FMPCache
+            db = SessionLocal()
+            try:
+                for s in missing:
+                    row = db.query(FMPCache).filter(FMPCache.cache_key == f"profile_{s}").first()
+                    if row and row.data and row.data.get("sector"):
+                        smap[s] = row.data["sector"]
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("pairs_scanner: FMPCache sector lookup failed: %s", exc)
+        missing = [s for s in ups if s not in smap]
+
+    # 4) live FMP — costs API credits, so capped; results cached below for next time
+    if missing:
+        try:
+            from app.services.fmp_client import fmp_client
+            for s in missing[:PAIRS_SECTOR_FMP_CAP]:
+                try:
+                    prof = fmp_client.get_profile(s)
+                    if prof and prof.get("sector"):
+                        smap[s] = prof["sector"]
+                except Exception:
+                    continue
+        except Exception as exc:
+            logger.debug("pairs_scanner: live FMP sector lookup failed: %s", exc)
+
+    if smap:
+        _save_sector_cache({**cached, **smap})
+    return smap
+
+
 def _group_by_sector() -> dict[str, list[str]]:
     """Return {sector: [symbols...]} for the active halal universe."""
     from app.db.database import SessionLocal
-    from app.services.universe import get_symbol_info, get_universe_symbols
+    from app.services.universe import get_universe_symbols
 
-    sectors: dict[str, list[str]] = {}
     db = SessionLocal()
     try:
         symbols = get_universe_symbols(db)
-        for sym in symbols:
-            info = get_symbol_info(db, sym)
-            sector = (info or {}).get("sector") or "UNKNOWN"
-            sectors.setdefault(sector, []).append(sym)
     finally:
         db.close()
+
+    smap = _resolve_sectors(symbols)
+    sectors: dict[str, list[str]] = {}
+    for sym in symbols:
+        sector = smap.get(sym.upper()) or "UNKNOWN"
+        sectors.setdefault(sector, []).append(sym)
+
     # Drop the UNKNOWN bucket and tiny sectors (can't form meaningful pairs)
     return {
         sec: syms
@@ -234,6 +324,7 @@ def find_cointegrated_pairs(
 
     global _last_scan_stats
     sectors = _group_by_sector()
+    n_symbols_in_sectors = sum(len(v) for v in sectors.values())
     logger.info("pairs_scanner: scanning %d sectors for cointegrated pairs", len(sectors))
 
     results: list[PairReport] = []
@@ -303,6 +394,7 @@ def find_cointegrated_pairs(
         "ts": time.time(),
         "statsmodels_available": coint_engine_available(),
         "sectors": len(sectors),
+        "symbols_in_sectors": n_symbols_in_sectors,
         "symbols_with_data": n_symbols_with_data,
         "candidate_pairs": n_candidate_pairs,
         "passed_correlation": n_passed_corr,

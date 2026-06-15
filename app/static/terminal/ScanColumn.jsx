@@ -292,6 +292,8 @@ function PairsList({ pairs }) {
             <div style={{ fontSize: 9, color: muted, marginBottom: 4, letterSpacing: 0.4 }}>
               SCAN FUNNEL · محرّك الإحصاء {d.statsmodels_available ? "✓" : "✗"}
             </div>
+            <Row k="قطاعات" v={d.sectors} />
+            <Row k="رموز ضمن قطاعات" v={d.symbols_in_sectors} />
             <Row k="رموز ببيانات" v={d.symbols_with_data} />
             <Row k="أزواج مرشحة (داخل القطاع)" v={d.candidate_pairs} />
             <Row k={`اجتازت فلتر الارتباط ≥${g.correlation_min}`} v={d.passed_correlation} />
