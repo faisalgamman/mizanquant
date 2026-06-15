@@ -49,6 +49,62 @@ _YF_CB_COOLDOWN: float = float(os.environ.get("HALAL_YF_CB_COOLDOWN", "300"))
 _HALAL_CACHE_TTL_DAYS: int = int(os.environ.get("HALAL_CACHE_TTL_DAYS", "14"))
 # Max live refreshes per pre-market warm run — a cap on FMP's shared ~250/day budget.
 _HALAL_WARM_MAX: int = int(os.environ.get("HALAL_WARM_MAX", "120"))
+
+# ── Screening standard + thresholds (env-overridable) ────────────────────────
+# "aaoifi" → ratios are taken over TOTAL ASSETS (AAOIFI Standard 21; stricter,
+# price-independent). "djim" → over trailing 24-month avg market cap (legacy/lenient).
+HALAL_STANDARD: str = os.environ.get("HALAL_STANDARD", "aaoifi").lower()
+# AAOIFI Standard 21 canonical defaults; scholars vary (some use 33%) — all tunable.
+HALAL_DEBT_MAX: float = float(os.environ.get("HALAL_DEBT_MAX", "30"))
+HALAL_LIQUIDITY_MAX: float = float(os.environ.get("HALAL_LIQUIDITY_MAX", "30"))
+HALAL_INTEREST_MAX: float = float(os.environ.get("HALAL_INTEREST_MAX", "5"))
+HALAL_RECEIVABLE_MAX: float = float(os.environ.get("HALAL_RECEIVABLE_MAX", "49"))
+# Bump (auto-derived) so any standard/threshold/activity change invalidates cached
+# ScreeningResult rows — see get_halal_status (never serve an old-standard verdict).
+HALAL_SCREEN_VERSION: str = (
+    f"{HALAL_STANDARD}-d{HALAL_DEBT_MAX:.0f}-l{HALAL_LIQUIDITY_MAX:.0f}"
+    f"-i{HALAL_INTEREST_MAX:.0f}-r{HALAL_RECEIVABLE_MAX:.0f}-act2"
+)
+
+
+def _kw_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    return tuple(k.strip().lower() for k in raw.split(",") if k.strip()) if raw else default
+
+
+# Unambiguously haram activities → auto NON_COMPLIANT (substring match on sector+industry).
+_HARAM_KEYWORDS: tuple[str, ...] = _kw_env("HALAL_HARAM_KEYWORDS", (
+    "casino", "gambling", "wager", "lottery", "tobacco", "brewer", "winer",
+    "distiller", "liquor", "cannabis", "adult", "bank", "insurance", "reit",
+    "mortgage", "capital markets", "credit services",
+))
+# Borderline activities (likely-but-not-certain haram revenue mixing, e.g. alcohol
+# served on premises) → DOUBTFUL, needs manual review. NOT auto-failed as haram, but
+# NOT silently passed as halal either. Kept narrow to avoid over-rejecting staples.
+_DOUBTFUL_KEYWORDS: tuple[str, ...] = _kw_env("HALAL_DOUBTFUL_KEYWORDS", (
+    "hotel", "resort", "cruise", "lodging", "travel", "restaurant", "airline",
+    "entertainment", "packaged food",
+))
+
+
+def _classify_activity(sector: str, industry: str) -> tuple[str, str]:
+    """Return ("haram" | "doubtful" | "clean", reason). Uses the exact-match sets
+    (back-compat) plus keyword/substring matching so a single FMP relabel can't slip
+    a tainted name through."""
+    s = (sector or "").lower().strip()
+    i = (industry or "").lower().strip()
+    blob = f"{s} {i}"
+    if s in HARAM_SECTORS or i in HARAM_INDUSTRIES:
+        return "haram", f"نشاط محرّم: {i or s}"
+    hit = next((k for k in _HARAM_KEYWORDS if k in blob), None)
+    if hit:
+        return "haram", f"نشاط محرّم: {hit}"
+    if i in _REVIEW_INDUSTRIES:
+        return "doubtful", f"نشاط يحتاج مراجعة: {i}"
+    hit = next((k for k in _DOUBTFUL_KEYWORDS if k in blob), None)
+    if hit:
+        return "doubtful", f"نشاط يحتاج مراجعة: {hit}"
+    return "clean", ""
 _YF_CB_LOCK = threading.Lock()
 _YF_CB = {"fails": 0, "until": 0.0}
 
@@ -164,6 +220,7 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
         cash_eq = _safe_float(info.get("totalCash"))
         short_inv = 0.0
         net_receivables = 0.0
+        total_assets = _safe_float(info.get("totalAssets"))
 
         try:
             bs = ticker.balance_sheet
@@ -173,6 +230,7 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 cash_eq = _safe_float(latest.get("Cash And Cash Equivalents"), cash_eq)
                 short_inv = _safe_float(latest.get("Other Short Term Investments"))
                 net_receivables = _safe_float(latest.get("Receivables")) or _safe_float(latest.get("Accounts Receivable"))
+                total_assets = _safe_float(latest.get("Total Assets"), total_assets)
         except Exception as e:
             logger.error(f"{symbol}: balance_sheet fallback failed, using info-based values: {e}")
 
@@ -206,6 +264,7 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
                 "shortTermInvestments": short_inv,
                 "cashAndShortTermInvestments": cash_eq + short_inv,
                 "netReceivables": net_receivables,  # extracted from yfinance balance sheet
+                "totalAssets": total_assets,        # AAOIFI denominator
             },
             "income": {
                 "revenue": revenue,
@@ -283,14 +342,14 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         logger.warning(f"No market cap for {symbol}")
         return None
 
-    # DJIM: use trailing 24-month average market cap as ratio denominator
+    # Trailing 24-month average market cap (still computed — it's the DJIM denominator
+    # and a displayed stat). The active denominator is chosen below once total assets
+    # are known (AAOIFI = total assets; DJIM = this avg market cap).
     avg_mcap, mcap_basis = _avg_market_cap_24m(symbol, shares_outstanding, market_cap)
-    djim_denom = avg_mcap  # all 3 ratios use this denominator
 
-    # 2. Haram sector/industry check
-    haram_sector_flag = sector in HARAM_SECTORS
-    haram_industry_flag = industry in HARAM_INDUSTRIES
-    needs_manual_review = industry in _REVIEW_INDUSTRIES
+    # 2. Activity (sector/industry) classification — three-state (haram/doubtful/clean).
+    activity, activity_reason = _classify_activity(sector, industry)
+    needs_manual_review = activity == "doubtful"
 
     # 3. Fetch balance sheet (skip if already from yfinance)
     if not used_fallback:
@@ -310,6 +369,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     short_term_investments = _safe_float(bs.get("shortTermInvestments"))
     cash_and_short_term = _safe_float(bs.get("cashAndShortTermInvestments"))
     net_receivables = _safe_float(bs.get("netReceivables"))
+    total_assets = _safe_float(bs.get("totalAssets"))
 
     # 4. Fetch income statement (skip if already from yfinance)
     if not used_fallback:
@@ -327,33 +387,66 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     interest_expense = _safe_float(income.get("interestExpense"))
 
     # ---------------------------------------------------------------------------
-    # AAOIFI Screens
+    # Financial Screens — denominator per HALAL_STANDARD
+    #   aaoifi → total assets (AAOIFI Standard 21; stricter, price-independent)
+    #   djim   → trailing 24-month avg market cap (legacy; lenient, price-dependent)
     # ---------------------------------------------------------------------------
+    if HALAL_STANDARD == "aaoifi":
+        denom, denom_basis = total_assets, "total_assets"
+    else:
+        denom, denom_basis = avg_mcap, "avg_mcap_24m"
 
-    # ── DJIM Financial Screens (denominator = trailing 24-month avg market cap) ──
+    # Absence of the denominator is NOT proof of non-compliance — flag as doubtful
+    # (needs data) rather than a false haram or a false halal.
+    data_unavailable = denom <= 0
 
-    # Screen 1 (DJIM): Total Debt / avg_mcap_24m < 33%
-    debt_ratio = (total_debt / djim_denom * 100) if djim_denom > 0 else 999.0
-    debt_pass = debt_ratio < 33.0
-
-    # Screen 2 (DJIM): Non-permissible income — Interest / Revenue < 5%
-    interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0.0
-    interest_pass = interest_ratio < 5.0
-
-    # Screen 3 (DJIM): Haram sector/industry (expanded: REITs/real-estate added)
-    haram_pass = not (haram_sector_flag or haram_industry_flag)
-
-    # Screen 4 (DJIM): Liquidity — (Cash + Interest-Bearing Securities) / avg_mcap_24m < 33%
     liquid_assets = cash_and_short_term if cash_and_short_term > 0 else (cash_and_equivalents + short_term_investments)
-    liquidity_ratio = (liquid_assets / djim_denom * 100) if djim_denom > 0 else 999.0
-    liquidity_pass = liquidity_ratio < 33.0
 
-    # Screen 5 (DJIM): Net Receivables / avg_mcap_24m < 33%
-    receivable_ratio = (net_receivables / djim_denom * 100) if djim_denom > 0 else 0.0
-    receivable_pass = receivable_ratio < 33.0
+    # Screen 1: Total Debt / denom < HALAL_DEBT_MAX
+    debt_ratio = (total_debt / denom * 100) if denom > 0 else 999.0
+    debt_pass = debt_ratio < HALAL_DEBT_MAX
+    # Screen 2: Non-permissible (interest) income / Revenue < HALAL_INTEREST_MAX
+    interest_ratio = (abs(interest_income) / revenue * 100) if revenue > 0 else 0.0
+    interest_pass = interest_ratio < HALAL_INTEREST_MAX
+    # Screen 3: Liquidity — (Cash + Interest-Bearing Securities) / denom < HALAL_LIQUIDITY_MAX
+    liquidity_ratio = (liquid_assets / denom * 100) if denom > 0 else 999.0
+    liquidity_pass = liquidity_ratio < HALAL_LIQUIDITY_MAX
+    # Screen 4: Net Receivables / denom < HALAL_RECEIVABLE_MAX
+    receivable_ratio = (net_receivables / denom * 100) if denom > 0 else 0.0
+    receivable_pass = receivable_ratio < HALAL_RECEIVABLE_MAX
 
-    # Final DJIM verdict — all 5 screens must pass
-    is_halal = debt_pass and interest_pass and haram_pass and liquidity_pass and receivable_pass
+    # Activity screen (back-compat boolean)
+    haram_pass = activity != "haram"
+    financials_pass = debt_pass and interest_pass and liquidity_pass and receivable_pass
+
+    # ── Three-state verdict: halal / doubtful / non_compliant ──
+    _std = HALAL_STANDARD.upper()
+    halal_reasons: list[str] = []
+    if activity == "haram":
+        halal_verdict = "non_compliant"
+        halal_reasons.append(activity_reason)
+    elif data_unavailable:
+        halal_verdict = "doubtful"
+        halal_reasons.append("إجمالي الأصول غير متوفر — يلزم مراجعة")
+    elif not financials_pass:
+        halal_verdict = "non_compliant"
+        if not debt_pass:
+            halal_reasons.append(f"الدَّين {round(debt_ratio, 1)}% > {HALAL_DEBT_MAX:.0f}% ({_std})")
+        if not liquidity_pass:
+            halal_reasons.append(f"السيولة {round(liquidity_ratio, 1)}% > {HALAL_LIQUIDITY_MAX:.0f}%")
+        if not interest_pass:
+            halal_reasons.append(f"دخل الفائدة {round(interest_ratio, 1)}% > {HALAL_INTEREST_MAX:.0f}%")
+        if not receivable_pass:
+            halal_reasons.append(f"الذمم {round(receivable_ratio, 1)}% > {HALAL_RECEIVABLE_MAX:.0f}%")
+    elif activity == "doubtful":
+        halal_verdict = "doubtful"
+        halal_reasons.append(activity_reason)
+    else:
+        halal_verdict = "halal"
+
+    # is_halal stays True ONLY for a clean pass — doubtful/non_compliant are kept out of
+    # auto-BUY (callers gate on is_halal) but distinguished by halal_verdict for display.
+    is_halal = halal_verdict == "halal"
 
     # ── Data-confidence label (honesty layer — NO threshold change) ──
     _low = []
@@ -384,17 +477,25 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         "liquidity_pass": liquidity_pass,
         # Raw data for audit
         "total_debt": total_debt,
+        "total_assets": total_assets,
         "revenue": revenue,
         "interest_income": interest_income,
         "cash_and_short_term": liquid_assets,
-        # DJIM additions
-        "standard": "DJIM",
+        # ── Three-state verdict + standard provenance ──
+        "halal_verdict": halal_verdict,           # "halal" | "doubtful" | "non_compliant"
+        "halal_reasons": halal_reasons,           # human-readable failing screen(s)/activity
+        "activity": activity,                     # "clean" | "doubtful" | "haram"
+        "standard": _std,                         # AAOIFI | DJIM (which denominator applied)
+        "denominator_basis": denom_basis,         # "total_assets" | "avg_mcap_24m"
+        "screen_version": HALAL_SCREEN_VERSION,   # cache-invalidation key
+        "thresholds": {"debt": HALAL_DEBT_MAX, "liquidity": HALAL_LIQUIDITY_MAX,
+                       "interest": HALAL_INTEREST_MAX, "receivable": HALAL_RECEIVABLE_MAX},
         "avg_market_cap": round(avg_mcap, 0),
         "mcap_basis": mcap_basis,
         "net_receivables": net_receivables,
         "receivable_ratio": round(receivable_ratio, 2),
         "receivable_pass": receivable_pass,
-        "disclaimer": "Quantitative DJIM screen only — no named Sharia supervisory board.",
+        "disclaimer": f"Quantitative {_std} screen only — no named Sharia supervisory board.",
         # Metadata
         "screens_passed": sum([debt_pass, interest_pass, haram_pass, liquidity_pass, receivable_pass]),
         "screens_total": 5,
@@ -402,7 +503,7 @@ def screen_symbol(symbol: str) -> Optional[dict]:
         "halal_confidence": halal_confidence,
         "confidence_reasons": _low,
         "purification_pct": round(interest_ratio, 2),
-        "purification_note": "طهّر هذه النسبة من أرباح هذا السهم (تقدير DJIM من دخل الفائدة/الإيراد)",
+        "purification_note": "طهّر هذه النسبة من أرباح هذا السهم (تقدير من دخل الفائدة/الإيراد)",
     }
 
     return result
@@ -485,18 +586,22 @@ def get_halal_status(symbol: str) -> Optional[dict]:
     except SQLAlchemyError as e:
         logger.error(f"DB read error for {symbol} screening: {e}")
 
-    # Fresh enough → serve from cache (no fetch).
-    if cached_details is not None and age_days is not None and age_days < _HALAL_CACHE_TTL_DAYS:
+    # A cached row computed under a DIFFERENT screen version (old standard/thresholds)
+    # must NOT be served — it would present an old-standard verdict as current.
+    same_version = (cached_details or {}).get("screen_version") == HALAL_SCREEN_VERSION
+
+    # Fresh enough AND same standard → serve from cache (no fetch).
+    if cached_details is not None and age_days is not None and age_days < _HALAL_CACHE_TTL_DAYS and same_version:
         return cached_details
 
-    # Stale or missing → try a live refresh (FMP-primary, yfinance breaker-protected).
+    # Stale / missing / wrong-version → try a live refresh (FMP-primary, yf breaker-protected).
     fresh = screen_and_store(symbol) if settings.FMP_API_KEY else None
     if fresh is not None:
         return fresh
 
-    # Refresh failed but we have an old value → serve it flagged stale rather than drop
-    # the symbol. The monthly rescreen still corrects genuine drift.
-    if cached_details is not None:
+    # Refresh failed. Serve the old value flagged stale ONLY if it is the same standard —
+    # otherwise drop the symbol (compliance: never present an old-standard verdict).
+    if cached_details is not None and same_version:
         stale = dict(cached_details)
         stale["stale"] = True
         stale["stale_days"] = age_days

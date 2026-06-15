@@ -25,8 +25,18 @@ from pathlib import Path
 
 logger = logging.getLogger("screener")
 
-DEBT_MAX_PCT = 33.0
-LIQUIDITY_MAX_PCT = 33.0
+# Mirror the canonical thresholds from halal_screening (env-driven; AAOIFI defaults)
+# so the rescreen's reason labels match the verdict logic it delegates to.
+try:
+    from app.services.halal_screening import (
+        HALAL_DEBT_MAX as DEBT_MAX_PCT,
+        HALAL_LIQUIDITY_MAX as LIQUIDITY_MAX_PCT,
+        HALAL_RECEIVABLE_MAX as RECEIVABLE_MAX_PCT,
+    )
+except Exception:  # pragma: no cover - defensive
+    DEBT_MAX_PCT = 30.0
+    LIQUIDITY_MAX_PCT = 30.0
+    RECEIVABLE_MAX_PCT = 49.0
 
 _UNIVERSE_PATH = Path(__file__).resolve().parents[2] / "data" / "halal_universe_v2.json"
 _EXCLUDED_PATH = Path(__file__).resolve().parents[2] / "data" / "halal_excluded_by_ratio.json"
@@ -73,7 +83,7 @@ def _fail_reason(r: dict) -> str:
     if not r.get("liquidity_pass", True):
         parts.append(f"liquidity {r['liquidity_ratio']}% > {LIQUIDITY_MAX_PCT:.0f}%")
     if not r.get("receivable_pass", True):
-        parts.append(f"receivables {r.get('receivable_ratio', 0)}% > 33%")
+        parts.append(f"receivables {r.get('receivable_ratio', 0)}% > {RECEIVABLE_MAX_PCT:.0f}%")
     return "; ".join(parts) or "ratio breach"
 
 

@@ -3452,6 +3452,10 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
                                              "totalCash": info.get("totalCash"), "totalRevenue": info.get("totalRevenue")})
         is_halal = halal.get("is_halal", False)
         halal_screens = halal.get("screens_passed", 0)
+        # Three-state verdict for display; default unknown/errored screens to "doubtful"
+        # (absence of data ≠ haram) rather than a false halal or false non-compliant.
+        halal_verdict = halal.get("halal_verdict") or ("halal" if is_halal else "doubtful")
+        halal_reasons = halal.get("halal_reasons") or []
         # Set only when the halal verdict was served from a STALE cache (a live refresh
         # failed, e.g. Yahoo blocked) — the UI flags it; None when fresh.
         halal_stale_days = halal.get("stale_days") if halal.get("stale") else None
@@ -3622,6 +3626,8 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
             "market_cap": mcap,
             "is_halal": is_halal,
             "halal_screens": halal_screens,
+            "halal_verdict": halal_verdict,
+            "halal_reasons": halal_reasons,
             "halal_stale_days": halal_stale_days,
             "in_watchlist": in_watchlist,
             "fundamental_score": fundamental,

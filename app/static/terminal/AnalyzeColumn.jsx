@@ -181,7 +181,26 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                 </div>
               )}
               <div style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <Badge kind={signal.halal ? "accent" : "red"}>{signal.halal ? "HALAL · DJIM" : "NON-COMPLIANT · DJIM"}</Badge>
+                {(() => {
+                  // Three-state AAOIFI verdict; fall back to the boolean when verdict absent.
+                  const v = signal.halalVerdict || (signal.halal ? "halal" : "non_compliant");
+                  const reasons = (signal.halalReasons || []).join(" · ");
+                  if (v === "halal") return <Badge kind="accent">HALAL · AAOIFI</Badge>;
+                  if (v === "doubtful") return (
+                    <span title={reasons || "نشاط يحتاج مراجعة شرعية"}
+                          style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
+                                   color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)" }}>
+                      ⚠ مشكوك — مراجعة{reasons ? ` · ${reasons}` : ""}
+                    </span>
+                  );
+                  return (
+                    <span title={reasons || "غير متوافق مع AAOIFI"}
+                          style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
+                                   color: "var(--red)", border: "1px solid var(--red)" }}>
+                      NON-COMPLIANT · AAOIFI{reasons ? ` · ${reasons}` : ""}
+                    </span>
+                  );
+                })()}
                 {signal.halalStaleDays != null && (
                   <span title="تعذّر تحديث الأساسيات (Yahoo محجوب) — النتيجة من كاش قديم؛ تُصحَّح في إعادة الفحص الشهرية"
                         style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 5,

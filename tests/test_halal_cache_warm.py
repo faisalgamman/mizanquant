@@ -45,7 +45,8 @@ def _row(symbol, age_days, details):
 
 
 def test_fresh_cache_is_served_without_refetch(monkeypatch):
-    details = {"symbol": "AAA", "is_halal": True, "screens_passed": 5}
+    details = {"symbol": "AAA", "is_halal": True, "screens_passed": 5,
+               "screen_version": hs.HALAL_SCREEN_VERSION}
     monkeypatch.setattr(hs, "SessionLocal", lambda: _FakeSession(first=_row("AAA", 3, details)))
     # If a refresh is attempted the test fails loudly.
     monkeypatch.setattr(hs, "screen_and_store",
@@ -56,7 +57,8 @@ def test_fresh_cache_is_served_without_refetch(monkeypatch):
 
 
 def test_stale_plus_refresh_failure_serves_stale_flagged(monkeypatch):
-    details = {"symbol": "BBB", "is_halal": True, "screens_passed": 5}
+    details = {"symbol": "BBB", "is_halal": True, "screens_passed": 5,
+               "screen_version": hs.HALAL_SCREEN_VERSION}
     monkeypatch.setattr(hs, "SessionLocal", lambda: _FakeSession(first=_row("BBB", 20, details)))
     monkeypatch.setattr(hs.settings, "FMP_API_KEY", "x", raising=False)
     monkeypatch.setattr(hs, "screen_and_store", lambda s: None)  # live refresh fails

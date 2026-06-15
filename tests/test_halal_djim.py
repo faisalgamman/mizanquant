@@ -1,8 +1,24 @@
-"""Tests for DJIM halal screening — full standard with 24-month avg market cap."""
+"""Tests for DJIM halal screening — full standard with 24-month avg market cap.
+
+The system default is now AAOIFI (total-assets denominator); this suite pins the
+legacy DJIM path (market-cap denominator, 33% thresholds) to keep covering that math.
+"""
 from __future__ import annotations
 
 import math
 from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _force_djim(monkeypatch):
+    from app.services import halal_screening as hs
+    monkeypatch.setattr(hs, "HALAL_STANDARD", "djim")
+    monkeypatch.setattr(hs, "HALAL_DEBT_MAX", 33.0)
+    monkeypatch.setattr(hs, "HALAL_LIQUIDITY_MAX", 33.0)
+    monkeypatch.setattr(hs, "HALAL_RECEIVABLE_MAX", 33.0)
+    monkeypatch.setattr(hs, "HALAL_INTEREST_MAX", 5.0)
 
 
 # ---------------------------------------------------------------------------

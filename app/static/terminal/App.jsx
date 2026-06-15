@@ -79,6 +79,8 @@ function App() {
           score:    s.swing_score || 0,
           verdict:  s.swing_signal || verdictFromScore(s.swing_score || 0),
           halal:    s.halal !== "No",
+          halalVerdict: s.halal_verdict,        // "halal" | "doubtful" | "non_compliant"
+          halalReasons: s.halal_reasons || [],
           halalStaleDays: s.halal_stale_days,   // set only when halal verdict served from a stale cache
           sector:   s.sector || "—",
           industry: s.industry || "—",
@@ -210,6 +212,8 @@ function App() {
         score:   r.composite_score || 0,
         verdict: r.signal_composite || verdictFromScore(r.composite_score || 0),
         halal:   r.is_halal !== false,
+        halalVerdict: r.halal_verdict,        // "halal" | "doubtful" | "non_compliant"
+        halalReasons: r.halal_reasons || [],
         halalStaleDays: r.halal_stale_days,   // set only when halal verdict served from a stale cache
         sector:  r.sector || "—",
         spark:   Array.isArray(r.spark) ? r.spark : [],

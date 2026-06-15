@@ -376,12 +376,31 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
     if sym in _VERIFIED_HARAM:
         return False, "Verified haram (AAOIFI screening failed)"
 
-    # 3. Curated list — stocks already passed sector exclusion
-    # This is the fast path that avoids FMP API calls for known stocks
+    # 3. Curated list — passed the SECTOR screen ONLY. Sector ≠ financial compliance,
+    # so consult the cached AAOIFI financial verdict (cheap: the durable cache is warmed
+    # daily) and HONOR it — a curated name that breaches debt/liquidity (e.g. ITT) or is a
+    # doubtful activity (e.g. hotels) must NOT pass as halal. Fall back to the sector-only
+    # allow ONLY when no screen data exists yet (the warm job fills it; absence of data
+    # must not block the whole curated universe).
     curated = _get_curated_set()
     if sym in curated:
-        _VERIFIED_HALAL.add(sym)
-        return True, "Halal (curated S&P 500 list, sector-verified)"
+        try:
+            result = get_halal_status(sym)
+        except Exception:
+            result = None
+        verdict = (result or {}).get("halal_verdict")
+        if result is not None and result.get("is_halal"):
+            _VERIFIED_HALAL.add(sym)
+            return True, "Verified halal (AAOIFI)"
+        if verdict == "non_compliant":
+            _VERIFIED_HARAM.add(sym)
+            reasons = result.get("halal_reasons") or []
+            return False, "Non-compliant (AAOIFI): " + ("; ".join(reasons) if reasons else "ratio/activity breach")
+        if verdict == "doubtful":
+            reasons = result.get("halal_reasons") or []
+            return False, "Doubtful — needs review: " + ("; ".join(reasons) if reasons else "borderline activity")
+        # No screen data cached yet → sector-verified allow (financial screen pending).
+        return True, "Halal (curated, sector-verified; financial screen pending)"
 
     # 4. Not in curated list — must verify via FMP AAOIFI screening
     try:
