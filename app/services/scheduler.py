@@ -141,6 +141,7 @@ def _scheduler_loop():
     last_outcome_match = ""   # YYYY-MM-DD — nightly decision-outcome matching
     last_sentinel = ""        # YYYY-MM-DD:slot — 2x/day sentinel judgment cycle
     last_screener_warm = ""   # YYYY-MM-DD — daily screener cache pre-warm
+    last_fund_warm = ""       # YYYY-MM-DD — daily pre-market fundamentals (halal) cache warm
     last_intraday_warm = ""  # YYYY-MM-DD:HH — intraday screener re-warm slots
     last_db_backup = ""      # YYYY-MM-DD — daily DB backup of measurement tables
     _screener_warmed_startup = False  # one-shot on boot
@@ -295,6 +296,31 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("optimizer", success=False, error=str(e))
                     logger.error(f"Weekly optimizer failed: {e}")
+
+            # --- PRE-MARKET FUNDAMENTALS WARM: ~07:30 ET (BEFORE the 08:00 screener warm) ---
+            # Refresh the stalest/missing halal-screen rows into the durable ScreeningResult
+            # cache so the screener reads warm fundamentals instead of fetching live (and
+            # stalling on a blocked Yahoo) during trading. Bounded + breaker-protected.
+            if _is_weekday(now) and now.hour == 7 and 30 <= now.minute < 40 and last_fund_warm != today_str:
+                last_fund_warm = today_str
+                try:
+                    from app.services.halal_screening import warm_fundamentals_cache
+                    from app.workspace_server import _SMART_UNIVERSE as _SU
+
+                    def _warm_fund():
+                        scheduler_metrics.record_cycle_start("warm_fundamentals")
+                        try:
+                            out = warm_fundamentals_cache(list(_SU))
+                            scheduler_metrics.record_cycle_end("warm_fundamentals", success=True)
+                            logger.info("Pre-market fundamentals warm: %s", out)
+                        except Exception as e:
+                            scheduler_metrics.record_cycle_end("warm_fundamentals", success=False, error=str(e))
+                            logger.error("Pre-market fundamentals warm failed: %s", e)
+
+                    logger.info("Scheduler: pre-market warming fundamentals (%d symbols)", len(_SU))
+                    threading.Thread(target=_warm_fund, daemon=True, name="fund-warm").start()
+                except Exception as e:
+                    logger.warning("Scheduler: fundamentals warm kickoff failed: %s", e)
 
             # --- PIPELINE STAGE 1: Data collection at 8:00 AM ET (once per day) ---
             if _is_weekday(now) and now.hour == 8 and now.minute < 5 and last_pipeline_data != today_str:

@@ -43,6 +43,12 @@ logger = logging.getLogger("screener")
 _YF_TIMEOUT: float = float(os.environ.get("HALAL_YF_TIMEOUT", "8"))
 _YF_CB_THRESHOLD: int = int(os.environ.get("HALAL_YF_CB_THRESHOLD", "12"))
 _YF_CB_COOLDOWN: float = float(os.environ.get("HALAL_YF_CB_COOLDOWN", "300"))
+
+# How long a stored screen stays "fresh". Fundamentals are quarterly, so 14 days is
+# safe and keeps the daily warm-up within FMP quota (~47 refreshes/day for 657 names).
+_HALAL_CACHE_TTL_DAYS: int = int(os.environ.get("HALAL_CACHE_TTL_DAYS", "14"))
+# Max live refreshes per pre-market warm run — a cap on FMP's shared ~250/day budget.
+_HALAL_WARM_MAX: int = int(os.environ.get("HALAL_WARM_MAX", "120"))
 _YF_CB_LOCK = threading.Lock()
 _YF_CB = {"fails": 0, "until": 0.0}
 
@@ -448,37 +454,119 @@ def screen_and_store(symbol: str) -> Optional[dict]:
 
 
 def get_halal_status(symbol: str) -> Optional[dict]:
-    """Get cached Halal status from DB, or screen live if stale/missing."""
+    """Cached-first Halal status: serve the durable ScreeningResult when fresh, screen
+    live when stale/missing, and — crucially — fall back to the STALE cached value when a
+    live refresh fails (e.g. Yahoo blocking the server). That last bit is what keeps the
+    bulk screener usable during a data outage instead of silently dropping symbols.
+    """
+    cached_details: Optional[dict] = None
+    age_days: Optional[int] = None
     try:
         db = SessionLocal()
         try:
             row = db.query(ScreeningResult).filter(
                 ScreeningResult.symbol == symbol
             ).first()
-
             if row and row.last_screened:
                 age_days = (_utc_now() - row.last_screened).days
-                if age_days < 7:  # Cache for 7 days (data is quarterly)
-                    return row.details if row.details else {
-                        "symbol": row.symbol,
-                        "is_halal": row.is_halal,
-                        "debt_ratio": row.debt_ratio,
-                        "interest_ratio": row.interest_ratio,
-                        "liquidity_ratio": row.liquidity_ratio,
-                        "sector": row.sector,
-                        "cached": True,
-                        "last_screened": row.last_screened.isoformat(),
-                    }
+                # Capture the payload while the session is open (row detaches on close).
+                cached_details = row.details if row.details else {
+                    "symbol": row.symbol,
+                    "is_halal": row.is_halal,
+                    "debt_ratio": row.debt_ratio,
+                    "interest_ratio": row.interest_ratio,
+                    "liquidity_ratio": row.liquidity_ratio,
+                    "sector": row.sector,
+                    "cached": True,
+                    "last_screened": row.last_screened.isoformat(),
+                }
         finally:
             db.close()
     except SQLAlchemyError as e:
         logger.error(f"DB read error for {symbol} screening: {e}")
 
-    # Not cached or stale — screen live
-    if settings.FMP_API_KEY:
-        return screen_and_store(symbol)
+    # Fresh enough → serve from cache (no fetch).
+    if cached_details is not None and age_days is not None and age_days < _HALAL_CACHE_TTL_DAYS:
+        return cached_details
+
+    # Stale or missing → try a live refresh (FMP-primary, yfinance breaker-protected).
+    fresh = screen_and_store(symbol) if settings.FMP_API_KEY else None
+    if fresh is not None:
+        return fresh
+
+    # Refresh failed but we have an old value → serve it flagged stale rather than drop
+    # the symbol. The monthly rescreen still corrects genuine drift.
+    if cached_details is not None:
+        stale = dict(cached_details)
+        stale["stale"] = True
+        stale["stale_days"] = age_days
+        return stale
 
     return None
+
+
+def warm_fundamentals_cache(symbols: list[str], max_refresh: Optional[int] = None) -> dict:
+    """Pre-market warm-up: refresh the STALEST / missing ScreeningResult rows first.
+
+    Selects symbols whose cached screen is older than the TTL (missing = most stale),
+    refreshes up to ``max_refresh`` via screen_and_store (FMP-primary; the yfinance breaker
+    keeps it from hanging when Yahoo is blocked), and leaves fresh rows untouched. Bounded
+    so it never overruns FMP's shared daily quota — over successive mornings it rotates
+    through the universe and keeps the durable cache warm, so the scan reads cache instead
+    of fetching live during trading.
+
+    Returns {refreshed, failed, skipped_fresh, considered, cap}.
+    """
+    if max_refresh is None:
+        max_refresh = _HALAL_WARM_MAX
+    ups = [s.upper() for s in symbols if s]
+
+    last_seen: dict[str, datetime] = {}
+    try:
+        db = SessionLocal()
+        try:
+            rows = (db.query(ScreeningResult.symbol, ScreeningResult.last_screened)
+                      .filter(ScreeningResult.symbol.in_(ups)).all())
+            last_seen = {r[0].upper(): r[1] for r in rows if r[1]}
+        finally:
+            db.close()
+    except SQLAlchemyError as e:
+        logger.error("warm_fundamentals: DB read failed: %s", e)
+
+    now = _utc_now()
+
+    def _age_days(sym: str) -> float:
+        ts = last_seen.get(sym)
+        return float("inf") if ts is None else (now - ts).days
+
+    # Only stale/missing names need work; fresh ones are skipped (free).
+    stale = [s for s in ups if _age_days(s) >= _HALAL_CACHE_TTL_DAYS]
+    stale.sort(key=_age_days, reverse=True)  # most-stale (missing) first
+    targets = stale[:max_refresh]
+
+    refreshed = failed = 0
+    for sym in targets:
+        try:
+            if screen_and_store(sym) is not None:
+                refreshed += 1
+            else:
+                failed += 1
+        except Exception as e:
+            failed += 1
+            logger.debug("warm_fundamentals: %s failed: %s", sym, e)
+
+    out = {
+        "refreshed": refreshed,
+        "failed": failed,
+        "skipped_fresh": len(ups) - len(stale),
+        "considered": len(stale),
+        "cap": max_refresh,
+    }
+    logger.info(
+        "warm_fundamentals: refreshed=%d failed=%d skipped_fresh=%d (stale=%d, cap=%d)",
+        refreshed, failed, out["skipped_fresh"], len(stale), max_refresh,
+    )
+    return out
 
 
 def get_screening_report() -> list[dict]:

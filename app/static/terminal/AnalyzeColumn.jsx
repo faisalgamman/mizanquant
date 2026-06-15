@@ -180,8 +180,15 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                   ⚠ إشارات البيع تاريخياً معكوسة (دقة ~38%) — لا تُعتمد
                 </div>
               )}
-              <div style={{ marginTop: 4 }}>
+              <div style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <Badge kind={signal.halal ? "accent" : "red"}>{signal.halal ? "HALAL · DJIM" : "NON-COMPLIANT · DJIM"}</Badge>
+                {signal.halalStaleDays != null && (
+                  <span title="تعذّر تحديث الأساسيات (Yahoo محجوب) — النتيجة من كاش قديم؛ تُصحَّح في إعادة الفحص الشهرية"
+                        style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 5,
+                                 color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)" }}>
+                    ⚠ بيانات حلال قديمة · {signal.halalStaleDays} يوم
+                  </span>
+                )}
               </div>
             </div>
           </div>

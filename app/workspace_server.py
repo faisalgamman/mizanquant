@@ -1546,19 +1546,22 @@ def _screen_halal(symbol: str, info: dict | None = None) -> dict:
     screen_symbol fetches its own data via FMP + yfinance fallback.
     """
     from app.services.market_context import _run_with_timeout
-    from app.services.halal_screening import screen_symbol
+    from app.services.halal_screening import get_halal_status
 
     def _compute():
-        result = screen_symbol(symbol)
+        # Cache-first: reads the durable ScreeningResult (pre-warmed daily), screens live
+        # only on miss/stale, and serves a flagged-stale value if a live refresh fails — so
+        # the bulk scan reads the warm cache during trading instead of hitting blocked yfinance.
+        result = get_halal_status(symbol)
         if result is None:
             return {"symbol": symbol, "is_halal": False, "error": "No data available"}
         # Ensure backward-compat fields that callers expect
-        result.setdefault("status", "HALAL - Compliant" if result["is_halal"] else "NON-COMPLIANT")
+        result.setdefault("status", "HALAL - Compliant" if result.get("is_halal") else "NON-COMPLIANT")
         return result
 
-    # Backstop timeout. The inner yfinance fundamentals fallback now fails fast via
-    # its own breaker (see halal_screening._yf_fallback), so 45s was just dead wait on
-    # a blocked Yahoo — 20s comfortably covers the FMP + price paths.
+    # Backstop timeout. With cache-first reads most calls don't fetch at all; the live-miss
+    # path's yfinance fallback now fails fast via its own breaker (halal_screening._yf_fallback),
+    # so 45s was just dead wait on a blocked Yahoo — 20s comfortably covers FMP + price paths.
     result = _run_with_timeout(_compute, timeout=20, fallback=None)
     if result is None:
         return {"symbol": symbol, "is_halal": False, "error": "Halal check timed out"}
@@ -3449,6 +3452,9 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
                                              "totalCash": info.get("totalCash"), "totalRevenue": info.get("totalRevenue")})
         is_halal = halal.get("is_halal", False)
         halal_screens = halal.get("screens_passed", 0)
+        # Set only when the halal verdict was served from a STALE cache (a live refresh
+        # failed, e.g. Yahoo blocked) — the UI flags it; None when fresh.
+        halal_stale_days = halal.get("stale_days") if halal.get("stale") else None
         in_watchlist = bool(watchlist_set and symbol.upper() in watchlist_set)
 
         # ── Fundamental Score (0-40) ──
@@ -3616,6 +3622,7 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
             "market_cap": mcap,
             "is_halal": is_halal,
             "halal_screens": halal_screens,
+            "halal_stale_days": halal_stale_days,
             "in_watchlist": in_watchlist,
             "fundamental_score": fundamental,
             "fundamental_details": {

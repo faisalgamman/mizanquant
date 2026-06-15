@@ -79,6 +79,7 @@ function App() {
           score:    s.swing_score || 0,
           verdict:  s.swing_signal || verdictFromScore(s.swing_score || 0),
           halal:    s.halal !== "No",
+          halalStaleDays: s.halal_stale_days,   // set only when halal verdict served from a stale cache
           sector:   s.sector || "—",
           industry: s.industry || "—",
           spark:    Array.isArray(s.spark) ? s.spark : [],  // real sparkline only; empty → no chart (no random noise)
@@ -209,6 +210,7 @@ function App() {
         score:   r.composite_score || 0,
         verdict: r.signal_composite || verdictFromScore(r.composite_score || 0),
         halal:   r.is_halal !== false,
+        halalStaleDays: r.halal_stale_days,   // set only when halal verdict served from a stale cache
         sector:  r.sector || "—",
         spark:   Array.isArray(r.spark) ? r.spark : [],
         // Composite breakdown (real sub-scores from deep-picks)
