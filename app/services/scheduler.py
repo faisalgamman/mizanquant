@@ -929,31 +929,33 @@ def _run_signal_audit():
 
 
 def _run_pairs_scan():
-    """Daily halal pairs-trading cycle (Phase 3).
+    """Daily halal pairs cycle (Phase 3) — PAPER-validated (PVP ledger).
 
-    Scans the universe (within-sector) for cointegrated pairs and executes
-    long-only relative-value entries/exits via the standard trading engine
-    (all halal/risk/cost gates inherited). Sends a Telegram summary.
+    Scans for cointegrated pairs and records long-only relative-value entries into the
+    isolated PVP paper ledger (matures open trades on z-reversion / stop / time cap).
+    NO live broker orders until PVP graduates — same discipline as weekly PV / monthly
+    PVM. run_pairs_cycle runs in dry_run for the observable signal list + Telegram.
     """
     from app.services.pairs_strategy import run_pairs_cycle
+    from app.services.paper_validation import record_pairs_signals, mature_pairs_paper_trades
     from app.services.telegram_alert import send_message as tg_send
 
-    summary = run_pairs_cycle()
-    pairs = summary.get("pairs_scanned", 0)
-    entries = summary.get("entries", 0)
-    exits = summary.get("exits", 0)
-    logger.info("Pairs cycle: %d pairs, %d entries, %d exits", pairs, entries, exits)
+    # PVP paper ledger: mature open trades first, then record new entries.
+    matured = mature_pairs_paper_trades()
+    recorded = record_pairs_signals()
 
-    if entries or exits:
-        lines = [
-            f"  {a['action']}: {a.get('symbol')} (z={a.get('z')})"
-            for a in summary.get("actions", []) if a.get("executed")
-        ]
+    summary = run_pairs_cycle(dry_run=True)  # observable signals only — NO live orders
+    pairs = summary.get("pairs_scanned", 0)
+    rec_n = recorded.get("recorded", 0) if isinstance(recorded, dict) else 0
+    clo_n = matured.get("closed", 0) if isinstance(matured, dict) else 0
+    logger.info("Pairs cycle (paper): %d pairs, recorded=%s, matured=%s", pairs, recorded, matured)
+
+    if rec_n or clo_n:
         tg_send(
-            f"PAIRS TRADING CYCLE\n\n"
-            f"Cointegrated pairs: {pairs}\n"
-            f"Entries: {entries} | Exits: {exits}\n"
-            + ("\n".join(lines) if lines else "")
+            f"PAIRS PAPER LEDGER (PVP)\n\n"
+            f"Cointegrated pairs scanned: {pairs}\n"
+            f"New paper entries: {rec_n} | Matured/closed: {clo_n}\n"
+            f"(paper-only — no real money until PVP graduates)"
         )
 
 

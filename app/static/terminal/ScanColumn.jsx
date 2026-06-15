@@ -200,9 +200,10 @@ function ScanTabs({ mode, onMode }) {
     </button>
   );
   return (
-    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-      {tab("weekly", "Weekly Scanner", "swing · technical · Option-A")}
-      {tab("monthly", "Monthly Scanner", "composite · fundamental · rebalanced")}
+    <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+      {tab("weekly", "Weekly", "swing · technical")}
+      {tab("monthly", "Monthly", "composite · fund.")}
+      {tab("pairs", "Pairs", "cointegration")}
     </div>
   );
 }
@@ -246,6 +247,52 @@ function LedgerBanner({ ledger, kind, onRecord, recording }) {
   );
 }
 
+// Halal long-only pairs (cointegration) — relative-value signals + the PVP ledger.
+function PairsList({ pairs }) {
+  const sigs = (pairs && pairs.signals) || [];
+  if (sigs.length === 0) {
+    return (
+      <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: "var(--text-muted)" }}>
+        جارٍ مسح الأزواج المتكاملة (cointegration)…
+      </div>
+    );
+  }
+  const actionable = sigs.filter(s => s.action === "long_y" || s.action === "long_x" || s.action === "exit");
+  const rows = actionable.length ? actionable : sigs.slice(0, 12);
+  return (
+    <>
+      <div style={{ fontSize: 9, color: "var(--text-muted)", marginBottom: 6 }}>
+        {pairs.count ?? sigs.length} زوج · دخول |z|≥{pairs.entry_z} · خروج |z|≤{pairs.exit_z} · long-only (لا شورت — حلال)
+      </div>
+      <div className="s-table-wrap">
+        <table className="s-table">
+          <thead><tr><th>Pair</th><th>Signal</th><th>Long leg</th><th>z</th><th>Half-life</th></tr></thead>
+          <tbody>
+            {rows.map((s, i) => {
+              const isExit = s.action === "exit";
+              const isBuy = s.action === "long_y" || s.action === "long_x";
+              return (
+                <tr key={s.pair + i}
+                    onClick={() => s.long_symbol && window.selectIntelSymbol && window.selectIntelSymbol(s.long_symbol)}
+                    style={{ cursor: s.long_symbol ? "pointer" : "default" }} title="اعرض البطاقة">
+                  <td style={{ fontWeight: 600 }}>{s.pair}</td>
+                  <td><Badge kind={isExit ? "red" : isBuy ? "green" : "muted"}>{isBuy ? "BUY" : isExit ? "EXIT" : "HOLD"}</Badge></td>
+                  <td style={{ fontWeight: 600 }}>{s.long_symbol || "—"}</td>
+                  <td className="mono">{s.zscore != null ? s.zscore.toFixed(2) : "—"}</td>
+                  <td className="mono">{s.half_life_bars != null ? s.half_life_bars.toFixed(0) + "d" : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 9, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.5 }}>
+        نسبية حلال long-only — نشتري الساق الأرخص نسبياً عند تطرّف الفرق، ونخرج عند عودته. تحقّق ورقي فقط (PVP) — لا مال حقيقي قبل التخرّج.
+      </div>
+    </>
+  );
+}
+
 function ScanEmpty({ status, mode, scanPct }) {
   const computing = status === "computing";
   const monthly = mode === "monthly";
@@ -283,13 +330,14 @@ function ScanEmpty({ status, mode, scanPct }) {
 
 function ScanColumn(props) {
   const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
-          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, watch, monthlyScanPct,
+          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, ledgerPairs, pairs, watch, monthlyScanPct,
           onRecord, recording } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
 
   const monthlyMode = scanMode === "monthly";
+  const pairsMode   = scanMode === "pairs";
   const list   = monthlyMode ? (monthlySignals || []) : signals;
   const status = monthlyMode ? monthlyStatus : signalsStatus;
   const top3   = list.slice(0, 3);
@@ -314,31 +362,40 @@ function ScanColumn(props) {
       <div className="wf-section">
         <div className="wf-head">
           <span className="wf-title">Scanners</span>
-          <span className="wf-sub">{monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
+          <span className="wf-sub">{pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
         </div>
         <ScanTabs mode={scanMode} onMode={onScanMode} />
-        <LedgerBanner ledger={monthlyMode ? ledgerMonthly : ledgerWeekly} kind={monthlyMode ? "Monthly" : "Weekly"}
-                      onRecord={onRecord} recording={recording} />
-        {empty ? (
-          <ScanEmpty status={status} mode={scanMode} scanPct={monthlyScanPct || 0} />
+        {pairsMode ? (
+          <>
+            <LedgerBanner ledger={ledgerPairs} kind="Pairs" />
+            <PairsList pairs={pairs} />
+          </>
         ) : (
           <>
-            <div className="signals-featured">
-              {top3.map((s) => (
-                <SignalHeroCard key={s.symbol} signal={s} selected={s.symbol === selectedSymbol} onSelect={onSelect} />
-              ))}
-            </div>
-            {monthlyMode ? (
-              <MonthlyTable signals={list} selectedSymbol={selectedSymbol} onSelect={onSelect} />
+            <LedgerBanner ledger={monthlyMode ? ledgerMonthly : ledgerWeekly} kind={monthlyMode ? "Monthly" : "Weekly"}
+                          onRecord={onRecord} recording={recording} />
+            {empty ? (
+              <ScanEmpty status={status} mode={scanMode} scanPct={monthlyScanPct || 0} />
             ) : (
-              <SignalTable
-                signals={list}
-                selectedSymbol={selectedSymbol}
-                onSelect={onSelect}
-                filterSignal={filterSignal} setFilterSignal={setFilterSignal}
-                filterScore={filterScore} setFilterScore={setFilterScore}
-                halalOnly={halalOnly} setHalalOnly={setHalalOnly}
-              />
+              <>
+                <div className="signals-featured">
+                  {top3.map((s) => (
+                    <SignalHeroCard key={s.symbol} signal={s} selected={s.symbol === selectedSymbol} onSelect={onSelect} />
+                  ))}
+                </div>
+                {monthlyMode ? (
+                  <MonthlyTable signals={list} selectedSymbol={selectedSymbol} onSelect={onSelect} />
+                ) : (
+                  <SignalTable
+                    signals={list}
+                    selectedSymbol={selectedSymbol}
+                    onSelect={onSelect}
+                    filterSignal={filterSignal} setFilterSignal={setFilterSignal}
+                    filterScore={filterScore} setFilterScore={setFilterScore}
+                    halalOnly={halalOnly} setHalalOnly={setHalalOnly}
+                  />
+                )}
+              </>
             )}
           </>
         )}

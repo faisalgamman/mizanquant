@@ -45,12 +45,18 @@ logger = logging.getLogger("screener")
 # Isolated paper-validation strategy ids (TradeHistory.strategy_id is <=5 chars).
 PV_WEEKLY = "PV"     # weekly swing scanner — Option-A exit (15% stop / 20-day time)
 PV_MONTHLY = "PVM"   # monthly composite scanner — rebalanced (hold top-N, drop the rest)
+PV_PAIRS = "PVP"     # halal long-only relative-value pairs (cointegration) — z-reversion exit
 PV_STRATEGY = PV_WEEKLY  # backward-compat alias (older callers / tests use PV_STRATEGY)
 
 
 def _strategy_for(scanner: str | None) -> str:
-    """Map a 'weekly' | 'monthly' scanner label to its ledger strategy id."""
-    return PV_MONTHLY if str(scanner or "").lower().startswith("month") else PV_WEEKLY
+    """Map a 'weekly' | 'monthly' | 'pairs' scanner label to its ledger strategy id."""
+    s = str(scanner or "").lower()
+    if s.startswith("pair"):
+        return PV_PAIRS
+    if s.startswith("month"):
+        return PV_MONTHLY
+    return PV_WEEKLY
 
 
 def _utc_now() -> datetime:
@@ -205,7 +211,8 @@ def paper_ledger_status(strategy_id: str = PV_WEEKLY) -> dict:
     finally:
         db.close()
     return {
-        "scanner": "monthly" if strategy_id == PV_MONTHLY else "weekly",
+        "scanner": ("pairs" if strategy_id == PV_PAIRS
+                    else "monthly" if strategy_id == PV_MONTHLY else "weekly"),
         "strategy_id": strategy_id,
         "open": open_n,
         "closed": closed_n,
@@ -376,6 +383,182 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None)
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("rebalance_monthly failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+# ── Pairs ledger (PVP) — halal long-only relative-value, cointegration ─────────
+
+def _pairs_row_from_signal(sig) -> dict:
+    """Map a pairs ENTRY signal → TradeHistory kwargs for an OPEN PVP trade.
+
+    Long-only relative-value: BUY the relatively-undervalued cointegrated leg. The
+    exit is spread z-reversion (handled in mature_pairs_paper_trades), with the
+    long-leg ATR stop / a max-hold cap as safety. Nominal sizing (~$2k) — the
+    graduation metric is pnl_pct, not absolute pnl.
+    """
+    entry = float(getattr(sig, "entry", 0) or 0)
+    qty = float(int(2000.0 // entry)) if entry > 0 else 0.0
+    return {
+        "strategy_id": PV_PAIRS,
+        "symbol": sig.long_symbol,
+        "side": "buy",
+        "qty": qty,
+        "entry_price": round(entry, 4),
+        "stop_loss": (float(sig.stop_loss) if getattr(sig, "stop_loss", 0) else None),
+        "take_profit": (float(sig.take_profit) if getattr(sig, "take_profit", 0) else None),
+        "position_value": round(qty * entry, 2),
+        "confidence": float(getattr(sig, "confidence", 0) or 0),
+        "status": "open",
+        "signal_details": {
+            "source": "pairs_paper",
+            "pair": sig.pair,
+            "long_symbol": sig.long_symbol,
+            "zscore": round(float(getattr(sig, "zscore", 0) or 0), 3),
+            "hedge_ratio": round(float(getattr(sig, "hedge_ratio", 0) or 0), 4),
+            "half_life": round(float(getattr(sig, "half_life", 0) or 0), 2),
+            "reason": getattr(sig, "reason", ""),
+            "asof": _utc_now().isoformat(),
+        },
+    }
+
+
+def record_pairs_signals(max_pairs: int | None = None) -> dict:
+    """Record the pairs strategy's ENTRY signals as OPEN PVP paper trades.
+
+    Deduped against open PVP trades on the long-leg symbol. NO live broker orders —
+    this is the isolated PVP validation ledger (does cointegrated relative-value
+    have a halal long-only edge?). Mirrors record_weekly_picks.
+    """
+    from app.services.pairs_strategy import compute_signals
+
+    try:
+        signals = compute_signals(max_pairs=max_pairs)
+    except Exception as e:
+        logger.warning("record_pairs_signals: compute_signals failed: %s", e)
+        return {"error": str(e)}
+    entries = [s for s in signals
+               if getattr(s, "action", "") in ("long_y", "long_x") and getattr(s, "long_symbol", None)]
+    if not entries:
+        return {"recorded": 0, "skipped": 0, "reason": "no entry signals"}
+
+    db = SessionLocal()
+    try:
+        open_syms = {
+            r[0] for r in db.query(TradeHistory.symbol).filter(
+                TradeHistory.strategy_id == PV_PAIRS,
+                TradeHistory.pnl_pct.is_(None),
+            ).all()
+        }
+        recorded = skipped = 0
+        for sig in entries:
+            sym = sig.long_symbol
+            if not sym or float(getattr(sig, "entry", 0) or 0) <= 0 or sym in open_syms:
+                skipped += 1
+                continue
+            db.add(TradeHistory(created_at=_utc_now(), **_pairs_row_from_signal(sig)))
+            open_syms.add(sym)
+            try:
+                from app.background.cache_manager import record_signal
+                record_signal(
+                    symbol=sym, signal_type="pairs", signal="BUY",
+                    score=float(getattr(sig, "confidence", 0) or 0),
+                    price=float(getattr(sig, "entry", 0) or 0),
+                    stop_loss=float(getattr(sig, "stop_loss", 0) or 0),
+                    take_profit=float(getattr(sig, "take_profit", 0) or 0),
+                    confidence=float(getattr(sig, "confidence", 0) or 0),
+                    details={"source": "pairs_scanner", "pair": sig.pair},
+                    breakdown={"zscore": sig.zscore, "hedge_ratio": sig.hedge_ratio,
+                               "half_life": sig.half_life},
+                )
+            except Exception:
+                logger.debug("pairs signal SignalHistory record skipped", exc_info=True)
+            recorded += 1
+        db.commit()
+        return {"recorded": recorded, "skipped": skipped}
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("record_pairs_signals failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+def mature_pairs_paper_trades() -> dict:
+    """Close any open PVP trade whose pairs exit fired: spread z-reversion
+    (|z| <= PAIRS_EXIT_Z), the long-leg catastrophe stop, or a max-hold cap."""
+    from app.services.market_data import fetch as fetch_market_data
+    from app.services.signal_tracker import _simulate_fixed_exit
+    from app.services.cointegration import spread_series, spread_zscore
+    from app.services.pairs_strategy import PAIRS_EXIT_Z
+
+    hold_days = int(os.environ.get("PAIRS_MAX_HOLD_DAYS", "30"))
+    db = SessionLocal()
+    try:
+        open_trades = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == PV_PAIRS,
+            TradeHistory.pnl_pct.is_(None),
+        ).all()
+        checked = closed = 0
+        for t in open_trades:
+            checked += 1
+            try:
+                entry = float(t.entry_price or 0)
+                if entry <= 0:
+                    continue
+                details = t.signal_details or {}
+                pair = str(details.get("pair") or "")
+                df = fetch_market_data(t.symbol, period="6mo")
+                if df is None or len(df) == 0:
+                    continue
+                try:
+                    post = df[df.index > t.created_at]
+                except Exception:
+                    post = df.tail(hold_days + 5)
+
+                exit_price = ret_pct = None
+                # 1) long-leg stop / max-hold time cap (safety)
+                stop_pct = max(1.0, (entry - float(t.stop_loss)) / entry * 100.0) if t.stop_loss else 15.0
+                sim = _simulate_fixed_exit(post, entry, hold_days, stop_pct, is_sell=False)
+                if sim is not None:
+                    ret_pct, exit_price = sim
+                else:
+                    # 2) spread z-reversion exit (the actual pairs policy)
+                    z_now = None
+                    if "/" in pair:
+                        y_sym, x_sym = pair.split("/", 1)
+                        ydf = fetch_market_data(y_sym, period="1y")
+                        xdf = fetch_market_data(x_sym, period="1y")
+                        if (ydf is not None and xdf is not None
+                                and len(ydf) > 60 and len(xdf) > 60):
+                            import pandas as pd
+                            j = pd.concat([ydf["close"].reset_index(drop=True).rename("y"),
+                                           xdf["close"].reset_index(drop=True).rename("x")],
+                                          axis=1).dropna()
+                            if len(j) > 60:
+                                spr = spread_series(j["y"].tolist(), j["x"].tolist())
+                                z_now = spread_zscore(spr)
+                    if z_now is not None and abs(z_now) <= PAIRS_EXIT_Z:
+                        last = float(df["close"].iloc[-1])
+                        exit_price = last
+                        ret_pct = round((last - entry) / entry * 100.0, 4)
+
+                if exit_price is None or ret_pct is None:
+                    continue  # still open
+                t.exit_price = round(float(exit_price), 4)
+                t.pnl = round((float(exit_price) - entry) * float(t.qty or 0), 2)
+                t.pnl_pct = ret_pct
+                t.closed_at = _utc_now()
+                t.status = "closed"
+                closed += 1
+            except Exception as e:  # one bad pair must not abort the batch
+                logger.debug("mature_pairs %s failed: %s", t.symbol, e)
+        db.commit()
+        return {"checked": checked, "closed": closed}
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("mature_pairs_paper_trades failed: %s", e)
         return {"error": str(e)}
     finally:
         db.close()

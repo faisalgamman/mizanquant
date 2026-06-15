@@ -54,6 +54,8 @@ function App() {
   const [monthlyScanPct, setMonthlyScanPct] = useState(0);
   const [ledgerW, setLedgerW]     = useState(null);        // weekly paper-ledger status (PV)
   const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
+  const [ledgerP, setLedgerP]     = useState(null);        // pairs paper-ledger status (PVP)
+  const [pairsData, setPairsData] = useState(null);        // halal pairs signals (cointegration)
   const [cardSymbol, setCardSymbol] = useState(null);      // Stock ID Card target symbol
   const [brokerHealth, setBrokerHealth] = useState(null);    // IBKR paper connectivity
 
@@ -225,7 +227,20 @@ function App() {
   const loadLedgers = async () => {
     try { setLedgerW(await (await fetch('/paper_validation/status?scanner=weekly')).json()); } catch (_) {}
     try { setLedgerM(await (await fetch('/paper_validation/status?scanner=monthly')).json()); } catch (_) {}
+    try { setLedgerP(await (await fetch('/paper_validation/status?scanner=pairs')).json()); } catch (_) {}
   };
+
+  // Pairs (cointegration) signals — computed lazily, only when the Pairs tab is open
+  // (the scan is O(N²)-ish; don't pay it unless viewing).
+  useEffect(() => {
+    if (scanMode !== "pairs") return;
+    let cancelled = false;
+    (async () => {
+      try { const p = await (await fetch('/api/v1/pairs/signals')).json(); if (!cancelled) setPairsData(p); } catch (_) {}
+      try { const l = await (await fetch('/paper_validation/status?scanner=pairs')).json(); if (!cancelled) setLedgerP(l); } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [scanMode]);
 
   // Manual "Record now" — kick the session-gated record-now endpoint for the
   // current scanner, then re-fetch the ledger status after the job has had time
@@ -572,6 +587,8 @@ function App() {
             monthlyStatus={monthlyStatus}
             ledgerWeekly={ledgerW}
             ledgerMonthly={ledgerM}
+            ledgerPairs={ledgerP}
+            pairs={pairsData}
             watch={watch}
             onRecord={onRecordPaper}
             recording={recording}
