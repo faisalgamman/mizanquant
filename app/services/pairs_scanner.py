@@ -51,10 +51,14 @@ PAIRS_MAX_PAIRS: int = int(os.environ.get("PAIRS_MAX_PAIRS", "20"))
 PAIRS_SCAN_TTL: float = float(os.environ.get("PAIRS_SCAN_TTL", "86400"))
 PAIRS_SCAN_LOOKBACK: str = os.environ.get("PAIRS_SCAN_LOOKBACK", "1y")
 PAIRS_MIN_SECTOR_SIZE: int = int(os.environ.get("PAIRS_MIN_SECTOR_SIZE", "3"))
-# Cost cap on the live-FMP step of sector resolution. The DB + FMPCache + durable
-# cache normally cover the universe (the screener fetches profiles daily), so the
-# live step rarely binds; the cap is a safety valve against a cold first run.
-PAIRS_SECTOR_FMP_CAP: int = int(os.environ.get("PAIRS_SECTOR_FMP_CAP", "400"))
+# Cost cap on the live-FMP step of sector resolution. FMP's free tier is only
+# 250 req/day and the MONTHLY screener depends on that same budget, so the pairs
+# scan must NOT burst it (a 400-symbol burst once exhausted the daily quota and
+# forced the screener onto its slow yfinance fallback). Default tiny: lean on the
+# free sources — DB Universe.sector + FMPCache (the screener populates both daily)
+# + the durable map below — and let the few still-missing names heal a handful per
+# day. Override via env only for a deliberate one-off backfill.
+PAIRS_SECTOR_FMP_CAP: int = int(os.environ.get("PAIRS_SECTOR_FMP_CAP", "25"))
 
 _CACHE_PATH = Path(os.environ.get("PAIRS_SCAN_CACHE", "pairs_scan_cache.json"))
 # Resolved symbol→sector map persists to the durable volume (CACHE_DIR=/data on
