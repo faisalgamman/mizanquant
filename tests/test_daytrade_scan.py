@@ -46,3 +46,14 @@ def test_scan_explosion_ranks_and_flags(monkeypatch):
     assert rows[0]["halal_verdict"] == "non_compliant"          # flag threaded through (research view)
     assert rows[1]["halal_verdict"] is None                     # not cached → None (UI shows "—")
     assert "components" in rows[0]
+
+
+def test_scan_explosion_drops_illiquid(monkeypatch):
+    dfs = {"GOOD": _df(0.5, 3, jump=0.05), "PENNY": _df(0.5, 3, jump=0.05), "THIN": _df(0.5, 1)}
+    dfs["PENNY"]["close"] = 2.0  # price < $3 → fails liquidity gate
+    dfs["PENNY"]["open"] = 2.0
+    dfs["THIN"]["volume"] = 100.0  # avg $-vol ≈ $10k < $5M → fails liquidity gate
+    monkeypatch.setattr("app.services.market_data.fetch_alpaca_batch", lambda syms, period="1y": dfs)
+    monkeypatch.setattr(dt, "_cached_verdicts", lambda syms: {})
+    syms = [r["symbol"] for r in dt.scan_explosion(["GOOD", "PENNY", "THIN"], limit=10)]
+    assert "GOOD" in syms and "PENNY" not in syms and "THIN" not in syms

@@ -222,7 +222,7 @@ function ExplosionList({ daytrade, selectedSymbol, onSelect }) {
   }
   const rows = daytrade.results || [];
   if (rows.length === 0) {
-    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>جارٍ مسح ~500 سهم (S&amp;P 500) لإيجاد المرشّحة للانفجار…</div>;
+    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>جارٍ مسح آلاف الأسهم السائلة (Alpaca) للمرشّحة للانفجار… قد يستغرق ~1–3 دقائق ثم يُخزَّن.</div>;
   }
   const hbadge = (v) => {
     if (v === "halal") return <Badge kind="accent">حلال</Badge>;
@@ -233,7 +233,7 @@ function ExplosionList({ daytrade, selectedSymbol, onSelect }) {
   return (
     <>
       <div className="watch-banner" style={{ color: "var(--red)", borderColor: "var(--red)" }}>
-        🔬 بحث فنّي · كل الأسهم (S&amp;P 500) · غير محكوم بالحلال · لا يُتداول
+        🔬 بحث فنّي · كل الأسهم الأمريكية السائلة · غير محكوم بالحلال · لا يُتداول
       </div>
       <div style={{ fontSize: 9, color: muted, margin: "6px 0" }}>
         {rows.length} سهماً · مرتّبة حسب درجة الانفجار (حجم + زخم + تقلّب + فجوة) · بيانات يومية

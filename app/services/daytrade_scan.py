@@ -11,6 +11,7 @@ non-compliant names. Nothing here feeds the halal scanners, ledgers, or the trad
 from __future__ import annotations
 
 import logging
+import os
 
 import numpy as np
 
@@ -18,6 +19,14 @@ logger = logging.getLogger("screener")
 
 # Explosion-score weights (sum = 1.0) — env/constant-tunable.
 _W_RVOL, _W_MOM, _W_VOL, _W_GAP = 0.35, 0.30, 0.20, 0.15
+
+# Liquidity gate + scan bounds (env-tunable). Day-trading needs liquid names, and a gate
+# also keeps a multi-thousand-symbol scan feasible. Bars are fetched in CHUNKS and discarded
+# after scoring, so peak memory is one chunk regardless of universe size.
+_MIN_PRICE = float(os.environ.get("DAYTRADE_MIN_PRICE", "3"))
+_MIN_DOLLAR_VOL = float(os.environ.get("DAYTRADE_MIN_DOLLAR_VOL", "5000000"))  # $5M avg daily
+_MAX_SYMBOLS = int(os.environ.get("DAYTRADE_MAX_SYMBOLS", "3000"))             # cap scored rows
+_CHUNK = int(os.environ.get("DAYTRADE_CHUNK", "600"))                          # symbols/batch fetch
 
 
 def _clamp01(x: float) -> float:
@@ -103,28 +112,64 @@ def _cached_verdicts(symbols: list[str]) -> dict[str, str]:
     return out
 
 
-def scan_explosion(symbols: list[str], limit: int = 60) -> list[dict]:
-    """Rank `symbols` by the technical explosion score (daily bars). Ranked desc, top `limit`."""
+def _is_liquid(df, min_price: float, min_dollar_vol: float) -> bool:
+    """Price + 20-day average dollar-volume gate (day-tradeable + cuts noise)."""
+    if df is None or len(df) < 30 or "close" not in df.columns:
+        return False
+    close = df["close"].astype(float)
+    if float(close.iloc[-1]) < min_price:
+        return False
+    if "volume" in df.columns:
+        dv = float((close.iloc[-20:] * df["volume"].astype(float).iloc[-20:]).mean())
+        if dv < min_dollar_vol:
+            return False
+    return True
+
+
+def scan_explosion(symbols, limit: int = 60, min_price: float | None = None,
+                   min_dollar_vol: float | None = None, max_symbols: int | None = None) -> list[dict]:
+    """Rank `symbols` by the technical explosion score (daily bars), ranked desc, top `limit`.
+
+    Scans in CHUNKS — fetch a batch of daily bars, score the liquid ones, DISCARD the bars —
+    so a multi-thousand-symbol universe stays memory-bounded. Only names passing the liquidity
+    gate are scored (and counted toward `max_symbols`).
+    """
     from app.services.market_data import fetch_alpaca_batch
 
-    try:
-        prefetched = fetch_alpaca_batch(list(symbols), period="1y") or {}
-    except Exception as e:
-        logger.warning("daytrade: batch prefetch failed: %s", e)
-        prefetched = {}
+    min_price = _MIN_PRICE if min_price is None else min_price
+    min_dollar_vol = _MIN_DOLLAR_VOL if min_dollar_vol is None else min_dollar_vol
+    max_symbols = _MAX_SYMBOLS if max_symbols is None else max_symbols
 
-    verdicts = _cached_verdicts(list(prefetched.keys()) or list(symbols))
+    syms = [str(s).upper() for s in symbols if s]
     rows: list[dict] = []
-    for sym, df in prefetched.items():
+    for i in range(0, len(syms), _CHUNK):
+        chunk = syms[i:i + _CHUNK]
         try:
-            res = explosion_score(df)
-            if res is None:
-                continue
-            score, fields = res
-            rows.append({"symbol": sym, "explosion_score": score,
-                         "halal_verdict": verdicts.get(sym.upper()), **fields})
-        except Exception:
+            pre = fetch_alpaca_batch(chunk, period="1y") or {}
+        except Exception as e:
+            logger.warning("daytrade: chunk fetch failed (%d..): %s", i, e)
             continue
+        for sym, df in pre.items():
+            try:
+                if not _is_liquid(df, min_price, min_dollar_vol):
+                    continue
+                res = explosion_score(df)
+                if res is None:
+                    continue
+                score, fields = res
+                rows.append({"symbol": sym, "explosion_score": score, **fields})
+            except Exception:
+                continue
+        if len(rows) >= max_symbols:  # safety ceiling on scored rows
+            logger.info("daytrade: hit max_symbols=%d at chunk offset %d", max_symbols, i)
+            break
+
+    # Cache-only halal flags for the scored set (single batched read; never screens).
+    verdicts = _cached_verdicts([r["symbol"] for r in rows])
+    for r in rows:
+        r["halal_verdict"] = verdicts.get(r["symbol"].upper())
+
     rows.sort(key=lambda r: r["explosion_score"], reverse=True)
-    logger.info("daytrade: scored %d/%d symbols", len(rows), len(prefetched))
+    logger.info("daytrade: scored %d liquid symbols of %d candidates (min_price=%s min_$vol=%s)",
+                len(rows), len(syms), min_price, min_dollar_vol)
     return rows[:limit]

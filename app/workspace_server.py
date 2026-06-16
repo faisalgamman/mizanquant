@@ -4804,10 +4804,14 @@ async def screener_daytrade(limit: int = Query(30, ge=5, le=60)):
             global _daytrade_scanning
             try:
                 from app.services.daytrade_scan import scan_explosion
+                from app.services.reference_data import get_tradable_symbols
                 from app.services.universe import _SP500_ALL
-                rows = scan_explosion(list(_SP500_ALL), limit=60)
+                # Full Alpaca tradable US-equity universe (~thousands); liquidity-gated +
+                # chunked inside scan_explosion. Fall back to the S&P 500 if Alpaca is unavailable.
+                universe = sorted(get_tradable_symbols()) or list(_SP500_ALL)
+                rows = scan_explosion(universe, limit=60)
                 if rows:
-                    _cache_set("daytrade_scan", {"results": rows})
+                    _cache_set("daytrade_scan", {"results": rows, "universe_size": len(universe)})
             except Exception as e:
                 logger.warning("daytrade scan failed: %s", e)
             finally:
