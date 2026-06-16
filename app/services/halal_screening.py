@@ -63,7 +63,7 @@ HALAL_RECEIVABLE_MAX: float = float(os.environ.get("HALAL_RECEIVABLE_MAX", "49")
 # ScreeningResult rows — see get_halal_status (never serve an old-standard verdict).
 HALAL_SCREEN_VERSION: str = (
     f"{HALAL_STANDARD}-d{HALAL_DEBT_MAX:.0f}-l{HALAL_LIQUIDITY_MAX:.0f}"
-    f"-i{HALAL_INTEREST_MAX:.0f}-r{HALAL_RECEIVABLE_MAX:.0f}-act2"
+    f"-i{HALAL_INTEREST_MAX:.0f}-r{HALAL_RECEIVABLE_MAX:.0f}-act3"
 )
 
 
@@ -80,10 +80,11 @@ _HARAM_KEYWORDS: tuple[str, ...] = _kw_env("HALAL_HARAM_KEYWORDS", (
 ))
 # Borderline activities (likely-but-not-certain haram revenue mixing, e.g. alcohol
 # served on premises) → DOUBTFUL, needs manual review. NOT auto-failed as haram, but
-# NOT silently passed as halal either. Kept narrow to avoid over-rejecting staples.
+# NOT silently passed as halal either. Kept narrow to avoid over-rejecting staples —
+# per owner decision, packaged foods + entertainment are treated as CLEAN (not doubtful);
+# only travel/hospitality/airlines stay doubtful (this keeps e.g. ABNB flagged).
 _DOUBTFUL_KEYWORDS: tuple[str, ...] = _kw_env("HALAL_DOUBTFUL_KEYWORDS", (
     "hotel", "resort", "cruise", "lodging", "travel", "restaurant", "airline",
-    "entertainment", "packaged food",
 ))
 
 
@@ -195,13 +196,10 @@ HARAM_INDUSTRIES = {
     "mortgage real estate investment trusts (reits)",
 }
 
-# Industries that require manual review per AAOIFI — not auto-disqualified.
-# packaged_foods: may contain pork products (needs label check)
-# entertainment: may contain adult content (needs content check)
-_REVIEW_INDUSTRIES = {
-    "packaged foods",
-    "entertainment",
-}
+# Industries that require manual review. Per owner decision, packaged foods and
+# entertainment are treated as CLEAN (halal) rather than doubtful — so this set is now
+# empty. (Kept as a hook in case specific review-only industries are added later.)
+_REVIEW_INDUSTRIES: set[str] = set()
 
 def _yf_fallback(symbol: str) -> Optional[dict]:
     """Fallback: fetch fundamental data from yfinance when FMP fails (premium block).

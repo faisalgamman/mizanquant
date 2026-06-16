@@ -106,6 +106,17 @@ def test_clean_low_debt_is_halal(monkeypatch):
     assert r["standard"] == "AAOIFI"
 
 
+def test_packaged_foods_and_entertainment_are_clean(monkeypatch):
+    # Owner decision: packaged foods + entertainment are CLEAN (halal), not doubtful.
+    monkeypatch.setattr(hs, "HALAL_STANDARD", "aaoifi")
+    for sector, industry in [("Consumer Defensive", "Packaged Foods"),
+                             ("Communication Services", "Entertainment")]:
+        prof = _profile(_MCAP, _SHARES, sector=sector, industry=industry)
+        r = _run(prof, _bs(0.10 * _ASSETS, _ASSETS, cash=1e7, receivables=1e7), _income(), _MCAP, _SHARES)
+        assert r["activity"] == "clean", f"{industry} should be clean"
+        assert r["halal_verdict"] == "halal" and r["is_halal"] is True
+
+
 def test_missing_total_assets_is_doubtful_not_haram(monkeypatch):
     monkeypatch.setattr(hs, "HALAL_STANDARD", "aaoifi")
     r = _run(_profile(_MCAP, _SHARES), _bs(_DEBT, 0.0), _income(), _MCAP, _SHARES)  # no total assets
