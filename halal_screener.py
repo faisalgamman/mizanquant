@@ -399,8 +399,10 @@ def verify_halal(symbol: str) -> tuple[bool, str]:
         if verdict == "doubtful":
             reasons = result.get("halal_reasons") or []
             return False, "Doubtful — needs review: " + ("; ".join(reasons) if reasons else "borderline activity")
-        # No screen data cached yet → sector-verified allow (financial screen pending).
-        return True, "Halal (curated, sector-verified; financial screen pending)"
+        # No AAOIFI financial screen yet (e.g. FMP/Yahoo outage) → FAIL-SAFE: do NOT pass
+        # as halal. A curated name is only sector-verified; without the financial screen it
+        # must not surface as halal/BUY (user's compliance choice). Clears once re-screened.
+        return False, "Doubtful — AAOIFI financial screen pending (no data)"
 
     # 4. Not in curated list — must verify via FMP AAOIFI screening
     try:
