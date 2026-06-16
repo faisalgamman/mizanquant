@@ -54,9 +54,10 @@ _HALAL_WARM_MAX: int = int(os.environ.get("HALAL_WARM_MAX", "120"))
 # "aaoifi" → ratios are taken over TOTAL ASSETS (AAOIFI Standard 21; stricter,
 # price-independent). "djim" → over trailing 24-month avg market cap (legacy/lenient).
 HALAL_STANDARD: str = os.environ.get("HALAL_STANDARD", "aaoifi").lower()
-# AAOIFI Standard 21 canonical defaults; scholars vary (some use 33%) — all tunable.
-HALAL_DEBT_MAX: float = float(os.environ.get("HALAL_DEBT_MAX", "30"))
-HALAL_LIQUIDITY_MAX: float = float(os.environ.get("HALAL_LIQUIDITY_MAX", "30"))
+# AAOIFI total-assets denominator; debt+liquidity at 33% per owner choice (matches the
+# reference Dow Jones Islamic tool). Scholars vary (Standard 21 canonical is 30%) — all tunable.
+HALAL_DEBT_MAX: float = float(os.environ.get("HALAL_DEBT_MAX", "33"))
+HALAL_LIQUIDITY_MAX: float = float(os.environ.get("HALAL_LIQUIDITY_MAX", "33"))
 HALAL_INTEREST_MAX: float = float(os.environ.get("HALAL_INTEREST_MAX", "5"))
 HALAL_RECEIVABLE_MAX: float = float(os.environ.get("HALAL_RECEIVABLE_MAX", "49"))
 # Bump (auto-derived) so any standard/threshold/activity change invalidates cached

@@ -32,8 +32,8 @@ def test_rescreen_partitions_pass_fail_unknown():
     assert out["checked"] == 4 and out["passed"] == 1
     failed = {f["symbol"]: f for f in out["failed"]}
     assert set(failed) == {"DEBT", "LIQ"}
-    assert "debt 39.4% > 30%" in failed["DEBT"]["reason"]
-    assert "liquidity 40.0% > 30%" in failed["LIQ"]["reason"]
+    assert "debt 39.4% > 33%" in failed["DEBT"]["reason"]
+    assert "liquidity 40.0% > 33%" in failed["LIQ"]["reason"]
     assert out["unknown"] == ["NODATA"]
 
 
