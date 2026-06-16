@@ -4806,9 +4806,18 @@ async def screener_daytrade(limit: int = Query(30, ge=5, le=60)):
                 from app.services.daytrade_scan import scan_explosion
                 from app.services.reference_data import get_tradable_symbols
                 from app.services.universe import _SP500_ALL
-                # Full Alpaca tradable US-equity universe (~thousands); liquidity-gated +
-                # chunked inside scan_explosion. Fall back to the S&P 500 if Alpaca is unavailable.
-                universe = sorted(get_tradable_symbols()) or list(_SP500_ALL)
+                try:
+                    from app.data.russell1000_halal import RUSSELL_1000_HALAL as _RUSSELL
+                except Exception:
+                    _RUSSELL = []
+                # The full Alpaca tradable list is ~11k (mostly illiquid OTC) — fetching all of
+                # it is too slow. Prioritize the known-liquid large/mid caps (S&P 500 + Russell)
+                # FIRST, then fill from the broader tradable list, capped — so the scan covers the
+                # liquid names that matter, goes well beyond ~650, and stays ~1-2 min. The
+                # liquidity gate inside scan_explosion still filters the tail. Cap is env-tunable.
+                cap = int(os.environ.get("DAYTRADE_UNIVERSE_CAP", "2500"))
+                tradable = sorted(get_tradable_symbols())
+                universe = list(dict.fromkeys([*_SP500_ALL, *_RUSSELL, *tradable]))[:cap] or list(_SP500_ALL)
                 rows = scan_explosion(universe, limit=60)
                 if rows:
                     _cache_set("daytrade_scan", {"results": rows, "universe_size": len(universe)})
