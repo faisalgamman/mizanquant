@@ -56,6 +56,7 @@ function App() {
   const [ledgerM, setLedgerM]     = useState(null);        // monthly paper-ledger status (PVM)
   const [ledgerP, setLedgerP]     = useState(null);        // pairs paper-ledger status (PVP)
   const [pairsData, setPairsData] = useState(null);        // halal pairs signals (cointegration)
+  const [daytrade, setDaytrade]   = useState(null);        // technical "explosion" scan (RESEARCH — all stocks, not halal-gated)
   const [backtest, setBacktest]   = useState(null);        // on-demand 2y backtest for the selected symbol
   const [cardSymbol, setCardSymbol] = useState(null);      // Stock ID Card target symbol
   const [brokerHealth, setBrokerHealth] = useState(null);    // IBKR paper connectivity
@@ -252,6 +253,21 @@ function App() {
     return () => { cancelled = true; };
   }, [scanMode]);
 
+  // Day-trade "explosion" scan (RESEARCH — all stocks, technical-only, NOT halal-gated).
+  // Lazy: only when the tab is open. The endpoint returns {status:"scanning"} on a cold
+  // cache (it kicks a background scan), so poll until results arrive, then keep fresh.
+  useEffect(() => {
+    if (scanMode !== "daytrade") return;
+    let cancelled = false;
+    const load = async () => {
+      try { const d = await (await fetch('/api/screener/daytrade?limit=40')).json(); if (!cancelled) setDaytrade(d || {}); }
+      catch (e) { if (!cancelled) setDaytrade({ error: String(e) }); }
+    };
+    load();
+    const poll = setInterval(load, 20000);
+    return () => { cancelled = true; clearInterval(poll); };
+  }, [scanMode]);
+
   // Manual "Record now" — kick the session-gated record-now endpoint for the
   // current scanner, then re-fetch the ledger status after the job has had time
   // to run. Honest: the write is real (simulated trades), not a fake.
@@ -410,9 +426,17 @@ function App() {
 
   // Real signals only — never fabricate. Empty → ScanColumn shows scanning state.
   const displaySignals = signals;
+  // Day-trade rows → signal-shaped objects so the Analyze card HEADER renders for a research
+  // pick (its technical card + Monte-Carlo forecast are symbol-keyed regardless of the list).
+  const daytradeSignals = ((daytrade && daytrade.results) || []).map(r => ({
+    symbol: r.symbol, company: r.symbol, price: r.price || 0, chg: r.change_pct || 0,
+    score: r.explosion_score || 0,
+    verdict: r.explosion_score >= 70 ? "STRONG" : r.explosion_score >= 45 ? "WATCH" : "—",
+    halal: r.halal_verdict === "halal", halalVerdict: r.halal_verdict || undefined,
+  }));
   // The active list depends on the scanner tab; the selected symbol can come
   // from either (Analyze/Forecast/Consensus are symbol-keyed, mode-agnostic).
-  const activeList     = scanMode === "monthly" ? monthly : displaySignals;
+  const activeList     = scanMode === "monthly" ? monthly : scanMode === "daytrade" ? daytradeSignals : displaySignals;
   const selectedSym    = selectedSymbol || activeList[0]?.symbol || displaySignals[0]?.symbol;
 
   // Auto-clear toast
@@ -502,6 +526,7 @@ function App() {
     activeList.find(s => s.symbol === selectedSym) ||
     displaySignals.find(s => s.symbol === selectedSym) ||
     monthly.find(s => s.symbol === selectedSym) ||
+    daytradeSignals.find(s => s.symbol === selectedSym) ||
     activeList[0] || displaySignals[0];
 
   // Trigger the REAL pipeline and reflect its actual stage status (no fake
@@ -628,6 +653,7 @@ function App() {
             ledgerMonthly={ledgerM}
             ledgerPairs={ledgerP}
             pairs={pairsData}
+            daytrade={daytrade}
             watch={watch}
             onRecord={onRecordPaper}
             recording={recording}

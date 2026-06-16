@@ -4777,6 +4777,49 @@ async def screener_watch(limit: int = Query(20, ge=1, le=100)):
 
 
 # ---------------------------------------------------------------------------
+# Day-trade "explosion" scanner — technical-only, ALL stocks, RESEARCH (not halal-gated)
+# ---------------------------------------------------------------------------
+_daytrade_scanning = False
+
+
+@app.get("/api/screener/daytrade")
+async def screener_daytrade(limit: int = Query(30, ge=5, le=60)):
+    """RESEARCH ONLY — technical "explosion" rank over the full S&P 500 (incl. non-halal).
+
+    Ranks by a 0-100 technical score (RVOL + momentum + volatility + gap) on daily bars.
+    Ignores the halal gate by DESIGN (research/display). Strictly isolated: its own cache key
+    (`daytrade_scan`), never touches the halal smart_screener cache, the ledgers, or the trade
+    path — execute_buy stays halal-gated. `halal_verdict` per row is a best-effort cached flag.
+    """
+    cached = _cache_get("daytrade_scan", max_age=900)  # 15 min
+    if cached and cached.get("results"):
+        rows = cached["results"][:limit]
+        return {"research_only": True, "source": "cache", "count": len(rows), "results": rows}
+
+    global _daytrade_scanning
+    if not _daytrade_scanning:
+        _daytrade_scanning = True
+
+        def _run():
+            global _daytrade_scanning
+            try:
+                from app.services.daytrade_scan import scan_explosion
+                from app.services.universe import _SP500_ALL
+                rows = scan_explosion(list(_SP500_ALL), limit=60)
+                if rows:
+                    _cache_set("daytrade_scan", {"results": rows})
+            except Exception as e:
+                logger.warning("daytrade scan failed: %s", e)
+            finally:
+                _daytrade_scanning = False
+
+        import threading
+        threading.Thread(target=_run, daemon=True, name="daytrade-scan").start()
+
+    return {"research_only": True, "status": "scanning", "results": []}
+
+
+# ---------------------------------------------------------------------------
 # Monte-Carlo forecast risers — top stocks by expected upside (probabilistic)
 # ---------------------------------------------------------------------------
 

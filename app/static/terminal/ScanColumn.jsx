@@ -204,7 +204,63 @@ function ScanTabs({ mode, onMode }) {
       {tab("weekly", "Weekly", "swing · technical")}
       {tab("monthly", "Monthly", "composite · fund.")}
       {tab("pairs", "Pairs", "cointegration")}
+      {tab("daytrade", "انفجار", "فني · بحث")}
     </div>
+  );
+}
+
+// Day-trade "explosion" research scanner — technical-only, ALL stocks (NOT halal-gated).
+// Ranks by a 0-100 explosion score (RVOL + momentum + volatility + gap) on daily bars.
+// Clicking a row selects the symbol so the Analyze column shows its full card + Monte Carlo.
+function ExplosionList({ daytrade, selectedSymbol, onSelect }) {
+  const muted = "var(--text-muted)";
+  if (daytrade == null) {
+    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>جارٍ مسح الانفجار…</div>;
+  }
+  if (daytrade.error) {
+    return <div style={{ padding: "28px 12px", textAlign: "center", fontSize: 12, color: "var(--red)" }}>تعذّر المسح: {String(daytrade.error).slice(0, 120)}</div>;
+  }
+  const rows = daytrade.results || [];
+  if (rows.length === 0) {
+    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>جارٍ مسح ~500 سهم (S&amp;P 500) لإيجاد المرشّحة للانفجار…</div>;
+  }
+  const hbadge = (v) => {
+    if (v === "halal") return <Badge kind="accent">حلال</Badge>;
+    if (v === "doubtful") return <span style={{ fontSize: 9, fontWeight: 700, color: "var(--amber, #d9a441)" }}>⚠ مشكوك</span>;
+    if (v === "non_compliant") return <span style={{ fontSize: 9, fontWeight: 700, color: "var(--red)" }}>✗ حرام</span>;
+    return <span style={{ fontSize: 9, color: muted }}>—</span>;
+  };
+  return (
+    <>
+      <div className="watch-banner" style={{ color: "var(--red)", borderColor: "var(--red)" }}>
+        🔬 بحث فنّي · كل الأسهم (S&amp;P 500) · غير محكوم بالحلال · لا يُتداول
+      </div>
+      <div style={{ fontSize: 9, color: muted, margin: "6px 0" }}>
+        {rows.length} سهماً · مرتّبة حسب درجة الانفجار (حجم + زخم + تقلّب + فجوة) · بيانات يومية
+      </div>
+      <div className="s-table-wrap">
+        <table className="s-table">
+          <thead><tr><th>Symbol</th><th>انفجار</th><th>تغيّر</th><th>RVOL</th><th>فجوة</th><th>حلال؟</th></tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.symbol + i} onClick={() => r.symbol && onSelect && onSelect(r.symbol)}
+                  className={r.symbol === selectedSymbol ? "active" : ""}
+                  style={{ cursor: "pointer" }} title="اعرض البطاقة الكاملة + مونتكارلو">
+                <td style={{ fontWeight: 600 }}>{r.symbol}</td>
+                <td><strong style={{ color: "var(--accent)" }}>{r.explosion_score}</strong></td>
+                <td className="mono" style={{ color: (r.change_pct || 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>{((r.change_pct || 0) >= 0 ? "+" : "") + r.change_pct}%</td>
+                <td className="mono">{r.rvol}x</td>
+                <td className="mono">{((r.gap_pct || 0) >= 0 ? "+" : "") + r.gap_pct}%</td>
+                <td>{hbadge(r.halal_verdict)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 9, color: muted, textAlign: "center", lineHeight: 1.5 }}>
+        تحليل فنّي بحت للتداول اليومي/قصير المدى — اضغط أي سهم لعرض البطاقة الكاملة + مونتكارلو. عرض بحثي فقط؛ مسار الشراء يبقى محكوماً بالحلال (لا يُنفَّذ شراء سهم غير حلال).
+      </div>
+    </>
   );
 }
 
@@ -381,7 +437,7 @@ function ScanEmpty({ status, mode, scanPct }) {
 
 function ScanColumn(props) {
   const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
-          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, ledgerPairs, pairs, watch, monthlyScanPct,
+          signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, ledgerPairs, pairs, daytrade, watch, monthlyScanPct,
           onRecord, recording } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
@@ -389,6 +445,7 @@ function ScanColumn(props) {
 
   const monthlyMode = scanMode === "monthly";
   const pairsMode   = scanMode === "pairs";
+  const daytradeMode = scanMode === "daytrade";
   const list   = monthlyMode ? (monthlySignals || []) : signals;
   const status = monthlyMode ? monthlyStatus : signalsStatus;
   const top3   = list.slice(0, 3);
@@ -413,10 +470,12 @@ function ScanColumn(props) {
       <div className="wf-section">
         <div className="wf-head">
           <span className="wf-title">Scanners</span>
-          <span className="wf-sub">{pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
+          <span className="wf-sub">{daytradeMode ? "day-trade · ~500 symbols · technical · research" : pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
         </div>
         <ScanTabs mode={scanMode} onMode={onScanMode} />
-        {pairsMode ? (
+        {daytradeMode ? (
+          <ExplosionList daytrade={daytrade} selectedSymbol={selectedSymbol} onSelect={onSelect} />
+        ) : pairsMode ? (
           <>
             <LedgerBanner ledger={ledgerPairs} kind="Pairs" />
             <PairsList pairs={pairs} />
