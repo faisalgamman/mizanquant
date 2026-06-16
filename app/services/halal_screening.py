@@ -134,6 +134,18 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _age_days(ts) -> Optional[int]:
+    """Whole days since ``ts``, tz-safe. ScreeningResult.last_screened comes back
+    tz-NAIVE from the DB while _utc_now() is tz-AWARE; subtracting them directly raises
+    'can't subtract offset-naive and offset-aware datetimes'. Normalise to UTC-aware.
+    Returns None when ts is None."""
+    if ts is None:
+        return None
+    if getattr(ts, "tzinfo", None) is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (_utc_now() - ts).days
+
+
 def _safe_float(val, default: float = 0.0) -> float:
     """Convert value to float, treating None/NaN/Inf as default.
 
@@ -572,7 +584,7 @@ def get_halal_status(symbol: str) -> Optional[dict]:
                 ScreeningResult.symbol == symbol
             ).first()
             if row and row.last_screened:
-                age_days = (_utc_now() - row.last_screened).days
+                age_days = _age_days(row.last_screened)   # tz-safe
                 # Capture the payload while the session is open (row detaches on close).
                 cached_details = row.details if row.details else {
                     "symbol": row.symbol,
@@ -641,15 +653,13 @@ def warm_fundamentals_cache(symbols: list[str], max_refresh: Optional[int] = Non
     except SQLAlchemyError as e:
         logger.error("warm_fundamentals: DB read failed: %s", e)
 
-    now = _utc_now()
-
-    def _age_days(sym: str) -> float:
-        ts = last_seen.get(sym)
-        return float("inf") if ts is None else (now - ts).days
+    def _sym_age(sym: str) -> float:
+        d = _age_days(last_seen.get(sym))   # tz-safe; None → missing
+        return float("inf") if d is None else d
 
     # Only stale/missing names need work; fresh ones are skipped (free).
-    stale = [s for s in ups if _age_days(s) >= _HALAL_CACHE_TTL_DAYS]
-    stale.sort(key=_age_days, reverse=True)  # most-stale (missing) first
+    stale = [s for s in ups if _sym_age(s) >= _HALAL_CACHE_TTL_DAYS]
+    stale.sort(key=_sym_age, reverse=True)  # most-stale (missing) first
     targets = stale[:max_refresh]
 
     refreshed = failed = 0

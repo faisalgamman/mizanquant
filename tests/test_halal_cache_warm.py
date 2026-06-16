@@ -5,7 +5,7 @@ ScreeningResult cache (warmed before market open) instead of fetching live funda
 and crawling on a blocked Yahoo. Covers: serve-fresh-from-cache, serve-STALE-on-refresh-
 failure (never drop a symbol during an outage), and stalest-first bounded warm-up.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import app.services.halal_screening as hs
@@ -95,6 +95,23 @@ def test_warm_refreshes_stalest_first_and_honors_cap(monkeypatch):
     assert out["skipped_fresh"] == 1         # BBB
     assert out["considered"] == 3            # AAA, CCC, DDD
     assert out["cap"] == 2
+
+
+def test_naive_last_screened_does_not_crash(monkeypatch):
+    # The DB returns last_screened tz-NAIVE; _utc_now() is tz-AWARE. get_halal_status must
+    # not raise "can't subtract offset-naive and offset-aware datetimes" (regression: this
+    # bug made EVERY cached symbol fail the scan → treated as non-halal).
+    details = {"symbol": "NAI", "is_halal": True, "screen_version": hs.HALAL_SCREEN_VERSION}
+    row = SimpleNamespace(
+        symbol="NAI", last_screened=datetime.utcnow() - timedelta(days=2),  # NAIVE
+        details=details, is_halal=True, debt_ratio=0, interest_ratio=0,
+        liquidity_ratio=0, sector="Tech",
+    )
+    monkeypatch.setattr(hs, "SessionLocal", lambda: _FakeSession(first=row))
+    monkeypatch.setattr(hs, "screen_and_store",
+                        lambda s: (_ for _ in ()).throw(AssertionError("should serve fresh cache, not refetch")))
+    out = hs.get_halal_status("NAI")
+    assert out == details   # fresh (2d < TTL), served from cache without a tz crash
 
 
 def test_warm_counts_failures(monkeypatch):
