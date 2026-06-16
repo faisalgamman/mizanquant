@@ -309,6 +309,15 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Keep the scanner lists self-updating: re-fetch weekly + monthly every 5 min so newly
+  // screened/halal stocks surface in an OPEN tab without a manual reload. The backend
+  // re-scans ~4x/day and the halal cache warms ~80 symbols/day; these are cheap cache
+  // reads (deep-picks 60-min TTL prevents re-kicking a heavy scan), so a gentle poll is safe.
+  useEffect(() => {
+    const id = setInterval(() => { loadBuys(); loadMonthly(); }, 300000);
+    return () => clearInterval(id);
+  }, []);
+
   // Load both paper-ledger statuses on mount, refresh every 60s.
   useEffect(() => {
     loadLedgers();
