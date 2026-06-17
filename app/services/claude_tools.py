@@ -191,6 +191,21 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "get_stock_news",
+        "description": "Recent news headlines for a stock (FMP primary, Alpaca fallback). Call this "
+                       "when recommending or explaining a stock, to tie any DIRECTLY-relevant headline "
+                       "(earnings, guidance, product, M&A, regulatory, analyst action) to the rationale. "
+                       "News is CONTEXT, not a price predictor — never fabricate causation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock symbol"},
+                "limit": {"type": "integer", "description": "Max headlines (default 6, max 12)"}
+            },
+            "required": ["symbol"]
+        }
+    },
+    {
         "name": "get_measurement_facts",
         "description": "Get MEASURED facts from OUR system: signal accuracy (OVERALL + BUY-SIDE), paper-trade graduation status, active USX version+weights, and static measured ICs from 8,849 buy outcomes (ONE month — weak evidence). Always cite this with its caveat: ~51% accuracy, no price prediction.",
         "input_schema": {
@@ -596,6 +611,54 @@ def _exec_get_explosion_picks(top_n: int = 10) -> dict:
             "research_only": True, "status": "ok", "count": len(picks), "picks": picks}
 
 
+def _exec_get_stock_news(symbol: str, limit: int = 6) -> dict:
+    """Recent headlines for a symbol (FMP primary, Alpaca fallback), normalized.
+
+    Returned so the agent can CONNECT a relevant headline to its rationale. News is context,
+    not a price predictor — the note tells the agent not to fabricate causation.
+    """
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        return {"status": "error", "message": "symbol required"}
+    limit = max(min(int(limit or 6), 12), 1)
+
+    raw = []
+    src = "fmp"
+    try:
+        from app.services.fmp_client import fmp_client
+        raw = fmp_client.get_stock_news(sym, limit=limit) or []
+    except Exception:
+        raw = []
+    if not raw:
+        try:
+            from app.services.market_data import get_alpaca_news
+            raw = get_alpaca_news(sym, limit=limit) or []
+            src = "alpaca"
+        except Exception:
+            raw = []
+
+    items = []
+    for n in (raw or [])[:limit]:
+        title = n.get("title") or n.get("headline") or ""
+        if not title:
+            continue
+        items.append({
+            "title": title,
+            "text": (n.get("text") or n.get("summary") or "")[:240],
+            "date": n.get("publishedDate") or n.get("published") or n.get("date") or "",
+            "source": n.get("site") or n.get("publisher") or src,
+            "url": n.get("url") or n.get("link") or "",
+        })
+    if not items:
+        return {"symbol": sym, "status": "no_news", "count": 0, "news": [],
+                "message": "No recent news available (or the news source is cold). Say the "
+                           "recommendation is technical/quant-driven, not news-driven."}
+    return {"symbol": sym, "status": "ok", "source": src, "count": len(items), "news": items,
+            "note": "Recent headlines = CONTEXT for the rationale, NOT a price predictor. Cite a "
+                    "headline only if it plausibly relates to the move/recommendation; never fabricate "
+                    "causation. If none are relevant, say the call is technical/quant-driven."}
+
+
 def _exec_get_signal_agreement(symbol: str) -> dict:
     """Cross-check a symbol across independent sources → a CALIBRATED confidence.
 
@@ -805,6 +868,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_risk_status": lambda **kw: _exec_get_risk_status(),
     "get_deep_picks": lambda **kw: _exec_get_deep_picks(kw.get("symbol"), kw.get("top_n", 10)),
     "get_explosion_picks": lambda **kw: _exec_get_explosion_picks(kw.get("top_n", 10)),
+    "get_stock_news": lambda **kw: _exec_get_stock_news(kw["symbol"], kw.get("limit", 6)),
     "get_signal_agreement": lambda **kw: _exec_get_signal_agreement(kw["symbol"]),
     "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
     "get_measurement_facts": lambda **kw: _exec_get_measurement_facts(),
