@@ -177,6 +177,20 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "get_explosion_picks",
+        "description": "RESEARCH-ONLY day-trade 'Explosion' scanner: ranks ALL liquid US stocks by a "
+                       "technical explosion score (relative volume + momentum + volatility + gap) on "
+                       "daily bars, for day/short-term trading research. NOT halal-screened and NOT "
+                       "tradeable — never present these as buy recommendations. Use ONLY when the user "
+                       "explicitly asks about the Explosion / day-trade scanner.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "top_n": {"type": "integer", "description": "Number of top movers to return (default 10, max 20)"}
+            }
+        }
+    },
+    {
         "name": "get_measurement_facts",
         "description": "Get MEASURED facts from OUR system: signal accuracy (OVERALL + BUY-SIDE), paper-trade graduation status, active USX version+weights, and static measured ICs from 8,849 buy outcomes (ONE month — weak evidence). Always cite this with its caveat: ~51% accuracy, no price prediction.",
         "input_schema": {
@@ -537,6 +551,51 @@ def _exec_get_deep_picks(symbol: str = None, top_n: int = 10) -> dict:
             "source": res.get("source"), "status": "ok", "count": len(picks), "picks": picks}
 
 
+def _exec_get_explosion_picks(top_n: int = 10) -> dict:
+    """RESEARCH-ONLY day-trade 'Explosion' scanner (technical-only, ALL liquid US stocks).
+
+    Reads the warm daytrade cache via /api/screener/daytrade. On a cold cache the endpoint
+    kicks a background scan and returns immediately, so we report 'not_ready' (don't block).
+    NOT halal-screened and NOT tradeable — the scanner_note tells the agent to treat it as
+    research and never present it as buy recommendations.
+    """
+    import asyncio
+    import concurrent.futures
+    limit = max(min(int(top_n or 10), 20), 1)
+    try:
+        from app.workspace_server import screener_daytrade
+
+        def _call():
+            return asyncio.run(screener_daytrade(limit=max(limit, 15)))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            res = ex.submit(_call).result(timeout=40)
+    except Exception as e:
+        return {"scanner": "explosion", "status": "error", "message": str(e)}
+
+    rows = res.get("results") if isinstance(res, dict) else None
+    if not rows:
+        return {"scanner": "explosion", "status": "not_ready", "count": 0, "picks": [],
+                "message": "The day-trade Explosion scan is not ready yet (cold cache / still "
+                           "scanning the liquid US universe, ~1-3 min). It is RESEARCH ONLY — "
+                           "technical, NOT halal-screened, NOT tradeable."}
+    picks = [{
+        "symbol": r.get("symbol"),
+        "explosion_score": r.get("explosion_score"),
+        "change_pct": r.get("change_pct"),
+        "rvol": r.get("rvol"),
+        "gap_pct": r.get("gap_pct"),
+        "halal_verdict": r.get("halal_verdict"),  # cached flag only; null = not screened
+    } for r in rows[:limit]]
+    return {"scanner": "explosion",
+            "scanner_note": "RESEARCH-ONLY day-trade 'explosion' scanner — technical-only "
+                            "(RVOL + momentum + volatility + gap) over ALL liquid US stocks. NOT "
+                            "halal-screened and NOT tradeable: NEVER present these as buy "
+                            "recommendations and never route them to a trade; the buy path is "
+                            "halal-gated. Use only for technical/day-trade research when asked.",
+            "research_only": True, "status": "ok", "count": len(picks), "picks": picks}
+
+
 def _exec_get_signal_agreement(symbol: str) -> dict:
     """Cross-check a symbol across independent sources → a CALIBRATED confidence.
 
@@ -745,6 +804,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_performance": lambda **kw: _exec_get_performance(),
     "get_risk_status": lambda **kw: _exec_get_risk_status(),
     "get_deep_picks": lambda **kw: _exec_get_deep_picks(kw.get("symbol"), kw.get("top_n", 10)),
+    "get_explosion_picks": lambda **kw: _exec_get_explosion_picks(kw.get("top_n", 10)),
     "get_signal_agreement": lambda **kw: _exec_get_signal_agreement(kw["symbol"]),
     "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
     "get_measurement_facts": lambda **kw: _exec_get_measurement_facts(),
