@@ -204,7 +204,7 @@ function ScanTabs({ mode, onMode }) {
       {tab("weekly", "Weekly", "swing · technical")}
       {tab("monthly", "Monthly", "composite · fund.")}
       {tab("pairs", "Pairs", "cointegration")}
-      {tab("daytrade", "انفجار", "فني · بحث")}
+      {tab("daytrade", "Explosion", "technical · research")}
     </div>
   );
 }
@@ -215,50 +215,43 @@ function ScanTabs({ mode, onMode }) {
 function ExplosionList({ daytrade, selectedSymbol, onSelect }) {
   const muted = "var(--text-muted)";
   if (daytrade == null) {
-    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>جارٍ مسح الانفجار…</div>;
+    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>Scanning for explosive movers…</div>;
   }
   if (daytrade.error) {
-    return <div style={{ padding: "28px 12px", textAlign: "center", fontSize: 12, color: "var(--red)" }}>تعذّر المسح: {String(daytrade.error).slice(0, 120)}</div>;
+    return <div style={{ padding: "28px 12px", textAlign: "center", fontSize: 12, color: "var(--red)" }}>Scan failed: {String(daytrade.error).slice(0, 120)}</div>;
   }
   const rows = daytrade.results || [];
   if (rows.length === 0) {
-    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>جارٍ مسح آلاف الأسهم السائلة (Alpaca) للمرشّحة للانفجار… قد يستغرق ~1–3 دقائق ثم يُخزَّن.</div>;
+    return <div style={{ padding: "32px 12px", textAlign: "center", fontSize: 12, color: muted }}>Scanning thousands of liquid US stocks for explosion candidates… ~1–3 min, then cached.</div>;
   }
-  const hbadge = (v) => {
-    if (v === "halal") return <Badge kind="accent">حلال</Badge>;
-    if (v === "doubtful") return <span style={{ fontSize: 9, fontWeight: 700, color: "var(--amber, #d9a441)" }}>⚠ مشكوك</span>;
-    if (v === "non_compliant") return <span style={{ fontSize: 9, fontWeight: 700, color: "var(--red)" }}>✗ حرام</span>;
-    return <span style={{ fontSize: 9, color: muted }}>—</span>;
-  };
   return (
     <>
       <div className="watch-banner" style={{ color: "var(--red)", borderColor: "var(--red)" }}>
-        🔬 بحث فنّي · كل الأسهم الأمريكية السائلة · غير محكوم بالحلال · لا يُتداول
+        🔬 Technical research · all liquid US stocks · NOT halal-screened · not traded
       </div>
       <div style={{ fontSize: 9, color: muted, margin: "6px 0" }}>
-        {rows.length} سهماً · مرتّبة حسب درجة الانفجار (حجم + زخم + تقلّب + فجوة) · بيانات يومية
+        {rows.length} stocks · ranked by explosion score (volume + momentum + volatility + gap) · daily bars
       </div>
       <div className="s-table-wrap">
         <table className="s-table">
-          <thead><tr><th>Symbol</th><th>انفجار</th><th>تغيّر</th><th>RVOL</th><th>فجوة</th><th>حلال؟</th></tr></thead>
+          <thead><tr><th>Symbol</th><th>Explosion</th><th>Chg</th><th>RVOL</th><th>Gap</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={r.symbol + i} onClick={() => r.symbol && onSelect && onSelect(r.symbol)}
                   className={r.symbol === selectedSymbol ? "active" : ""}
-                  style={{ cursor: "pointer" }} title="اعرض البطاقة الكاملة + مونتكارلو">
+                  style={{ cursor: "pointer" }} title="Open full card + Monte Carlo">
                 <td style={{ fontWeight: 600 }}>{r.symbol}</td>
                 <td><strong style={{ color: "var(--accent)" }}>{r.explosion_score}</strong></td>
                 <td className="mono" style={{ color: (r.change_pct || 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>{((r.change_pct || 0) >= 0 ? "+" : "") + r.change_pct}%</td>
                 <td className="mono">{r.rvol}x</td>
                 <td className="mono">{((r.gap_pct || 0) >= 0 ? "+" : "") + r.gap_pct}%</td>
-                <td>{hbadge(r.halal_verdict)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div style={{ marginTop: 6, fontSize: 9, color: muted, textAlign: "center", lineHeight: 1.5 }}>
-        تحليل فنّي بحت للتداول اليومي/قصير المدى — اضغط أي سهم لعرض البطاقة الكاملة + مونتكارلو. عرض بحثي فقط؛ مسار الشراء يبقى محكوماً بالحلال (لا يُنفَّذ شراء سهم غير حلال).
+        Pure technical scan for day / short-term trading — click any row for the full card + Monte Carlo. Research view only; the buy path stays halal-gated (a non-halal stock can't be traded).
       </div>
     </>
   );
@@ -470,7 +463,7 @@ function ScanColumn(props) {
       <div className="wf-section">
         <div className="wf-head">
           <span className="wf-title">Scanners</span>
-          <span className="wf-sub">{daytradeMode ? "day-trade · ~500 symbols · technical · research" : pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
+          <span className="wf-sub">{daytradeMode ? "day-trade · ~2500 liquid · technical · research" : pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
         </div>
         <ScanTabs mode={scanMode} onMode={onScanMode} />
         {daytradeMode ? (
