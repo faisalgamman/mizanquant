@@ -633,11 +633,13 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 @keyframes aiwPulse { 0% { box-shadow: 0 0 0 0 rgba(224,168,46,.55); }
   70% { box-shadow: 0 0 0 16px rgba(224,168,46,0); } 100% { box-shadow: 0 0 0 0 rgba(224,168,46,0); } }
 .aiw-fab-open .aiw-fab-pulse { animation: none; }
-.aiw-panel { position: absolute; bottom: 70px; left: 0; width: 460px; max-width: 94vw; height: 600px;
-  max-height: 80vh; background: var(--bg-surface, #14161c); border: 1px solid var(--border, #2a2d36);
+/* Half-page reading panel pinned to the RIGHT side, full height (the fab toggle stays
+   bottom-left). Bigger and on the opposite side so the agent's answers are easy to read. */
+.aiw-panel { position: fixed; top: 12px; right: 12px; bottom: 12px; left: auto; width: 50vw; max-width: 50vw;
+  height: auto; max-height: none; background: var(--bg-surface, #14161c); border: 1px solid var(--border, #2a2d36);
   border-radius: 14px; display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 12px 40px rgba(0,0,0,.5); animation: aiwSlide .18s ease-out; }
-@keyframes aiwSlide { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes aiwSlide { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 .aiw-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px;
   background: var(--bg-raised, #1c1f27); border-bottom: 1px solid var(--border, #2a2d36); font-size: 13px; }
 .aiw-head small { color: var(--text-muted, #8a8f99); }
@@ -674,7 +676,8 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   width: 38px; color: #1a1a1a; cursor: pointer; }
 .aiw-input button:disabled { opacity: .5; cursor: default; }
 .aiw-disc { font-size: 12px; color: var(--text-muted, #8a8f99); text-align: center; padding: 6px; }
-@media (max-width: 600px) { .aiw-panel { height: 70vh; } }
+/* Narrow screens: the half-page panel would be too cramped → go near-full-width. */
+@media (max-width: 900px) { .aiw-panel { width: auto; left: 8px; right: 8px; top: 8px; bottom: 8px; max-width: none; } }
 
 /* WATCH list — near-miss stocks */
 .watch-banner { background: var(--warning-dim, #3a2e0e); border: 1px solid var(--warning, #e0a82e);
