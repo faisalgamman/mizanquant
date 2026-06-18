@@ -38,9 +38,11 @@ TOOL_SCHEMAS = [
     {
         "name": "analyze_stock",
         "description": (
-            "Run full technical analysis on a US stock: price, EMA, RSI, MACD, "
-            "ATR, volume ratio, swing score (0-100), swing signal, support/resistance, "
-            "stop loss, take profit levels. Only analyzes halal-compliant stocks."
+            "Analyze a US stock using the SAME data the dashboard Analyze card shows: "
+            "Monthly composite score + verdict, price, change, the technical factor "
+            "breakdown (RS-vs-SPY, Trend, Regime, MACD, Volume, RSI, ADX, Bollinger, VWAP, "
+            "Gap), AAOIFI halal verdict, and ATR-based trade levels (entry/stop/take-profit). "
+            "Report the numbers it returns verbatim — they match the on-screen card."
         ),
         "input_schema": {
             "type": "object",
@@ -278,23 +280,163 @@ def _resolve_strategy(name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _exec_analyze_stock(symbol: str) -> dict:
-    """Full technical analysis with halal gate."""
-    import halal_screener as hs
+    """Analyze a stock from the SAME sources the dashboard Analyze card shows.
+
+    Earlier this tool used a legacy yfinance + swing-score path, so the agent
+    reported different numbers than the on-screen card (e.g. PWR: agent swing
+    10/100 @ $706 vs card composite 75/100 STRONG BUY @ $721). It now reads the
+    identical sources the Analyze column uses:
+      • headline composite + verdict + price + change → cached Monthly-composite
+        row (screener_deep_picks — exactly what the scanner/card displays) when
+        the symbol is among the live picks;
+      • technical factor breakdown (RS/Trend/Regime/MACD/Volume/RSI/ADX/BB/VWAP/
+        Gap) → weighted_score  (same engine as /api/v1/scoring/weighted);
+      • headline + halal verdict for non-pick symbols → _analyze_smart;
+      • trade levels → generate_trade_plan  (same as /api/v1/trade/plan).
+    Market data comes from Alpaca/Tiingo (the card's source), not yfinance.
+    """
+    import asyncio
+    import concurrent.futures
+
     symbol = symbol.upper().strip()
+    out: dict = {"symbol": symbol,
+                 "data_source": "dashboard Analyze card (composite + weighted_score + trade plan)"}
 
-    # Halal gate
-    is_halal, reason = hs.verify_halal(symbol)
-    if not is_halal:
-        return {"symbol": symbol, "blocked": True, "reason": reason}
+    # ── 1) Cached Monthly-composite row — the EXACT numbers the card header shows.
+    #    The UI scanner list is top-25 by composite (App.jsx → deep-picks?limit=25);
+    #    a symbol the user clicked to analyze is therefore in this list.
+    crow: dict = {}
+    try:
+        from app.workspace_server import screener_deep_picks
 
-    df = hs.fetch_yf(symbol)
-    if df is None or df.empty:
-        return {"error": f"Could not fetch market data for {symbol}"}
+        def _dp():
+            return asyncio.run(screener_deep_picks(limit=25, use_cache="true"))
 
-    result = hs.analyze(symbol, df)
-    if result is None:
-        return {"error": f"Analysis failed for {symbol}"}
-    return result
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            dp = ex.submit(_dp).result(timeout=40)
+        for r in (dp.get("results") or []):
+            if str(r.get("symbol", "")).upper() == symbol:
+                crow = r
+                break
+    except Exception as e:
+        logger.debug("analyze_stock deep-picks lookup failed for %s: %s", symbol, e)
+    out["in_scanner"] = bool(crow)
+
+    # ── 2) Market data — Alpaca/Tiingo, the SAME source the card uses (NOT yfinance).
+    df = spy_df = None
+    try:
+        from app.services.market_data import fetch
+        df = fetch(symbol, period="6mo")
+        spy_df = fetch("SPY", period="6mo")
+    except Exception as e:
+        logger.debug("analyze_stock data fetch failed for %s: %s", symbol, e)
+    if df is None and not crow:
+        return {"symbol": symbol, "error": f"Could not fetch market data for {symbol}"}
+
+    # ── 3) Technical factor breakdown — identical to the card's bars (37/109 style).
+    _MAX = {"rs": 25, "trend": 15, "regime": 15, "macd": 15, "volume": 10,
+            "rsi": 8, "adx": 7, "bb": 5, "vwap": 5, "gap": 4}
+    factors: dict = {}
+    technical_total = technical_max = technical_signal = None
+    if df is not None:
+        try:
+            from app.services.scoring import weighted_score, _score_to_dict
+            ws = _score_to_dict(weighted_score(df, spy_df=spy_df))
+            comps = ws.get("components") or {}
+            factors = {k: {"score": comps.get(k), "max": _MAX[k]} for k in _MAX if k in comps}
+            # The card's "37/109" sub-total is the SUM of component points (not the
+            # gated/bonused ws.total), so mirror that exactly.
+            technical_total = sum(int(comps[k]) for k in _MAX
+                                  if k in comps and isinstance(comps[k], (int, float)))
+            technical_max = sum(_MAX[k] for k in _MAX if k in comps) or 109
+            technical_signal = ws.get("signal")
+        except Exception as e:
+            logger.debug("analyze_stock weighted_score failed for %s: %s", symbol, e)
+
+    # ── 4) Headline (composite + verdict) + price/change/halal/sector.
+    #    Prefer the cached scanner row (what the card shows); else compute live.
+    smart: dict = {}
+    if not crow and df is not None:
+        try:
+            from app.workspace_server import _analyze_smart
+            smart = _analyze_smart(symbol, spy_df=spy_df) or {}
+        except Exception as e:
+            logger.debug("analyze_stock _analyze_smart failed for %s: %s", symbol, e)
+
+    src = crow or smart
+    composite_score = (src.get("composite_score")
+                       if src.get("composite_score") is not None else src.get("smart_score"))
+    verdict = src.get("signal_composite") or src.get("signal")
+    price = src.get("price")
+    change_pct = src.get("change_pct")
+    company = src.get("company") or src.get("name") or symbol
+    sector = src.get("sector") or ""
+    halal_verdict = src.get("halal_verdict") or ("halal" if src.get("is_halal") else None)
+    halal_reasons = src.get("halal_reasons") or []
+    if not halal_verdict:
+        try:
+            from app.services.halal_screening import get_halal_status
+            hstat = get_halal_status(symbol) or {}
+            halal_verdict = hstat.get("halal_verdict") or ("halal" if hstat.get("is_halal") else None)
+            halal_reasons = hstat.get("halal_reasons") or halal_reasons
+        except Exception:
+            pass
+
+    # ── 5) Trade levels — same generator as the card's /api/v1/trade/plan.
+    plan: dict = {}
+    if df is not None:
+        try:
+            from app.services.trade_plan import generate_trade_plan
+            plan = generate_trade_plan(df) or {}
+        except Exception as e:
+            logger.debug("analyze_stock trade_plan failed for %s: %s", symbol, e)
+
+    # ── 6) Reconciliation note — mirrors the card's two-lens reconciliation.
+    tech_strong = (technical_total is not None and technical_max
+                   and technical_total / technical_max >= 0.65)
+    verdict_buy = bool(verdict) and "BUY" in str(verdict).upper()
+    if tech_strong and not verdict_buy:
+        recon = "Technically strong, but fundamentals/system gates temper the net verdict."
+    elif (not tech_strong) and verdict_buy:
+        recon = "Net BUY thanks to fundamentals despite weak technicals."
+    else:
+        recon = ""
+
+    out.update({
+        "company": company,
+        "sector": sector,
+        "price": price,
+        "change_pct": change_pct,
+        # Headline (the card's big number) — Monthly composite when available.
+        "composite_score": composite_score,
+        "verdict": verdict,
+        "composite_max": 100,
+        # Technical lens (the card's factor bars).
+        "technical_score": technical_total,
+        "technical_max": technical_max,
+        "technical_signal": technical_signal,
+        "factors": factors,
+        "rsi": (src.get("momentum_details") or {}).get("rsi"),
+        "atr_pct": src.get("atr_pct"),
+        "ext_pct": src.get("ext_pct"),
+        # Halal — AAOIFI three-state, same verdict the card badge shows.
+        "halal_verdict": halal_verdict,
+        "halal_reasons": halal_reasons,
+        "tradeable_halal": halal_verdict == "halal",
+        # Trade levels — same as the card's trade plan.
+        "entry": plan.get("strategy_entry") or plan.get("entry_price") or plan.get("entry"),
+        "stop_loss": plan.get("strategy_stop") or plan.get("stop_loss") or plan.get("stop"),
+        "take_profit": plan.get("strategy_tp1") or plan.get("take_profit") or plan.get("tp1"),
+        "rr_ratio": plan.get("rr_ratio") or plan.get("strategy_rr"),
+        "reconciliation": recon,
+        "consistency_note": (
+            "These numbers come from the SAME sources as the dashboard Analyze card "
+            "(Monthly composite row + weighted_score + trade plan). Report them as-is — do "
+            "NOT recompute from another source. Any difference from the card is cache-refresh "
+            "timing, not a different engine. When the composite verdict (fundamentals) and the "
+            "technical bars disagree, state BOTH lenses honestly."),
+    })
+    return out
 
 
 def _exec_check_halal(symbol: str) -> dict:
