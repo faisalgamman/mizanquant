@@ -243,10 +243,11 @@ TOOL_SCHEMAS = [
     {
         "name": "get_signal_agreement",
         "description": (
-            "Cross-check ONE symbol across INDEPENDENT sources (weekly technical, monthly composite, "
-            "Monte-Carlo forecast direction) and return a CALIBRATED confidence "
+            "Cross-check ONE symbol across INDEPENDENT sources (technical — the SAME weighted_score "
+            "lens as the dashboard Analyze card, monthly composite, Monte-Carlo forecast direction) "
+            "and return a CALIBRATED confidence "
             "(INSUFFICIENT / LOW / LOW-MEDIUM / MEDIUM — never higher; the system is ~51% coin-flip) "
-            "plus any CONFLICTS (e.g. BUY vs falling RSI, BUY vs negative forecast). "
+            "plus any CONFLICTS (e.g. technical-vs-forecast, technical-vs-composite). "
             "Use this to STATE confidence — never invent a confidence number yourself."
         ),
         "input_schema": {
@@ -809,34 +810,42 @@ def _exec_get_signal_agreement(symbol: str) -> dict:
     unavailable are reported as such, never guessed. The honest ceiling is MEDIUM:
     the system is ~51% (coin-flip) on one month of data and does not predict prices.
     """
-    import halal_screener as hs
     symbol = symbol.upper().strip()
     sources: dict = {}
     bull = 0
     avail = 0
     conflicts: list[str] = []
 
-    # 1) Weekly technical (fast, reliable)
-    weekly_buy = False
+    # 1) Technical — the SAME weighted_score lens the dashboard Analyze card shows
+    #    (RS/Trend/Regime/MACD/Volume/RSI/ADX/Bollinger/VWAP/Gap), fed by Alpaca data.
+    #    Replaces the legacy yfinance swing read, which contradicted the card.
+    tech_bull = False
+    _MAX = {"rs": 25, "trend": 15, "regime": 15, "macd": 15, "volume": 10,
+            "rsi": 8, "adx": 7, "bb": 5, "vwap": 5, "gap": 4}
     try:
-        df = hs.fetch_yf(symbol)
-        row = hs.analyze(symbol, df) if df is not None else None
-        if row:
-            sig = str(row.get("swing_signal", "")).upper()
-            weekly_buy = "BUY" in sig
-            sources["weekly_technical"] = {
-                "signal": row.get("swing_signal"), "swing_score": row.get("swing_score"),
-                "rsi": row.get("rsi"), "rsi_trend": row.get("rsi_trend"),
+        from app.services.market_data import fetch as _md_fetch
+        from app.services.scoring import weighted_score, _score_to_dict
+        _df = _md_fetch(symbol, period="6mo")
+        _spy = _md_fetch("SPY", period="6mo")
+        if _df is not None and len(_df) > 20:
+            ws = _score_to_dict(weighted_score(_df, spy_df=_spy))
+            comps = ws.get("components") or {}
+            tech_pts = sum(int(comps[k]) for k in _MAX
+                           if k in comps and isinstance(comps[k], (int, float)))
+            tech_max = sum(_MAX[k] for k in _MAX if k in comps) or 109
+            tech_bull = tech_max > 0 and tech_pts / tech_max >= 0.65
+            sources["technical"] = {
+                "technical_score": tech_pts, "technical_max": tech_max,
+                "signal": ws.get("signal"),
+                "note": "same as the Analyze card's technical bars",
             }
             avail += 1
-            if weekly_buy:
+            if tech_bull:
                 bull += 1
-                if row.get("rsi_trend") == "Falling":
-                    conflicts.append("weekly BUY but RSI is falling (possible bearish divergence)")
         else:
-            sources["weekly_technical"] = {"available": False}
+            sources["technical"] = {"available": False}
     except Exception:
-        sources["weekly_technical"] = {"available": False}
+        sources["technical"] = {"available": False}
 
     # 2) Monthly composite (may be cold / not ready)
     try:
@@ -849,6 +858,8 @@ def _exec_get_signal_agreement(symbol: str) -> dict:
             avail += 1
             if comp >= 65:
                 bull += 1
+            elif comp < 38 and tech_bull:
+                conflicts.append("technicals are strong but the Monthly composite is weak (fundamentals drag)")
         else:
             sources["monthly_composite"] = {"available": False, "note": "monthly scan not ready"}
     except Exception:
@@ -869,8 +880,8 @@ def _exec_get_signal_agreement(symbol: str) -> dict:
                                        "prob_profit_pct": fc.get("prob_profit_pct")}
                 if ec > 0:
                     bull += 1
-                elif ec < 0 and weekly_buy:
-                    conflicts.append("weekly BUY but Monte-Carlo expected change is negative")
+                elif ec < 0 and tech_bull:
+                    conflicts.append("technical lens is bullish but Monte-Carlo expected change is negative")
         else:
             sources["forecast"] = {"available": False}
     except Exception:
