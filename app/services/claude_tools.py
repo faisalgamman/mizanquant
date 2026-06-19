@@ -258,6 +258,29 @@ TOOL_SCHEMAS = [
             "required": ["symbol"]
         }
     },
+    {
+        "name": "get_signal_calibration",
+        "description": (
+            "Measure whether a scanner's SCORE actually predicts forward returns, from the "
+            "paper-validation ledger: per-score-band win-rate & average return, the "
+            "score-vs-return rank correlation (+1 = higher score → higher return), a "
+            "monotonicity flag, and (monthly) per-component attribution. Use when the user "
+            "asks whether the scoring 'works' / is calibrated / which factors carry signal. "
+            "READ-ONLY measurement — small samples are directional, not proof; always surface "
+            "closed_trades and sufficient_sample."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "scanner": {
+                    "type": "string",
+                    "enum": ["weekly", "monthly", "pairs"],
+                    "description": "Which scanner's ledger to measure. Default 'weekly'."
+                }
+            },
+            "required": []
+        }
+    },
 ]
 DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
@@ -912,6 +935,19 @@ def _exec_get_signal_agreement(symbol: str) -> dict:
     }
 
 
+def _exec_get_signal_calibration(scanner: str = "weekly") -> dict:
+    """Read-only: does a higher scanner score actually yield a higher forward return?
+
+    Reads the paper-validation ledger (no trade-path impact). For the monthly scanner it
+    also attaches per-component attribution (which composite parts carry signal).
+    """
+    from app.services.signal_calibration import calibration_report, component_attribution
+    rep = calibration_report(scanner)
+    if str(scanner).lower() == "monthly":
+        rep["component_attribution"] = component_attribution("monthly")
+    return rep
+
+
 def _exec_get_accuracy_report(period_days: int = 30) -> dict:
     """Return trailing accuracy per signal source."""
     try:
@@ -1023,6 +1059,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_explosion_picks": lambda **kw: _exec_get_explosion_picks(kw.get("top_n", 10)),
     "get_stock_news": lambda **kw: _exec_get_stock_news(kw["symbol"], kw.get("limit", 6)),
     "get_signal_agreement": lambda **kw: _exec_get_signal_agreement(kw["symbol"]),
+    "get_signal_calibration": lambda **kw: _exec_get_signal_calibration(kw.get("scanner", "weekly")),
     "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
     "get_measurement_facts": lambda **kw: _exec_get_measurement_facts(),
     "record_recommendation": lambda **kw: _exec_record_recommendation(kw["symbol"], kw["verdict"], kw["confidence"], kw["rationale"]),

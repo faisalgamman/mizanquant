@@ -246,6 +246,9 @@ def _monthly_row_from_pick(pick: dict, account: float, top_n: int) -> dict:
             "score": pick.get("score") or pick.get("composite_score"),
             "signal": pick.get("signal") or pick.get("signal_composite"),
             "asof": _utc_now().isoformat(),
+            # Composite parts at entry → enables read-only component attribution later
+            # (signal_calibration.component_attribution). Additive; no behavior change.
+            **(pick.get("parts") or {}),
         },
     }
 
@@ -269,7 +272,13 @@ def _normalize_picks(picks) -> list[dict]:
             continue
         if not sym or price <= 0:
             continue
-        out.append({"symbol": sym, "price": price, "score": float(score or 0)})
+        # Carry the composite component parts through (when the source row has them) so
+        # the monthly ledger can store them for read-only component attribution.
+        parts = {k: p.get(k) for k in
+                 ("score_tech", "score_fund", "score_sentiment", "score_halal",
+                  "conviction_score", "confirmation_count")
+                 if isinstance(p.get(k), (int, float))}
+        out.append({"symbol": sym, "price": price, "score": float(score or 0), "parts": parts})
     return out
 
 

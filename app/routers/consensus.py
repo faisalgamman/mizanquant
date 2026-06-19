@@ -169,6 +169,20 @@ async def paper_validation_status(scanner: str = "weekly"):
     return paper_ledger_status(strategy_id=_strategy_for(scanner))
 
 
+@router.get("/api/signal-calibration")
+async def signal_calibration(scanner: str = "weekly", view: str = "calibration"):
+    """READ-ONLY measurement: does a higher scanner score actually yield a higher forward
+    return? Reads the paper ledger (no trade-path impact).
+
+    view=calibration (default) → per-score-band win-rate/avg-return + score↔return rank
+    correlation + monotonicity. view=attribution → per-component rank correlation (monthly).
+    """
+    from app.services.signal_calibration import calibration_report, component_attribution
+    if view == "attribution":
+        return component_attribution(scanner)
+    return calibration_report(scanner)
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,
