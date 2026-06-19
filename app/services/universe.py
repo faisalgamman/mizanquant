@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -154,6 +155,99 @@ def seed_from_fallback(db: Session):
             db.add(Universe(symbol=symbol, is_active=True))
     db.commit()
     logger.info("Seeded %d symbols into Universe table", len(HALAL_STOCKS_FALLBACK))
+
+
+# ── Universe expansion (EDGAR-backed, no FMP quota) ──────────────────────────
+# The binding constraint on universe size was FMP's fundamentals quota. With SEC
+# EDGAR as a free fundamentals source, the nightly warm job can halal-screen a much
+# larger candidate pool; the names that PASS are synced into the Universe table so
+# BOTH scanners (Weekly via get_universe_symbols, Monthly via a refreshed
+# _SMART_UNIVERSE) search the expanded set. The base 657 is always the floor.
+HALAL_UNIVERSE_CAP: int = int(os.environ.get("HALAL_UNIVERSE_CAP", "1500"))
+
+
+def build_halal_candidates(cap: Optional[int] = None) -> list[str]:
+    """Candidate pool to halal-screen: the base universe FLOOR + liquid Alpaca-tradable
+    US equities, deterministically prioritized and capped. EDGAR screens these for free;
+    the scanner's own penny/liquidity gates trim illiquid names at scan time, so no
+    separate volume pre-filter is needed here."""
+    cap = HALAL_UNIVERSE_CAP if cap is None else cap
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def _add(syms):
+        for s in syms:
+            u = str(s).upper().strip()
+            if u and u not in seen:
+                seen.add(u)
+                out.append(u)
+
+    _add(HALAL_STOCKS_FALLBACK)          # base floor — always first
+    _add(_SP500_ALL)                     # large-cap liquid
+    try:
+        from app.services.reference_data import get_tradable_symbols
+        _add(sorted(get_tradable_symbols()))
+    except Exception as exc:
+        logger.warning("build_halal_candidates: tradable fetch failed: %s", exc)
+    return out[: max(cap, len(HALAL_STOCKS_FALLBACK))]
+
+
+def sync_verified_halal_to_universe(cap: Optional[int] = None) -> int:
+    """Upsert EDGAR/FMP-verified halal names (current screen version) into the Universe
+    table as active, so both scanners search the expanded set. The base floor is always
+    kept; this never DEACTIVATES rows (the scanners' own halal gate still filters at scan
+    time). Returns the resulting active-halal count."""
+    cap = HALAL_UNIVERSE_CAP if cap is None else cap
+    try:
+        from app.db.models import ScreeningResult
+        from app.services.halal_screening import HALAL_SCREEN_VERSION
+    except Exception as exc:
+        logger.warning("sync_verified_halal: imports failed: %s", exc)
+        return 0
+
+    verified: list[str] = []
+    try:
+        db = SessionLocal()
+        try:
+            rows = (db.query(ScreeningResult.symbol, ScreeningResult.details)
+                      .filter(ScreeningResult.is_halal.is_(True)).all())
+            for sym, details in rows:
+                if isinstance(details, dict) and details.get("screen_version") == HALAL_SCREEN_VERSION:
+                    verified.append(str(sym).upper())
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("sync_verified_halal: DB read failed: %s", exc)
+        return 0
+
+    # Base floor first, then verified additions, deduped + capped.
+    seen: set[str] = set()
+    final: list[str] = []
+    for s in list(HALAL_STOCKS_FALLBACK) + verified:
+        u = str(s).upper()
+        if u and u not in seen:
+            seen.add(u)
+            final.append(u)
+    final = final[: max(cap, len(HALAL_STOCKS_FALLBACK))]
+
+    try:
+        db = SessionLocal()
+        try:
+            existing = {r[0].upper() for r in db.query(Universe.symbol).all()}
+            for sym in final:
+                if sym in existing:
+                    db.query(Universe).filter(Universe.symbol == sym).update({"is_active": True})
+                else:
+                    db.add(Universe(symbol=sym, is_active=True))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("sync_verified_halal: DB write failed: %s", exc)
+
+    logger.info("sync_verified_halal: %d active halal symbols (%d verified additions over the %d floor)",
+                len(final), max(0, len(final) - len(HALAL_STOCKS_FALLBACK)), len(HALAL_STOCKS_FALLBACK))
+    return len(final)
 
 
 def get_symbol_info(db: Session, symbol: str) -> Optional[dict]:

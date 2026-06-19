@@ -2990,9 +2990,31 @@ async def get_assistant_page():
 # Smart Screener — halal + profitability + fair price scoring (0-100)
 # ---------------------------------------------------------------------------
 
-# Full expanded halal universe (~657, from halal_universe_v2.json) — the SAME list
-# the weekly screener uses (both resolve to HALAL_STOCKS_FALLBACK).
-_SMART_UNIVERSE = HALAL_STOCKS_FALLBACK
+# Expanded halal universe. Starts at the ~657 base floor (halal_universe_v2.json); the
+# nightly EDGAR warm job syncs verified-halal names into the DB Universe table, and
+# _refresh_smart_universe() rebuilds this list from it at scan start — so the Monthly
+# scanner grows WITHOUT a restart (the Weekly scanner reads the same DB table directly).
+_SMART_UNIVERSE = list(HALAL_STOCKS_FALLBACK)
+
+
+def _refresh_smart_universe() -> int:
+    """Rebuild _SMART_UNIVERSE from the DB Universe table (the EDGAR-expanded halal set),
+    keeping the base fallback as the floor. Safe: reassigns a fresh list and only ever
+    GROWS past the floor; on any error it keeps the current value."""
+    global _SMART_UNIVERSE
+    try:
+        from app.db.database import SessionLocal
+        from app.services.universe import get_universe_symbols
+        db = SessionLocal()
+        try:
+            syms = get_universe_symbols(db)
+        finally:
+            db.close()
+        if syms and len(syms) >= len(HALAL_STOCKS_FALLBACK):
+            _SMART_UNIVERSE = list(dict.fromkeys(str(s).upper() for s in syms))
+    except Exception as e:
+        logger.debug("refresh_smart_universe failed: %s", e)
+    return len(_SMART_UNIVERSE)
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -3708,6 +3730,10 @@ async def _smart_screener_impl(
     if effective_min_score == 0:
         effective_min_score = market_status.get("min_gate", 60)
     strong_gate = market_status.get("strong_gate", 75)
+
+    # Pick up any EDGAR-verified halal additions synced into the Universe table since the
+    # last scan (grows _SMART_UNIVERSE past the 657 floor without a restart).
+    _refresh_smart_universe()
 
     # Load current watchlist to prioritize
     from app.services.watchlist_service import get_watchlist_set

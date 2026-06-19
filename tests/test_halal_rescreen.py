@@ -69,6 +69,10 @@ def test_screen_financials_passes_threshold_logic(monkeypatch):
     import types
     fake_yf = types.SimpleNamespace(Ticker=_T)
     monkeypatch.setitem(__import__("sys").modules, "yfinance", fake_yf)
+    # EDGAR is now the first free fallback source; disable it so the screen falls through
+    # to the stubbed yfinance ("XYZ" is a REAL EDGAR filer — Block Inc. — which would
+    # otherwise return live data and bypass the stub).
+    monkeypatch.setattr("app.services.edgar_client.get_fundamentals", lambda s: None)
     r = hr.screen_financials_yf("XYZ")
     assert r["debt_ratio"] == 40.0 and r["debt_pass"] is False  # 400/1000 = 40% > 30%
     assert r["liquidity_ratio"] == 5.0 and r["liquidity_pass"] is True

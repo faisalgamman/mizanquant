@@ -305,19 +305,33 @@ def _scheduler_loop():
                 last_fund_warm = today_str
                 try:
                     from app.services.halal_screening import warm_fundamentals_cache
-                    from app.workspace_server import _SMART_UNIVERSE as _SU
+                    from app.services.universe import (
+                        build_halal_candidates, sync_verified_halal_to_universe,
+                    )
 
                     def _warm_fund():
                         scheduler_metrics.record_cycle_start("warm_fundamentals")
                         try:
-                            out = warm_fundamentals_cache(list(_SU))
+                            # EDGAR-primary bulk screen over the EXPANDED candidate pool
+                            # (no FMP quota), then sync the verified-halal names into the
+                            # Universe table so BOTH scanners grow.
+                            cands = build_halal_candidates()
+                            out = warm_fundamentals_cache(cands, prefer_edgar=True)
+                            active = sync_verified_halal_to_universe()
+                            try:
+                                from app.workspace_server import _refresh_smart_universe
+                                _refresh_smart_universe()          # Monthly: same-day, no restart
+                                import halal_screener as _hs
+                                _hs._db_symbols = None              # Weekly: drop cached DB universe
+                            except Exception as _re:
+                                logger.debug("universe refresh after warm failed: %s", _re)
                             scheduler_metrics.record_cycle_end("warm_fundamentals", success=True)
-                            logger.info("Pre-market fundamentals warm: %s", out)
+                            logger.info("Pre-market fundamentals warm (EDGAR): %s; active_halal=%d", out, active)
                         except Exception as e:
                             scheduler_metrics.record_cycle_end("warm_fundamentals", success=False, error=str(e))
                             logger.error("Pre-market fundamentals warm failed: %s", e)
 
-                    logger.info("Scheduler: pre-market warming fundamentals (%d symbols)", len(_SU))
+                    logger.info("Scheduler: pre-market EDGAR warm over expanded halal candidates")
                     threading.Thread(target=_warm_fund, daemon=True, name="fund-warm").start()
                 except Exception as e:
                     logger.warning("Scheduler: fundamentals warm kickoff failed: %s", e)

@@ -59,13 +59,14 @@ def test_fresh_cache_is_served_without_refetch(monkeypatch):
 def test_stale_plus_refresh_failure_serves_stale_flagged(monkeypatch):
     details = {"symbol": "BBB", "is_halal": True, "screens_passed": 5,
                "screen_version": hs.HALAL_SCREEN_VERSION}
-    monkeypatch.setattr(hs, "SessionLocal", lambda: _FakeSession(first=_row("BBB", 20, details)))
+    _stale_age = hs._HALAL_CACHE_TTL_DAYS + 10   # past the (env-tunable) freshness window
+    monkeypatch.setattr(hs, "SessionLocal", lambda: _FakeSession(first=_row("BBB", _stale_age, details)))
     monkeypatch.setattr(hs.settings, "FMP_API_KEY", "x", raising=False)
     monkeypatch.setattr(hs, "screen_and_store", lambda s: None)  # live refresh fails
     out = hs.get_halal_status("BBB")
     assert out["is_halal"] is True          # last-known verdict preserved
     assert out["stale"] is True
-    assert out["stale_days"] == 20          # never dropped, just flagged
+    assert out["stale_days"] == _stale_age  # never dropped, just flagged
 
 
 def test_stale_plus_refresh_success_returns_fresh(monkeypatch):
@@ -85,7 +86,8 @@ def test_warm_refreshes_stalest_first_and_honors_cap(monkeypatch):
             ("CCC", now - timedelta(days=40))]
     monkeypatch.setattr(hs, "SessionLocal", lambda: _FakeSession(all_=rows))
     called = []
-    monkeypatch.setattr(hs, "screen_and_store", lambda s: called.append(s) or {"is_halal": True})
+    # screen_and_store now takes a prefer_edgar kwarg (warm path is EDGAR-primary).
+    monkeypatch.setattr(hs, "screen_and_store", lambda s, **kw: called.append(s) or {"is_halal": True})
 
     # DDD is missing entirely (most stale); cap to 2 refreshes.
     out = hs.warm_fundamentals_cache(["AAA", "BBB", "CCC", "DDD"], max_refresh=2)

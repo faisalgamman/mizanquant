@@ -44,11 +44,12 @@ _YF_TIMEOUT: float = float(os.environ.get("HALAL_YF_TIMEOUT", "8"))
 _YF_CB_THRESHOLD: int = int(os.environ.get("HALAL_YF_CB_THRESHOLD", "12"))
 _YF_CB_COOLDOWN: float = float(os.environ.get("HALAL_YF_CB_COOLDOWN", "300"))
 
-# How long a stored screen stays "fresh". Fundamentals are quarterly, so 14 days is
-# safe and keeps the daily warm-up within FMP quota (~47 refreshes/day for 657 names).
-_HALAL_CACHE_TTL_DAYS: int = int(os.environ.get("HALAL_CACHE_TTL_DAYS", "14"))
-# Max live refreshes per pre-market warm run — a cap on FMP's shared ~250/day budget.
-_HALAL_WARM_MAX: int = int(os.environ.get("HALAL_WARM_MAX", "120"))
+# How long a stored screen stays "fresh". Fundamentals are quarterly, so 30 days is safe
+# and — now that the warm path is EDGAR-primary (free, no quota) — it halves refresh churn.
+_HALAL_CACHE_TTL_DAYS: int = int(os.environ.get("HALAL_CACHE_TTL_DAYS", "30"))
+# Max refreshes per pre-market warm run. The warm path is EDGAR-primary (no FMP quota), so
+# this can cover the whole expanded universe in one night (~5 req/s → ~10 min for 1,500).
+_HALAL_WARM_MAX: int = int(os.environ.get("HALAL_WARM_MAX", "1500"))
 
 # ── Screening standard + thresholds (env-overridable) ────────────────────────
 # "aaoifi" → ratios are taken over TOTAL ASSETS (AAOIFI Standard 21; stricter,
@@ -289,6 +290,24 @@ def _yf_fallback(symbol: str) -> Optional[dict]:
     return result
 
 
+def _fundamentals_fallback(symbol: str) -> Optional[dict]:
+    """Free fundamentals chain: SEC EDGAR (no quota) → yfinance (breaker-protected).
+
+    Returns the {profile, bs, income} shape screen_symbol consumes. EDGAR is tried first
+    because it is free, unlimited, and AAOIFI-complete (total-assets denominator is
+    price-independent); yfinance is the last resort for non-EDGAR filers (ETF/foreign).
+    Only accept EDGAR when it actually yields the denominator (total assets > 0).
+    """
+    try:
+        from app.services.edgar_client import get_fundamentals as _edgar_fund
+        data = _edgar_fund(symbol)
+        if data and _safe_float((data.get("bs") or {}).get("totalAssets")) > 0:
+            return data
+    except Exception as e:
+        logger.debug("EDGAR fundamentals failed for %s: %s", symbol, e)
+    return _yf_fallback(symbol)
+
+
 def _avg_market_cap_24m(symbol: str, shares: float, spot_mcap: float) -> tuple[float, str]:
     """Compute trailing 24-month average market cap for DJIM ratio denominator.
 
@@ -314,7 +333,7 @@ def _avg_market_cap_24m(symbol: str, shares: float, spot_mcap: float) -> tuple[f
         return spot_mcap, "spot_fallback"
 
 
-def screen_symbol(symbol: str) -> Optional[dict]:
+def screen_symbol(symbol: str, prefer_edgar: bool = False) -> Optional[dict]:
     """Run DJIM-standard Halal screening on a single symbol.
 
     Implements the Dow Jones Islamic Market 3-ratio financial screens
@@ -325,18 +344,27 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     Returns a dict with screening results, or None if data unavailable.
     Uses FMP API with yfinance fallback for premium-blocked symbols.
     """
-    # 1. Fetch profile (market cap + sector/industry)
-    profile = fmp_client.get_profile(symbol)
-    if not profile:
-        yf_data = _yf_fallback(symbol)
-        if not yf_data:
-            return None
-        profile = yf_data["profile"]
-        bs = yf_data["bs"]
-        income = yf_data["income"]
+    # Warm/bulk path: try the FREE EDGAR source FIRST so a large universe screens without
+    # spending FMP's daily quota. On-demand calls keep FMP primary (prefer_edgar=False).
+    _forced = _fundamentals_fallback(symbol) if prefer_edgar else None
+    if _forced:
+        profile = _forced["profile"]
+        bs = _forced["bs"]
+        income = _forced["income"]
         used_fallback = True
     else:
-        used_fallback = False
+        # 1. Fetch profile (market cap + sector/industry)
+        profile = fmp_client.get_profile(symbol)
+        if not profile:
+            yf_data = _fundamentals_fallback(symbol)
+            if not yf_data:
+                return None
+            profile = yf_data["profile"]
+            bs = yf_data["bs"]
+            income = yf_data["income"]
+            used_fallback = True
+        else:
+            used_fallback = False
 
     market_cap = _safe_float(profile.get("marketCap")) or _safe_float(profile.get("mktCap"))
     # Shares outstanding for 24m avg mcap calculation
@@ -349,7 +377,11 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     industry = (profile.get("industry") or "").lower().strip()
     company_name = profile.get("companyName", symbol)
 
-    if market_cap <= 0:
+    if market_cap <= 0 and HALAL_STANDARD != "aaoifi":
+        # Only the DJIM path needs market cap (it is the denominator). Under AAOIFI the
+        # denominator is total assets (price-independent), so a missing market cap must
+        # NOT abort the screen — EDGAR often has no market cap. total-assets availability
+        # is checked below via data_unavailable (→ doubtful, fail-safe).
         logger.warning(f"No market cap for {symbol}")
         return None
 
@@ -365,11 +397,11 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     activity, activity_reason = _classify_activity(sector, industry)
     needs_manual_review = activity == "doubtful"
 
-    # 3. Fetch balance sheet (skip if already from yfinance)
+    # 3. Fetch balance sheet (skip if already from a fallback source)
     if not used_fallback:
         bs_data = fmp_client.get_balance_sheet(symbol, limit=1)
         if not bs_data:
-            yf_data = _yf_fallback(symbol)
+            yf_data = _fundamentals_fallback(symbol)
             if not yf_data:
                 return None
             bs = yf_data["bs"]
@@ -385,11 +417,11 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     net_receivables = _safe_float(bs.get("netReceivables"))
     total_assets = _safe_float(bs.get("totalAssets"))
 
-    # 4. Fetch income statement (skip if already from yfinance)
+    # 4. Fetch income statement (skip if already from a fallback source)
     if not used_fallback:
         is_data = fmp_client.get_income_statement(symbol, limit=1)
         if not is_data:
-            yf_data = _yf_fallback(symbol)
+            yf_data = _fundamentals_fallback(symbol)
             if not yf_data:
                 return None
             income = yf_data["income"]
@@ -523,9 +555,9 @@ def screen_symbol(symbol: str) -> Optional[dict]:
     return result
 
 
-def screen_and_store(symbol: str) -> Optional[dict]:
+def screen_and_store(symbol: str, prefer_edgar: bool = False) -> Optional[dict]:
     """Screen a symbol and persist results to database."""
-    result = screen_symbol(symbol)
+    result = screen_symbol(symbol, prefer_edgar=prefer_edgar)
     if result is None:
         return None
 
@@ -624,7 +656,8 @@ def get_halal_status(symbol: str) -> Optional[dict]:
     return None
 
 
-def warm_fundamentals_cache(symbols: list[str], max_refresh: Optional[int] = None) -> dict:
+def warm_fundamentals_cache(symbols: list[str], max_refresh: Optional[int] = None,
+                            prefer_edgar: bool = True) -> dict:
     """Pre-market warm-up: refresh the STALEST / missing ScreeningResult rows first.
 
     Selects symbols whose cached screen is older than the TTL (missing = most stale),
@@ -664,7 +697,7 @@ def warm_fundamentals_cache(symbols: list[str], max_refresh: Optional[int] = Non
     refreshed = failed = 0
     for sym in targets:
         try:
-            if screen_and_store(sym) is not None:
+            if screen_and_store(sym, prefer_edgar=prefer_edgar) is not None:
                 refreshed += 1
             else:
                 failed += 1
