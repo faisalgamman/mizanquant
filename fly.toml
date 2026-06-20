@@ -1,0 +1,37 @@
+# Fly.io deployment for mizanquant — see FLY_MIGRATION.md for the full runbook.
+# Railway keeps using railway.json + Dockerfile and IGNORES this file, so it is safe to
+# commit while still on Railway. The app already binds 0.0.0.0:$PORT (workspace_server.main).
+app = "mizanquant"
+primary_region = "iad"   # US-East (close to Alpaca/FMP/IBKR US endpoints); change if you prefer
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  CACHE_DIR = "/data"      # persistent volume mount (see [[mounts]])
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # ALWAYS-ON: the scheduler is an in-process thread (off-session precompute, paper ledgers,
+  # outcome matching). The machine must NEVER sleep, or those jobs stop firing.
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "120s"
+    method = "GET"
+    path = "/health"
+
+# Persistent disk for CACHE_DIR=/data (OHLCV/halal/screener warm caches, SQLite fallback, backups).
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"        # bump to 2048 if you hit OOM; Railway's 2GB was a ceiling, not usage
