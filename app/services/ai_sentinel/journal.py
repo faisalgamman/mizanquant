@@ -199,3 +199,109 @@ def match_outcomes(lookback_days: int = 30) -> dict:
         raise
     finally:
         db.close()
+
+
+def record_decision_if_new(symbol: str, kind: str, verdict: str, confidence: float,
+                           rationale: str, context: Optional[dict] = None,
+                           dedup_minutes: int = 60) -> Optional[int]:
+    """``record_decision`` but skips when a decision for the same symbol was recorded
+    within ``dedup_minutes`` — so the LLM's own record_recommendation and the chat
+    auto-capture don't double-log the same call. Returns the new id, or None if skipped."""
+    from app.db.database import SessionLocal
+    from app.db.models import AgentDecision
+    try:
+        db = SessionLocal()
+        try:
+            recent = (
+                db.query(AgentDecision)
+                .filter(AgentDecision.symbol == symbol.upper(),
+                        AgentDecision.created_at >= _utc_now() - timedelta(minutes=dedup_minutes))
+                .first()
+            )
+            if recent is not None:
+                return None
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return record_decision(symbol, kind, verdict, confidence, rationale, context)
+
+
+def performance_summary(lookback_days: int = 90) -> dict:
+    """The agent's OWN measured track record — the LEARNING layer (recent_decisions is only
+    retrieval). Aggregates SCORED decisions (those match_outcomes has labelled) into hit-rate
+    + average outcome, overall and by verdict, so the system prompt can tell the agent to
+    calibrate its confidence on its real past accuracy."""
+    from app.db.database import SessionLocal
+    from app.db.models import AgentDecision
+    cutoff = _utc_now() - timedelta(days=lookback_days)
+    db = SessionLocal()
+    try:
+        rows = db.query(AgentDecision).filter(AgentDecision.created_at >= cutoff).all()
+    except Exception:
+        return {"scored": 0}
+    finally:
+        db.close()
+
+    scored = []
+    for r in rows:
+        snap = r.snapshot or {}
+        lbl, pct = snap.get("outcome_label"), snap.get("outcome_pct")
+        if lbl in ("win", "loss", "flat") and isinstance(pct, (int, float)):
+            scored.append((str(r.verdict or "").upper(), float(pct), lbl))
+    n = len(scored)
+    if n == 0:
+        return {"scored": 0, "note": "no scored recommendations yet (outcomes accrue as the matcher runs)"}
+
+    wins = sum(1 for _, _, lbl in scored if lbl == "win")
+    by_verdict: dict[str, dict] = {}
+    for v in sorted(set(x[0] for x in scored)):
+        grp = [(p, lbl) for vv, p, lbl in scored if vv == v]
+        gn = len(grp)
+        by_verdict[v] = {
+            "n": gn,
+            "win_rate": round(sum(1 for _, lbl in grp if lbl == "win") / gn * 100, 1),
+            "avg_pct": round(sum(p for p, _ in grp) / gn, 2),
+        }
+    return {
+        "scored": n,
+        "win_rate": round(wins / n * 100, 1),
+        "avg_pct": round(sum(p for _, p, _ in scored) / n, 2),
+        "by_verdict": by_verdict,
+        "lookback_days": lookback_days,
+    }
+
+
+def save_transcript(conversation_id: str, user_text: str, assistant_text: str,
+                    max_turns: int = 60) -> bool:
+    """Append a (user, assistant) exchange to the durable AgentConversation transcript so
+    the agent's advice survives past the in-memory 30-min TTL and can be reviewed. Text
+    only (JSON-safe); capped to the last ``max_turns`` exchanges. Never raises."""
+    if not conversation_id:
+        return False
+    from app.db.database import SessionLocal
+    from app.db.models import AgentConversation
+    try:
+        db = SessionLocal()
+        try:
+            row = (db.query(AgentConversation)
+                     .filter(AgentConversation.conversation_id == conversation_id).first())
+            msgs = list(row.messages) if (row and row.messages) else []
+            ts = _utc_now().isoformat()
+            if user_text:
+                msgs.append({"role": "user", "text": str(user_text)[:4000], "ts": ts})
+            if assistant_text:
+                msgs.append({"role": "ai", "text": str(assistant_text)[:6000], "ts": ts})
+            msgs = msgs[-(max_turns * 2):]
+            if row:
+                row.messages = msgs
+                row.turns = (row.turns or 0) + 1
+            else:
+                db.add(AgentConversation(conversation_id=conversation_id, messages=msgs, turns=1))
+            db.commit()
+            return True
+        finally:
+            db.close()
+    except Exception:
+        logger.debug("save_transcript failed", exc_info=True)
+        return False

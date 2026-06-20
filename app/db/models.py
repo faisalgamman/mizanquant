@@ -223,6 +223,18 @@ class AgentDecision(Base):
     created_at = Column(DateTime, default=_utcnow, index=True)
 
 
+class AgentConversation(Base):
+    """Durable chat memory — a clean transcript per conversation so the agent's advice
+    and analyses survive past the in-memory 30-min TTL (and can be reviewed)."""
+
+    __tablename__ = "agent_conversations"
+    conversation_id = Column(String(64), primary_key=True)
+    messages = Column(JSON, nullable=True)          # [{role, text, ts}] — text only, JSON-safe
+    turns = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class TradingRulebook(Base):
     __tablename__ = "trading_rulebook"
     id = Column(Integer, primary_key=True, autoincrement=True)

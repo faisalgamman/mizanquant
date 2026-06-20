@@ -97,18 +97,38 @@ You CANNOT execute trades. Call the tools to build a complete picture before ans
 HALAL SCREENING (AAOIFI): Debt/MktCap < 33% · Interest income/Rev < 5% · no haram sectors
 (alcohol, gambling, pork, conventional banking/insurance) · Cash+Securities/MktCap < 33%.
 """
+    sections = [base]
+    # LEARNING: the agent's OWN measured track record — calibrate confidence on it.
+    try:
+        from app.services.ai_sentinel.journal import performance_summary
+        ps = performance_summary()
+        if ps.get("scored"):
+            bv = "؛ ".join(
+                f"{v}: إصابة {d['win_rate']}% / متوسط {d['avg_pct']}% (n={d['n']})"
+                for v, d in (ps.get("by_verdict") or {}).items()
+            )
+            sections += [
+                "",
+                "## أداؤك المقاس — تعلَّم من توصياتك (قياس حقيقي، ليس ضماناً):",
+                f"- من {ps['scored']} توصية مسجَّلة النتيجة آخر {ps['lookback_days']} يوماً: "
+                f"نسبة الإصابة {ps['win_rate']}%، متوسط العائد {ps['avg_pct']}%.",
+                (f"- حسب الحكم: {bv}." if bv else ""),
+                "- عايِر ثقتك على هذا الأداء الفعلي: إن كان حكمٌ ما يخسر تاريخياً، اخفض ثقتك فيه أو تجنّبه.",
+            ]
+    except Exception:
+        pass
+    # Post-trade reflection rules.
     try:
         from app.services.agent_reflection import get_active_rules
         rules = get_active_rules(limit=15)
         if rules:
-            lines = [base, "", "## Active Trading Rules (from post-trade reflection):"]
+            sections += ["", "## Active Trading Rules (from post-trade reflection):"]
             for r in rules:
                 conf_str = f"{r['confidence']:.0%}" if r.get('confidence') else "new"
-                lines.append(f"- [{r['category']}] {r['rule_text']} (confidence: {conf_str})")
-            return "\n".join(lines)
+                sections.append(f"- [{r['category']}] {r['rule_text']} (confidence: {conf_str})")
     except Exception:
         pass
-    return base
+    return "\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +220,68 @@ class TradingAgent:
         self.max_iterations = 8  # max tool-use loop iterations
 
     async def chat(
+        self,
+        user_message: str,
+        conversation_id: Optional[str] = None,
+    ) -> dict:
+        """Public entry. Runs the turn, then (a) durably persists the transcript so advice
+        survives past the in-memory TTL and (b) auto-records any BUY recommendation the
+        tools surfaced — so memory + the learning loop never depend on the LLM remembering
+        to call record_recommendation. Persistence failures never break the reply."""
+        result = await self._chat_impl(user_message, conversation_id)
+        cid = result.get("conversation_id")
+        try:
+            from app.services.ai_sentinel.journal import save_transcript
+            save_transcript(cid, user_message, result.get("response", ""))
+        except Exception:
+            logger.debug("transcript persist failed", exc_info=True)
+        try:
+            self._auto_record_recommendations(cid)
+        except Exception:
+            logger.debug("auto-record failed", exc_info=True)
+        return result
+
+    def _auto_record_recommendations(self, cid: Optional[str]) -> None:
+        """Log BUY/STRONG BUY verdicts surfaced by tools this conversation (deduped per
+        conversation + per-hour in the DB), so the journal + learning loop capture them
+        deterministically from tool DATA, not from the LLM remembering a tool call."""
+        if not cid:
+            return
+        conv = _conversations.get(cid)
+        if not conv:
+            return
+        recorded = conv.setdefault("_recorded", set())
+        from app.services.ai_sentinel.journal import record_decision_if_new
+        for m in conv.get("messages", []):
+            if not isinstance(m, dict):
+                continue
+            blobs = []
+            if m.get("role") == "tool" and isinstance(m.get("content"), str):
+                blobs.append(m["content"])                       # DeepSeek/OpenAI tool reply
+            elif m.get("role") == "user" and isinstance(m.get("content"), list):
+                for blk in m["content"]:                          # Anthropic tool_result blocks
+                    if isinstance(blk, dict) and blk.get("type") == "tool_result" and isinstance(blk.get("content"), str):
+                        blobs.append(blk["content"])
+            for c in blobs:
+                try:
+                    d = json.loads(c)
+                except Exception:
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                sym = str(d.get("symbol") or "").upper()
+                verdict = str(d.get("verdict") or "").upper()
+                if not sym or sym in recorded or "BUY" not in verdict:
+                    continue
+                conf = d.get("composite_score") or d.get("smart_score") or 0
+                rationale = (d.get("reconciliation") or d.get("consistency_note") or verdict)[:200]
+                try:
+                    record_decision_if_new(sym, "opportunity", verdict, float(conf or 0), rationale)
+                    recorded.add(sym)
+                except Exception:
+                    pass
+
+    async def _chat_impl(
         self,
         user_message: str,
         conversation_id: Optional[str] = None,

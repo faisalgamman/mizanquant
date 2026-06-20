@@ -126,3 +126,11 @@ def _run_schema_migrations():
             logger.info("Created fmp_cache table for persistent FMP response caching")
         except Exception as exc:
             logger.warning("Could not create fmp_cache table: %s", exc)
+
+    # Durable agent chat memory (added post-deployment Jun-2026)
+    if "agent_conversations" not in tables and "agent_conversations" in Base.metadata.tables:
+        try:
+            Base.metadata.tables["agent_conversations"].create(bind=engine)
+            logger.info("Created agent_conversations table for durable agent memory")
+        except Exception as exc:
+            logger.warning("Could not create agent_conversations table: %s", exc)
