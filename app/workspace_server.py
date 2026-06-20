@@ -3498,7 +3498,15 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
                 # Roadmap 1.1 — Hard Gates: must-pass or score = 0
                 from app.services.scoring import check_hard_gates
                 gates = check_hard_gates(hist_df, spy_df=spy_df)
-                if not gates.passed:
+                # Precision entry gates (earnings blackout + regime-aware weekly trend) —
+                # merged into the same must-pass branch (score = 0 / AVOID on any failure).
+                try:
+                    from app.services.precision_gates import entry_gate_failures
+                    _pg_fails = entry_gate_failures(symbol, hist_df)
+                except Exception:
+                    _pg_fails = []
+                _all_fails = list(gates.failed_gates) + _pg_fails
+                if not gates.passed or _pg_fails:
                     return {
                         "symbol": symbol, "company": name,
                         "sector": sector_val.title() if sector_val else "",
@@ -3514,12 +3522,12 @@ def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.Dat
                         "forecast_score": 0, "forecast_details": {},
                         "smart_score": 0,
                         "ext_pct": None, "atr_pct": None, "adv_dollar_m": None,
-                        "signal": "AVOID", "strategy": "NONE", "strategy_score": 0, "strategy_reason": "Hard Gates: " + "; ".join(gates.failed_gates),
-                        "hard_gates_passed": False, "hard_gates_failed": gates.failed_gates,
+                        "signal": "AVOID", "strategy": "NONE", "strategy_score": 0, "strategy_reason": "Hard Gates: " + "; ".join(_all_fails),
+                        "hard_gates_passed": False, "hard_gates_failed": _all_fails,
                         "pipeline": {
                             "1_data": "loaded", "2_halal": "passed" if is_halal else "blocked",
                             "3_fundamental": f"{fundamental}/40",
-                            "4_hard_gates": f"BLOCKED ({'; '.join(gates.failed_gates)})",
+                            "4_hard_gates": f"BLOCKED ({'; '.join(_all_fails)})",
                             "5_momentum": "skipped", "6_strategy_selector": "skipped",
                             "7_ai_confirm": "skipped", "8_kelly": "skipped", "9_execute": "skipped",
                         },
@@ -4051,11 +4059,20 @@ async def screener_deep_picks(
         _rank_key = _SORT_MAP["composite"]
         _ranking_mode = "composite"
 
-    top = sorted(
+    _ranked = sorted(
         [r for r in enriched if r.get("is_halal", False)],
         key=_rank_key,
         reverse=True,
-    )[:limit]
+    )
+    # Precision gate: cap correlated same-sector names so a cluster can't dominate the
+    # picks (the IBKR correlated-tech lesson). Applied AFTER ranking → keeps the
+    # highest-ranked names in each sector; env MAX_PICKS_PER_SECTOR / GATE_SECTOR_CAP.
+    try:
+        from app.services.precision_gates import sector_concentration_cap
+        _ranked = sector_concentration_cap(_ranked, sector_key="sector")
+    except Exception as _sc_exc:
+        logger.debug("sector cap skipped: %s", _sc_exc)
+    top = _ranked[:limit]
 
     # Determine current SWING_EXIT_ENABLED state for exit_guidance header
     try:

@@ -476,6 +476,17 @@ def analyze(symbol, df):
         elif score >= 55: sig = "BUY"
         elif score >= 35: sig = "WATCH"
         else: sig = "NO TRADE"
+        # Precision entry gates (earnings blackout + regime-aware weekly trend) — downgrade
+        # to NO TRADE so a gated name never surfaces as a BUY/WATCH in the weekly scanner.
+        try:
+            from app.services.precision_gates import entry_gate_failures
+            _pg = entry_gate_failures(symbol, df)
+        except Exception:
+            _pg = []
+        if _pg:
+            sig = "NO TRADE"
+            score = min(score, 34)          # below WATCH (35) → never appears as a buy
+            signals.append("GATE: " + "; ".join(_pg))
         pos = int((settings.RISK_CAPITAL * (settings.RISK_PCT / 100)) / atr_val) if atr_val > 0 else 0
         chg1w = float(((price - close.iloc[-5]) / close.iloc[-5]) * 100) if len(close) >= 5 else 0
         chg1m = float(((price - close.iloc[-21]) / close.iloc[-21]) * 100) if len(close) >= 21 else 0
