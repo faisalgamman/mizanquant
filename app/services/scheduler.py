@@ -102,6 +102,27 @@ def _is_active_window(now):
     return 4 <= now.hour < 20  # 4 AM to 8 PM ET
 
 
+# NYSE market holidays (observed dates) — EXTEND YEARLY. Used so the off-session full
+# re-screen fires whenever the EXCHANGE is closed, and so session scans skip closed days.
+_NYSE_HOLIDAYS = {
+    # 2026
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
+    "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+    # 2027
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31",
+    "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+}
+
+
+def _is_market_holiday(now) -> bool:
+    return now.strftime("%Y-%m-%d") in _NYSE_HOLIDAYS
+
+
+def _is_market_closed(now) -> bool:
+    """True when the US exchange is closed: a weekend OR a NYSE holiday."""
+    return (not _is_weekday(now)) or _is_market_holiday(now)
+
+
 def _scheduler_loop():
     """Main scheduler loop — runs forever in a background thread."""
     global _scheduler_running
@@ -144,6 +165,7 @@ def _scheduler_loop():
     last_fund_warm = ""       # YYYY-MM-DD — daily pre-market fundamentals (halal) cache warm
     last_intraday_warm = ""  # YYYY-MM-DD:HH — intraday screener re-warm slots
     last_db_backup = ""      # YYYY-MM-DD — daily DB backup of measurement tables
+    last_full_rescreen = ""  # YYYY-MM-DD — off-session FULL precompute (exchange-closed days)
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
 
@@ -200,6 +222,42 @@ def _scheduler_loop():
                         alert_system_health(f"⚠️ DB backup failed: {str(e)[:160]}", severity="CRITICAL")
                     except Exception:
                         pass
+
+            # --- OFF-SESSION FULL PRECOMPUTE: ~06:00 ET when the EXCHANGE is CLOSED ---
+            # (weekends + NYSE holidays). Runs BEFORE the active-window guard (like the DB
+            # backup) so it fires on days the scheduler otherwise sleeps. EDGAR is free and
+            # unlimited, so we screen the WHOLE universe (fundamentals + halal) and warm the
+            # monthly composite — leaving weekday sessions to recompute only fast technicals.
+            if _is_market_closed(now) and now.hour == 6 and now.minute < 20 and last_full_rescreen != today_str:
+                last_full_rescreen = today_str
+
+                def _full_precompute():
+                    scheduler_metrics.record_cycle_start("full_precompute")
+                    try:
+                        from app.services.halal_screening import warm_fundamentals_cache
+                        from app.services.universe import (
+                            build_halal_candidates, sync_verified_halal_to_universe,
+                        )
+                        cands = build_halal_candidates()
+                        # UNCAPPED full EDGAR screen — no FMP quota, plenty of off-session time.
+                        out = warm_fundamentals_cache(cands, prefer_edgar=True, max_refresh=len(cands))
+                        active = sync_verified_halal_to_universe()
+                        try:
+                            import app.workspace_server as _ws
+                            _ws._refresh_smart_universe()
+                            import halal_screener as _hs
+                            _hs._db_symbols = None                       # weekly picks up additions
+                            _ws._run_screener_bg(list(_ws._SMART_UNIVERSE))  # full monthly composite
+                        except Exception as _re:
+                            logger.warning("full precompute: composite/universe refresh failed: %s", _re)
+                        scheduler_metrics.record_cycle_end("full_precompute", success=True)
+                        logger.info("Off-session full precompute (EDGAR): %s; active_halal=%d", out, active)
+                    except Exception as e:
+                        scheduler_metrics.record_cycle_end("full_precompute", success=False, error=str(e))
+                        logger.error("Off-session full precompute failed: %s", e)
+
+                logger.info("Scheduler: off-session FULL precompute starting (exchange closed)")
+                threading.Thread(target=_full_precompute, daemon=True, name="full-precompute").start()
 
             # --- COST OPTIMIZATION: Sleep deeply outside active window ---
             if not _is_active_window(now):
@@ -351,7 +409,8 @@ def _scheduler_loop():
                     logger.error(f"Pipeline data collection failed: {e}")
 
             # --- SCREENER CACHE PRE-WARM: ~08:00 ET (so the Monthly tab opens warm) ---
-            if _is_weekday(now) and now.hour == 8 and now.minute < 15 and last_screener_warm != today_str:
+            if (_is_weekday(now) and not _is_market_holiday(now)
+                    and now.hour == 8 and now.minute < 15 and last_screener_warm != today_str):
                 last_screener_warm = today_str
                 try:
                     from app.workspace_server import _run_screener_bg, _SMART_UNIVERSE as _SU
@@ -363,7 +422,8 @@ def _scheduler_loop():
 
             # Intraday screener re-warm — keep the dashboard fresh without a redeploy.
             # Gentle cadence (every ~2h in market hours) — the 650-symbol scan is heavy, so NOT more often.
-            if _is_weekday(now) and now.hour in (11, 13, 15) and now.minute < 8                     and last_intraday_warm != f"{today_str}:{now.hour}":
+            if (_is_weekday(now) and not _is_market_holiday(now) and now.hour in (11, 13, 15)
+                    and now.minute < 8 and last_intraday_warm != f"{today_str}:{now.hour}"):
                 last_intraday_warm = f"{today_str}:{now.hour}"
                 try:
                     from app.workspace_server import _run_screener_bg, _SMART_UNIVERSE as _SU
@@ -443,7 +503,7 @@ def _scheduler_loop():
             # --- INTRADAY SIGNALS: 10:30 / 12:00 / 14:30 / 16:30 ET ---
             # Independent block — runs alongside any other branch above.
             # Pushes STRONG-BUY Telegram alerts (signals advisor).
-            if _is_weekday(now):
+            if _is_weekday(now) and not _is_market_holiday(now):
                 for hour, minute, label in SIGNALS_SLOTS:
                     slot_key = f"{hour:02d}:{minute:02d}"
                     if (now.hour == hour and now.minute >= minute
