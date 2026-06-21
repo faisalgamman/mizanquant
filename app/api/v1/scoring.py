@@ -156,6 +156,33 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
             if plan.get(_k) is not None:
                 plan["strategy_" + _k] = plan[_k]
 
+    # Earnings proximity — make the risk VISIBLE in the Analyze card. The buy path is
+    # already earnings-gated server-side (guards + USX filter); here we surface the date,
+    # flag the ±blackout window, and report known=false when the date is unavailable
+    # instead of passing it silently. Data is FMP-backed + cached 24h.
+    try:
+        from app.services.reference_data import (
+            get_earnings_date, business_days_until_earnings,
+        )
+        from app.services.precision_gates import EARNINGS_BLACKOUT_DAYS
+        ed = get_earnings_date(symbol)
+        bdays = business_days_until_earnings(symbol) if ed is not None else None
+        # bdays < 0 ⇒ the cached date is in the PAST (stale calendar) ⇒ the next date is
+        # unknown → report known=False so the card prompts a manual check, not a past date.
+        if ed is not None and bdays is not None and bdays >= 0:
+            plan["earnings"] = {
+                "known": True,
+                "date": ed.isoformat(),
+                "business_days": bdays,
+                "blackout_days": EARNINGS_BLACKOUT_DAYS,
+                "within_blackout": bdays <= EARNINGS_BLACKOUT_DAYS,
+            }
+        else:
+            plan["earnings"] = {"known": False, "blackout_days": EARNINGS_BLACKOUT_DAYS}
+    except Exception as e:
+        logger.debug("trade/plan earnings lookup failed for %s: %s", symbol, e)
+        plan["earnings"] = {"known": False}
+
     # Sanitize numpy scalars (e.g. numpy.bool_ inside sig.details) so FastAPI's
     # encoder can serialize the response instead of 500-ing.
     return _to_jsonable(plan)

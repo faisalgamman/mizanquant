@@ -217,6 +217,42 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           </div>
           <Sparkline points={signal.spark} color={chgColor} height={36} />
 
+          {/* Earnings proximity — surface the risk the buy path already gates on. Three
+              states: within blackout (red), known & upcoming (subtle), unknown (amber —
+              don't assume it's safe). Data from /api/v1/trade/plan → plan.earnings. */}
+          {plan && plan.earnings ? (() => {
+            const e = plan.earnings;
+            const fmtD = (iso) => {
+              try { return new Date(iso + "T00:00:00").toLocaleDateString("ar-u-nu-latn", { day: "numeric", month: "long" }); }
+              catch (_) { return iso; }
+            };
+            if (e.within_blackout) {
+              return (
+                <div style={{ marginTop: 8, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                              color: "var(--red)", border: "1px solid var(--red)",
+                              background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
+                     title="الدخول قبل إعلان الأرباح في نفس الأسبوع من أخطر سيناريوهات التداول الأسبوعي — تقلّب حادّ محتمل">
+                  ⚠️ أرباح خلال {e.business_days} {e.business_days === 1 ? "يوم" : "أيام"} · {fmtD(e.date)} — لا تدخل قبل الإعلان
+                </div>
+              );
+            }
+            if (e.known) {
+              return (
+                <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)" }}
+                     title="موعد الأرباح القادم — خارج نافذة الحظر، لكن انتبه لاقترابه">
+                  📅 الأرباح القادمة: {fmtD(e.date)} · خلال {e.business_days} يوم عمل
+                </div>
+              );
+            }
+            return (
+              <div style={{ marginTop: 8, padding: "5px 9px", borderRadius: 6, fontSize: 9.5, fontWeight: 700,
+                            color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)", lineHeight: 1.5 }}
+                   title="تعذّر تأكيد موعد الأرباح (بيانات غير متوفّرة) — تحقّق يدوياً قبل الدخول بدل افتراض الأمان">
+                ⚠️ موعد الأرباح غير مؤكّد — تحقّق قبل الدخول
+              </div>
+            );
+          })() : null}
+
           {/* H1: Score bars with points/max */}
           <div className="an-sect-title">
             Technical factors{compRows.length ? " · " + techSum + "/" + techMax : ""}
