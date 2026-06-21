@@ -130,6 +130,7 @@ def _is_market_closed(now) -> bool:
 _FULL_PRECOMPUTE_LOCK = threading.Lock()
 _FULL_PRECOMPUTE_STATE: dict = {
     "status": "idle",       # idle | running | done | error
+    "mode": None,           # full | technical
     "phase": None,          # candidates | fundamentals | universe | composite | done | error
     "triggered_by": None,   # scheduler | user
     "started_at": None,     # ISO ts (UTC)
@@ -145,53 +146,68 @@ def get_full_precompute_state() -> dict:
     return dict(_FULL_PRECOMPUTE_STATE)
 
 
-def run_full_precompute(triggered_by: str = "scheduler") -> dict:
-    """Whole-universe re-screen: candidates → fundamentals+halal (UNCAPPED EDGAR) →
-    promote verified-halal into the universe → recompute the monthly composite.
+def run_full_precompute(triggered_by: str = "scheduler", technical_only: bool = False) -> dict:
+    """Re-screen the halal universe and recompute the monthly composite.
 
-    Single-flight: if a run is already in progress, returns immediately with
-    {"status": "already_running"} (the lock guards against stacked/duplicate scans).
-    Called by the off-session scheduler AND the manual "Full Rescan" button.
+    Two modes (one lock — they never overlap):
+      • FULL (off-session): candidates → fundamentals+halal (UNCAPPED EDGAR) → promote
+        verified-halal into the universe → composite scan. This is the heavy weekly
+        extraction of the data that does NOT change intraday; runs when the market is closed.
+      • TECHNICAL (the in-session "بحث عن الأسهم" button): skip the EDGAR fundamentals/halal
+        warm entirely and ONLY refresh the universe + recompute the fast technical composite,
+        reading the fundamentals/halal already stored off-session. Keeps the box light during
+        market hours.
+
+    Single-flight: if a run is already in progress, returns {"status": "already_running"}.
     """
     if not _FULL_PRECOMPUTE_LOCK.acquire(blocking=False):
         return {"status": "already_running"}
+    mode = "technical" if technical_only else "full"
     scheduler_metrics.record_cycle_start("full_precompute")
     _FULL_PRECOMPUTE_STATE.update(
-        status="running", phase="candidates", triggered_by=triggered_by,
+        status="running", mode=mode,
+        phase=("composite" if technical_only else "candidates"),
+        triggered_by=triggered_by,
         started_at=datetime.utcnow().isoformat(), finished_at=None,
         active_halal=None, result=None, error=None,
     )
     try:
-        from app.services.halal_screening import warm_fundamentals_cache
-        from app.services.universe import (
-            build_halal_candidates, sync_verified_halal_to_universe,
-        )
-        cands = build_halal_candidates()
-        _FULL_PRECOMPUTE_STATE["phase"] = "fundamentals"
-        # UNCAPPED full EDGAR screen — no FMP quota, plenty of off-session time.
-        out = warm_fundamentals_cache(cands, prefer_edgar=True, max_refresh=len(cands))
-        _FULL_PRECOMPUTE_STATE["result"] = out
-        _FULL_PRECOMPUTE_STATE["phase"] = "universe"
-        active = sync_verified_halal_to_universe()
-        _FULL_PRECOMPUTE_STATE["active_halal"] = active
+        out = None
+        active = None
+        if not technical_only:
+            # --- Heavy weekly extraction (off-session only) ---
+            from app.services.halal_screening import warm_fundamentals_cache
+            from app.services.universe import (
+                build_halal_candidates, sync_verified_halal_to_universe,
+            )
+            cands = build_halal_candidates()
+            _FULL_PRECOMPUTE_STATE["phase"] = "fundamentals"
+            # UNCAPPED full EDGAR screen — no FMP quota, plenty of off-session time.
+            out = warm_fundamentals_cache(cands, prefer_edgar=True, max_refresh=len(cands))
+            _FULL_PRECOMPUTE_STATE["result"] = out
+            _FULL_PRECOMPUTE_STATE["phase"] = "universe"
+            active = sync_verified_halal_to_universe()
+            _FULL_PRECOMPUTE_STATE["active_halal"] = active
+
+        # --- Fast technical composite (both modes) — reads the stored fundamentals/halal ---
         _FULL_PRECOMPUTE_STATE["phase"] = "composite"
         try:
             import app.workspace_server as _ws
             _ws._refresh_smart_universe()
             import halal_screener as _hs
             _hs._db_symbols = None                            # weekly picks up additions
-            _ws._run_screener_bg(list(_ws._SMART_UNIVERSE))   # full monthly composite
+            _ws._run_screener_bg(list(_ws._SMART_UNIVERSE))   # monthly composite (technical-fresh)
         except Exception as _re:
-            logger.warning("full precompute: composite/universe refresh failed: %s", _re)
+            logger.warning("precompute (%s): composite/universe refresh failed: %s", mode, _re)
         scheduler_metrics.record_cycle_end("full_precompute", success=True)
-        logger.info("Full precompute (EDGAR · %s): %s; active_halal=%d", triggered_by, out, active)
+        logger.info("Precompute done (%s · %s): %s; active_halal=%s", mode, triggered_by, out, active)
         _FULL_PRECOMPUTE_STATE.update(status="done", phase="done")
-        return {"status": "done", "result": out, "active_halal": active}
+        return {"status": "done", "mode": mode, "result": out, "active_halal": active}
     except Exception as e:
         scheduler_metrics.record_cycle_end("full_precompute", success=False, error=str(e))
-        logger.error("Full precompute failed (%s): %s", triggered_by, e)
+        logger.error("Precompute failed (%s · %s): %s", mode, triggered_by, e)
         _FULL_PRECOMPUTE_STATE.update(status="error", phase="error", error=str(e)[:300])
-        return {"status": "error", "error": str(e)[:300]}
+        return {"status": "error", "mode": mode, "error": str(e)[:300]}
     finally:
         _FULL_PRECOMPUTE_STATE["finished_at"] = datetime.utcnow().isoformat()
         _FULL_PRECOMPUTE_LOCK.release()

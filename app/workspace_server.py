@@ -4719,26 +4719,34 @@ async def screener_progress():
 
 
 @app.post("/api/screener/full-rescan")
-async def screener_full_rescan():
-    """Manually trigger the FULL precompute — search the halal universe + refresh
-    fundamentals & halal (EDGAR) + recompute the monthly composite. Same job the
-    scheduler runs off-session; here it is on demand for market hours.
+async def screener_full_rescan(mode: str = Query("technical")):
+    """Manually trigger a re-scan. Two modes:
 
-    Session-gated (the dashboard login already protects /api/*), so it needs NO operator
-    API key in the browser. Single-flight: a press while a run is in progress is a no-op.
-    Heads-up: the uncapped EDGAR warm of the whole universe takes ~3-8 min and is CPU-heavy.
+    • mode=technical (DEFAULT — the "بحث عن الأسهم" button): fast technical-only composite
+      scan that reads the fundamentals/halal already stored off-session. Light enough for
+      market hours — this is what keeps the box from being hammered during a live session.
+    • mode=full: the heavy weekly extraction (uncapped EDGAR fundamentals + halal + composite,
+      ~3-8 min). Normally runs off-session; exposed here to warm everything on demand.
+
+    Session-gated (the dashboard login already protects /api/*). Single-flight: a press while
+    a run is in progress is a no-op.
     """
     import threading
     from app.services.scheduler import run_full_precompute, get_full_precompute_state
     if get_full_precompute_state().get("status") == "running":
         return {"status": "already_running",
-                "message": "المسح الكامل يعمل بالفعل — انتظر حتى ينتهي."}
+                "message": "المسح يعمل بالفعل — انتظر حتى ينتهي."}
+    technical_only = str(mode).lower() != "full"
     threading.Thread(
-        target=run_full_precompute, kwargs={"triggered_by": "user"},
-        daemon=True, name="full-precompute-manual",
+        target=run_full_precompute,
+        kwargs={"triggered_by": "user", "technical_only": technical_only},
+        daemon=True, name="precompute-manual",
     ).start()
-    return {"status": "started",
-            "message": "بدأ المسح الكامل — قد يستغرق 3-8 دقائق. تابع الحالة."}
+    if technical_only:
+        msg = "بدأ المسح الفنّي — عادةً أقل من دقيقة. تابع الحالة."
+    else:
+        msg = "بدأ المسح الكامل (أساسيات + شرعي) — قد يستغرق 3-8 دقائق. تابع الحالة."
+    return {"status": "started", "mode": "technical" if technical_only else "full", "message": msg}
 
 
 @app.get("/api/screener/full-rescan/status")

@@ -307,7 +307,7 @@ function App() {
         setRescanning(false); setRescanPhase(null);
         return;
       } else {
-        setToast({ kind: "ok", title: "بدأ المسح الكامل", body: "بحث + أساسيات + شرعي · 3-8 دقائق" });
+        setToast({ kind: "ok", title: "بدأ المسح الفنّي", body: "إعادة حساب فنّي على البيانات المخزّنة · أقل من دقيقة" });
       }
     } catch (e) {
       setToast({ kind: "error", title: "خطأ شبكة", body: String(e) });

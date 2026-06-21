@@ -440,7 +440,7 @@ function FullRescanButton({ rescanning, rescanPhase, onClick }) {
       type="button"
       onClick={onClick}
       disabled={rescanning}
-      title="بحث كامل: يحدّث الأساسيات + الشرعي ويعيد حساب التقييم · 3-8 دقائق · استخدمه عند الحاجة فقط"
+      title="مسح فنّي سريع: يعيد حساب التقييم على الأساسيات والشرعي المخزّنة مسبقاً (التي لا تتغيّر خلال اليوم) · أقل من دقيقة عادةً"
       style={{
         display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
         cursor: rescanning ? "default" : "pointer", opacity: rescanning ? 0.65 : 1,
