@@ -7482,12 +7482,6 @@ async def get_terminal():
     """Terminal Overview kit — served directly so auth gate works correctly."""
     return _html("terminal/index.html")
 
-@app.get("/weekly-picks", include_in_schema=False)
-@app.get("/weekly-picks/", include_in_schema=False)
-async def get_weekly_picks_page():
-    """Weekly swing-picks report UI (advisory). Data: GET /weekly_picks."""
-    return _html("weekly-picks.html")
-
 @app.get("/halal-screener-v2", include_in_schema=False)
 @app.get("/halal-screener-v2/", include_in_schema=False)
 async def get_halal_screener_v2():
@@ -7504,183 +7498,21 @@ async def get_onboarding():
     return _html("public/onboarding/index.html")
 
 
-@app.get("/dashboard", include_in_schema=False)
-async def get_dashboard_alt():
-    """Consolidated → the single dashboard is now /terminal.
-
-    dashboard.html is retired (its layout broke and it duplicated /terminal);
-    everyone is sent to the one clean terminal. The legacy file remains in the
-    repo for reference at /dashboard-legacy.
-    """
-    return RedirectResponse("/terminal", status_code=302)
-
-
-@app.get("/dashboard-legacy-html", include_in_schema=False)
-async def get_dashboard_legacy_html():
-    """Legacy dashboard.html kept for reference only."""
-    p = Path(__file__).resolve().parent / "static" / "dashboard.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store"})
-    return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
-
-
-@app.get("/legacy", include_in_schema=False)
-async def get_legacy_dashboard():
-    """Serve the legacy dashboard (kept for backward compatibility)."""
-    p = Path(__file__).resolve().parent / "static" / "dashboard-legacy.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
-    return RedirectResponse("/")
-
-
-@app.get("/forecast", include_in_schema=False)
-@app.options("/forecast", include_in_schema=False)
-async def get_forecast_panel():
-    """Serve the ForecastML calibration suite — Ensemble, LSTM-CNN, Transformer."""
-    forecast_path = Path(__file__).resolve().parent / "static" / "forecast-panel.html"
-    if forecast_path.exists():
-        return HTMLResponse(content=forecast_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Forecast Panel not found</h1>", status_code=404)
-
-
-@app.get("/trading-lab", include_in_schema=False)
-async def get_trading_lab_panel():
-    """Serve the Trading Lab — Strategy development and backtesting."""
-    trading_lab_path = Path(__file__).resolve().parent / "static" / "trading-lab.html"
-    if trading_lab_path.exists():
-        return HTMLResponse(content=trading_lab_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Trading Lab not found</h1>", status_code=404)
-
-
-@app.get("/trading", include_in_schema=False)
-async def get_trading_panel():
-    """Serve the Live Trading interface."""
-    trading_path = Path(__file__).resolve().parent / "static" / "trading.html"
-    if trading_path.exists():
-        return HTMLResponse(content=trading_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Trading Panel not found</h1>", status_code=404)
-
-
-@app.get("/analysis-lab", include_in_schema=False)
-async def get_analysis_lab():
-    """Serve the unified Analysis Lab — Forecast + Trading agents on one page."""
-    p = Path(__file__).resolve().parent / "static" / "analysis-lab.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store"})
-    return HTMLResponse("<h1>Analysis Lab not found</h1>", status_code=404)
-
-
-@app.get("/risk-desk", include_in_schema=False)
-async def get_risk_desk_panel():
-    """Serve the Risk Desk — Professional risk management."""
-    risk_desk_path = Path(__file__).resolve().parent / "static" / "risk-desk.html"
-    if risk_desk_path.exists():
-        return HTMLResponse(content=risk_desk_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Risk Desk not found</h1>", status_code=404)
-
-
-@app.get("/halal-screener", include_in_schema=False)
-async def get_halal_screener():
-    """Serve the Halal Screener interface."""
-    p = Path(__file__).resolve().parent / "static" / "halal-screener.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    p = Path(__file__).resolve().parent / "static" / "screener.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Screener not found</h1>", status_code=404)
-
-
-@app.get("/strategy-dashboard", include_in_schema=False)
-async def get_strategies_page():
-    """Serve the Strategies Dashboard."""
-    _base = Path(__file__).resolve().parent / "static"
-    # Prefer the vanilla HTML page (uses real strategy configs); React SPA uses model registry names
-    for name in ("strategies.html", "strategies-app/index.html"):
-        p = _base / name
-        if p.exists():
-            return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                                headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
-    return HTMLResponse("<h1>Strategies not found</h1>", status_code=404)
-
-
-@app.get("/alerts", include_in_schema=False)
-async def get_alerts_page():
-    """Serve the Alerts Center."""
-    p = Path(__file__).resolve().parent / "static" / "alerts.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Alerts not found</h1>", status_code=404)
-
-
-@app.get("/ai-assistant", include_in_schema=False)
-async def get_ai_assistant_page():
-    """Serve the AI Assistant."""
-    p = Path(__file__).resolve().parent / "static" / "ai-assistant.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>AI Assistant not found</h1>", status_code=404)
-
-
-@app.get("/mizan-ai", include_in_schema=False)
-async def get_mizan_ai_page():
-    """Fresh route for MizanAI RTL design — no cached 301 conflict."""
-    p = Path(__file__).resolve().parent / "static" / "ai-assistant.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Not found</h1>", status_code=404)
-
-
-@app.get("/backtest", include_in_schema=False)
-async def get_backtest_panel():
-    """Serve the Backtest Lab interface."""
-    backtest_path = Path(__file__).resolve().parent / "static" / "backtest.html"
-    if backtest_path.exists():
-        return HTMLResponse(content=backtest_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Backtest not found</h1>", status_code=404)
-
-
-@app.get("/investors", include_in_schema=False)
-async def get_investors_page():
-    """Serve the Investors Insights page."""
-    p = Path(__file__).resolve().parent / "static" / "investors.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store"})
-    return HTMLResponse("<h1>Investors Insights not found</h1>", status_code=404)
-
-
-@app.get("/macro", include_in_schema=False)
-async def get_macro_page():
-    """Serve the Macro · FRED indicators page."""
-    p = Path(__file__).resolve().parent / "static" / "macro.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store"})
-    return HTMLResponse("<h1>Macro page not found</h1>", status_code=404)
-
-
-@app.get("/etf", include_in_schema=False)
-async def get_etf_page():
-    """Serve the ETF Explorer page."""
-    p = Path(__file__).resolve().parent / "static" / "etf.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store"})
-    return HTMLResponse("<h1>ETF Explorer not found</h1>", status_code=404)
-
-
-@app.get("/rotation", include_in_schema=False)
-async def get_rotation_page():
-    """Serve the Sector Rotation (RRG) page."""
-    p = Path(__file__).resolve().parent / "static" / "rotation.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store"})
-    return HTMLResponse("<h1>Rotation page not found</h1>", status_code=404)
+# Legacy pages retired — redirect everything to /terminal
+for _legacy_path in (
+    "/dashboard", "/dashboard-legacy-html", "/legacy",
+    "/weekly-picks", "/weekly-picks/",
+    "/forecast", "/trading-lab", "/trading",
+    "/analysis-lab", "/risk-desk", "/halal-screener",
+    "/strategy-dashboard", "/alerts",
+    "/ai-assistant", "/mizan-ai",
+    "/backtest", "/investors", "/macro", "/etf", "/rotation",
+):
+    app.add_api_route(
+        _legacy_path,
+        (lambda: RedirectResponse("/terminal", status_code=301)),
+        include_in_schema=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -7713,31 +7545,6 @@ async def get_press():            return _html("public/press/index.html")
 @app.get("/brand",            include_in_schema=False)
 async def get_brand_vault():      return _html("public/index.html")
 
-
-# ── Legacy page redirects (301 permanent) ────────────────────────────────────
-# Old blue-accent pages are replaced by v2 kits or rebranded equivalents.
-
-_LEGACY_REDIRECTS: dict[str, str] = {
-    "/dashboard-legacy":  "/terminal",
-    "/halal-screener":    "/halal-screener-v2",
-    "/risk-desk":         "/risk-desk-v2",
-    # NOTE: "/screener" intentionally NOT redirected — it is a JSON data endpoint
-    # (app/routers/screener.py) the halal-screener-v2 kit fetches. Redirecting it
-    # would shadow the data API. Navigate to /halal-screener-v2 directly for the page.
-    "/trading":           "/terminal",
-    "/trading-lab":       "/terminal",
-    # "/ai-assistant":      "/assistant",  # REMOVED — v2 page is live, not a legacy redirect
-    # "/analysis-lab":      "/assistant",  # REMOVED — v2 page is live, not a legacy redirect
-    "/backtest":          "/terminal",
-    "/etf":               "/macro",
-    "/investors":         "/landing",
-    "/alerts":            "/alerts",        # keep — has real API backend
-}
-
-for _old, _new in _LEGACY_REDIRECTS.items():
-    if _old != _new:                       # skip self-redirect
-        _fn = (lambda n: lambda: RedirectResponse(n, status_code=301))(_new)
-        app.add_api_route(_old, _fn, include_in_schema=False)
 
 
 # ---------------------------------------------------------------------------
