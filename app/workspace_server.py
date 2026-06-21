@@ -4718,6 +4718,42 @@ async def screener_progress():
     return p
 
 
+@app.post("/api/screener/full-rescan")
+async def screener_full_rescan():
+    """Manually trigger the FULL precompute — search the halal universe + refresh
+    fundamentals & halal (EDGAR) + recompute the monthly composite. Same job the
+    scheduler runs off-session; here it is on demand for market hours.
+
+    Session-gated (the dashboard login already protects /api/*), so it needs NO operator
+    API key in the browser. Single-flight: a press while a run is in progress is a no-op.
+    Heads-up: the uncapped EDGAR warm of the whole universe takes ~3-8 min and is CPU-heavy.
+    """
+    import threading
+    from app.services.scheduler import run_full_precompute, get_full_precompute_state
+    if get_full_precompute_state().get("status") == "running":
+        return {"status": "already_running",
+                "message": "المسح الكامل يعمل بالفعل — انتظر حتى ينتهي."}
+    threading.Thread(
+        target=run_full_precompute, kwargs={"triggered_by": "user"},
+        daemon=True, name="full-precompute-manual",
+    ).start()
+    return {"status": "started",
+            "message": "بدأ المسح الكامل — قد يستغرق 3-8 دقائق. تابع الحالة."}
+
+
+@app.get("/api/screener/full-rescan/status")
+async def screener_full_rescan_status():
+    """Status of the full precompute (for the button's progress poll): phase + the
+    composite scan percent (from _screener_progress) once it reaches that stage."""
+    from app.services.scheduler import get_full_precompute_state
+    st = get_full_precompute_state()
+    if st.get("phase") == "composite" and _screener_progress.get("total", 0) > 0:
+        st["pct"] = round(_screener_progress["current"] / _screener_progress["total"] * 100, 1)
+    else:
+        st["pct"] = 0
+    return st
+
+
 @app.get("/api/screener/near-miss")
 async def screener_near_miss():
     """Symbols that almost passed the USX V4 filter.

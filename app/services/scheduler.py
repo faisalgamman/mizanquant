@@ -123,6 +123,80 @@ def _is_market_closed(now) -> bool:
     return (not _is_weekday(now)) or _is_market_holiday(now)
 
 
+# --- Full precompute: search the halal universe + refresh fundamentals & halal (EDGAR)
+# + recompute the monthly composite. Runs off-session on its own (weekends / holidays),
+# and on demand via the terminal "بحث عن الأسهم" button — BOTH call run_full_precompute().
+# Single-flight (one run at a time) so repeated button presses never stack up scans.
+_FULL_PRECOMPUTE_LOCK = threading.Lock()
+_FULL_PRECOMPUTE_STATE: dict = {
+    "status": "idle",       # idle | running | done | error
+    "phase": None,          # candidates | fundamentals | universe | composite | done | error
+    "triggered_by": None,   # scheduler | user
+    "started_at": None,     # ISO ts (UTC)
+    "finished_at": None,    # ISO ts (UTC)
+    "active_halal": None,   # verified-halal count after the universe sync
+    "result": None,         # warm_fundamentals_cache() summary
+    "error": None,
+}
+
+
+def get_full_precompute_state() -> dict:
+    """Snapshot of the last/current full-precompute run (for the UI status poll)."""
+    return dict(_FULL_PRECOMPUTE_STATE)
+
+
+def run_full_precompute(triggered_by: str = "scheduler") -> dict:
+    """Whole-universe re-screen: candidates → fundamentals+halal (UNCAPPED EDGAR) →
+    promote verified-halal into the universe → recompute the monthly composite.
+
+    Single-flight: if a run is already in progress, returns immediately with
+    {"status": "already_running"} (the lock guards against stacked/duplicate scans).
+    Called by the off-session scheduler AND the manual "Full Rescan" button.
+    """
+    if not _FULL_PRECOMPUTE_LOCK.acquire(blocking=False):
+        return {"status": "already_running"}
+    scheduler_metrics.record_cycle_start("full_precompute")
+    _FULL_PRECOMPUTE_STATE.update(
+        status="running", phase="candidates", triggered_by=triggered_by,
+        started_at=datetime.utcnow().isoformat(), finished_at=None,
+        active_halal=None, result=None, error=None,
+    )
+    try:
+        from app.services.halal_screening import warm_fundamentals_cache
+        from app.services.universe import (
+            build_halal_candidates, sync_verified_halal_to_universe,
+        )
+        cands = build_halal_candidates()
+        _FULL_PRECOMPUTE_STATE["phase"] = "fundamentals"
+        # UNCAPPED full EDGAR screen — no FMP quota, plenty of off-session time.
+        out = warm_fundamentals_cache(cands, prefer_edgar=True, max_refresh=len(cands))
+        _FULL_PRECOMPUTE_STATE["result"] = out
+        _FULL_PRECOMPUTE_STATE["phase"] = "universe"
+        active = sync_verified_halal_to_universe()
+        _FULL_PRECOMPUTE_STATE["active_halal"] = active
+        _FULL_PRECOMPUTE_STATE["phase"] = "composite"
+        try:
+            import app.workspace_server as _ws
+            _ws._refresh_smart_universe()
+            import halal_screener as _hs
+            _hs._db_symbols = None                            # weekly picks up additions
+            _ws._run_screener_bg(list(_ws._SMART_UNIVERSE))   # full monthly composite
+        except Exception as _re:
+            logger.warning("full precompute: composite/universe refresh failed: %s", _re)
+        scheduler_metrics.record_cycle_end("full_precompute", success=True)
+        logger.info("Full precompute (EDGAR · %s): %s; active_halal=%d", triggered_by, out, active)
+        _FULL_PRECOMPUTE_STATE.update(status="done", phase="done")
+        return {"status": "done", "result": out, "active_halal": active}
+    except Exception as e:
+        scheduler_metrics.record_cycle_end("full_precompute", success=False, error=str(e))
+        logger.error("Full precompute failed (%s): %s", triggered_by, e)
+        _FULL_PRECOMPUTE_STATE.update(status="error", phase="error", error=str(e)[:300])
+        return {"status": "error", "error": str(e)[:300]}
+    finally:
+        _FULL_PRECOMPUTE_STATE["finished_at"] = datetime.utcnow().isoformat()
+        _FULL_PRECOMPUTE_LOCK.release()
+
+
 def _scheduler_loop():
     """Main scheduler loop — runs forever in a background thread."""
     global _scheduler_running
@@ -230,34 +304,11 @@ def _scheduler_loop():
             # monthly composite — leaving weekday sessions to recompute only fast technicals.
             if _is_market_closed(now) and now.hour == 6 and now.minute < 20 and last_full_rescreen != today_str:
                 last_full_rescreen = today_str
-
-                def _full_precompute():
-                    scheduler_metrics.record_cycle_start("full_precompute")
-                    try:
-                        from app.services.halal_screening import warm_fundamentals_cache
-                        from app.services.universe import (
-                            build_halal_candidates, sync_verified_halal_to_universe,
-                        )
-                        cands = build_halal_candidates()
-                        # UNCAPPED full EDGAR screen — no FMP quota, plenty of off-session time.
-                        out = warm_fundamentals_cache(cands, prefer_edgar=True, max_refresh=len(cands))
-                        active = sync_verified_halal_to_universe()
-                        try:
-                            import app.workspace_server as _ws
-                            _ws._refresh_smart_universe()
-                            import halal_screener as _hs
-                            _hs._db_symbols = None                       # weekly picks up additions
-                            _ws._run_screener_bg(list(_ws._SMART_UNIVERSE))  # full monthly composite
-                        except Exception as _re:
-                            logger.warning("full precompute: composite/universe refresh failed: %s", _re)
-                        scheduler_metrics.record_cycle_end("full_precompute", success=True)
-                        logger.info("Off-session full precompute (EDGAR): %s; active_halal=%d", out, active)
-                    except Exception as e:
-                        scheduler_metrics.record_cycle_end("full_precompute", success=False, error=str(e))
-                        logger.error("Off-session full precompute failed: %s", e)
-
                 logger.info("Scheduler: off-session FULL precompute starting (exchange closed)")
-                threading.Thread(target=_full_precompute, daemon=True, name="full-precompute").start()
+                threading.Thread(
+                    target=run_full_precompute, kwargs={"triggered_by": "scheduler"},
+                    daemon=True, name="full-precompute",
+                ).start()
 
             # --- COST OPTIMIZATION: Sleep deeply outside active window ---
             if not _is_active_window(now):

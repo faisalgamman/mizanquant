@@ -428,10 +428,45 @@ function ScanEmpty({ status, mode, scanPct }) {
   );
 }
 
+// "بحث عن الأسهم" — manual full rescan (fundamentals + halal + composite). Single-flight:
+// disabled + spinner while running. FontAwesome isn't loaded here, so we use an inline SVG.
+function FullRescanButton({ rescanning, rescanPhase, onClick }) {
+  const phaseLabel = {
+    candidates: "يبحث…", fundamentals: "أساسيات…", universe: "تحديث…",
+    composite: "تقييم…", done: "تم", error: "خطأ",
+  }[rescanPhase] || "… يمسح";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={rescanning}
+      title="بحث كامل: يحدّث الأساسيات + الشرعي ويعيد حساب التقييم · 3-8 دقائق · استخدمه عند الحاجة فقط"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
+        cursor: rescanning ? "default" : "pointer", opacity: rescanning ? 0.65 : 1,
+        fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 5,
+        border: "1px solid var(--accent)", color: "var(--accent)", background: "var(--accent-dim)",
+      }}>
+      {rescanning ? (
+        <span className="spin" style={{
+          width: 9, height: 9, border: "2px solid var(--border)",
+          borderTopColor: "var(--accent)", borderRadius: "50%", display: "inline-block",
+        }}></span>
+      ) : (
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+             strokeWidth="1.8" strokeLinecap="round">
+          <circle cx="7" cy="7" r="4.5"></circle><line x1="10.5" y1="10.5" x2="14" y2="14"></line>
+        </svg>
+      )}
+      {rescanning ? phaseLabel : "بحث عن الأسهم"}
+    </button>
+  );
+}
+
 function ScanColumn(props) {
   const { scanMode, onScanMode, signals, monthlySignals, selectedSymbol, onSelect, market,
           signalsStatus, monthlyStatus, ledgerWeekly, ledgerMonthly, ledgerPairs, pairs, daytrade, watch, monthlyScanPct,
-          onRecord, recording } = props;
+          onRecord, recording, onFullRescan, rescanning, rescanPhase } = props;
   const [filterSignal, setFilterSignal] = useState("all");
   const [filterScore, setFilterScore] = useState("0");
   const [halalOnly, setHalalOnly] = useState(true);
@@ -463,7 +498,12 @@ function ScanColumn(props) {
       <div className="wf-section">
         <div className="wf-head">
           <span className="wf-title">Scanners</span>
-          <span className="wf-sub">{daytradeMode ? "day-trade · ~2500 liquid · technical · research" : pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="wf-sub">{daytradeMode ? "day-trade · ~2500 liquid · technical · research" : pairsMode ? "pairs · cointegration · relative-value" : monthlyMode ? "monthly · ~650 symbols · composite" : "weekly · ~650 symbols · swing"}</span>
+            {onFullRescan ? (
+              <FullRescanButton rescanning={rescanning} rescanPhase={rescanPhase} onClick={onFullRescan} />
+            ) : null}
+          </div>
         </div>
         <ScanTabs mode={scanMode} onMode={onScanMode} />
         {daytradeMode ? (

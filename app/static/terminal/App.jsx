@@ -288,6 +288,56 @@ function App() {
     setTimeout(() => { loadLedgers().finally(() => setRecording(false)); }, 90000);
   };
 
+  // Manual "بحث عن الأسهم" — full rescan (search universe + refresh fundamentals & halal
+  // + recompute composite). Single-flight on the server; here we poll status until it
+  // finishes, then refresh the Monthly table + ledgers. On-demand only — no auto-polling
+  // unless a user-triggered scan is in flight (off-hours the scheduler already covers it).
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanPhase, setRescanPhase] = useState(null);
+  const onFullRescan = async () => {
+    if (rescanning) return;                       // client guard (server is single-flight too)
+    setRescanning(true);
+    setRescanPhase("candidates");
+    try {
+      const j = await (await fetch("/api/screener/full-rescan", { method: "POST" })).json();
+      if (j && j.status === "already_running") {
+        setToast({ kind: "ok", title: "المسح يعمل بالفعل", body: "انتظر حتى ينتهي" });
+      } else if (!j || j.status !== "started") {
+        setToast({ kind: "error", title: "تعذّر بدء المسح", body: (j && j.message) || "حاول مجدداً" });
+        setRescanning(false); setRescanPhase(null);
+        return;
+      } else {
+        setToast({ kind: "ok", title: "بدأ المسح الكامل", body: "بحث + أساسيات + شرعي · 3-8 دقائق" });
+      }
+    } catch (e) {
+      setToast({ kind: "error", title: "خطأ شبكة", body: String(e) });
+      setRescanning(false); setRescanPhase(null);
+      return;
+    }
+    // Poll status; only done/error are terminal (status may briefly read "idle" before the
+    // worker thread flips to "running"). Hard stop after ~15 min so the poll can't leak.
+    let ticks = 0;
+    const poll = setInterval(async () => {
+      ticks++;
+      let st;
+      try { st = await (await fetch("/api/screener/full-rescan/status")).json(); }
+      catch (_) { return; }                       // transient — keep polling
+      setRescanPhase(st.phase);
+      const finished = st.status === "done" || st.status === "error";
+      if (finished || ticks > 180) {
+        clearInterval(poll);
+        if (st.status === "error") {
+          setToast({ kind: "error", title: "فشل المسح", body: String(st.error || "").slice(0, 120) });
+        } else if (finished) {
+          const n = st.active_halal != null ? ` · ${st.active_halal} حلال` : "";
+          setToast({ kind: "ok", title: "اكتمل المسح", body: "تم تحديث الأساسيات والشرعي" + n });
+        }
+        loadMonthly(); loadLedgers();
+        setRescanning(false); setRescanPhase(null);
+      }
+    }, 5000);
+  };
+
   // Clock tick (ET)
   useEffect(() => {
     const tick = () => {
@@ -657,6 +707,9 @@ function App() {
             watch={watch}
             onRecord={onRecordPaper}
             recording={recording}
+            onFullRescan={onFullRescan}
+            rescanning={rescanning}
+            rescanPhase={rescanPhase}
           />
           <AnalyzeColumn
             signal={selected}
