@@ -253,6 +253,41 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             );
           })() : null}
 
+          {/* Analyst consensus (Finnhub) — BUY/HOLD/SELL trend. Amber when bearish (more
+              sells than buys, e.g. EXPD 8 sell vs 2 buy); subtle muted otherwise. The
+              free tier has no price target, so this is the consensus, not a target number. */}
+          {plan && plan.analyst && plan.analyst.known ? (() => {
+            const a = plan.analyst;
+            const ratingAr = { strong_buy: "شراء قوي", buy: "شراء", hold: "تثبيت", sell: "بيع", strong_sell: "بيع قوي" }[a.rating] || "";
+            const bearish = a.bearish;
+            return (
+              <div style={{ marginTop: 6, padding: bearish ? "6px 9px" : "4px 9px", borderRadius: 6,
+                            fontSize: bearish ? 10 : 9.5, fontWeight: bearish ? 700 : 600, lineHeight: 1.5,
+                            color: bearish ? "var(--amber, #d9a441)" : "var(--text-muted)",
+                            border: bearish ? "1px solid var(--amber, #d9a441)" : "none" }}
+                   title="توافق المحلّلين (Finnhub) — اتجاه التوصيات؛ ميل بيعي = عدد توصيات البيع يفوق الشراء">
+                🎯 توافق المحلّلين: {ratingAr} · {a.buy} شراء / {a.hold} تثبيت / {a.sell} بيع ({a.n_analysts}){bearish ? " — ميل بيعي" : ""}
+              </div>
+            );
+          })() : null}
+
+          {/* Insider transactions (Finnhub · SEC Form 4, last 90d, open-market only).
+              Amber when insiders sell heavily (e.g. HWM $11.3M exec sale); muted otherwise. */}
+          {plan && plan.insider && plan.insider.known ? (() => {
+            const ins = plan.insider;
+            const heavy = ins.heavy_sell;
+            const fmtM = (v) => { const a = Math.abs(v); return a >= 1e6 ? "$" + (a / 1e6).toFixed(1) + "M" : a >= 1e3 ? "$" + Math.round(a / 1e3) + "K" : "$" + Math.round(a); };
+            return (
+              <div style={{ marginTop: 6, padding: heavy ? "6px 9px" : "4px 9px", borderRadius: 6,
+                            fontSize: heavy ? 10 : 9.5, fontWeight: heavy ? 700 : 600, lineHeight: 1.5,
+                            color: heavy ? "var(--amber, #d9a441)" : "var(--text-muted)",
+                            border: heavy ? "1px solid var(--amber, #d9a441)" : "none" }}
+                   title="صفقات المطّلعين (Form 4 · آخر 90 يوماً) — بيع/شراء السوق المفتوح فقط؛ المنح والضرائب مستثناة">
+                👤 المطّلعون (90 يوم): {ins.sell_value > 0 ? `بيع ${fmtM(ins.sell_value)}${ins.n_sellers > 1 ? ` · ${ins.n_sellers} أشخاص` : ""}` : "لا بيع سوقي"}{ins.buy_value > 0 ? ` · شراء ${fmtM(ins.buy_value)}` : ""}{heavy ? " — بيع كثيف ⚠" : ""}
+              </div>
+            );
+          })() : null}
+
           {/* H1: Score bars with points/max */}
           <div className="an-sect-title">
             Technical factors{compRows.length ? " · " + techSum + "/" + techMax : ""}

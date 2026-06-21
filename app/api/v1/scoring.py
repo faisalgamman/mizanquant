@@ -183,6 +183,79 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
         logger.debug("trade/plan earnings lookup failed for %s: %s", symbol, e)
         plan["earnings"] = {"known": False}
 
+    # Analyst consensus (Finnhub /stock/recommendation — free tier). The price-target
+    # endpoint is premium, so we surface the BUY/HOLD/SELL consensus, not a target number;
+    # bearish=True flags more sells than buys (e.g. EXPD: 8 sell vs 2 buy). Needs
+    # FINNHUB_API_KEY; absent ⇒ known=False and the card omits the chip.
+    try:
+        from app.services.finnhub_client import finnhub_client
+        recs = finnhub_client.get_recommendation(symbol) or []
+        if recs and isinstance(recs[0], dict):
+            r0 = recs[0]  # latest period first
+            sb = int(r0.get("strongBuy") or 0)
+            b = int(r0.get("buy") or 0)
+            h = int(r0.get("hold") or 0)
+            s = int(r0.get("sell") or 0)
+            ss = int(r0.get("strongSell") or 0)
+            total = sb + b + h + s + ss
+            if total > 0:
+                buckets = {"strong_buy": sb, "buy": b, "hold": h, "sell": s, "strong_sell": ss}
+                buy_side, sell_side = sb + b, s + ss
+                plan["analyst"] = {
+                    "known": True,
+                    "rating": max(buckets, key=buckets.get),
+                    "n_analysts": total, "buy": buy_side, "hold": h, "sell": sell_side,
+                    "period": r0.get("period"),
+                    "bearish": sell_side > buy_side,
+                }
+            else:
+                plan["analyst"] = {"known": False}
+        else:
+            plan["analyst"] = {"known": False}
+    except Exception as e:
+        logger.debug("trade/plan analyst (finnhub) failed for %s: %s", symbol, e)
+        plan["analyst"] = {"known": False}
+
+    # Insider transactions (Finnhub /stock/insider-transactions — free, SEC Form 4).
+    # Summarize OPEN-MARKET activity over the last 90 days: code 'S' = sale, 'P' = purchase.
+    # Awards ('A') and tax-withholding ('F') are routine and excluded from the signal.
+    # heavy_sell flags large net selling (e.g. HWM: a $11.3M exec sale).
+    try:
+        from datetime import date, timedelta
+        from app.services.finnhub_client import finnhub_client
+        trades = finnhub_client.get_insider_transactions(symbol) or []
+        cutoff = (date.today() - timedelta(days=90)).isoformat()
+        sell_sh = buy_sh = 0
+        sell_val = buy_val = 0.0
+        sellers: set = set()
+        for t in trades:
+            if str(t.get("transactionDate") or "")[:10] < cutoff:
+                continue
+            code = (t.get("transactionCode") or "").upper()
+            sh = abs(int(t.get("change") or 0))
+            px = float(t.get("transactionPrice") or 0) or 0.0
+            if code == "S":
+                sell_sh += sh
+                sell_val += sh * px
+                if t.get("name"):
+                    sellers.add(t.get("name"))
+            elif code == "P":
+                buy_sh += sh
+                buy_val += sh * px
+        if sell_sh or buy_sh:
+            plan["insider"] = {
+                "known": True, "window_days": 90,
+                "sell_shares": sell_sh, "buy_shares": buy_sh,
+                "sell_value": round(sell_val), "buy_value": round(buy_val),
+                "net_value": round(buy_val - sell_val), "n_sellers": len(sellers),
+                "heavy_sell": bool(sell_val >= 1_000_000 and sell_val > buy_val * 2),
+            }
+        else:
+            plan["insider"] = {"known": False}
+    except Exception as e:
+        logger.debug("trade/plan insider (finnhub) failed for %s: %s", symbol, e)
+        plan["insider"] = {"known": False}
+
     # Sanitize numpy scalars (e.g. numpy.bool_ inside sig.details) so FastAPI's
     # encoder can serialize the response instead of 500-ing.
     return _to_jsonable(plan)
