@@ -426,9 +426,21 @@ def _exec_analyze_stock(symbol: str) -> dict:
     else:
         recon = ""
 
+    # ── 7) External signals — analyst consensus + insider trades + next earnings, from the
+    #    SAME helper the Analyze card uses, so the agent and the card never disagree.
+    try:
+        from app.services.external_signals import get_external_signals
+        ext = get_external_signals(symbol)
+    except Exception as e:
+        logger.debug("analyze_stock external signals failed for %s: %s", symbol, e)
+        ext = {}
+
     out.update({
         "company": company,
         "sector": sector,
+        "analyst_consensus": ext.get("analyst"),
+        "insider_activity": ext.get("insider"),
+        "earnings": ext.get("earnings"),
         "price": price,
         "change_pct": change_pct,
         # Headline (the card's big number) — Monthly composite when available.
@@ -455,10 +467,14 @@ def _exec_analyze_stock(symbol: str) -> dict:
         "reconciliation": recon,
         "consistency_note": (
             "These numbers come from the SAME sources as the dashboard Analyze card "
-            "(Monthly composite row + weighted_score + trade plan). Report them as-is — do "
-            "NOT recompute from another source. Any difference from the card is cache-refresh "
-            "timing, not a different engine. When the composite verdict (fundamentals) and the "
-            "technical bars disagree, state BOTH lenses honestly."),
+            "(Monthly composite row + weighted_score + trade plan + Finnhub external signals). "
+            "Report them as-is — do NOT recompute from another source. Any difference from the "
+            "card is cache-refresh timing, not a different engine. When the composite verdict "
+            "(fundamentals) and the technical bars disagree, state BOTH lenses honestly. "
+            "analyst_consensus / insider_activity / earnings ARE available here (Finnhub) — when "
+            "their known=true, cite them in the analysis (e.g. analyst buy/hold/sell split, heavy "
+            "insider selling, earnings within the blackout window); when known=false, say the "
+            "data is unavailable — never invent or deny it generically."),
     })
     return out
 

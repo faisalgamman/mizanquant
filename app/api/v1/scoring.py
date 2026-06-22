@@ -156,116 +156,16 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
             if plan.get(_k) is not None:
                 plan["strategy_" + _k] = plan[_k]
 
-    # Earnings proximity — make the risk VISIBLE in the Analyze card. The buy path is
-    # already earnings-gated server-side (guards + USX filter); here we surface the date,
-    # flag the ±blackout window, and report known=false when the date is unavailable
-    # instead of passing it silently. Source: Finnhub calendar (free) PRIMARY, FMP fallback
-    # (FMP's earnings endpoint is premium on this plan, so it returns nothing → 'unknown').
+    # External signals — analyst consensus + insider trades + next earnings. Shared with
+    # the MizanAI agent (claude_tools._exec_analyze_stock) via ONE helper so the card and
+    # the agent never report different numbers.
     try:
-        from datetime import date as _date
-        from app.services.reference_data import get_earnings_date, _business_days_between
-        from app.services.precision_gates import EARNINGS_BLACKOUT_DAYS
-        ed = None
-        hour = None
-        try:
-            from app.services.finnhub_client import finnhub_client
-            ec = finnhub_client.get_next_earnings(symbol)
-            if ec and ec.get("date"):
-                ed = _date.fromisoformat(str(ec["date"])[:10])
-                hour = ec.get("hour")  # amc (after close) | bmo (before open) | dmh
-        except Exception:
-            ed = None
-        if ed is None:  # FMP fallback (works for legacy/premium keys)
-            ed = get_earnings_date(symbol)
-        bdays = _business_days_between(_date.today(), ed) if ed is not None else None
-        # bdays < 0 ⇒ the date is in the PAST (stale) ⇒ next date unknown → known=False.
-        if ed is not None and bdays is not None and bdays >= 0:
-            plan["earnings"] = {
-                "known": True,
-                "date": ed.isoformat(),
-                "business_days": bdays,
-                "blackout_days": EARNINGS_BLACKOUT_DAYS,
-                "within_blackout": bdays <= EARNINGS_BLACKOUT_DAYS,
-                "hour": hour,
-            }
-        else:
-            plan["earnings"] = {"known": False, "blackout_days": EARNINGS_BLACKOUT_DAYS}
+        from app.services.external_signals import get_external_signals
+        plan.update(get_external_signals(symbol))
     except Exception as e:
-        logger.debug("trade/plan earnings lookup failed for %s: %s", symbol, e)
-        plan["earnings"] = {"known": False}
-
-    # Analyst consensus (Finnhub /stock/recommendation — free tier). The price-target
-    # endpoint is premium, so we surface the BUY/HOLD/SELL consensus, not a target number;
-    # bearish=True flags more sells than buys (e.g. EXPD: 8 sell vs 2 buy). Needs
-    # FINNHUB_API_KEY; absent ⇒ known=False and the card omits the chip.
-    try:
-        from app.services.finnhub_client import finnhub_client
-        recs = finnhub_client.get_recommendation(symbol) or []
-        if recs and isinstance(recs[0], dict):
-            r0 = recs[0]  # latest period first
-            sb = int(r0.get("strongBuy") or 0)
-            b = int(r0.get("buy") or 0)
-            h = int(r0.get("hold") or 0)
-            s = int(r0.get("sell") or 0)
-            ss = int(r0.get("strongSell") or 0)
-            total = sb + b + h + s + ss
-            if total > 0:
-                buckets = {"strong_buy": sb, "buy": b, "hold": h, "sell": s, "strong_sell": ss}
-                buy_side, sell_side = sb + b, s + ss
-                plan["analyst"] = {
-                    "known": True,
-                    "rating": max(buckets, key=buckets.get),
-                    "n_analysts": total, "buy": buy_side, "hold": h, "sell": sell_side,
-                    "period": r0.get("period"),
-                    "bearish": sell_side > buy_side,
-                }
-            else:
-                plan["analyst"] = {"known": False}
-        else:
-            plan["analyst"] = {"known": False}
-    except Exception as e:
-        logger.debug("trade/plan analyst (finnhub) failed for %s: %s", symbol, e)
-        plan["analyst"] = {"known": False}
-
-    # Insider transactions (Finnhub /stock/insider-transactions — free, SEC Form 4).
-    # Summarize OPEN-MARKET activity over the last 90 days: code 'S' = sale, 'P' = purchase.
-    # Awards ('A') and tax-withholding ('F') are routine and excluded from the signal.
-    # heavy_sell flags large net selling (e.g. HWM: a $11.3M exec sale).
-    try:
-        from datetime import date, timedelta
-        from app.services.finnhub_client import finnhub_client
-        trades = finnhub_client.get_insider_transactions(symbol) or []
-        cutoff = (date.today() - timedelta(days=90)).isoformat()
-        sell_sh = buy_sh = 0
-        sell_val = buy_val = 0.0
-        sellers: set = set()
-        for t in trades:
-            if str(t.get("transactionDate") or "")[:10] < cutoff:
-                continue
-            code = (t.get("transactionCode") or "").upper()
-            sh = abs(int(t.get("change") or 0))
-            px = float(t.get("transactionPrice") or 0) or 0.0
-            if code == "S":
-                sell_sh += sh
-                sell_val += sh * px
-                if t.get("name"):
-                    sellers.add(t.get("name"))
-            elif code == "P":
-                buy_sh += sh
-                buy_val += sh * px
-        if sell_sh or buy_sh:
-            plan["insider"] = {
-                "known": True, "window_days": 90,
-                "sell_shares": sell_sh, "buy_shares": buy_sh,
-                "sell_value": round(sell_val), "buy_value": round(buy_val),
-                "net_value": round(buy_val - sell_val), "n_sellers": len(sellers),
-                "heavy_sell": bool(sell_val >= 1_000_000 and sell_val > buy_val * 2),
-            }
-        else:
-            plan["insider"] = {"known": False}
-    except Exception as e:
-        logger.debug("trade/plan insider (finnhub) failed for %s: %s", symbol, e)
-        plan["insider"] = {"known": False}
+        logger.debug("trade/plan external signals failed for %s: %s", symbol, e)
+        for _k in ("earnings", "analyst", "insider"):
+            plan.setdefault(_k, {"known": False})
 
     # Sanitize numpy scalars (e.g. numpy.bool_ inside sig.details) so FastAPI's
     # encoder can serialize the response instead of 500-ing.
