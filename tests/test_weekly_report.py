@@ -181,3 +181,28 @@ def test_weekly_picks_endpoint(monkeypatch):
 
     # Out-of-range account is rejected by validate_range (HTTP 400).
     assert client.get("/weekly_picks?account=1").status_code == 400
+
+
+# ── Swing funnel (Fly fix: record from the swing screener, not the AI pipeline) ──
+
+def test_swing_funnel_maps_and_filters(monkeypatch):
+    """funnel='swing' sources run_screener (same as /buys) and keeps only STRONG BUY/BUY."""
+    import halal_screener as hs
+    fake = [
+        {"symbol": "AAA", "swing_signal": "STRONG BUY", "swing_score": 80, "price": 100.0},
+        {"symbol": "BBB", "swing_signal": "BUY",        "swing_score": 60, "price": 50.0},
+        {"symbol": "CCC", "swing_signal": "WATCH",      "swing_score": 40, "price": 20.0},
+        {"symbol": "DDD", "swing_signal": "NO TRADE",   "swing_score": 10, "price": 8.0},
+    ]
+    monkeypatch.setattr(hs, "run_screener", lambda: fake, raising=False)
+
+    mapped = wr._swing_funnel()
+    assert {r["Symbol"] for r in mapped} == {"AAA", "BBB", "CCC", "DDD"}
+    assert all(r["Confidence %"] == r["Swing Score"] for r in mapped)
+
+    rep = wr.build_weekly_report(
+        100_000.0, funnel="swing", _forward_pf_fn=lambda: {}, _graduation_fn=lambda: {},
+    )
+    # WATCH (40) and NO TRADE dropped; only the two BUY-verdict names remain.
+    assert {p["symbol"] for p in rep["picks"]} == {"AAA", "BBB"}
+    assert all(p["shares"] >= 0 for p in rep["picks"])

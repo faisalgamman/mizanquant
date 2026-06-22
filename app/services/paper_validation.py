@@ -90,8 +90,13 @@ def _paper_row_from_pick(pick: dict) -> dict:
 
 
 def record_weekly_picks(account: float = 10000.0, top: int = 15,
-                        min_confidence: float = 45.0, funnel: str = "pipeline") -> dict:
-    """Record this week's picks as OPEN paper trades (one per symbol, deduped)."""
+                        min_confidence: float = 45.0, funnel: str = "swing") -> dict:
+    """Record this week's picks as OPEN paper trades (one per symbol, deduped).
+
+    Sources from the SWING screener (funnel="swing") — the same picks the Weekly tab
+    shows — not the AI-consensus pipeline, which yielded 0 BUY verdicts on Fly and left
+    the ledger empty. So the recorded ledger now matches the displayed weekly scanner.
+    """
     from app.services.weekly_report import build_weekly_report
 
     report = build_weekly_report(account, top=top, min_confidence=min_confidence, funnel=funnel)

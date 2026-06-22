@@ -118,9 +118,36 @@ def _is_buy_candidate(row: dict, min_confidence: float) -> bool:
         return False
 
 
+def _swing_funnel():
+    """Weekly SWING picks straight from run_screener — the SAME source the Weekly tab
+    (`/buys`) shows — mapped to the report schema. Bypasses the AI-consensus stage in
+    run_pipeline that was zeroing the recorded ledger on Fly (consensus runs the disabled
+    ~coin-flip models → few/no BUY verdicts). STRONG BUY/BUY (swing_score ≥ 55) become buy
+    candidates; WATCH/NO TRADE are dropped by _is_buy_candidate."""
+    import halal_screener as hs
+    rows = hs.run_screener() or []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or not r.get("symbol"):
+            continue
+        score = float(r.get("swing_score") or 0)
+        out.append({
+            "Symbol": r.get("symbol"),
+            "Verdict": r.get("swing_signal") or "",
+            "Confidence %": score,
+            "Price": float(r.get("price") or 0),
+            "Swing Score": score,
+            "swing_score": score,
+            "Votes BUY": 0, "Votes SELL": 0, "Votes HOLD": 0,
+        })
+    return out
+
+
 def _resolve_funnel(funnel: str):
     """Lazily resolve the chosen funnel (import halal_screener only when needed)."""
     import halal_screener as hs
+    if funnel == "swing":
+        return _swing_funnel
     if funnel == "ready":
         return lambda: hs.run_ready_to_trade()
     return lambda: hs.run_pipeline()
