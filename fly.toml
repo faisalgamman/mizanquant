@@ -33,5 +33,6 @@ primary_region = "iad"   # US-East (close to Alpaca/FMP/IBKR US endpoints); chan
   destination = "/data"
 
 [[vm]]
-  size = "shared-cpu-1x"
+  size = "shared-cpu-2x"   # 2 shared vCPUs — the scan/yfinance threads no longer starve the
+                           # asyncio event loop (1x caused /health-critical → 503 under scan load).
   memory = "1024mb"        # bump to 2048 if you hit OOM; Railway's 2GB was a ceiling, not usage
