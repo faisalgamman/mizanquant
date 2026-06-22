@@ -159,16 +159,26 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
     # Earnings proximity — make the risk VISIBLE in the Analyze card. The buy path is
     # already earnings-gated server-side (guards + USX filter); here we surface the date,
     # flag the ±blackout window, and report known=false when the date is unavailable
-    # instead of passing it silently. Data is FMP-backed + cached 24h.
+    # instead of passing it silently. Source: Finnhub calendar (free) PRIMARY, FMP fallback
+    # (FMP's earnings endpoint is premium on this plan, so it returns nothing → 'unknown').
     try:
-        from app.services.reference_data import (
-            get_earnings_date, business_days_until_earnings,
-        )
+        from datetime import date as _date
+        from app.services.reference_data import get_earnings_date, _business_days_between
         from app.services.precision_gates import EARNINGS_BLACKOUT_DAYS
-        ed = get_earnings_date(symbol)
-        bdays = business_days_until_earnings(symbol) if ed is not None else None
-        # bdays < 0 ⇒ the cached date is in the PAST (stale calendar) ⇒ the next date is
-        # unknown → report known=False so the card prompts a manual check, not a past date.
+        ed = None
+        hour = None
+        try:
+            from app.services.finnhub_client import finnhub_client
+            ec = finnhub_client.get_next_earnings(symbol)
+            if ec and ec.get("date"):
+                ed = _date.fromisoformat(str(ec["date"])[:10])
+                hour = ec.get("hour")  # amc (after close) | bmo (before open) | dmh
+        except Exception:
+            ed = None
+        if ed is None:  # FMP fallback (works for legacy/premium keys)
+            ed = get_earnings_date(symbol)
+        bdays = _business_days_between(_date.today(), ed) if ed is not None else None
+        # bdays < 0 ⇒ the date is in the PAST (stale) ⇒ next date unknown → known=False.
         if ed is not None and bdays is not None and bdays >= 0:
             plan["earnings"] = {
                 "known": True,
@@ -176,6 +186,7 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
                 "business_days": bdays,
                 "blackout_days": EARNINGS_BLACKOUT_DAYS,
                 "within_blackout": bdays <= EARNINGS_BLACKOUT_DAYS,
+                "hour": hour,
             }
         else:
             plan["earnings"] = {"known": False, "blackout_days": EARNINGS_BLACKOUT_DAYS}

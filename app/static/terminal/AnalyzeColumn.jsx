@@ -226,13 +226,14 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
               try { return new Date(iso + "T00:00:00").toLocaleDateString("ar-u-nu-latn", { day: "numeric", month: "long" }); }
               catch (_) { return iso; }
             };
+            const hourAr = { amc: " (بعد الإغلاق)", bmo: " (قبل الافتتاح)", dmh: " (خلال الجلسة)" }[e.hour] || "";
             if (e.within_blackout) {
               return (
                 <div style={{ marginTop: 8, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
                               color: "var(--red)", border: "1px solid var(--red)",
                               background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
                      title="الدخول قبل إعلان الأرباح في نفس الأسبوع من أخطر سيناريوهات التداول الأسبوعي — تقلّب حادّ محتمل">
-                  ⚠️ أرباح خلال {e.business_days} {e.business_days === 1 ? "يوم" : "أيام"} · {fmtD(e.date)} — لا تدخل قبل الإعلان
+                  ⚠️ أرباح خلال {e.business_days} {e.business_days === 1 ? "يوم" : "أيام"} · {fmtD(e.date)}{hourAr} — لا تدخل قبل الإعلان
                 </div>
               );
             }
@@ -240,7 +241,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
               return (
                 <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)" }}
                      title="موعد الأرباح القادم — خارج نافذة الحظر، لكن انتبه لاقترابه">
-                  📅 الأرباح القادمة: {fmtD(e.date)} · خلال {e.business_days} يوم عمل
+                  📅 الأرباح القادمة: {fmtD(e.date)}{hourAr} · خلال {e.business_days} يوم عمل
                 </div>
               );
             }

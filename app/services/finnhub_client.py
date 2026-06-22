@@ -67,6 +67,23 @@ class FinnhubClient:
         d = self._get("stock/recommendation", {"symbol": symbol.upper()})
         return d if isinstance(d, list) else None
 
+    def get_next_earnings(self, symbol: str) -> dict | None:
+        """Next scheduled earnings within ~120d: {date, hour ('amc'/'bmo'/'dmh'),
+        epsEstimate, ...} or None. Finnhub earnings calendar is on the FREE tier
+        (FMP's earnings endpoint is premium on this plan)."""
+        from datetime import date, timedelta
+        today = date.today()
+        d = self._get("calendar/earnings", {
+            "symbol": symbol.upper(),
+            "from": today.isoformat(),
+            "to": (today + timedelta(days=120)).isoformat(),
+        })
+        if isinstance(d, dict):
+            rows = [r for r in (d.get("earningsCalendar") or []) if r.get("date")]
+            if rows:
+                return sorted(rows, key=lambda r: r["date"])[0]  # soonest upcoming
+        return None
+
     def get_insider_transactions(self, symbol: str) -> list | None:
         """SEC Form 4 insider transactions: rows with {name, change, transactionDate,
         transactionCode ('S'=sale, 'P'=purchase, 'A'=award, 'F'=tax), transactionPrice}."""
