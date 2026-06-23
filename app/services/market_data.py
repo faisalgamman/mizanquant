@@ -26,9 +26,15 @@ logger = logging.getLogger("screener")
 # ---------------------------------------------------------------------------
 _data_cache = {}
 _data_cache_ts = {}
-# P2.4 — dynamic TTL: short in market hours, long outside (data doesn't change)
-_DATA_CACHE_TTL_MARKET_OPEN = 60     # 1 minute — frequent intraday updates
-_DATA_CACHE_TTL_MARKET_CLOSED = 1800  # 30 minutes — bars are final
+# P2.4 — dynamic TTL: short in market hours, long outside (data doesn't change).
+# Market-open TTL was 60s, which forced EVERY scan to re-fetch all ~890 symbols' daily
+# bars — on Alpaca's free tier that triggers a 429 storm, so each scan covered a different
+# PARTIAL subset and the rankings were unstable run-to-run (dashboard vs agent diverged).
+# These are DAILY bars for a swing scanner; 10 min of staleness is irrelevant to a daily
+# candle, but it lets a full scan + the 5-min UI auto-refresh hit cache → stable rankings,
+# no 429 storm, far less CPU/event-loop pressure. Env-tunable.
+_DATA_CACHE_TTL_MARKET_OPEN = int(os.environ.get("DATA_CACHE_TTL_OPEN", "600"))   # 10 min
+_DATA_CACHE_TTL_MARKET_CLOSED = int(os.environ.get("DATA_CACHE_TTL_CLOSED", "1800"))  # 30 min
 _DATA_CACHE_TTL = _DATA_CACHE_TTL_MARKET_CLOSED  # backward-compat for old callers
 _YF_CACHE_CONFIGURED = False
 _YF_SESSION_INITIALIZED = False
