@@ -605,29 +605,23 @@ def _scheduler_loop():
             # trades. Daily (~17:00 ET, post-close): mature open trades on the
             # Option-A exit (15% stop / 20-day) so closed pnl_pct accumulates and
             # the paper_trade_gate graduation counter can move. No broker orders.
-            # Weekly paper recording — AUTO-fires once/day on ANY trading day, and SELF-WARMS
-            # the swing 'screener' cache if it's cold (in-process, the same _bg_compute /buys
-            # uses) so it no longer depends on the UI being open or a manual click. Was
-            # Monday-09:00-only → kept missing after restarts → ledger stuck at 0 open.
-            # Records the BUY/STRONG BUY picks the Weekly tab shows; dedups against open trades.
+            # Weekly paper recording — AUTO-fires once/day on ANY trading day when the swing
+            # 'screener' cache is ALREADY warm (warmed by /buys when the Weekly tab is open).
+            # This is a CHEAP in-memory cache READ — it must NEVER trigger a scan here: a
+            # scheduler-kicked run_screener (~657 symbols) starves the event loop on
+            # shared-cpu-2x → 503 (learned the hard way). So if the cache is cold we simply
+            # wait for the UI to warm it. Records BUY/STRONG BUY picks; dedups against open trades.
             if (_is_weekday(now) and not _is_market_holiday(now)
                     and last_paper_record != today_str):
                 try:
                     import halal_screener as _hs
-                    _cached, _cstatus = _hs._get_cached("screener")
-                    if isinstance(_cached, list):
-                        _warm_buys = any(isinstance(r, dict) and (r.get("swing_score") or 0) >= 55
-                                         for r in _cached)
-                        if _warm_buys:
-                            last_paper_record = today_str
-                            logger.info("Paper validation: auto-recording weekly picks (cache warm)...")
-                            from app.services.paper_validation import record_weekly_picks
-                            logger.info("Paper validation weekly record: %s", record_weekly_picks())
-                    elif _cstatus != "running":
-                        # Cache cold → warm it in-process (won't block); record on a later tick.
-                        logger.info("Paper validation: warming swing 'screener' cache for auto-record")
-                        threading.Thread(target=_hs._bg_compute, args=("screener", _hs.run_screener),
-                                         daemon=True, name="screener-warm-for-record").start()
+                    _cached, _ = _hs._get_cached("screener")
+                    if isinstance(_cached, list) and any(
+                            isinstance(r, dict) and (r.get("swing_score") or 0) >= 55 for r in _cached):
+                        last_paper_record = today_str
+                        logger.info("Paper validation: auto-recording weekly picks (cache warm)...")
+                        from app.services.paper_validation import record_weekly_picks
+                        logger.info("Paper validation weekly record: %s", record_weekly_picks())
                 except Exception as e:
                     logger.error(f"Paper validation record failed: {e}", exc_info=True)
 
