@@ -461,6 +461,7 @@ def _exec_analyze_stock(symbol: str) -> dict:
         "analyst_consensus": ext.get("analyst"),
         "insider_activity": ext.get("insider"),
         "earnings": ext.get("earnings"),
+        "market_regime": ext.get("market"),
         "price": price,
         "change_pct": change_pct,
         # Headline (the card's big number) — Monthly composite when available.

@@ -289,6 +289,18 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             );
           })() : null}
 
+          {/* Broad-market regime warning — the swing signal judges this stock on its OWN
+              trend (relative strength), so it can fire STRONG BUY while SPY is in a downtrend.
+              In a selloff correlation rises and even strong stocks fall — so warn, don't hide. */}
+          {plan && plan.market && plan.market.known && plan.market.spy_bearish ? (
+            <div style={{ marginTop: 6, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                          color: "var(--red)", border: "1px solid var(--red)",
+                          background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
+                 title="هذه الإشارة مبنية على قوة السهم نفسه؛ لكن السوق العام هابط — في البيع الجماعي يرتفع الترابط وتسقط حتى الأسهم القوية. تعامل بحذر مضاعف.">
+              ⚠️ السوق العام هابط (SPY {plan.market.spy_price} تحت متوسّطه {plan.market.spy_ema21}) — الإشارة من قوة السهم نفسه؛ احذر الشراء ضدّ التيار
+            </div>
+          ) : null}
+
           {/* H1: Score bars with points/max */}
           <div className="an-sect-title">
             Technical factors{compRows.length ? " · " + techSum + "/" + techMax : ""}

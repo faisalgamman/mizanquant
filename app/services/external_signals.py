@@ -97,8 +97,28 @@ def _earnings(symbol: str) -> dict:
     return {"known": False, "blackout_days": EARNINGS_BLACKOUT_DAYS}
 
 
+def _market_regime() -> dict:
+    """Broad-market trend: is SPY below its EMA21 (bearish daily trend)? Mirrors the USX
+    regime gate so the Analyze card / agent can WARN that the per-stock swing signal (which
+    judges each name on its OWN trend, relative-strength) is firing while the whole market is
+    in a downtrend — even strong stocks tend to fall in a selloff. SPY bars are cached ~10 min."""
+    try:
+        from app.services.market_data import fetch
+        df = fetch("SPY", period="3mo")
+        if df is None or len(df) < 21:
+            return {"known": False}
+        close = df["close"] if "close" in df.columns else df["Close"]
+        price = float(close.iloc[-1])
+        ema21 = float(close.ewm(span=21, adjust=False).mean().iloc[-1])
+        return {"known": True, "spy_bearish": bool(price < ema21),
+                "spy_price": round(price, 2), "spy_ema21": round(ema21, 2)}
+    except Exception as e:
+        logger.debug("market_regime failed: %s", e)
+        return {"known": False}
+
+
 def get_external_signals(symbol: str) -> dict:
-    """{'earnings': {...}, 'analyst': {...}, 'insider': {...}} — never raises."""
+    """{'earnings':{}, 'analyst':{}, 'insider':{}, 'market':{}} — never raises."""
     symbol = (symbol or "").upper().strip()
     out: dict = {}
     for name, fn in (("earnings", _earnings), ("analyst", _analyst), ("insider", _insider)):
@@ -107,4 +127,9 @@ def get_external_signals(symbol: str) -> dict:
         except Exception as e:
             logger.debug("external_signals %s failed for %s: %s", name, symbol, e)
             out[name] = {"known": False}
+    try:
+        out["market"] = _market_regime()
+    except Exception as e:
+        logger.debug("external_signals market failed: %s", e)
+        out["market"] = {"known": False}
     return out
