@@ -217,74 +217,84 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           </div>
           <Sparkline points={signal.spark} color={chgColor} height={36} />
 
-          {/* Earnings proximity — surface the risk the buy path already gates on. Three
-              states: within blackout (red), known & upcoming (subtle), unknown (amber —
-              don't assume it's safe). Data from /api/v1/trade/plan → plan.earnings. */}
+          {/* Earnings proximity — three states: within blackout (red), known & upcoming
+              (subtle), unknown (amber). Data from /api/v1/trade/plan → plan.earnings. */}
           {plan && plan.earnings ? (() => {
             const e = plan.earnings;
             const fmtD = (iso) => {
-              try { return new Date(iso + "T00:00:00").toLocaleDateString("ar-u-nu-latn", { day: "numeric", month: "long" }); }
+              try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" }); }
               catch (_) { return iso; }
             };
-            const hourAr = { amc: " (بعد الإغلاق)", bmo: " (قبل الافتتاح)", dmh: " (خلال الجلسة)" }[e.hour] || "";
+            const hr = { amc: " (after close)", bmo: " (before open)", dmh: " (during session)" }[e.hour] || "";
             if (e.within_blackout) {
               return (
                 <div style={{ marginTop: 8, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
                               color: "var(--red)", border: "1px solid var(--red)",
                               background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
-                     title="الدخول قبل إعلان الأرباح في نفس الأسبوع من أخطر سيناريوهات التداول الأسبوعي — تقلّب حادّ محتمل">
-                  ⚠️ أرباح خلال {e.business_days} {e.business_days === 1 ? "يوم" : "أيام"} · {fmtD(e.date)}{hourAr} — لا تدخل قبل الإعلان
+                     title="Entering right before an earnings report carries binary gap risk — one of the riskiest swing setups.">
+                  ⚠️ Earnings in {e.business_days} {e.business_days === 1 ? "day" : "days"} · {fmtD(e.date)}{hr} — don't enter before the report
                 </div>
               );
             }
             if (e.known) {
               return (
                 <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)" }}
-                     title="موعد الأرباح القادم — خارج نافذة الحظر، لكن انتبه لاقترابه">
-                  📅 الأرباح القادمة: {fmtD(e.date)}{hourAr} · خلال {e.business_days} يوم عمل
+                     title="Next earnings date — outside the blackout window, but note how close it is.">
+                  📅 Next earnings: {fmtD(e.date)}{hr} · in {e.business_days} business days
                 </div>
               );
             }
             return (
               <div style={{ marginTop: 8, padding: "5px 9px", borderRadius: 6, fontSize: 9.5, fontWeight: 700,
                             color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)", lineHeight: 1.5 }}
-                   title="تعذّر تأكيد موعد الأرباح (بيانات غير متوفّرة) — تحقّق يدوياً قبل الدخول بدل افتراض الأمان">
-                ⚠️ موعد الأرباح غير مؤكّد — تحقّق قبل الدخول
+                   title="Earnings date couldn't be confirmed (no data) — verify manually before entering rather than assuming it's safe.">
+                ⚠️ Earnings date unconfirmed — verify before entering
               </div>
             );
           })() : null}
 
-          {/* Analyst consensus (Finnhub) — BUY/HOLD/SELL trend. Amber when bearish (more
-              sells than buys, e.g. EXPD 8 sell vs 2 buy); subtle muted otherwise. The
-              free tier has no price target, so this is the consensus, not a target number. */}
+          {/* Analyst consensus (Finnhub recommendation trend). Amber when bearish (more
+              sell than buy ratings). Free tier has no price target — this is the consensus. */}
           {plan && plan.analyst && plan.analyst.known ? (() => {
             const a = plan.analyst;
-            const ratingAr = { strong_buy: "شراء قوي", buy: "شراء", hold: "تثبيت", sell: "بيع", strong_sell: "بيع قوي" }[a.rating] || "";
+            const rating = { strong_buy: "Strong Buy", buy: "Buy", hold: "Hold", sell: "Sell", strong_sell: "Strong Sell" }[a.rating] || a.rating || "";
             const bearish = a.bearish;
             return (
               <div style={{ marginTop: 6, padding: bearish ? "6px 9px" : "4px 9px", borderRadius: 6,
                             fontSize: bearish ? 10 : 9.5, fontWeight: bearish ? 700 : 600, lineHeight: 1.5,
                             color: bearish ? "var(--amber, #d9a441)" : "var(--text-muted)",
                             border: bearish ? "1px solid var(--amber, #d9a441)" : "none" }}
-                   title="توافق المحلّلين (Finnhub) — اتجاه التوصيات؛ ميل بيعي = عدد توصيات البيع يفوق الشراء">
-                🎯 توافق المحلّلين: {ratingAr} · {a.buy} شراء / {a.hold} تثبيت / {a.sell} بيع ({a.n_analysts}){bearish ? " — ميل بيعي" : ""}
+                   title="Analyst recommendation trend (Finnhub); bearish tilt = sell ratings outnumber buy ratings.">
+                🎯 Analyst consensus: {rating} · {a.buy} buy / {a.hold} hold / {a.sell} sell ({a.n_analysts}){bearish ? " — bearish tilt" : ""}
               </div>
             );
           })() : null}
 
-          {/* Insider transactions (Finnhub · SEC Form 4, last 90d, open-market only).
-              Amber when insiders sell heavily (e.g. HWM $11.3M exec sale); muted otherwise. */}
+          {/* Insider transactions (Finnhub · SEC Form 4, last 90d, open-market only). The
+              % of the insider's stake sold is a stronger 'abnormal' signal than the $ amount
+              (Finnhub has no 10b5-1 flag, so this is the best normal-vs-significant gauge). */}
           {plan && plan.insider && plan.insider.known ? (() => {
             const ins = plan.insider;
             const heavy = ins.heavy_sell;
+            const top = ins.top_seller;
             const fmtM = (v) => { const a = Math.abs(v); return a >= 1e6 ? "$" + (a / 1e6).toFixed(1) + "M" : a >= 1e3 ? "$" + Math.round(a / 1e3) + "K" : "$" + Math.round(a); };
+            let txt;
+            if (ins.sell_value > 0 && top && top.pct_of_stake != null) {
+              txt = `${top.name || "an insider"} sold ${top.pct_of_stake}% of stake (${fmtM(top.value)})`;
+            } else if (ins.sell_value > 0) {
+              txt = `sold ${fmtM(ins.sell_value)}`;
+            } else {
+              txt = "no open-market sells";
+            }
+            const more = ins.n_sellers > 1 ? ` · ${ins.n_sellers} sellers` : "";
+            const bought = ins.buy_value > 0 ? ` · bought ${fmtM(ins.buy_value)}` : "";
             return (
               <div style={{ marginTop: 6, padding: heavy ? "6px 9px" : "4px 9px", borderRadius: 6,
                             fontSize: heavy ? 10 : 9.5, fontWeight: heavy ? 700 : 600, lineHeight: 1.5,
                             color: heavy ? "var(--amber, #d9a441)" : "var(--text-muted)",
                             border: heavy ? "1px solid var(--amber, #d9a441)" : "none" }}
-                   title="صفقات المطّلعين (Form 4 · آخر 90 يوماً) — بيع/شراء السوق المفتوح فقط؛ المنح والضرائب مستثناة">
-                👤 المطّلعون (90 يوم): {ins.sell_value > 0 ? `بيع ${fmtM(ins.sell_value)}${ins.n_sellers > 1 ? ` · ${ins.n_sellers} أشخاص` : ""}` : "لا بيع سوقي"}{ins.buy_value > 0 ? ` · شراء ${fmtM(ins.buy_value)}` : ""}{heavy ? " — بيع كثيف ⚠" : ""}
+                   title="Insider Form 4 trades (last 90d, open-market sales/buys only — routine awards & tax withholding excluded). % of stake = how much of that insider's own holding they sold; a large % is a stronger signal than the dollar amount.">
+                👤 Insiders (90d): {txt}{more}{bought}{heavy ? " — heavy selling ⚠" : ""}
               </div>
             );
           })() : null}
@@ -296,8 +306,8 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             <div style={{ marginTop: 6, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
                           color: "var(--red)", border: "1px solid var(--red)",
                           background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
-                 title="هذه الإشارة مبنية على قوة السهم نفسه؛ لكن السوق العام هابط — في البيع الجماعي يرتفع الترابط وتسقط حتى الأسهم القوية. تعامل بحذر مضاعف.">
-              ⚠️ السوق العام هابط (SPY {plan.market.spy_price} تحت متوسّطه {plan.market.spy_ema21}) — الإشارة من قوة السهم نفسه؛ احذر الشراء ضدّ التيار
+                 title="This signal is based on the stock's OWN strength, but the broad market is in a downtrend — in a selloff correlation rises and even strong stocks fall. Use extra caution.">
+              ⚠️ Broad market is DOWN (SPY {plan.market.spy_price} below its {plan.market.spy_ema21} avg) — signal is the stock's own strength; beware buying against the trend
             </div>
           ) : null}
 

@@ -2,17 +2,17 @@
 const { useState, useEffect, useRef } = React;
 
 const AI_QUICK = [
-  { label: "🔍 الأسهم المرشّحة للصعود", q:
-    "ابحث عن أفضل الأسهم الحلال المرشّحة للصعود في المدى القريب، بأسلوب منهجي:\n" +
-    "1) استخرج المرشّحين الحلال من الماسح عبر get_deep_picks (وget_buy_signals إن لزم) — هذه قائمة مختصرة بسكور مركّب + طبقات فرعية + توافق شرعي.\n" +
-    "2) لأقوى 4-5 منها، استدعِ analyze_stock لكل سهم لتجمع كل الطبقات: الفني (RS/Trend/MACD/RSI/ADX/VWAP) + الأساسي + الشرعي AAOIFI + إجماع المحلّلين (analyst_consensus) + نشاط المطّلعين (insider_activity) + قرب الأرباح (earnings)، واجلب الأخبار عبر get_stock_news، وتحقّق من توافق التوقّع مع الإشارة عبر get_signal_agreement.\n" +
-    "3) قاعدة صارمة: أي سهم له near_term_red_flags (بيع مطّلعين كثيف، تقلّب متطرّف ATR>7%، أرباح ضمن الحظر، أو هبوط حادّ) — استبعده من أفضل 3 مهما كان سكوره الفني (لا ترتّب 'سكيناً يسقط' في القمة). اذكره في قائمة المستبعدين مع سبب الاستبعاد.\n" +
-    "4) للناجين فقط، اعرض جدولاً: السهم | السكور | الإشارة | السبب المختصر | التحذيرات. ثم أفضل 3 مع: الدخول، الوقف، و**الأهداف الثلاثة TP1/TP2/TP3** (لا هدفاً واحداً). وضّح أن R/R ‎1.7 نسبة مرجّحة عبر الأهداف الثلاثة (TP1 50% · TP2 30% · TP3 20%)، وأن الهدف الواحد مقابل الوقف ≈ 1:1.\n" +
-    "اعتمد فقط ما تؤكّده الأدوات؛ وقل 'غير متاح' لأي بيانات مفقودة (known=false) ولا تختلقها، وخاصّةً لا تختلق أخباراً — إن لم تأتِ من أداة get_stock_news فلا تذكرها." },
-  { label: "أفضل الفرص الحلال", q: "ما أفضل الفرص الحلال اليوم؟ حلّل أقواها." },
-  { label: "حلّل سهماً", q: "حلّل AAPL تحليلاً كاملاً: حلال، فني، إجماع، محلّلون، مطّلعون، أرباح، ونقاط دخول/وقف/هدف." },
-  { label: "حالة السوق", q: "ما حالة السوق الآن (Regime/VIX/Credit)؟" },
-  { label: "محفظتي", q: "اعرض حالة محفظتي والمخاطر." },
+  { label: "🔍 Upside candidates", q:
+    "Find the best halal stocks that are candidates for near-term upside, methodically:\n" +
+    "1) Pull halal candidates via get_deep_picks (and get_buy_signals if needed) — a shortlist with composite score + sub-scores + halal verdict.\n" +
+    "2) For the strongest 4-5, call analyze_stock on each to gather ALL layers: technical (RS/Trend/MACD/RSI/ADX/VWAP) + fundamental + AAOIFI halal + analyst_consensus + insider_activity (note top_seller.pct_of_stake) + earnings + market_regime, fetch news via get_stock_news, and check forecast/signal agreement via get_signal_agreement.\n" +
+    "3) STRICT rule: any stock with near_term_red_flags (heavy insider selling — especially a large % of stake, extreme volatility ATR>7%, earnings within blackout, or a sharp drop) must be kept OUT of the top 3 regardless of technical score (never rank a falling knife at the top). List it under exclusions with the reason. Also flag if market_regime.spy_bearish is true (broad market downtrend — extra caution).\n" +
+    "4) For the survivors only, show a table: Symbol | Score | Signal | Brief reason (from the data) | Warnings. Then the top 3 with: Entry, Stop, and ALL THREE targets TP1/TP2/TP3 (not one). Explain that the 1.7 R/R is BLENDED across the three targets (TP1 50% / TP2 30% / TP3 20%) and that a single target vs the stop is ≈ 1:1.\n" +
+    "Use only what the tools confirm; say 'not available' for any missing field (known=false) and never fabricate — especially do NOT invent news: if it didn't come from get_stock_news, don't mention it. Reply in English." },
+  { label: "Best halal picks", q: "What are the best halal opportunities today? Analyze the strongest ones. Reply in English." },
+  { label: "Analyze a stock", q: "Analyze AAPL fully: halal, technical, consensus, analysts, insiders (% of stake), earnings, market regime, and entry/stop/targets. Reply in English." },
+  { label: "Market state", q: "What's the market state now (Regime/VIX/Credit)? Reply in English." },
+  { label: "My portfolio", q: "Show my portfolio status and risk. Reply in English." },
 ];
 
 // Lightweight markdown → JSX so the agent's answers (## headings, **bold**, - bullets,

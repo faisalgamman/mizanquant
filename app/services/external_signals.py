@@ -46,6 +46,7 @@ def _insider(symbol: str) -> dict:
     sell_sh = buy_sh = 0
     sell_val = buy_val = 0.0
     sellers: set = set()
+    top_seller = None  # the single largest open-market sale, with % of that insider's stake
     for t in trades:
         if str(t.get("transactionDate") or "")[:10] < cutoff:
             continue
@@ -54,19 +55,34 @@ def _insider(symbol: str) -> dict:
         px = float(t.get("transactionPrice") or 0) or 0.0
         if code == "S":
             sell_sh += sh
-            sell_val += sh * px
+            val = sh * px
+            sell_val += val
             if t.get("name"):
                 sellers.add(t.get("name"))
+            # % of the insider's stake sold: 'share' is holdings AFTER the sale, so the
+            # pre-sale stake = after + sold. A large % (e.g. 39%) is a strong "abnormal /
+            # high-conviction" signal vs a routine 2-3% trim. Finnhub has NO 10b5-1 flag,
+            # so this %-of-stake is the best available normal-vs-significant gauge.
+            held_after = abs(int(t.get("share") or 0))
+            before = held_after + sh
+            pct = round(sh / before * 100, 1) if before > 0 else None
+            if top_seller is None or val > top_seller["value"]:
+                top_seller = {"name": t.get("name"), "value": round(val),
+                              "shares": sh, "pct_of_stake": pct,
+                              "date": str(t.get("transactionDate") or "")[:10]}
         elif code == "P":
             buy_sh += sh
             buy_val += sh * px
     if sell_sh or buy_sh:
+        big_pct_sale = bool(top_seller and (top_seller.get("pct_of_stake") or 0) >= 25)
         return {
             "known": True, "window_days": 90,
             "sell_shares": sell_sh, "buy_shares": buy_sh,
             "sell_value": round(sell_val), "buy_value": round(buy_val),
             "net_value": round(buy_val - sell_val), "n_sellers": len(sellers),
-            "heavy_sell": bool(sell_val >= 1_000_000 and sell_val > buy_val * 2),
+            "top_seller": top_seller,
+            # Heavy = large $ net selling OR one insider dumping a big slice of their stake.
+            "heavy_sell": bool((sell_val >= 1_000_000 and sell_val > buy_val * 2) or big_pct_sale),
         }
     return {"known": False}
 
