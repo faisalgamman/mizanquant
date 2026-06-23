@@ -186,7 +186,7 @@ def test_weekly_picks_endpoint(monkeypatch):
 # ── Swing funnel (Fly fix: record from the swing screener, not the AI pipeline) ──
 
 def test_swing_funnel_maps_and_filters(monkeypatch):
-    """funnel='swing' sources run_screener (same as /buys) and keeps only STRONG BUY/BUY."""
+    """funnel='swing' reads the warm 'screener' cache (same as /buys) and keeps STRONG BUY/BUY."""
     import halal_screener as hs
     fake = [
         {"symbol": "AAA", "swing_signal": "STRONG BUY", "swing_score": 80, "price": 100.0},
@@ -194,7 +194,9 @@ def test_swing_funnel_maps_and_filters(monkeypatch):
         {"symbol": "CCC", "swing_signal": "WATCH",      "swing_score": 40, "price": 20.0},
         {"symbol": "DDD", "swing_signal": "NO TRADE",   "swing_score": 10, "price": 8.0},
     ]
-    monkeypatch.setattr(hs, "run_screener", lambda: fake, raising=False)
+    # _swing_funnel reads the warm cache via _get_cached('screener'), NOT run_screener
+    # (which would trigger a fresh heavy scan in the recording thread).
+    monkeypatch.setattr(hs, "_get_cached", lambda key: (fake, "ready"), raising=False)
 
     mapped = wr._swing_funnel()
     assert {r["Symbol"] for r in mapped} == {"AAA", "BBB", "CCC", "DDD"}

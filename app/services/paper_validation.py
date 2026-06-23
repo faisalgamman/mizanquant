@@ -141,6 +141,8 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                 logger.debug("weekly pick SignalHistory record skipped", exc_info=True)
             recorded += 1
         db.commit()
+        logger.info("weekly paper recorded: %d new, %d skipped (funnel=%s, picks=%d)",
+                    recorded, skipped, funnel, len(picks))
         return {"recorded": recorded, "skipped": skipped}
     except SQLAlchemyError as e:
         db.rollback()

@@ -119,13 +119,19 @@ def _is_buy_candidate(row: dict, min_confidence: float) -> bool:
 
 
 def _swing_funnel():
-    """Weekly SWING picks straight from run_screener — the SAME source the Weekly tab
-    (`/buys`) shows — mapped to the report schema. Bypasses the AI-consensus stage in
-    run_pipeline that was zeroing the recorded ledger on Fly (consensus runs the disabled
-    ~coin-flip models → few/no BUY verdicts). STRONG BUY/BUY (swing_score ≥ 55) become buy
-    candidates; WATCH/NO TRADE are dropped by _is_buy_candidate."""
+    """Weekly SWING picks from the SAME warm cache the Weekly tab (`/buys`) reads — cache
+    key 'screener' via _get_cached — mapped to the report schema. Bypasses the AI-consensus
+    stage in run_pipeline that zeroed the recorded ledger on Fly. CRUCIAL: read the cache,
+    do NOT call run_screener() (which uses a different 'all' key and would trigger a fresh
+    heavy scan in the recording thread → stalls the box and records nothing). STRONG BUY/BUY
+    (swing_score ≥ 55) become buy candidates; WATCH/NO TRADE are dropped by _is_buy_candidate.
+    Empty cache ⇒ [] (no scan) — the scheduler/UI warms 'screener' pre-market."""
     import halal_screener as hs
-    rows = hs.run_screener() or []
+    try:
+        cached, _status = hs._get_cached("screener")
+    except Exception:
+        cached = None
+    rows = cached if isinstance(cached, list) else []
     out = []
     for r in rows:
         if not isinstance(r, dict) or not r.get("symbol"):
