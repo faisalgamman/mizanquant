@@ -435,6 +435,26 @@ def _exec_analyze_stock(symbol: str) -> dict:
         logger.debug("analyze_stock external signals failed for %s: %s", symbol, e)
         ext = {}
 
+    # ── 7b) Near-term RED FLAGS — disqualify "falling-knife"/distribution names from being
+    #    ranked as upside candidates (the SNDK case: ranked #1 despite a -11.9% day, $8.9M
+    #    insider selling, ATR ~9.5%). The agent is told to keep any flagged name OUT of the
+    #    top picks regardless of technical score.
+    red_flags = []
+    _ins = ext.get("insider") or {}
+    _an = ext.get("analyst") or {}
+    _ea = ext.get("earnings") or {}
+    if _ins.get("heavy_sell"):
+        red_flags.append(f"heavy insider selling (~${round((_ins.get('sell_value') or 0)/1e6,1)}M, 90d)")
+    if _an.get("bearish"):
+        red_flags.append(f"analyst consensus bearish ({_an.get('sell')} sell vs {_an.get('buy')} buy)")
+    if _ea.get("within_blackout"):
+        red_flags.append(f"earnings in {_ea.get('business_days')} business days (blackout)")
+    _atr = src.get("atr_pct")
+    if isinstance(_atr, (int, float)) and _atr > 7.0:
+        red_flags.append(f"extreme volatility (ATR {round(_atr,1)}%)")
+    if isinstance(change_pct, (int, float)) and change_pct <= -6.0:
+        red_flags.append(f"sharp recent drop ({round(change_pct,1)}%)")
+
     out.update({
         "company": company,
         "sector": sector,
@@ -463,7 +483,15 @@ def _exec_analyze_stock(symbol: str) -> dict:
         "entry": plan.get("strategy_entry") or plan.get("entry_price") or plan.get("entry"),
         "stop_loss": plan.get("strategy_stop") or plan.get("stop_loss") or plan.get("stop"),
         "take_profit": plan.get("strategy_tp1") or plan.get("take_profit") or plan.get("tp1"),
+        "take_profit_2": plan.get("strategy_tp2") or plan.get("tp2"),
+        "take_profit_3": plan.get("strategy_tp3") or plan.get("tp3"),
         "rr_ratio": plan.get("rr_ratio") or plan.get("strategy_rr"),
+        "rr_note": ("rr_ratio is the BLENDED 3-tier R/R (TP1 closes 50% at 1:1, TP2 30% at 2:1, "
+                    "TP3 20% at 3:1 → weighted ~1.7). A SINGLE target vs the stop is ~1:1 — when "
+                    "you cite R/R, show all three targets so it isn't misread as a 1:1 mislabeled."),
+        # Near-term upside guardrail — see 7b. Keep flagged names OUT of the top picks.
+        "near_term_red_flags": red_flags,
+        "near_term_safe": len(red_flags) == 0,
         "reconciliation": recon,
         "consistency_note": (
             "These numbers come from the SAME sources as the dashboard Analyze card "
