@@ -4,6 +4,38 @@ from fastapi import APIRouter
 
 router = APIRouter(tags=["Screener"])
 
+# Radical fix for the weekly paper ledger staying at 0 open: record at the EXACT moment
+# /buys serves BUY picks. When the Weekly tab shows stocks, the 'screener' cache is warm by
+# definition, so record_weekly_picks (which reads that same cache) is guaranteed to find them.
+# No scheduler timing, no cache-warmth race, no extra scan. Once/day, deduped against opens.
+_LAST_WEEKLY_AUTORECORD = {"date": None}
+
+
+def _autorecord_weekly_if_due(buys: list) -> None:
+    import datetime
+    import logging
+    logger = logging.getLogger("screener")
+    if not buys:
+        return
+    today = datetime.date.today().isoformat()
+    if _LAST_WEEKLY_AUTORECORD["date"] == today:
+        return
+    _LAST_WEEKLY_AUTORECORD["date"] = today  # claim first, so concurrent /buys polls don't double-fire
+    try:
+        from threading import Thread
+        from app.services.paper_validation import record_weekly_picks
+        def _go():
+            try:
+                logger.info("Weekly auto-record (triggered by /buys serving %d buys)...", len(buys))
+                logger.info("Weekly auto-record result: %s", record_weekly_picks())
+            except Exception as e:
+                logger.error("Weekly auto-record failed: %s", e, exc_info=True)
+                _LAST_WEEKLY_AUTORECORD["date"] = None  # allow a retry on the next /buys
+        Thread(target=_go, daemon=True, name="buys-autorecord").start()
+    except Exception as e:
+        logger.error("Weekly auto-record kickoff failed: %s", e)
+        _LAST_WEEKLY_AUTORECORD["date"] = None
+
 
 @router.get("/screener")
 async def screener():
@@ -18,7 +50,9 @@ async def buys():
     key = "screener"
     cached, status = _get_cached(key)
     if cached and isinstance(cached, list):
-        return [r for r in cached if r.get("swing_score", 0) >= 55]
+        buys = [r for r in cached if r.get("swing_score", 0) >= 55]
+        _autorecord_weekly_if_due(buys)   # record these picks now (once/day) — radical fix
+        return buys
     if status != "running":
         from threading import Thread
         Thread(target=_bg_compute, args=(key, run_screener), daemon=True).start()
