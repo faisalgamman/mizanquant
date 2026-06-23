@@ -605,13 +605,24 @@ def _scheduler_loop():
             # trades. Daily (~17:00 ET, post-close): mature open trades on the
             # Option-A exit (15% stop / 20-day) so closed pnl_pct accumulates and
             # the paper_trade_gate graduation counter can move. No broker orders.
-            if (_is_weekday(now) and now.weekday() == 0 and now.hour == 9
-                    and now.minute < 10 and last_paper_record != today_str):
-                last_paper_record = today_str
-                logger.info("Paper validation: recording weekly picks...")
+            # Weekly paper recording — AUTO-fires once/day on ANY trading day as soon as the
+            # swing 'screener' cache is warm. Previously Monday-09:00-only, which kept missing
+            # after restarts and forced a manual click on a (often cold) cache → ledger stuck
+            # at 0 open. Now it self-heals: opening the Weekly tab warms 'screener', and the
+            # next scheduler tick records the BUY/STRONG BUY picks the tab shows. Reads the
+            # WARM cache (no heavy scan), dedups against open trades.
+            if (_is_weekday(now) and not _is_market_holiday(now)
+                    and last_paper_record != today_str):
                 try:
-                    from app.services.paper_validation import record_weekly_picks
-                    record_weekly_picks()
+                    import halal_screener as _hs
+                    _cached, _ = _hs._get_cached("screener")
+                    _warm_buys = isinstance(_cached, list) and any(
+                        isinstance(r, dict) and (r.get("swing_score") or 0) >= 55 for r in _cached)
+                    if _warm_buys:
+                        last_paper_record = today_str
+                        logger.info("Paper validation: auto-recording weekly picks (cache warm)...")
+                        from app.services.paper_validation import record_weekly_picks
+                        logger.info("Paper validation weekly record: %s", record_weekly_picks())
                 except Exception as e:
                     logger.error(f"Paper validation record failed: {e}", exc_info=True)
 
