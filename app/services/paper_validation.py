@@ -444,10 +444,11 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
 
     1. Pull the composite ranking (`_picks_fn` injected in tests; defaults to the
        live deep-picks scan).
-    2. CLOSE each held PVM name that fell OUT of the top-N at its current price —
-       writes pnl_pct = (cur/entry-1)*100, pnl, exit_price, closed_at, status.
+    2. CLOSE each held PVM name that fell PAST the exit buffer (top-N × MONTHLY_EXIT_BUFFER,
+       default 1.5×N) at its current price — a hysteresis band so a name hovering at the
+       top-N edge isn't churned in/out every rebalance. Writes pnl_pct, pnl, exit_price.
     3. OPEN the new entrants (top-N not already held) at their current price.
-    4. KEEP the held names still inside the top-N (left untouched / open).
+    4. KEEP the held names still within the buffer (left untouched / open).
 
     Returns {target, opened, closed, held}. Simulated only — no broker orders.
     """
@@ -463,7 +464,11 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
     ranked = sorted(picks, key=lambda p: p["score"], reverse=True)
     price_map = {p["symbol"]: p["price"] for p in picks}
     target = [p["symbol"] for p in ranked][:top_n]
-    target_set = set(target)
+    # Hysteresis exit band: keep a held name until it falls PAST top-N × buffer
+    # (default 1.5×N), not the instant it slips to rank N+1 — cuts turnover / whipsaw.
+    exit_buffer = float(os.environ.get("MONTHLY_EXIT_BUFFER", "1.5"))
+    exit_rank = max(top_n, int(round(top_n * exit_buffer)))
+    keep_set = set([p["symbol"] for p in ranked][:exit_rank])
     # Conviction × inverse-vol weights for the target book (computed before the DB
     # session so the vol fetches don't hold a connection). New entrants are sized by it.
     weights = _conviction_vol_weights(ranked, top_n, vol_fn=_vol_fn)
@@ -476,8 +481,8 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
 
         closed = held = 0
         for t in open_trades:
-            if t.symbol in target_set:
-                held += 1                       # still in top-N → keep open
+            if t.symbol in keep_set:            # within top-N + hysteresis buffer → keep
+                held += 1
                 continue
             cur = _current_price(t.symbol, price_map)
             if cur is None:

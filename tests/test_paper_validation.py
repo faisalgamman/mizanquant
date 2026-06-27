@@ -215,6 +215,42 @@ def test_rebalance_no_picks_is_noop(tdb):
     assert out["opened"] == 0 and out["closed"] == 0
 
 
+# ── Hysteresis exit band (Phase 2 — cut churn / whipsaw) ──────────────────────
+
+def test_rebalance_hysteresis_keeps_name_just_outside_topn(tdb):
+    # Held EEE sits at rank 3 with top_n=2 → inside the 1.5×N buffer (exit_rank=3) → KEPT,
+    # not churned. Without hysteresis it would close the moment it left the top-2.
+    _seed_open_pvm(tdb, "AAA", entry=100.0, qty=5)
+    _seed_open_pvm(tdb, "EEE", entry=40.0, qty=10)
+    picks = [_mpick("AAA", 110, 95), _mpick("BBB", 60, 85),
+             _mpick("EEE", 45, 70), _mpick("CCC", 30, 60)]
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                               _vol_fn=lambda s: None)
+    assert out["closed"] == 0          # EEE (rank 3) within buffer → no churn
+    db = tdb()
+    try:
+        eee = db.query(TradeHistory).filter(TradeHistory.symbol == "EEE").first()
+        assert eee.status == "open" and eee.pnl_pct is None
+    finally:
+        db.close()
+
+
+def test_rebalance_buffer_1_0_is_strict_topn(tdb, monkeypatch):
+    # MONTHLY_EXIT_BUFFER=1.0 → exit_rank == top_n → no hysteresis (strict top-N exit).
+    monkeypatch.setenv("MONTHLY_EXIT_BUFFER", "1.0")
+    _seed_open_pvm(tdb, "EEE", entry=40.0, qty=10)
+    picks = [_mpick("AAA", 110, 95), _mpick("BBB", 60, 85), _mpick("EEE", 45, 70)]
+    pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                         _vol_fn=lambda s: None)
+    db = tdb()
+    try:
+        eee = db.query(TradeHistory).filter(TradeHistory.symbol == "EEE").first()
+        assert eee.status == "closed"  # rank 3 > exit_rank(2) → closed at +12.5%
+        assert eee.pnl_pct == 12.5
+    finally:
+        db.close()
+
+
 # ── Conviction × inverse-vol weighting (Phase 1 — raise risk-adjusted return) ──
 
 def test_vol_weights_tilt_to_lower_volatility():
