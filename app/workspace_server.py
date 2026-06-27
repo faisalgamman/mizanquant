@@ -4074,6 +4074,32 @@ async def screener_deep_picks(
         logger.debug("sector cap skipped: %s", _sc_exc)
     top = _ranked[:limit]
 
+    # Insider overlay — fold recent insider activity into the SELECTION ranking: DEMOTE
+    # names with heavy insider selling, lightly PROMOTE net buying. Bounded to the final
+    # shortlist only (≤limit names), insider data cached 6h, fetched in parallel, fail-open
+    # (no change on error). Env COMPOSITE_INSIDER_ADJ (default on) / INSIDER_SELL_PENALTY
+    # (15) / INSIDER_BUY_BONUS (5). Disable instantly with COMPOSITE_INSIDER_ADJ=false.
+    if top and os.environ.get("COMPOSITE_INSIDER_ADJ", "true").strip().lower() in ("true", "1", "yes", "on"):
+        try:
+            from app.services.external_signals import insider_rank_adjustment
+            _ins_pen = float(os.environ.get("INSIDER_SELL_PENALTY", "15"))
+            _ins_bon = float(os.environ.get("INSIDER_BUY_BONUS", "5"))
+
+            def _ins_one(row: dict) -> None:
+                a = insider_rank_adjustment(row.get("symbol", ""),
+                                            sell_penalty=_ins_pen, buy_bonus=_ins_bon)
+                row["insider_adj"] = a["adj"]
+                row["score_insider"] = round(a["adj"], 1)
+                row["insider_flag"] = a.get("flag")
+                row["insider_top_seller"] = a.get("top_seller")
+
+            with ThreadPoolExecutor(max_workers=4) as _ins_pool:
+                list(_ins_pool.map(_ins_one, top))
+            # Re-rank the shortlist with the insider adjustment folded into the rank key.
+            top.sort(key=lambda x: (_rank_key(x) + float(x.get("insider_adj") or 0)), reverse=True)
+        except Exception as _ins_exc:
+            logger.debug("insider overlay skipped: %s", _ins_exc)
+
     # Determine current SWING_EXIT_ENABLED state for exit_guidance header
     try:
         from app.config import settings as _exit_cfg

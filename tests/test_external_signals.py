@@ -33,3 +33,34 @@ def test_all_unknown_when_no_data(monkeypatch):
     assert out["analyst"]["known"] is False
     assert out["insider"]["known"] is False
     assert out["earnings"]["known"] is False
+
+
+# ── insider_rank_adjustment: fold insider activity into the SELECTION score ────
+
+def test_insider_rank_adjustment_heavy_sell_demotes(monkeypatch):
+    monkeypatch.setattr(es, "_insider", lambda s: {
+        "known": True, "heavy_sell": True, "net_value": -2_000_000,
+        "top_seller": {"name": "Exec X"}})
+    out = es.insider_rank_adjustment("AAA", sell_penalty=15)
+    assert out["adj"] == -15 and out["flag"] == "heavy_sell" and out["known"] is True
+    assert out["top_seller"]["name"] == "Exec X"
+
+
+def test_insider_rank_adjustment_net_buy_promotes(monkeypatch):
+    monkeypatch.setattr(es, "_insider", lambda s: {
+        "known": True, "heavy_sell": False, "net_value": 500_000})
+    out = es.insider_rank_adjustment("AAA", buy_bonus=5)
+    assert out["adj"] == 5 and out["flag"] == "net_buy"
+
+
+def test_insider_rank_adjustment_mild_sell_is_neutral(monkeypatch):
+    monkeypatch.setattr(es, "_insider", lambda s: {
+        "known": True, "heavy_sell": False, "net_value": -50_000})
+    out = es.insider_rank_adjustment("AAA")
+    assert out["adj"] == 0.0 and out["flag"] == "net_sell"   # noted, but not penalized
+
+
+def test_insider_rank_adjustment_unknown_fails_open(monkeypatch):
+    monkeypatch.setattr(es, "_insider", lambda s: {"known": False})
+    out = es.insider_rank_adjustment("AAA")
+    assert out["adj"] == 0.0 and out["known"] is False and out["flag"] is None

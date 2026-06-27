@@ -87,6 +87,29 @@ def _insider(symbol: str) -> dict:
     return {"known": False}
 
 
+def insider_rank_adjustment(symbol: str, *, sell_penalty: float = 15.0,
+                            buy_bonus: float = 5.0) -> dict:
+    """Composite-rank adjustment from recent insider activity — DEMOTE heavy selling,
+    lightly PROMOTE net buying. Returns {'adj', 'flag', 'top_seller', 'known'}; adj=0 with
+    known=False when there's no insider data (FAIL-OPEN — absence must never penalize a
+    name). Used to fold insider conviction into the deep-picks selection score."""
+    try:
+        ins = _insider((symbol or "").upper().strip())
+    except Exception as e:
+        logger.debug("insider_rank_adjustment %s failed: %s", symbol, e)
+        return {"adj": 0.0, "flag": None, "known": False}
+    if not ins.get("known"):
+        return {"adj": 0.0, "flag": None, "known": False}
+    net = float(ins.get("net_value") or 0)
+    if ins.get("heavy_sell"):
+        adj, flag = -abs(sell_penalty), "heavy_sell"
+    elif net > 0:
+        adj, flag = abs(buy_bonus), "net_buy"
+    else:
+        adj, flag = 0.0, ("net_sell" if net < 0 else "neutral")
+    return {"adj": adj, "flag": flag, "top_seller": ins.get("top_seller"), "known": True}
+
+
 def _earnings(symbol: str) -> dict:
     """Next scheduled earnings (Finnhub calendar primary, FMP cache fallback)."""
     from app.services.precision_gates import EARNINGS_BLACKOUT_DAYS
