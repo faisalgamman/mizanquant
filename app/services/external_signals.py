@@ -110,6 +110,46 @@ def insider_rank_adjustment(symbol: str, *, sell_penalty: float = 15.0,
     return {"adj": adj, "flag": flag, "top_seller": ins.get("top_seller"), "known": True}
 
 
+def fundamentals_rank_adjustment(symbol: str, *, max_bonus: float = 15.0,
+                                 max_penalty: float = 10.0) -> dict:
+    """Composite-rank adjustment from FREE Finnhub fundamentals (/stock/metric) — REWARD
+    real revenue growth + positive cash generation + quality (ROE), PENALIZE shrinking
+    revenue and heavy leverage. Returns {'adj', 'known', ...}; adj=0/known=False on no data
+    (FAIL-OPEN). Repairs the degraded score_fund (FMP legacy-403, yfinance IP-blocked)."""
+    try:
+        from app.services.finnhub_client import finnhub_client
+        m = finnhub_client.get_basic_financials((symbol or "").upper().strip())
+    except Exception as e:
+        logger.debug("fundamentals_rank_adjustment %s failed: %s", symbol, e)
+        return {"adj": 0.0, "known": False}
+    if not m:
+        return {"adj": 0.0, "known": False}
+
+    def _f(*keys):
+        for k in keys:
+            v = m.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return float(v)
+        return None
+
+    rev = _f("revenueGrowthTTMYoy", "revenueGrowthQuarterlyYoy")          # %
+    fcf_ps = _f("cashFlowPerShareTTM", "cashFlowPerShareAnnual")
+    roe = _f("roeTTM", "roeRfy")                                          # %
+    de = _f("totalDebt/totalEquityQuarterly", "totalDebt/totalEquityAnnual")
+    score = 0.0
+    if rev is not None:
+        score += 6.0 if rev > 15 else 3.0 if rev > 5 else (-5.0 if rev < 0 else 0.0)
+    if fcf_ps is not None:
+        score += 4.0 if fcf_ps > 0 else -4.0
+    if roe is not None and roe > 15:
+        score += 3.0
+    if de is not None and de > 2:
+        score -= 3.0
+    adj = max(-abs(max_penalty), min(abs(max_bonus), score))
+    return {"adj": adj, "known": True, "revenue_growth": rev,
+            "fcf_per_share": fcf_ps, "roe": roe, "debt_equity": de}
+
+
 def _earnings(symbol: str) -> dict:
     """Next scheduled earnings (Finnhub calendar primary, FMP cache fallback)."""
     from app.services.precision_gates import EARNINGS_BLACKOUT_DAYS

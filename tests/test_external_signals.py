@@ -64,3 +64,31 @@ def test_insider_rank_adjustment_unknown_fails_open(monkeypatch):
     monkeypatch.setattr(es, "_insider", lambda s: {"known": False})
     out = es.insider_rank_adjustment("AAA")
     assert out["adj"] == 0.0 and out["known"] is False and out["flag"] is None
+
+
+# ── fundamentals_rank_adjustment: free Finnhub /stock/metric → selection score ─
+
+def test_fundamentals_adjustment_rewards_growth_cash_quality(monkeypatch):
+    from app.services import finnhub_client as fc
+    monkeypatch.setattr(fc.finnhub_client, "get_basic_financials", lambda s: {
+        "revenueGrowthTTMYoy": 20.0, "cashFlowPerShareTTM": 6.0, "roeTTM": 25.0,
+        "totalDebt/totalEquityAnnual": 0.5}, raising=False)
+    out = es.fundamentals_rank_adjustment("AAA")
+    assert out["known"] and out["adj"] == 13.0   # +6 growth +4 fcf +3 roe
+    assert out["revenue_growth"] == 20.0 and out["fcf_per_share"] == 6.0
+
+
+def test_fundamentals_adjustment_penalizes_shrink_and_leverage(monkeypatch):
+    from app.services import finnhub_client as fc
+    monkeypatch.setattr(fc.finnhub_client, "get_basic_financials", lambda s: {
+        "revenueGrowthTTMYoy": -8.0, "cashFlowPerShareTTM": -1.0,
+        "totalDebt/totalEquityAnnual": 3.0}, raising=False)
+    out = es.fundamentals_rank_adjustment("AAA")
+    assert out["adj"] == -10.0   # -5 shrink -4 neg-fcf -3 leverage = -12, clamped to -10
+
+
+def test_fundamentals_adjustment_unknown_fails_open(monkeypatch):
+    from app.services import finnhub_client as fc
+    monkeypatch.setattr(fc.finnhub_client, "get_basic_financials", lambda s: None, raising=False)
+    out = es.fundamentals_rank_adjustment("AAA")
+    assert out["adj"] == 0.0 and out["known"] is False

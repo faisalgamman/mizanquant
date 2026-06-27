@@ -4074,31 +4074,50 @@ async def screener_deep_picks(
         logger.debug("sector cap skipped: %s", _sc_exc)
     top = _ranked[:limit]
 
-    # Insider overlay — fold recent insider activity into the SELECTION ranking: DEMOTE
-    # names with heavy insider selling, lightly PROMOTE net buying. Bounded to the final
-    # shortlist only (≤limit names), insider data cached 6h, fetched in parallel, fail-open
-    # (no change on error). Env COMPOSITE_INSIDER_ADJ (default on) / INSIDER_SELL_PENALTY
-    # (15) / INSIDER_BUY_BONUS (5). Disable instantly with COMPOSITE_INSIDER_ADJ=false.
-    if top and os.environ.get("COMPOSITE_INSIDER_ADJ", "true").strip().lower() in ("true", "1", "yes", "on"):
+    # External overlays — fold conviction signals a technical scan misses into the SELECTION
+    # ranking, on the final shortlist only (≤limit names, cached, parallel, fail-open):
+    #   • insider      — demote heavy insider SELLING, lightly promote net buying
+    #   • fundamentals — reward real revenue growth + cash generation + quality (ROE),
+    #                    penalize shrinking revenue / heavy leverage. FREE Finnhub metrics —
+    #                    repairs score_fund, whose FMP (legacy-403) + yfinance (IP-blocked)
+    #                    sources are dead on the box.
+    # Env COMPOSITE_INSIDER_ADJ / COMPOSITE_FUND_ADJ (both default on) — toggle each live.
+    _ins_on = os.environ.get("COMPOSITE_INSIDER_ADJ", "true").strip().lower() in ("true", "1", "yes", "on")
+    _fund_on = os.environ.get("COMPOSITE_FUND_ADJ", "true").strip().lower() in ("true", "1", "yes", "on")
+    if top and (_ins_on or _fund_on):
         try:
-            from app.services.external_signals import insider_rank_adjustment
+            from app.services.external_signals import (
+                insider_rank_adjustment, fundamentals_rank_adjustment,
+            )
             _ins_pen = float(os.environ.get("INSIDER_SELL_PENALTY", "15"))
             _ins_bon = float(os.environ.get("INSIDER_BUY_BONUS", "5"))
 
-            def _ins_one(row: dict) -> None:
-                a = insider_rank_adjustment(row.get("symbol", ""),
-                                            sell_penalty=_ins_pen, buy_bonus=_ins_bon)
-                row["insider_adj"] = a["adj"]
-                row["score_insider"] = round(a["adj"], 1)
-                row["insider_flag"] = a.get("flag")
-                row["insider_top_seller"] = a.get("top_seller")
+            def _overlay_one(row: dict) -> None:
+                sym = row.get("symbol", "")
+                adj = 0.0
+                if _ins_on:
+                    a = insider_rank_adjustment(sym, sell_penalty=_ins_pen, buy_bonus=_ins_bon)
+                    row["insider_adj"] = a["adj"]
+                    row["score_insider"] = round(a["adj"], 1)
+                    row["insider_flag"] = a.get("flag")
+                    row["insider_top_seller"] = a.get("top_seller")
+                    adj += a["adj"]
+                if _fund_on:
+                    f = fundamentals_rank_adjustment(sym)
+                    row["fund_adj"] = f["adj"]
+                    row["score_fund_finnhub"] = round(f["adj"], 1)
+                    if f.get("known"):
+                        row["revenue_growth_yoy"] = f.get("revenue_growth")
+                        row["fcf_per_share"] = f.get("fcf_per_share")
+                    adj += f["adj"]
+                row["selection_adj"] = round(adj, 2)
 
-            with ThreadPoolExecutor(max_workers=4) as _ins_pool:
-                list(_ins_pool.map(_ins_one, top))
-            # Re-rank the shortlist with the insider adjustment folded into the rank key.
-            top.sort(key=lambda x: (_rank_key(x) + float(x.get("insider_adj") or 0)), reverse=True)
-        except Exception as _ins_exc:
-            logger.debug("insider overlay skipped: %s", _ins_exc)
+            with ThreadPoolExecutor(max_workers=4) as _ov_pool:
+                list(_ov_pool.map(_overlay_one, top))
+            # Re-rank the shortlist with the overlays folded into the rank key.
+            top.sort(key=lambda x: (_rank_key(x) + float(x.get("selection_adj") or 0)), reverse=True)
+        except Exception as _ov_exc:
+            logger.debug("selection overlay skipped: %s", _ov_exc)
 
     # Determine current SWING_EXIT_ENABLED state for exit_guidance header
     try:

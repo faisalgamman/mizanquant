@@ -84,6 +84,16 @@ class FinnhubClient:
                 return sorted(rows, key=lambda r: r["date"])[0]  # soonest upcoming
         return None
 
+    def get_basic_financials(self, symbol: str) -> dict | None:
+        """Basic financial metrics (FREE tier /stock/metric): revenue & EPS growth,
+        margins, cash-flow/share, ROE/ROA, leverage. Returns the flat 'metric' dict, or
+        None. This is the working free fundamentals source — FMP's are legacy/403 and
+        yfinance is IP-blocked on the server, so this repairs the degraded fundamentals."""
+        d = self._get("stock/metric", {"symbol": symbol.upper(), "metric": "all"})
+        if isinstance(d, dict) and isinstance(d.get("metric"), dict):
+            return d["metric"]
+        return None
+
     def get_insider_transactions(self, symbol: str) -> list | None:
         """SEC Form 4 insider transactions: rows with {name, change, transactionDate,
         transactionCode ('S'=sale, 'P'=purchase, 'A'=award, 'F'=tax), transactionPrice}."""
