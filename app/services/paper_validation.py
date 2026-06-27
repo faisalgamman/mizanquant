@@ -268,15 +268,19 @@ def paper_ledger_status(strategy_id: str = PV_WEEKLY) -> dict:
 
 # ── Monthly composite ledger (PVM) — cross-sectional rebalance ─────────────────
 
-def _monthly_row_from_pick(pick: dict, account: float, top_n: int) -> dict:
+def _monthly_row_from_pick(pick: dict, account: float, top_n: int,
+                           budget: float | None = None) -> dict:
     """Map a monthly composite pick → TradeHistory kwargs for an OPEN PVM trade.
 
-    Equal-weight sizing: each of the top-N names gets ~account/top_n of capital.
-    No stop / take-profit — the monthly exit is *leaving the top-N* at the next
-    rebalance, not a price stop (so those columns stay null).
+    ``budget`` is the dollar capital for THIS name. When None it falls back to
+    equal-weight (~account/top_n); rebalance_monthly passes a conviction × inverse-vol
+    weighted budget instead (risk-parity sizing — raises risk-adjusted return without
+    changing which names are held). No stop / take-profit — the monthly exit is *leaving
+    the top-N* at the next rebalance, not a price stop (so those columns stay null).
     """
     price = float(pick.get("price") or pick.get("current_price") or 0)
-    budget = (float(account) / max(int(top_n), 1)) if account else 0.0
+    if budget is None:
+        budget = (float(account) / max(int(top_n), 1)) if account else 0.0
     qty = float(int(budget // price)) if price > 0 else 0.0
     return {
         "strategy_id": PV_MONTHLY,
@@ -372,7 +376,70 @@ def _current_price(symbol: str, price_map: dict) -> float | None:
     return None
 
 
-def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None) -> dict:
+def _realized_vol(symbol: str) -> "float | None":
+    """Annualized realized volatility — std of ~3mo daily log returns. None on any
+    failure (caller then treats the name as median-vol, so missing data never distorts
+    the weights). Monthly cadence → the per-name fetch cost is negligible."""
+    try:
+        import numpy as np
+        from app.services.market_data import fetch as fetch_market_data
+        df = fetch_market_data(symbol, period="3mo")
+        if df is None or len(df) < 20 or "close" not in getattr(df, "columns", []):
+            return None
+        c = df["close"].astype(float)
+        rets = np.log(c / c.shift(1)).dropna()
+        if len(rets) < 15:
+            return None
+        v = float(rets.std() * (252 ** 0.5))
+        return v if v > 0 else None
+    except Exception as e:
+        logger.debug("realized_vol %s failed: %s", symbol, e)
+        return None
+
+
+def _conviction_vol_weights(picks: list, top_n: int, vol_fn=None) -> dict:
+    """Portfolio weights over the top-N target names: a risk-parity base (inverse
+    volatility) with a gentle conviction tilt (sqrt of score / mean-score). Each weight
+    is clamped to ~[floor, cap]×equal so no single name dominates or becomes dust, then
+    renormalized to sum to 1. Falls back to plain equal weight when the master flag is
+    off or volatilities are unavailable — so the change only ever *reallocates* capital
+    across the same picks, raising risk-adjusted return without altering selection.
+
+    Env: MONTHLY_VOL_WEIGHT (master, default on), MONTHLY_WEIGHT_CAP (2.0),
+    MONTHLY_WEIGHT_FLOOR (0.4). ``vol_fn`` is injectable for offline tests.
+    """
+    names = [p["symbol"] for p in picks][:top_n]
+    n = len(names)
+    if n == 0:
+        return {}
+    eq = 1.0 / n
+    if os.environ.get("MONTHLY_VOL_WEIGHT", "true").strip().lower() not in ("true", "1", "yes", "on"):
+        return {s: eq for s in names}
+    vf = vol_fn or _realized_vol
+    scores = {p["symbol"]: max(float(p.get("score") or 0.0), 0.0) for p in picks[:top_n]}
+    mean_score = (sum(scores.values()) / n) or 1.0
+    vols = {s: vf(s) for s in names}
+    known = sorted(v for v in vols.values() if v)
+    median_vol = known[len(known) // 2] if known else None
+    raw: dict = {}
+    for s in names:
+        v = vols.get(s) or median_vol
+        if not v or v <= 0:
+            raw[s] = eq                      # no vol info anywhere → neutral weight
+            continue
+        tilt = (scores.get(s, 0.0) / mean_score) ** 0.5 if mean_score else 1.0
+        raw[s] = (1.0 / v) * tilt
+    tot = sum(raw.values()) or 1.0
+    w = {s: raw[s] / tot for s in names}
+    cap = float(os.environ.get("MONTHLY_WEIGHT_CAP", "2.0")) * eq
+    floor = float(os.environ.get("MONTHLY_WEIGHT_FLOOR", "0.4")) * eq
+    w = {s: min(max(x, floor), cap) for s, x in w.items()}    # soft concentration guard
+    tot2 = sum(w.values()) or 1.0
+    return {s: x / tot2 for s, x in w.items()}
+
+
+def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
+                      _vol_fn=None) -> dict:
     """Rebalance the monthly composite ledger (PVM) to the current top-N.
 
     1. Pull the composite ranking (`_picks_fn` injected in tests; defaults to the
@@ -397,6 +464,9 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None)
     price_map = {p["symbol"]: p["price"] for p in picks}
     target = [p["symbol"] for p in ranked][:top_n]
     target_set = set(target)
+    # Conviction × inverse-vol weights for the target book (computed before the DB
+    # session so the vol fetches don't hold a connection). New entrants are sized by it.
+    weights = _conviction_vol_weights(ranked, top_n, vol_fn=_vol_fn)
 
     db = SessionLocal()
     try:
@@ -429,8 +499,9 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None)
             if not price or price <= 0:
                 continue
             pick = next((p for p in ranked if p["symbol"] == sym), {"symbol": sym, "price": price})
+            budget = float(account) * weights.get(sym, 1.0 / max(int(top_n), 1))
             db.add(TradeHistory(created_at=_utc_now(),
-                                **_monthly_row_from_pick(pick, account, top_n)))
+                                **_monthly_row_from_pick(pick, account, top_n, budget=budget)))
             opened += 1
 
         db.commit()

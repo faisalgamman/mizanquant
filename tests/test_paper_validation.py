@@ -173,7 +173,8 @@ def test_monthly_row_from_pick_equal_weight():
 
 def test_rebalance_opens_top_n_on_empty_ledger(tdb):
     picks = [_mpick("AAA", 100, 90), _mpick("BBB", 50, 80), _mpick("CCC", 25, 70)]
-    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks)
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                               _vol_fn=lambda s: None)
     assert out == {"target": 2, "opened": 2, "closed": 0, "held": 0}
 
     db = tdb()
@@ -192,7 +193,8 @@ def test_rebalance_closes_dropouts_opens_entrants_keeps_held(tdb):
     # New ranking top-2 = AAA, BBB. DDD priced at 50 (was 40) → +25% on close.
     picks = [_mpick("AAA", 110, 95), _mpick("BBB", 60, 85),
              _mpick("CCC", 30, 60), _mpick("DDD", 50, 30)]
-    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks)
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                               _vol_fn=lambda s: None)
     assert out == {"target": 2, "opened": 1, "closed": 1, "held": 1}
 
     db = tdb()
@@ -211,3 +213,38 @@ def test_rebalance_closes_dropouts_opens_entrants_keeps_held(tdb):
 def test_rebalance_no_picks_is_noop(tdb):
     out = pv.rebalance_monthly(top_n=2, _picks_fn=lambda n: [])
     assert out["opened"] == 0 and out["closed"] == 0
+
+
+# ── Conviction × inverse-vol weighting (Phase 1 — raise risk-adjusted return) ──
+
+def test_vol_weights_tilt_to_lower_volatility():
+    # equal score → pure risk-parity: the lower-vol name gets the larger weight
+    picks = [_mpick("AAA", 100, 80), _mpick("BBB", 100, 80)]
+    vols = {"AAA": 0.20, "BBB": 0.40}
+    w = pv._conviction_vol_weights(picks, top_n=2, vol_fn=lambda s: vols[s])
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+    assert w["AAA"] > w["BBB"]
+
+
+def test_vol_weights_equal_when_flag_off(monkeypatch):
+    monkeypatch.setenv("MONTHLY_VOL_WEIGHT", "false")
+    picks = [_mpick("AAA", 100, 90), _mpick("BBB", 100, 50)]
+    w = pv._conviction_vol_weights(picks, top_n=2, vol_fn=lambda s: 0.2)
+    assert w == {"AAA": 0.5, "BBB": 0.5}
+
+
+def test_vol_weights_fallback_equal_when_vol_unknown():
+    picks = [_mpick("AAA", 100, 90), _mpick("BBB", 100, 50)]
+    w = pv._conviction_vol_weights(picks, top_n=2, vol_fn=lambda s: None)
+    assert w == {"AAA": 0.5, "BBB": 0.5}
+
+
+def test_vol_weights_clamp_prevents_domination():
+    # extreme spread (low-vol high-score AAA): without the clamp AAA ≈ 0.99; the soft
+    # cap pulls it well down and the floor lifts the dust names off ~0.
+    picks = [_mpick("AAA", 100, 99), _mpick("BBB", 100, 1), _mpick("CCC", 100, 1)]
+    vols = {"AAA": 0.05, "BBB": 0.9, "CCC": 0.9}
+    w = pv._conviction_vol_weights(picks, top_n=3, vol_fn=lambda s: vols[s])
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+    assert w["AAA"] == max(w.values()) and w["AAA"] < 0.8     # clamped down from ~0.99
+    assert w["BBB"] == w["CCC"] and w["BBB"] > 0.05           # floor lifted them
