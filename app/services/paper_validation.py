@@ -122,14 +122,42 @@ def _paper_row_from_pick(pick: dict) -> dict:
     }
 
 
+def _default_regime() -> dict:
+    """Broad-market regime ({known, spy_bearish, spy_price, spy_ema21}) — SPY vs EMA21,
+    the same signal the Analyze-card downtrend warning uses. Never raises."""
+    try:
+        from app.services.external_signals import _market_regime
+        return _market_regime()
+    except Exception:
+        return {"known": False}
+
+
 def record_weekly_picks(account: float = 10000.0, top: int = 15,
-                        min_confidence: float = 45.0, funnel: str = "swing") -> dict:
+                        min_confidence: float = 45.0, funnel: str = "swing",
+                        _regime_fn=None) -> dict:
     """Record this week's picks as OPEN paper trades (one per symbol, deduped).
 
     Sources from the SWING screener (funnel="swing") — the same picks the Weekly tab
     shows — not the AI-consensus pipeline, which yielded 0 BUY verdicts on Fly and left
     the ledger empty. So the recorded ledger now matches the displayed weekly scanner.
     """
+    # Broad-market regime gate — the corrupt 2026-06-11/12 batch was a swing-long pile-in
+    # right before a market drop, every trade a loss. Skip recording NEW weekly paper
+    # entries when SPY is below its EMA21 (don't open swing longs into a downtrend). The
+    # Weekly tab still SHOWS the signals + the downtrend warning — this gates ONLY what is
+    # auto-recorded as a paper trade. Fail-open on unknown regime; env WEEKLY_REGIME_GATE
+    # (default on), set false to record regardless (pure-validation data collection).
+    if os.environ.get("WEEKLY_REGIME_GATE", "true").strip().lower() in ("true", "1", "yes", "on"):
+        try:
+            regime = (_regime_fn or _default_regime)()
+            if regime.get("known") and regime.get("spy_bearish"):
+                logger.info("weekly record skipped — SPY %.2f < EMA21 %.2f (regime gate)",
+                            regime.get("spy_price") or 0.0, regime.get("spy_ema21") or 0.0)
+                return {"recorded": 0, "skipped": 0, "reason": "spy_bearish",
+                        "spy_price": regime.get("spy_price"), "spy_ema21": regime.get("spy_ema21")}
+        except Exception as e:
+            logger.debug("weekly regime gate failed (allowing record): %s", e)
+
     from app.services.weekly_report import build_weekly_report
 
     report = build_weekly_report(account, top=top, min_confidence=min_confidence, funnel=funnel)

@@ -50,11 +50,12 @@ def test_paper_row_from_pick():
 def test_record_inserts_open_and_dedups(tdb, monkeypatch):
     report = {"picks": [_pick("AAA"), _pick("BBB"), _pick("CCC", shares=0)]}
     monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+    _bull = lambda: {"known": True, "spy_bearish": False}
 
-    r1 = pv.record_weekly_picks(account=10000)
+    r1 = pv.record_weekly_picks(account=10000, _regime_fn=_bull)
     assert r1["recorded"] == 2 and r1["skipped"] == 1   # CCC has 0 shares → skipped
 
-    r2 = pv.record_weekly_picks(account=10000)            # AAA/BBB still open → deduped
+    r2 = pv.record_weekly_picks(account=10000, _regime_fn=_bull)  # AAA/BBB open → deduped
     assert r2["recorded"] == 0
 
     db = tdb()
@@ -78,12 +79,13 @@ def test_record_also_persists_swing_signal_history(tdb, monkeypatch):
                 "usx_shadow": {"v1_score": 55.0, "v2_score": None, "active": "v2"}})
     report = {"picks": [p_a, _pick("BBB"), _pick("CCC", shares=0)]}
     monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+    _bull = lambda: {"known": True, "spy_bearish": False}
 
     calls = []
     import app.background.cache_manager as cm
     monkeypatch.setattr(cm, "record_signal", lambda **kw: calls.append(kw))
 
-    r1 = pv.record_weekly_picks(account=10000)
+    r1 = pv.record_weekly_picks(account=10000, _regime_fn=_bull)
     assert r1["recorded"] == 2
     assert len(calls) == 2, "record_signal must run once per INSERTED pick (not skipped ones)"
     assert all(c["signal_type"] == "swing" for c in calls)
@@ -94,8 +96,49 @@ def test_record_also_persists_swing_signal_history(tdb, monkeypatch):
     assert by_sym["AAA"]["details"]["source"] == "weekly_scanner"
     assert "usx_score" not in (by_sym["BBB"]["breakdown"] or {})  # BBB carries no usx fields
 
-    pv.record_weekly_picks(account=10000)   # AAA/BBB still open → PV dedup
+    pv.record_weekly_picks(account=10000, _regime_fn=_bull)   # AAA/BBB open → PV dedup
     assert len(calls) == 2, "second run must not duplicate SignalHistory rows"
+
+
+# ── Weekly broad-market regime gate (don't pile swing longs into a downtrend) ──
+
+def test_weekly_record_skipped_when_spy_bearish(tdb, monkeypatch):
+    report = {"picks": [_pick("AAA"), _pick("BBB")]}
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+    out = pv.record_weekly_picks(
+        account=10000, _regime_fn=lambda: {"known": True, "spy_bearish": True})
+    assert out["recorded"] == 0 and out["reason"] == "spy_bearish"
+    db = tdb()
+    try:
+        n = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == "PV", TradeHistory.pnl_pct.is_(None)).count()
+        assert n == 0           # nothing recorded into the downtrend
+    finally:
+        db.close()
+
+
+def test_weekly_record_runs_when_spy_bullish(tdb, monkeypatch):
+    report = {"picks": [_pick("AAA"), _pick("BBB")]}
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+    out = pv.record_weekly_picks(
+        account=10000, _regime_fn=lambda: {"known": True, "spy_bearish": False})
+    assert out["recorded"] == 2
+
+
+def test_weekly_record_unknown_regime_fails_open(tdb, monkeypatch):
+    report = {"picks": [_pick("AAA")]}
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+    out = pv.record_weekly_picks(account=10000, _regime_fn=lambda: {"known": False})
+    assert out["recorded"] == 1   # absence of a regime signal must not block
+
+
+def test_weekly_record_gate_off_records_in_downtrend(tdb, monkeypatch):
+    monkeypatch.setenv("WEEKLY_REGIME_GATE", "false")
+    report = {"picks": [_pick("AAA")]}
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report", lambda *a, **k: report)
+    out = pv.record_weekly_picks(
+        account=10000, _regime_fn=lambda: {"known": True, "spy_bearish": True})
+    assert out["recorded"] == 1   # gate disabled → records despite the downtrend
 
 
 def _seed_open(tdb, symbol="AAA", entry=100.0, qty=10):
