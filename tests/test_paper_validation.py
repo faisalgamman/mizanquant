@@ -299,6 +299,26 @@ def test_catastrophe_stop_disabled_by_env(tdb, monkeypatch):
         db.close()
 
 
+# ── Component-attribution data pipeline (sub-scores must reach the ledger) ─────
+
+def test_normalize_picks_preserves_existing_parts():
+    # _default_monthly_picks normalizes, then rebalance_monthly normalizes AGAIN — the
+    # second pass must NOT wipe the sub-scores (the n=0 component_attribution bug).
+    once = pv._normalize_picks([{"symbol": "AAA", "price": 100, "composite_score": 80,
+                                 "score_tech": 70, "score_fund": 60, "conviction_score": 5}])
+    assert once[0]["parts"] == {"score_tech": 70, "score_fund": 60, "conviction_score": 5}
+    twice = pv._normalize_picks(once)
+    assert twice[0]["parts"] == once[0]["parts"]   # preserved through re-normalization
+
+
+def test_monthly_row_stores_parts_in_signal_details():
+    pick = {"symbol": "AAA", "price": 100, "score": 80,
+            "parts": {"score_tech": 70, "score_fund": 60}}
+    row = pv._monthly_row_from_pick(pick, account=10000.0, top_n=10)
+    assert row["signal_details"]["score_tech"] == 70
+    assert row["signal_details"]["score_fund"] == 60
+
+
 # ── Conviction × inverse-vol weighting (Phase 1 — raise risk-adjusted return) ──
 
 def test_vol_weights_tilt_to_lower_volatility():

@@ -323,11 +323,18 @@ def _normalize_picks(picks) -> list[dict]:
         if not sym or price <= 0:
             continue
         # Carry the composite component parts through (when the source row has them) so
-        # the monthly ledger can store them for read-only component attribution.
-        parts = {k: p.get(k) for k in
-                 ("score_tech", "score_fund", "score_sentiment", "score_halal",
-                  "conviction_score", "confirmation_count")
-                 if isinstance(p.get(k), (int, float))}
+        # the monthly ledger can store them for read-only component attribution. IDEMPOTENT:
+        # preserve an already-normalized `parts` dict — _default_monthly_picks normalizes
+        # the deep-picks output and rebalance_monthly normalizes AGAIN; a naive second pass
+        # read top-level sub-scores (now nested under `parts`) and wiped them to {}, which
+        # is why component_attribution saw n=0 on every trade.
+        if isinstance(p.get("parts"), dict):
+            parts = p["parts"]
+        else:
+            parts = {k: p.get(k) for k in
+                     ("score_tech", "score_fund", "score_sentiment", "score_halal",
+                      "conviction_score", "confirmation_count")
+                     if isinstance(p.get(k), (int, float))}
         out.append({"symbol": sym, "price": price, "score": float(score or 0), "parts": parts})
     return out
 
