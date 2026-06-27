@@ -204,6 +204,11 @@ def paper_trade_status(
             query = db.query(TradeHistory).filter(TradeHistory.pnl_pct.isnot(None))
             if strategy_id:
                 query = query.filter(TradeHistory.strategy_id == strategy_id)
+                # Exclude a ledger's pre-inception (corrupt/reset) rows from graduation.
+                from app.services.paper_validation import ledger_inception
+                _inc = ledger_inception(strategy_id)
+                if _inc is not None:
+                    query = query.filter(TradeHistory.created_at >= _inc)
             trades = (
                 query.order_by(TradeHistory.created_at.desc())
                 .limit(lookback_trades)
@@ -256,6 +261,11 @@ async def paper_trade_status_async(
             query = select(TradeHistory).filter(TradeHistory.pnl_pct.isnot(None))
             if strategy_id:
                 query = query.filter(TradeHistory.strategy_id == strategy_id)
+                # Exclude a ledger's pre-inception (corrupt/reset) rows from graduation.
+                from app.services.paper_validation import ledger_inception
+                _inc = ledger_inception(strategy_id)
+                if _inc is not None:
+                    query = query.filter(TradeHistory.created_at >= _inc)
             query = query.order_by(TradeHistory.created_at.desc()).limit(lookback_trades)
             result = await db.execute(query)
             trades = result.scalars().all()

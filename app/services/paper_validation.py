@@ -59,6 +59,39 @@ def _strategy_for(scanner: str | None) -> str:
     return PV_WEEKLY
 
 
+# ── Ledger inception (non-destructive reset) ──────────────────────────────────
+# A ledger's pre-inception rows are EXCLUDED from the reported stats + graduation
+# (the rows stay in the DB for audit — this only resets what the ledger *reports*).
+# The weekly (PV) ledger's pre-2026-06-27 rows were a single corrupt batch: duplicate
+# weekly picks recorded 2026-06-11/12 right before a market drop, every one closed at a
+# loss (0% win rate, several at the −15% catastrophe stop). They poisoned the win-rate
+# and graduation gate, so we move the weekly ledger's inception forward and let it
+# rebuild a clean track record. Per-strategy; env-tunable (PV_WEEKLY_INCEPTION, empty
+# disables the cutoff). Monthly (PVM) / pairs (PVP) keep their full history.
+_INCEPTION_ENV: dict[str, tuple[str, str]] = {
+    PV_WEEKLY: ("PV_WEEKLY_INCEPTION", "2026-06-27"),
+}
+
+
+def ledger_inception(strategy_id: str) -> "datetime | None":
+    """Stats/graduation cutoff for a ledger — trades created before it are ignored
+    (kept in the DB, just not reported). None = count all history. Naive UTC to match
+    the naive TradeHistory.created_at column. Read at call time so the cutoff can be
+    retuned via env without a redeploy."""
+    spec = _INCEPTION_ENV.get(strategy_id)
+    if not spec:
+        return None
+    env_key, default = spec
+    iso = (os.environ.get(env_key, default) or "").strip()
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso)
+    except ValueError:
+        logger.warning("bad ledger inception %r for %s — ignoring", iso, strategy_id)
+        return None
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -207,12 +240,18 @@ def paper_ledger_status(strategy_id: str = PV_WEEKLY) -> dict:
     from app.services.paper_trade_gate import paper_trade_status
 
     open_n = closed_n = 0
+    inception = ledger_inception(strategy_id)
     db = SessionLocal()
     try:
-        open_n = db.query(TradeHistory).filter(
-            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.is_(None)).count()
-        closed_n = db.query(TradeHistory).filter(
-            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.isnot(None)).count()
+        oq = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.is_(None))
+        cq = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.isnot(None))
+        if inception is not None:  # ignore the pre-reset (corrupt) batch
+            oq = oq.filter(TradeHistory.created_at >= inception)
+            cq = cq.filter(TradeHistory.created_at >= inception)
+        open_n = oq.count()
+        closed_n = cq.count()
     except SQLAlchemyError as e:
         logger.debug("paper_ledger_status count failed: %s", e)
     finally:
