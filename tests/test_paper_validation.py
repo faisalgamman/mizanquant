@@ -175,7 +175,7 @@ def test_rebalance_opens_top_n_on_empty_ledger(tdb):
     picks = [_mpick("AAA", 100, 90), _mpick("BBB", 50, 80), _mpick("CCC", 25, 70)]
     out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
                                _vol_fn=lambda s: None)
-    assert out == {"target": 2, "opened": 2, "closed": 0, "held": 0}
+    assert out == {"target": 2, "opened": 2, "closed": 0, "held": 0, "stopped": 0}
 
     db = tdb()
     try:
@@ -195,7 +195,7 @@ def test_rebalance_closes_dropouts_opens_entrants_keeps_held(tdb):
              _mpick("CCC", 30, 60), _mpick("DDD", 50, 30)]
     out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
                                _vol_fn=lambda s: None)
-    assert out == {"target": 2, "opened": 1, "closed": 1, "held": 1}
+    assert out == {"target": 2, "opened": 1, "closed": 1, "held": 1, "stopped": 0}
 
     db = tdb()
     try:
@@ -247,6 +247,54 @@ def test_rebalance_buffer_1_0_is_strict_topn(tdb, monkeypatch):
         eee = db.query(TradeHistory).filter(TradeHistory.symbol == "EEE").first()
         assert eee.status == "closed"  # rank 3 > exit_rank(2) → closed at +12.5%
         assert eee.pnl_pct == 12.5
+    finally:
+        db.close()
+
+
+# ── Loose catastrophe stop overlay (Phase 2 — in-rank blowup safety net) ──────
+
+def test_catastrophe_stop_closes_in_rank_crash(tdb):
+    # AAA is still rank-1 (inside the buffer) but has crashed 35% from entry → the loose
+    # stop fires anyway (the rank exit alone would have kept it).
+    _seed_open_pvm(tdb, "AAA", entry=100.0, qty=5)
+    picks = [_mpick("AAA", 65, 95), _mpick("BBB", 60, 85)]   # AAA 100→65 = -35%
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                               _vol_fn=lambda s: None)
+    assert out["stopped"] == 1
+    db = tdb()
+    try:
+        aaa = db.query(TradeHistory).filter(TradeHistory.symbol == "AAA").first()
+        assert aaa.status == "closed" and aaa.pnl_pct == -35.0
+    finally:
+        db.close()
+
+
+def test_catastrophe_stop_is_loose_ignores_small_drawdown(tdb):
+    # 10% down and in-rank → the wide 30% stop must NOT fire (no weekly-style whipsaw).
+    _seed_open_pvm(tdb, "AAA", entry=100.0, qty=5)
+    picks = [_mpick("AAA", 90, 95), _mpick("BBB", 60, 85)]
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                               _vol_fn=lambda s: None)
+    assert out["stopped"] == 0
+    db = tdb()
+    try:
+        aaa = db.query(TradeHistory).filter(TradeHistory.symbol == "AAA").first()
+        assert aaa.status == "open"
+    finally:
+        db.close()
+
+
+def test_catastrophe_stop_disabled_by_env(tdb, monkeypatch):
+    monkeypatch.setenv("MONTHLY_CAT_STOP_PCT", "0")
+    _seed_open_pvm(tdb, "AAA", entry=100.0, qty=5)
+    picks = [_mpick("AAA", 50, 95), _mpick("BBB", 60, 85)]   # -50% but stop off
+    out = pv.rebalance_monthly(top_n=2, account=10000.0, _picks_fn=lambda n: picks,
+                               _vol_fn=lambda s: None)
+    assert out["stopped"] == 0
+    db = tdb()
+    try:
+        aaa = db.query(TradeHistory).filter(TradeHistory.symbol == "AAA").first()
+        assert aaa.status == "open"   # stop disabled → kept despite the crash
     finally:
         db.close()
 

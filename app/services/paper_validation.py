@@ -445,12 +445,14 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
     1. Pull the composite ranking (`_picks_fn` injected in tests; defaults to the
        live deep-picks scan).
     2. CLOSE each held PVM name that fell PAST the exit buffer (top-N × MONTHLY_EXIT_BUFFER,
-       default 1.5×N) at its current price — a hysteresis band so a name hovering at the
-       top-N edge isn't churned in/out every rebalance. Writes pnl_pct, pnl, exit_price.
+       default 1.5×N) — a hysteresis band so a name hovering at the top-N edge isn't churned
+       in/out every rebalance — OR that hit the loose catastrophe stop (down ≥
+       MONTHLY_CAT_STOP_PCT% from entry, default 30 — a wide safety net for an in-rank
+       blowup). Closes at current price; writes pnl_pct, pnl, exit_price.
     3. OPEN the new entrants (top-N not already held) at their current price.
-    4. KEEP the held names still within the buffer (left untouched / open).
+    4. KEEP the held names still within the buffer and not stopped (untouched / open).
 
-    Returns {target, opened, closed, held}. Simulated only — no broker orders.
+    Returns {target, opened, closed, held, stopped}. Simulated only — no broker orders.
     """
     fn = _picks_fn or _default_monthly_picks
     try:
@@ -479,22 +481,30 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
             TradeHistory.strategy_id == PV_MONTHLY, TradeHistory.pnl_pct.is_(None)).all()
         held_syms = {t.symbol for t in open_trades}
 
-        closed = held = 0
+        cat_stop_pct = float(os.environ.get("MONTHLY_CAT_STOP_PCT", "30"))
+        closed = held = stopped = 0
         for t in open_trades:
-            if t.symbol in keep_set:            # within top-N + hysteresis buffer → keep
-                held += 1
-                continue
             cur = _current_price(t.symbol, price_map)
             if cur is None:
                 held += 1                       # can't price honestly → leave open
                 continue
             entry = float(t.entry_price or 0)
+            # Loose catastrophe-stop OVERLAY: exit a held name that has crashed from entry
+            # even while it's still in-rank (the rank exit alone can't catch an in-rank
+            # blowup). Deliberately WIDE (≈30%) so it never whipsaws like the weekly stop.
+            hit_stop = (cat_stop_pct > 0 and entry > 0
+                        and cur <= entry * (1.0 - cat_stop_pct / 100.0))
+            if t.symbol in keep_set and not hit_stop:
+                held += 1                       # within buffer & no blowup → keep open
+                continue
             t.exit_price = round(cur, 4)
             t.pnl_pct = round((cur / entry - 1.0) * 100, 2) if entry > 0 else None
             t.pnl = round((cur - entry) * float(t.qty or 0), 2)
             t.closed_at = _utc_now()
             t.status = "closed"
             closed += 1
+            if hit_stop:
+                stopped += 1
 
         opened = 0
         for sym in target:
@@ -510,7 +520,8 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
             opened += 1
 
         db.commit()
-        return {"target": len(target), "opened": opened, "closed": closed, "held": held}
+        return {"target": len(target), "opened": opened, "closed": closed,
+                "held": held, "stopped": stopped}
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("rebalance_monthly failed: %s", e)
