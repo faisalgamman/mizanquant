@@ -90,14 +90,21 @@ function _convictionGauge(score) {
 
 // Market-context rows (SPY/VIX/credit/breadth/liquidity/sectors) with traffic-light
 // verdicts — the broad backdrop, shown right inside the Decision Card.
-function _marketRows(market, sectors) {
+function _marketRows(market, sectors, planMarket) {
   const m = market || {};
   const amber = "var(--amber, #d9a441)", green = "var(--positive)", red = "var(--negative)", muted = "var(--text-muted)";
   const n2 = (v, d = 2) => (v == null || isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
+  // SPY regime: use the SAME SPY-vs-EMA21 measure as the "Market regime" tile (and the USX
+  // panel) so the card never contradicts itself. Fall back to the context regime if absent.
+  const pm = planMarket || {};
+  const spyKnown = pm.known === true;
+  const spyBear = spyKnown ? !!pm.spy_bearish : (m.spy_regime === "BEAR");
+  const spyPx = pm.spy_price != null ? pm.spy_price : m.spy_price;
   const rows = [
-    { lab: "SPY", val: n2(m.spy_price),
-      verdict: m.spy_regime || "—",
-      color: m.spy_regime === "BULL" ? green : m.spy_regime === "BEAR" ? red : m.spy_regime === "NEUTRAL" ? amber : muted },
+    { lab: "SPY", val: n2(spyPx),
+      verdict: spyKnown ? (spyBear ? "BEAR" : "BULL") : (m.spy_regime || "—"),
+      color: spyKnown ? (spyBear ? red : green)
+           : (m.spy_regime === "BULL" ? green : m.spy_regime === "BEAR" ? red : m.spy_regime === "NEUTRAL" ? amber : muted) },
     { lab: "VIX", val: n2(m.vix),
       verdict: m.vix == null ? "—" : m.vix < 20 ? "NORMAL" : m.vix < 30 ? "ELEVATED" : "STRESS",
       color: m.vix == null ? muted : m.vix < 20 ? green : m.vix < 30 ? amber : red },
@@ -117,8 +124,8 @@ function _marketRows(market, sectors) {
     const up = sectors.filter(s => Number(s.chg) > 0).length, tot = sectors.length;
     const r = up / tot;
     rows.push({ lab: "Sectors", val: up + "/" + tot,
-      verdict: r >= 0.6 ? "OK+" : r >= 0.45 ? "MIXED" : "WEAK",
-      color: r >= 0.6 ? green : r >= 0.45 ? amber : red });
+      verdict: r >= 0.7 ? "OK+" : r >= 0.5 ? "MIXED+" : "WEAK",
+      color: r >= 0.7 ? green : r >= 0.5 ? amber : red });
   }
   return rows;
 }
@@ -356,7 +363,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             <>
               <div className="an-sect-title">Market context</div>
               <div style={{ marginBottom: 2 }}>
-                {_marketRows(market, sectors).map((r, i) => (
+                {_marketRows(market, sectors, plan && plan.market).map((r, i) => (
                   <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto 58px", gap: 8, alignItems: "center", fontSize: 10, padding: "2.5px 0" }}>
                     <span style={{ color: "var(--text-muted)" }}>{r.lab}</span>
                     <span className="mono" style={{ fontWeight: 600, textAlign: "right" }}>{r.val}</span>
