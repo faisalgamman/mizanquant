@@ -176,11 +176,25 @@ def _fundamentals(symbol: str) -> dict:
     gm = _f("grossMarginTTM", "grossMarginAnnual")
     if rev is None and fcf_ps is None and roe is None:
         return {"known": False}
+    # 0-100 quality grade — neutral 50 baseline, transparent per-component contributions:
+    # revenue growth ±25, FCF ±12, ROE up to +15/-8, leverage -8, fat margin +5.
+    s = 50.0
+    if rev is not None:
+        s += max(-25.0, min(25.0, rev * 1.5))
+    if fcf_ps is not None:
+        s += 12.0 if fcf_ps > 0 else -12.0
+    if roe is not None:
+        s += 15.0 if roe > 20 else 10.0 if roe > 10 else 5.0 if roe > 0 else -8.0
+    if de is not None and de > 2:
+        s -= 8.0
+    if gm is not None and gm > 40:
+        s += 5.0
+    score = int(round(max(0.0, min(100.0, s))))
     adj = fundamentals_rank_adjustment(symbol).get("adj", 0.0)  # cached fetch reused
     return {
-        "known": True, "revenue_growth": rev, "fcf_per_share": fcf_ps, "roe": roe,
-        "debt_equity": de, "gross_margin": gm, "score_adj": adj,
-        "strong": adj >= 8, "weak": adj <= -4,
+        "known": True, "score": score, "revenue_growth": rev, "fcf_per_share": fcf_ps,
+        "roe": roe, "debt_equity": de, "gross_margin": gm, "score_adj": adj,
+        "strong": score >= 70, "weak": score <= 40,
     }
 
 

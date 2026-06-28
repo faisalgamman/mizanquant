@@ -105,4 +105,15 @@ def test_get_external_signals_includes_fundamentals(monkeypatch):
         "revenueGrowthTTMYoy": 18.0, "cashFlowPerShareTTM": 5.0, "roeTTM": 30.0}, raising=False)
     out = es.get_external_signals("AAA")
     assert out["fundamentals"]["known"] and out["fundamentals"]["revenue_growth"] == 18.0
+    assert out["fundamentals"]["score"] == 100   # +25 rev +12 fcf +15 roe over the 50 base
     assert out["fundamentals"]["strong"] is True
+
+
+def test_fundamentals_score_scales_with_quality(monkeypatch):
+    from app.services import finnhub_client as fc
+    # weak: revenue shrinking, negative FCF, poor ROE, heavy leverage → low grade
+    monkeypatch.setattr(fc.finnhub_client, "get_basic_financials", lambda s: {
+        "revenueGrowthTTMYoy": -6.0, "cashFlowPerShareTTM": -1.0, "roeTTM": -3.0,
+        "totalDebt/totalEquityAnnual": 3.0}, raising=False)
+    out = es._fundamentals("AAA")
+    assert out["known"] and out["weak"] is True and out["score"] <= 40

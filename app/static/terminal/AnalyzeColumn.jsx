@@ -179,10 +179,11 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   tiles.push({ icon: "📊", label: "Technical", value: techMax ? `${techSum}/${techMax}` : "—",
                sub: "RS · MACD · ADX", status: techMax ? (techStrong ? "good" : "warn") : "neutral" });
   if (fund) {
-    const sub = [fund.fcf_per_share != null ? (fund.fcf_per_share > 0 ? "FCF+" : "FCF−") : null,
-                 fund.roe != null ? `ROE ${r1(fund.roe)}%` : null].filter(Boolean).join(" · ") || "quality";
+    const fcfTxt = fund.fcf_per_share != null ? (fund.fcf_per_share > 0 ? "FCF+" : "FCF−") : null;
+    const sub = [fund.revenue_growth != null ? `Rev ${fund.revenue_growth > 0 ? "+" : ""}${fund.revenue_growth}%` : null,
+                 fund.roe != null ? `ROE ${r1(fund.roe)}%` : null, fcfTxt].filter(Boolean).join(" · ") || "quality";
     tiles.push({ icon: "💰", label: "Fundamentals", isNew: true,
-                 value: fund.revenue_growth != null ? `Rev ${fund.revenue_growth > 0 ? "+" : ""}${fund.revenue_growth}%` : "—",
+                 value: fund.score != null ? `${fund.score}/100` : (fund.revenue_growth != null ? `Rev ${fund.revenue_growth}%` : "—"),
                  sub, status: fund.strong ? "good" : fund.weak ? "bad" : "neutral" });
   } else {
     tiles.push({ icon: "💰", label: "Fundamentals", isNew: true, value: "—", sub: "no data", status: "neutral" });
