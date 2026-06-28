@@ -2,6 +2,13 @@
 const { useState, useEffect, useRef } = React;
 
 const AI_QUICK = [
+  { label: "🚀 مرشّحو الصعود القريب", q:
+    "ابحث عن أفضل الأسهم الحلال المرشّحة للصعود خلال مدة قصيرة، بمنهجية صارمة:\n" +
+    "1) اجلب المرشّحين الحلال عبر get_deep_picks (وget_buy_signals عند الحاجة) — قائمة بالدرجة المركّبة + الدرجات الفرعية + الحكم الشرعي.\n" +
+    "2) لأقوى 4-5 أسماء استدعِ analyze_stock لكلٍّ لجمع كل الطبقات: الفني (RS/الاتجاه/MACD/RSI/ADX/VWAP) + الأساسيات (fundamentals: نمو الإيرادات revenue_growth، التدفق النقدي fcf_per_share، العائد roe) + الحلال AAOIFI + توافق المحلّلين analyst_consensus + نشاط المطّلعين insider_activity (لاحِظ top_seller.pct_of_stake) + الأرباح earnings + نظام السوق market_regime. واجلب الأخبار عبر get_stock_news، وتحقّق من توافق التوقّع مع الإشارة عبر get_signal_agreement.\n" +
+    "3) قاعدة صارمة: أي سهم به near_term_red_flags (بيع مطّلعين كثيف — خصوصاً نسبة كبيرة من الحصّة، تقلّب شديد ATR>7%، أرباح ضمن فترة الحظر، أو هبوط حادّ) يُستبعَد من المراكز الثلاثة الأولى مهما علت درجته الفنية (لا ترشّح سكّيناً هابطاً في القمّة). اذكره في الاستبعادات مع السبب. ونبّه إذا كان market_regime.spy_bearish=true (السوق العريض هابط — حذرٌ إضافي).\n" +
+    "4) للناجين فقط اعرض جدولاً: الرمز | الدرجة | الإشارة | سبب مختصر (من البيانات) | تحذيرات. ثم أفضل 3 مع: الدخول، الوقف، والأهداف الثلاثة TP1/TP2/TP3 (لا هدف واحد). ووضّح أن نسبة المخاطرة/العائد 1.7 مرجّحة عبر الأهداف الثلاثة (TP1 50% / TP2 30% / TP3 20%)، وأن هدفاً واحداً مقابل الوقف ≈ 1:1.\n" +
+    "استخدم فقط ما تؤكّده الأدوات؛ قل «غير متاح» لأي حقل ناقص (known=false) ولا تختلق أبداً — خاصةً لا تخترع أخباراً: إن لم تأتِ من get_stock_news فلا تذكرها. وذكّر أن هذا إرشاديّ لا نصيحة مرخّصة والنتائج ورقية. أجب بالعربية." },
   { label: "🔍 Upside candidates", q:
     "Find the best halal stocks that are candidates for near-term upside, methodically:\n" +
     "1) Pull halal candidates via get_deep_picks (and get_buy_signals if needed) — a shortlist with composite score + sub-scores + halal verdict.\n" +

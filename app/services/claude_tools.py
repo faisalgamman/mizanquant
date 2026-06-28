@@ -462,6 +462,7 @@ def _exec_analyze_stock(symbol: str) -> dict:
         "insider_activity": ext.get("insider"),
         "earnings": ext.get("earnings"),
         "market_regime": ext.get("market"),
+        "fundamentals": ext.get("fundamentals"),
         "price": price,
         "change_pct": change_pct,
         # Headline (the card's big number) — Monthly composite when available.
@@ -500,10 +501,11 @@ def _exec_analyze_stock(symbol: str) -> dict:
             "Report them as-is — do NOT recompute from another source. Any difference from the "
             "card is cache-refresh timing, not a different engine. When the composite verdict "
             "(fundamentals) and the technical bars disagree, state BOTH lenses honestly. "
-            "analyst_consensus / insider_activity / earnings ARE available here (Finnhub) — when "
-            "their known=true, cite them in the analysis (e.g. analyst buy/hold/sell split, heavy "
-            "insider selling, earnings within the blackout window); when known=false, say the "
-            "data is unavailable — never invent or deny it generically."),
+            "analyst_consensus / insider_activity / earnings / fundamentals ARE available here "
+            "(Finnhub free tier) — when their known=true, cite them (analyst buy/hold/sell split, "
+            "heavy insider selling with % of stake, earnings within the blackout window, "
+            "fundamentals.revenue_growth / fcf_per_share / roe); when known=false, say the data is "
+            "unavailable — never invent or deny it generically."),
     })
     return out
 
