@@ -165,9 +165,12 @@ def get_spy_regime() -> dict:
     close = df["close"].astype(float).values
     price = float(close[-1])
     ema_20 = float(_ema_series(close, 20)[-1])
+    ema_21 = float(_ema_series(close, 21)[-1])
     ema_50 = float(_ema_series(close, 50)[-1])
     ema_200 = float(_ema_series(close, 200)[-1])
 
+    # `regime` is the long-term EMA-200 trend — KEEP IT: scoring (services/scoring.py) and
+    # the live-trade guards (spy_bear_halt / block_system) depend on these exact values.
     if price > ema_200 and ema_20 > ema_50:
         regime = "bull"
     elif price < ema_200:
@@ -177,8 +180,14 @@ def get_spy_regime() -> dict:
 
     return {
         "regime": regime,
+        # `regime_short` is the SAME short-term measure the Analyze card, the auto-paper gate
+        # and the USX panel use (SPY vs EMA21) — the canonical DISPLAY regime so every panel
+        # agrees. Separate from `regime` so the scoring/guard behavior is unchanged.
+        "regime_short": "bear" if price < ema_21 else "bull",
+        "below_ema21": bool(price < ema_21),
         "price": round(price, 2),
         "ema_20": round(ema_20, 2),
+        "ema_21": round(ema_21, 2),
         "ema_50": round(ema_50, 2),
         "ema_200": round(ema_200, 2),
         "price_vs_ema200_pct": round((price / ema_200 - 1) * 100, 2),

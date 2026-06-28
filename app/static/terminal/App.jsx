@@ -111,7 +111,9 @@ function App() {
       setMarket({
         vix:        num((sreg && sreg.vix) ?? (mc.vix && mc.vix.vix) ?? mc.vix),
         vix_pctile: num(mc.vix && mc.vix.vix_pctile),
-        spy_regime: (sreg.regime ?? mc.regime ?? "—"),
+        // Unified DISPLAY regime = short-term SPY vs EMA21 (same as the Analyze card, the
+        // auto-paper gate and the USX panel) so every panel agrees. Uppercased for the UI.
+        spy_regime: ((sreg.regime_short ?? sreg.regime ?? mc.regime ?? "—") + "").toUpperCase(),
         spy_price:  num(sreg.price ?? sreg.spy_price ?? sreg.last ?? sreg.close),
         spy_trend:  (sreg.ema_50 != null && sreg.ema_200 != null) ? "EMA50 vs EMA200" : "",
         breadth:    num((mc.breadth && mc.breadth.breadth_pct) ?? mc.breadth),

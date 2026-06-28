@@ -117,7 +117,7 @@ function _marketRows(market, sectors, planMarket) {
     { lab: "Breadth", val: m.breadth == null ? "—" : n2(m.breadth, 1) + "%",
       verdict: m.breadth == null ? "—" : m.breadth >= 50 ? "OK" : "WEAK",
       color: m.breadth == null ? muted : m.breadth >= 50 ? green : red },
-    { lab: "Liquidity", val: m.liquidity == null ? "—" : Math.round(m.liquidity) + "%",
+    { lab: "Liquidity (vol)", val: m.liquidity == null ? "—" : Math.round(m.liquidity) + "%",
       verdict: m.liquidity == null ? "—" : "OK", color: m.liquidity == null ? muted : green },
   ];
   if (sectors && sectors.length) {
