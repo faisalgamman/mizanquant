@@ -273,7 +273,7 @@ function App() {
   // to run. Honest: the write is real (simulated trades), not a fake.
   const [recording, setRecording] = useState(false);
   const onRecordPaper = async () => {
-    const kind = scanMode === "monthly" ? "monthly" : "weekly";
+    const kind = scanMode === "monthly" ? "monthly" : scanMode === "pairs" ? "pairs" : "weekly";
     setRecording(true);
     setToast({ kind: "ok", title: "بدأ التسجيل", body: `${kind} · يستغرق 1-3 دقائق` });
     try {

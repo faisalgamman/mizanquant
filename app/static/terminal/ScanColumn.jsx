@@ -296,6 +296,55 @@ function LedgerBanner({ ledger, kind, onRecord, recording }) {
   );
 }
 
+// Recorded PVP paper-ledger trades — the actual track record (open + closed) the banner
+// counts. Self-fetches so it shows regardless of the live scan state. Newest first.
+function PairsLedger() {
+  const { useState, useEffect } = React;
+  const [trades, setTrades] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/v1/paper/trades?strategy_id=PVP&limit=30')
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setTrades(Array.isArray(d) ? d : []); })
+      .catch(() => { if (!cancelled) setTrades([]); });
+    return () => { cancelled = true; };
+  }, []);
+  if (trades == null) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 9, color: "var(--text-muted)", marginBottom: 6, letterSpacing: 0.4 }}>
+        LEDGER · سجلّ صفقات PVP الورقية
+      </div>
+      {trades.length === 0 ? (
+        <div style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "center", padding: "10px 8px", lineHeight: 1.6 }}>
+          لا صفقات مسجّلة بعد — اضغط «سجّل الآن» أعلاه لتسجيل إشارات الأزواج الحالية في الدفتر.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {trades.map((t) => {
+            const open = t.pnl_pct == null;
+            const pnl = Number(t.pnl_pct);
+            const c = open ? "var(--text-muted)" : pnl >= 0 ? "var(--positive)" : "var(--negative)";
+            return (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                     fontSize: 10, padding: "4px 8px", background: "var(--bg-raised)", borderRadius: 5 }}>
+                <span style={{ fontWeight: 700, minWidth: 64 }}>{t.pair || t.symbol}</span>
+                <span style={{ color: "var(--text-muted)", flex: 1, textAlign: "center" }}>
+                  buy {t.symbol} @ ${t.entry_price != null ? Number(t.entry_price).toFixed(2) : "—"}
+                  {!open && t.exit_price != null ? ` → $${Number(t.exit_price).toFixed(2)}` : ""}
+                </span>
+                <span style={{ fontWeight: 700, color: c, minWidth: 46, textAlign: "right" }}>
+                  {open ? "OPEN" : (pnl >= 0 ? "+" : "") + pnl.toFixed(1) + "%"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Halal long-only pairs (cointegration) — relative-value signals + the PVP ledger.
 function PairsList({ pairs }) {
   const muted = "var(--text-muted)";
@@ -510,8 +559,9 @@ function ScanColumn(props) {
           <ExplosionList daytrade={daytrade} selectedSymbol={selectedSymbol} onSelect={onSelect} />
         ) : pairsMode ? (
           <>
-            <LedgerBanner ledger={ledgerPairs} kind="Pairs" />
+            <LedgerBanner ledger={ledgerPairs} kind="Pairs" onRecord={onRecord} recording={recording} />
             <PairsList pairs={pairs} />
+            <PairsLedger />
           </>
         ) : (
           <>

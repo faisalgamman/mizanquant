@@ -64,17 +64,18 @@ async def v1_paper_execute(body: PaperExecuteRequest, db: AsyncSession | None = 
 
 
 @router.get("/paper/trades")
-async def v1_paper_trades(limit: int = Query(default=50, le=200), db: AsyncSession | None = Depends(get_async_db)):
+async def v1_paper_trades(limit: int = Query(default=50, le=200),
+                          strategy_id: str | None = Query(default=None),
+                          db: AsyncSession | None = Depends(get_async_db)):
     if db is None:
         return JSONResponse(status_code=503, content={"detail": "Database unavailable"})
     from app.db.models import TradeHistory
 
     try:
-        result = await db.execute(
-            select(TradeHistory)
-            .order_by(TradeHistory.created_at.desc())
-            .limit(limit)
-        )
+        q = select(TradeHistory).order_by(TradeHistory.created_at.desc())
+        if strategy_id:
+            q = q.filter(TradeHistory.strategy_id == strategy_id)
+        result = await db.execute(q.limit(limit))
         trades = result.scalars().all()
     except Exception as exc:
         logger.error("paper/trades DB query failed: %s", exc)
@@ -98,8 +99,11 @@ async def v1_paper_trades(limit: int = Query(default=50, le=200), db: AsyncSessi
             "status": t.status,
             "pnl": t.pnl,
             "pnl_pct": t.pnl_pct,
+            "exit_price": t.exit_price,
             "strategy_id": t.strategy_id,
+            "pair": (t.signal_details or {}).get("pair") if isinstance(t.signal_details, dict) else None,
             "created_at": t.created_at.isoformat() if t.created_at else None,
+            "closed_at": t.closed_at.isoformat() if t.closed_at else None,
         }
         for t in trades
     ]
@@ -292,6 +296,9 @@ async def v1_paper_record_now(scanner: str = Query("weekly")):
         if s.startswith("month"):
             from app.services.paper_validation import rebalance_monthly
             threading.Thread(target=rebalance_monthly, daemon=True).start()
+        elif s.startswith("pair"):
+            from app.services.paper_validation import record_pairs_signals
+            threading.Thread(target=record_pairs_signals, daemon=True).start()
         else:
             from app.services.paper_validation import record_weekly_picks
             threading.Thread(target=record_weekly_picks, daemon=True).start()
