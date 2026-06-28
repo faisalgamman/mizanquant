@@ -92,3 +92,17 @@ def test_fundamentals_adjustment_unknown_fails_open(monkeypatch):
     monkeypatch.setattr(fc.finnhub_client, "get_basic_financials", lambda s: None, raising=False)
     out = es.fundamentals_rank_adjustment("AAA")
     assert out["adj"] == 0.0 and out["known"] is False
+
+
+def test_get_external_signals_includes_fundamentals(monkeypatch):
+    from app.services import finnhub_client as fc
+    from app.services import reference_data as rd
+    monkeypatch.setattr(fc.finnhub_client, "get_recommendation", lambda s: [], raising=False)
+    monkeypatch.setattr(fc.finnhub_client, "get_insider_transactions", lambda s: [], raising=False)
+    monkeypatch.setattr(fc.finnhub_client, "get_next_earnings", lambda s: None, raising=False)
+    monkeypatch.setattr(rd, "get_earnings_date", lambda s: None, raising=False)
+    monkeypatch.setattr(fc.finnhub_client, "get_basic_financials", lambda s: {
+        "revenueGrowthTTMYoy": 18.0, "cashFlowPerShareTTM": 5.0, "roeTTM": 30.0}, raising=False)
+    out = es.get_external_signals("AAA")
+    assert out["fundamentals"]["known"] and out["fundamentals"]["revenue_growth"] == 18.0
+    assert out["fundamentals"]["strong"] is True

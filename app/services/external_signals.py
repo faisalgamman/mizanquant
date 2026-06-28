@@ -150,6 +150,40 @@ def fundamentals_rank_adjustment(symbol: str, *, max_bonus: float = 15.0,
             "fcf_per_share": fcf_ps, "roe": roe, "debt_equity": de}
 
 
+def _fundamentals(symbol: str) -> dict:
+    """Display fundamentals for the Analyze card — FREE Finnhub /stock/metric: revenue
+    growth (TTM YoY), cash-flow/share, ROE, leverage, gross margin. {'known': False} when
+    unavailable. Carries the same strong/weak verdict the selection scorer uses."""
+    try:
+        from app.services.finnhub_client import finnhub_client
+        m = finnhub_client.get_basic_financials((symbol or "").upper().strip())
+    except Exception:
+        return {"known": False}
+    if not m:
+        return {"known": False}
+
+    def _f(*keys):
+        for k in keys:
+            v = m.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return round(float(v), 2)
+        return None
+
+    rev = _f("revenueGrowthTTMYoy", "revenueGrowthQuarterlyYoy")
+    fcf_ps = _f("cashFlowPerShareTTM", "cashFlowPerShareAnnual")
+    roe = _f("roeTTM", "roeRfy")
+    de = _f("totalDebt/totalEquityQuarterly", "totalDebt/totalEquityAnnual")
+    gm = _f("grossMarginTTM", "grossMarginAnnual")
+    if rev is None and fcf_ps is None and roe is None:
+        return {"known": False}
+    adj = fundamentals_rank_adjustment(symbol).get("adj", 0.0)  # cached fetch reused
+    return {
+        "known": True, "revenue_growth": rev, "fcf_per_share": fcf_ps, "roe": roe,
+        "debt_equity": de, "gross_margin": gm, "score_adj": adj,
+        "strong": adj >= 8, "weak": adj <= -4,
+    }
+
+
 def _earnings(symbol: str) -> dict:
     """Next scheduled earnings (Finnhub calendar primary, FMP cache fallback)."""
     from app.services.precision_gates import EARNINGS_BLACKOUT_DAYS
@@ -200,7 +234,8 @@ def get_external_signals(symbol: str) -> dict:
     """{'earnings':{}, 'analyst':{}, 'insider':{}, 'market':{}} — never raises."""
     symbol = (symbol or "").upper().strip()
     out: dict = {}
-    for name, fn in (("earnings", _earnings), ("analyst", _analyst), ("insider", _insider)):
+    for name, fn in (("earnings", _earnings), ("analyst", _analyst),
+                     ("insider", _insider), ("fundamentals", _fundamentals)):
         try:
             out[name] = fn(symbol)
         except Exception as e:

@@ -1,24 +1,28 @@
-// AnalyzeColumn.jsx — Column 2: REAL scoring + trade plan for the selected signal.
+// AnalyzeColumn.jsx — Column 2: the "Decision Card" for the selected signal.
+//
+// Top half = a fast BUY decision surface: a conviction gauge, a verdict banner, an
+// 8-tile SIGNAL MATRIX (every layer the program computes — technical, fundamentals,
+// halal, insider, analysts, earnings, market regime, forecast), and a why-buy / watch
+// flag split. Bottom half keeps the full detail (technical bars, forecast fan, backtest).
 //
 // Every number comes from the live APIs (passed in via the `analyze` prop):
 //   score breakdown → GET /api/v1/scoring/weighted   (.total, .components)
-//   trade plan       → GET /api/v1/trade/plan         (entry/stop/tp/shares/rr)
-// There are NO synthesized sub-scores and NO mock trade plan. Anything the API
-// does not provide renders as "—" rather than an invented value.
-//
-// v1.1 accuracy + polish: points/max bars, measured values, plan tooltips,
-// signal⇄forecast agreement chip, WAIT-confirm guard, stale-entry guard.
+//   trade plan       → GET /api/v1/trade/plan         (entry/stop/tp/shares/rr +
+//                       earnings/analyst/insider/market/fundamentals external signals)
+// There are NO synthesized sub-scores and NO mock trade plan. Anything the API does not
+// provide renders as "—" rather than an invented value.
 
 const _AN_MAX = { rs: 25, trend: 15, regime: 15, macd: 15, volume: 10, rsi: 8, adx: 7, bb: 5, vwap: 5, gap: 4 };
 const _AN_LAB = { rs: "RS vs SPY", trend: "Trend", regime: "Regime", macd: "MACD", volume: "Volume", rsi: "RSI", adx: "ADX", bb: "Bollinger", vwap: "VWAP", gap: "Gap" };
 const _AN_TOOLTIP = {
-  rs: "قوة السهم النسبية مقابل SPY — كلما ارتفعت زاد التفوق", trend: "اتجاه السهم (فوق/تحت المتوسطات الرئيسية)",
-  regime: "حالة السوق العامة (صاعد/محايد/هابط)", macd: "تقاطع MACD الأخير — إشارة زخم",
-  volume: "تأكيد الحجم — ارتفاع الحجم يدعم الحركة", rsi: "مؤشر القوة النسبية RSI — ذروة شراء/بيع",
-  adx: "قوة الاتجاه ADX — فوق 20 = اتجاه قوي", bb: "Bollinger Bands — موقع السعر داخل النطاق",
-  vwap: "متوسط السعر المرجح بالحجم VWAP — دعم/مقاومة", gap: "فجوة سعرية — قياس الانحراف عن الإغلاق السابق"
+  rs: "Relative strength vs SPY — higher = outperforming", trend: "Trend (above/below the key moving averages)",
+  regime: "Broad market state (up / neutral / down)", macd: "Recent MACD cross — momentum signal",
+  volume: "Volume confirmation — rising volume backs the move", rsi: "RSI — overbought / oversold",
+  adx: "ADX trend strength — above 20 = strong trend", bb: "Bollinger Bands — price position in the band",
+  vwap: "VWAP — volume-weighted support/resistance", gap: "Price gap from the prior close"
 };
 const _anFx = (n, p = 2) => (n == null || isNaN(Number(n))) ? "—" : "$" + Number(n).toFixed(p);
+const _anStatusColor = (s) => s === "good" ? "var(--positive)" : s === "warn" ? "var(--amber, #d9a441)" : s === "bad" ? "var(--negative)" : "var(--text-muted)";
 
 // Probabilistic forecast fan chart: P5–P95 + P25–P75 ribbons + median line, with a
 // dashed reference line at the current price. Pure function returning an <svg>.
@@ -67,6 +71,23 @@ function _rangeBar(p5, p50, p95, currentPrice) {
   );
 }
 
+// Conviction gauge — a donut whose arc length + color encode the headline score.
+function _convictionGauge(score) {
+  const pct = Math.max(0, Math.min(100, Number(score) || 0));
+  const color = pct >= 65 ? "var(--positive)" : pct >= 45 ? "var(--amber, #d9a441)" : "var(--negative)";
+  const R = 30, C = 2 * Math.PI * R;
+  const dash = (pct / 100) * C;
+  return (
+    <svg width="76" height="76" viewBox="0 0 76 76" style={{ flexShrink: 0 }}>
+      <circle cx="38" cy="38" r={R} fill="none" stroke="var(--border)" strokeWidth="7" />
+      <circle cx="38" cy="38" r={R} fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
+              strokeDasharray={`${dash} ${C}`} transform="rotate(-90 38 38)" />
+      <text x="38" y="37" textAnchor="middle" fontSize="20" fontWeight="700" fill="var(--text)">{Math.round(pct)}</text>
+      <text x="38" y="50" textAnchor="middle" fontSize="7.5" fill="var(--text-muted)">CONVICTION</text>
+    </svg>
+  );
+}
+
 function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth, backtest, onBacktest }) {
   if (!signal) {
     return (
@@ -85,16 +106,10 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const plan    = ready ? analyze.plan : null;
   const scErr   = scoring && scoring.error;
 
-  // HEADLINE = the SAME score + verdict as the scanner row the user clicked, so the
-  // Analyze panel NEVER contradicts the scanner. Previously it recomputed a different
-  // score (smart_score) with a different threshold → a scanner BUY (e.g. composite 61)
-  // showed here as AVOID (smart_score 49). The weighted-score bars below are a TECHNICAL
-  // sub-view shown with their OWN total — not the headline number.
+  // HEADLINE = the SAME score + verdict as the scanner row the user clicked.
   const score    = Math.round(Number(signal.score) || (scoring && (scoring.smart_score ?? scoring.total)) || 0);
   const verdict  = signal.verdict || verdictFromScore(score);
   const chgColor = signal.chg >= 0 ? "var(--positive)" : "var(--negative)";
-
-  // Raw measured values from momentum_details (if present in signal payload)
   const mom = signal.momentum_details || {};
 
   // Real per-factor score components (points). Show points/max.
@@ -103,22 +118,18 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
     const v = Number(comps[k]) || 0;
     const max = _AN_MAX[k];
     const pct = Math.max(0, Math.min(100, (v / max) * 100));
-    // Measured value: ADAPT to real keys from signal/scoring payload
     const rawVal = mom[k + "_raw"] ?? mom[k] ?? null;
     return { lab: _AN_LAB[k] || k, k, v, max, pct, rawVal };
   });
-  // Technical sub-total (the bars' own scale, distinct from the headline verdict).
   const techSum = compRows.reduce((a, c) => a + (Number(c.v) || 0), 0);
   const techMax = compRows.reduce((a, c) => a + (Number(c.max) || 0), 0);
-  const techStrong = techMax > 0 && techSum / techMax >= 0.65;     // technically strong
+  const techStrong = techMax > 0 && techSum / techMax >= 0.65;
   const verdictBuy = /(?:BUY|STRONG)/i.test(verdict);
-  // Honest reconciliation note: the headline (composite/smart) weighs fundamentals the
-  // technical bars don't, so the two lenses can disagree — say so plainly.
   const techNote = (compRows.length && scoring && !scErr)
     ? (techStrong && !verdictBuy
-        ? "قوي فنياً، لكن الأساسيات/النظام تكبح المحصّلة"
+        ? "Technically strong, but fundamentals/regime hold the verdict back"
         : (!techStrong && verdictBuy
-            ? "المحصّلة شراء بفضل الأساسيات رغم ضعف الفنّي"
+            ? "Verdict is BUY on fundamentals despite a softer technical read"
             : ""))
     : "";
 
@@ -132,30 +143,100 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const riskAmt  = plan ? plan.risk_amount : null;
   const rr       = plan ? (plan.rr_ratio ?? plan.strategy_rr) : null;
   const strat    = plan ? (plan.strategy || "") : "";
+  const holdDays = plan ? (plan.hold_days ?? (plan.earnings && plan.earnings.hold_days)) : null;
   const canTrade = signal.halal && shares != null && Number(shares) > 0;
   const isWait   = verdict === "WAIT" || !/(?:BUY|STRONG)/i.test(verdict);
 
-  // Stale-entry: entry price vs current price divergence > 1%
   const priceNow = Number(signal.price) || 0;
   const entryNow = Number(entry) || 0;
   const stalePct = priceNow && entryNow ? Math.abs(entryNow - priceNow) / priceNow * 100 : 0;
   const isStale = stalePct > 1;
 
-  // Risk as % of equity
   const equity = brokerHealth && brokerHealth.account ? brokerHealth.account.equity : null;
   const riskPctEq = equity && riskAmt ? (Number(riskAmt) / Number(equity) * 100).toFixed(2) : null;
 
-  // H3: Signal⇄Forecast agreement
+  // Signal⇄Forecast agreement
   const fcForChip = (forecast && forecast.data && !forecast.data.error) ? forecast.data : null;
   const fcDir = fcForChip ? (fcForChip.expected_change_pct >= 0 ? "up" : "down") : null;
   const sigDir = verdict.includes("SELL") ? "down" : verdict.includes("BUY") ? "up" : null;
   const agreeChip = fcDir && sigDir ? (fcDir === sigDir ? "agree" : "disagree") : null;
 
-  // H4: WAIT-confirm guard
   const handleTrade = (sig) => {
-    if (isWait && !window.confirm("الخطة تقول WAIT — متأكد من الإرسال؟")) return;
+    if (isWait && !window.confirm("Plan says WAIT — send anyway?")) return;
     if (onTrade) onTrade(sig);
   };
+
+  // ── SIGNAL MATRIX — one tile per layer the program computes ───────────────
+  const fund   = plan && plan.fundamentals && plan.fundamentals.known ? plan.fundamentals : null;
+  const ins    = plan && plan.insider && plan.insider.known ? plan.insider : null;
+  const ana    = plan && plan.analyst && plan.analyst.known ? plan.analyst : null;
+  const earn   = plan && plan.earnings ? plan.earnings : null;
+  const mkt    = plan && plan.market && plan.market.known ? plan.market : null;
+  const halalV = signal.halalVerdict || (signal.halal ? "halal" : "non_compliant");
+  const r1 = (n) => (n == null || isNaN(Number(n))) ? "—" : Math.round(Number(n));
+
+  const tiles = [];
+  tiles.push({ icon: "📊", label: "Technical", value: techMax ? `${techSum}/${techMax}` : "—",
+               sub: "RS · MACD · ADX", status: techMax ? (techStrong ? "good" : "warn") : "neutral" });
+  if (fund) {
+    const sub = [fund.fcf_per_share != null ? (fund.fcf_per_share > 0 ? "FCF+" : "FCF−") : null,
+                 fund.roe != null ? `ROE ${r1(fund.roe)}%` : null].filter(Boolean).join(" · ") || "quality";
+    tiles.push({ icon: "💰", label: "Fundamentals", isNew: true,
+                 value: fund.revenue_growth != null ? `Rev ${fund.revenue_growth > 0 ? "+" : ""}${fund.revenue_growth}%` : "—",
+                 sub, status: fund.strong ? "good" : fund.weak ? "bad" : "neutral" });
+  } else {
+    tiles.push({ icon: "💰", label: "Fundamentals", isNew: true, value: "—", sub: "no data", status: "neutral" });
+  }
+  tiles.push({ icon: "🕌", label: "Halal AAOIFI",
+               value: halalV === "halal" ? "Compliant" : halalV === "doubtful" ? "Doubtful" : "Non-compliant",
+               sub: "Standard 21", status: halalV === "halal" ? "good" : halalV === "doubtful" ? "warn" : "bad" });
+  if (ins) {
+    const heavy = ins.heavy_sell, top = ins.top_seller;
+    tiles.push({ icon: "👤", label: "Insider 90d",
+                 value: heavy ? (top && top.pct_of_stake != null ? `Sold ${top.pct_of_stake}%` : "Heavy selling")
+                              : (ins.net_value > 0 ? "Net buying" : ins.sell_value > 0 ? "Some selling" : "Quiet"),
+                 sub: heavy ? "of stake — caution" : ins.net_value > 0 ? "insiders bought" : "open-market",
+                 status: heavy ? "bad" : ins.net_value > 0 ? "good" : "neutral" });
+  } else {
+    tiles.push({ icon: "👤", label: "Insider 90d", value: "—", sub: "no data", status: "neutral" });
+  }
+  if (ana) {
+    tiles.push({ icon: "🎯", label: "Analysts", value: ana.bearish ? "Bearish tilt" : "Buy consensus",
+                 sub: `${ana.buy} buy · ${ana.hold} hold · ${ana.sell} sell`, status: ana.bearish ? "warn" : "good" });
+  } else {
+    tiles.push({ icon: "🎯", label: "Analysts", value: "—", sub: "no data", status: "neutral" });
+  }
+  if (earn && earn.within_blackout) tiles.push({ icon: "📅", label: "Earnings", value: `In ${earn.business_days}d`, sub: "blackout — don't enter", status: "bad" });
+  else if (earn && earn.known) tiles.push({ icon: "📅", label: "Earnings", value: `In ${earn.business_days}d`, sub: "outside blackout", status: "neutral" });
+  else tiles.push({ icon: "📅", label: "Earnings", value: "Unconfirmed", sub: "verify before entry", status: "warn" });
+  if (mkt) tiles.push({ icon: "📈", label: "Market regime", value: mkt.spy_bearish ? "Risk-off" : "Risk-on",
+                        sub: mkt.spy_bearish ? "SPY below avg" : "SPY above avg", status: mkt.spy_bearish ? "warn" : "good" });
+  else tiles.push({ icon: "📈", label: "Market regime", value: "—", sub: "SPY trend", status: "neutral" });
+  if (fcForChip) {
+    const up = fcForChip.expected_change_pct >= 0;
+    tiles.push({ icon: "🔮", label: "Forecast 20d", value: `${up ? "+" : ""}${Number(fcForChip.expected_change_pct).toFixed(1)}%`,
+                 sub: fcForChip.prob_profit_pct != null ? `${fcForChip.prob_profit_pct}% prob profit` : "probabilistic",
+                 status: up ? "good" : "warn" });
+  } else {
+    tiles.push({ icon: "🔮", label: "Forecast", value: "—", sub: "loading", status: "neutral" });
+  }
+
+  const goodFlags  = tiles.filter(t => t.status === "good").map(t => t.label);
+  const watchFlags = tiles.filter(t => t.status === "bad" || t.status === "warn")
+                          .map(t => t.label + (t.value && t.value !== "—" ? ` (${t.value})` : ""));
+  const nGood = goodFlags.length, nWatch = watchFlags.length;
+
+  // Verdict banner color
+  const vColor = verdict.includes("SELL") ? "var(--negative)" : verdictBuy ? "var(--positive)" : "var(--text-muted)";
+  const vBg    = verdict.includes("SELL") ? "var(--negative-dim, rgba(220,80,80,0.12))" : verdictBuy ? "var(--accent-dim, rgba(80,200,120,0.10))" : "var(--bg-raised)";
+
+  // Trade-plan visual axis
+  const planVals = [stop, entry, tp1, tp2, tp3].map(Number).filter(v => v > 0);
+  const plo = planVals.length ? Math.min(...planVals) : 0;
+  const phi = planVals.length ? Math.max(...planVals) : 1;
+  const pspan = (phi - plo) || 1;
+  const ppos = v => Math.max(0, Math.min(100, ((Number(v) - plo) / pspan) * 100));
+  const hasBar = planVals.length >= 2 && entry && stop;
 
   return (
     <div className="col col-analyze">
@@ -165,158 +246,136 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           <span className="wf-sub">{signal.symbol} · {signal.industry}</span>
         </div>
         <div className="an-panel">
-          <div className="an-hdr">
+
+          {/* ── HERO: symbol + price + conviction gauge ── */}
+          <div className="an-hdr" style={{ alignItems: "center" }}>
             <div>
               <div className="an-sym">{signal.symbol}</div>
               <div className="an-co">{signal.company}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span title={verdict === "WAIT" ? "التحليل لا يعطي إشارة شراء واضحة — انتظر تأكيداً أقوى" : verdict.includes("SELL") ? "إشارة بيع — دقة تاريخية منخفضة" : "إشارة شراء بناءً على نقاط السكور"}>
-                <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
-              </span>
-              {score > 0 ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 6, color: "var(--text-secondary)" }} title="درجة الماسح — نفس الرقم في جدول الفاحص">{score}/100</span> : null}
-              {(verdict || "").includes("SELL") && (
-                <div style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.3 }}>
-                  ⚠ إشارات البيع تاريخياً معكوسة (دقة ~38%) — لا تُعتمد
-                </div>
-              )}
-              <div style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                {(() => {
-                  // Three-state AAOIFI verdict; fall back to the boolean when verdict absent.
-                  const v = signal.halalVerdict || (signal.halal ? "halal" : "non_compliant");
-                  const reasons = (signal.halalReasons || []).join(" · ");
-                  if (v === "halal") return <Badge kind="accent">HALAL · AAOIFI</Badge>;
-                  if (v === "doubtful") return (
-                    <span title={reasons || "نشاط يحتاج مراجعة شرعية"}
-                          style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
-                                   color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)" }}>
-                      ⚠ مشكوك — مراجعة{reasons ? ` · ${reasons}` : ""}
-                    </span>
-                  );
-                  return (
-                    <span title={reasons || "غير متوافق مع AAOIFI"}
-                          style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
-                                   color: "var(--red)", border: "1px solid var(--red)" }}>
-                      NON-COMPLIANT · AAOIFI{reasons ? ` · ${reasons}` : ""}
-                    </span>
-                  );
-                })()}
-                {signal.halalStaleDays != null && (
-                  <span title="تعذّر تحديث الأساسيات (Yahoo محجوب) — النتيجة من كاش قديم؛ تُصحَّح في إعادة الفحص الشهرية"
-                        style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 5,
-                                 color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)" }}>
-                    ⚠ بيانات حلال قديمة · {signal.halalStaleDays} يوم
-                  </span>
-                )}
+              <div className="an-price" style={{ marginTop: 4 }}>
+                <span className="p">${Number(signal.price).toFixed(2)}</span>
+                <span className="c" style={{ color: chgColor }}>{fmtPct(signal.chg)} <span style={{ fontSize: 9, color: "var(--text-muted)" }}>1w</span></span>
               </div>
             </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+              {_convictionGauge(score)}
+              <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
+            </div>
           </div>
-          <div className="an-price">
-            <span className="p">${Number(signal.price).toFixed(2)}</span>
-            <span className="c" style={{ color: chgColor }}>{fmtPct(signal.chg)} <span style={{ fontSize: 9, color: "var(--text-muted)" }}>1w</span></span>
+
+          <Sparkline points={signal.spark} color={chgColor} height={30} />
+
+          {/* ── VERDICT BANNER ── */}
+          <div style={{ marginTop: 8, padding: "7px 11px", borderRadius: 7, background: vBg,
+                        display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 800, color: vColor }}>{verdict}</span>
+            <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
+              {nGood} strong · {nWatch} caution
+              {halalV === "halal" ? " · halal ✓" : ""}
+              {score > 0 ? ` · ${score}/100` : ""}
+            </span>
           </div>
-          <Sparkline points={signal.spark} color={chgColor} height={36} />
+          {(verdict || "").includes("SELL") && (
+            <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.4 }}>
+              ⚠ SELL signals are historically unreliable (~38% accuracy) — not actioned
+            </div>
+          )}
 
-          {/* Earnings proximity — three states: within blackout (red), known & upcoming
-              (subtle), unknown (amber). Data from /api/v1/trade/plan → plan.earnings. */}
-          {plan && plan.earnings ? (() => {
-            const e = plan.earnings;
-            const fmtD = (iso) => {
-              try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" }); }
-              catch (_) { return iso; }
-            };
-            const hr = { amc: " (after close)", bmo: " (before open)", dmh: " (during session)" }[e.hour] || "";
-            if (e.within_blackout) {
-              return (
-                <div style={{ marginTop: 8, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                              color: "var(--red)", border: "1px solid var(--red)",
-                              background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
-                     title="Entering right before an earnings report carries binary gap risk — one of the riskiest swing setups.">
-                  ⚠️ Earnings in {e.business_days} {e.business_days === 1 ? "day" : "days"} · {fmtD(e.date)}{hr} — don't enter before the report
+          {/* ── SIGNAL MATRIX ── */}
+          <div className="an-sect-title">Signal matrix · every layer at a glance</div>
+          {loading ? (
+            <div className="an-bar-row"><div className="an-skel-bar" style={{ width: "100%", height: 40, borderRadius: 6, background: "var(--bg-raised)", animation: "pulse 1.5s ease-in-out infinite" }}></div></div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+              {tiles.map((t, i) => (
+                <div key={i} style={{ background: "var(--bg-raised)", borderRadius: 7, padding: "7px 9px",
+                       border: `1px solid ${t.status === "bad" ? "var(--negative)" : t.status === "warn" ? "var(--amber, #d9a441)" : "var(--border)"}` }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)" }}>
+                    <span><span style={{ marginRight: 4 }}>{t.icon}</span>{t.label}</span>
+                    {t.isNew ? <span style={{ fontSize: 7.5, fontWeight: 700, color: "var(--accent)", border: "1px solid var(--accent)", borderRadius: 3, padding: "0 3px" }}>NEW</span> : null}
+                  </div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 2, color: _anStatusColor(t.status) }}>{t.value}</div>
+                  <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 1 }}>{t.sub}</div>
                 </div>
-              );
-            }
-            if (e.known) {
-              return (
-                <div style={{ marginTop: 8, fontSize: 9.5, color: "var(--text-muted)" }}
-                     title="Next earnings date — outside the blackout window, but note how close it is.">
-                  📅 Next earnings: {fmtD(e.date)}{hr} · in {e.business_days} business days
-                </div>
-              );
-            }
-            return (
-              <div style={{ marginTop: 8, padding: "5px 9px", borderRadius: 6, fontSize: 9.5, fontWeight: 700,
-                            color: "var(--amber, #d9a441)", border: "1px solid var(--amber, #d9a441)", lineHeight: 1.5 }}
-                   title="Earnings date couldn't be confirmed (no data) — verify manually before entering rather than assuming it's safe.">
-                ⚠️ Earnings date unconfirmed — verify before entering
-              </div>
-            );
-          })() : null}
+              ))}
+            </div>
+          )}
 
-          {/* Analyst consensus (Finnhub recommendation trend). Amber when bearish (more
-              sell than buy ratings). Free tier has no price target — this is the consensus. */}
-          {plan && plan.analyst && plan.analyst.known ? (() => {
-            const a = plan.analyst;
-            const rating = { strong_buy: "Strong Buy", buy: "Buy", hold: "Hold", sell: "Sell", strong_sell: "Strong Sell" }[a.rating] || a.rating || "";
-            const bearish = a.bearish;
-            return (
-              <div style={{ marginTop: 6, padding: bearish ? "6px 9px" : "4px 9px", borderRadius: 6,
-                            fontSize: bearish ? 10 : 9.5, fontWeight: bearish ? 700 : 600, lineHeight: 1.5,
-                            color: bearish ? "var(--amber, #d9a441)" : "var(--text-muted)",
-                            border: bearish ? "1px solid var(--amber, #d9a441)" : "none" }}
-                   title="Analyst recommendation trend (Finnhub); bearish tilt = sell ratings outnumber buy ratings.">
-                🎯 Analyst consensus: {rating} · {a.buy} buy / {a.hold} hold / {a.sell} sell ({a.n_analysts}){bearish ? " — bearish tilt" : ""}
+          {/* ── WHY BUY / WATCH FLAGS ── */}
+          {!loading && (nGood || nWatch) ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 8 }}>
+              <div style={{ borderRadius: 7, background: "var(--accent-dim, rgba(80,200,120,0.10))", padding: "7px 9px" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--positive)", marginBottom: 3 }}>✓ why buy</div>
+                <div style={{ fontSize: 9.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{nGood ? goodFlags.join(" · ") : "—"}</div>
               </div>
-            );
-          })() : null}
-
-          {/* Insider transactions (Finnhub · SEC Form 4, last 90d, open-market only). The
-              % of the insider's stake sold is a stronger 'abnormal' signal than the $ amount
-              (Finnhub has no 10b5-1 flag, so this is the best normal-vs-significant gauge). */}
-          {plan && plan.insider && plan.insider.known ? (() => {
-            const ins = plan.insider;
-            const heavy = ins.heavy_sell;
-            const top = ins.top_seller;
-            const fmtM = (v) => { const a = Math.abs(v); return a >= 1e6 ? "$" + (a / 1e6).toFixed(1) + "M" : a >= 1e3 ? "$" + Math.round(a / 1e3) + "K" : "$" + Math.round(a); };
-            let txt;
-            if (ins.sell_value > 0 && top && top.pct_of_stake != null) {
-              txt = `${top.name || "an insider"} sold ${top.pct_of_stake}% of stake (${fmtM(top.value)})`;
-            } else if (ins.sell_value > 0) {
-              txt = `sold ${fmtM(ins.sell_value)}`;
-            } else {
-              txt = "no open-market sells";
-            }
-            const more = ins.n_sellers > 1 ? ` · ${ins.n_sellers} sellers` : "";
-            const bought = ins.buy_value > 0 ? ` · bought ${fmtM(ins.buy_value)}` : "";
-            return (
-              <div style={{ marginTop: 6, padding: heavy ? "6px 9px" : "4px 9px", borderRadius: 6,
-                            fontSize: heavy ? 10 : 9.5, fontWeight: heavy ? 700 : 600, lineHeight: 1.5,
-                            color: heavy ? "var(--amber, #d9a441)" : "var(--text-muted)",
-                            border: heavy ? "1px solid var(--amber, #d9a441)" : "none" }}
-                   title="Insider Form 4 trades (last 90d, open-market sales/buys only — routine awards & tax withholding excluded). % of stake = how much of that insider's own holding they sold; a large % is a stronger signal than the dollar amount.">
-                👤 Insiders (90d): {txt}{more}{bought}{heavy ? " — heavy selling ⚠" : ""}
+              <div style={{ borderRadius: 7, background: nWatch ? "var(--negative-dim, rgba(220,80,80,0.10))" : "var(--bg-raised)", padding: "7px 9px" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: nWatch ? "var(--negative)" : "var(--text-muted)", marginBottom: 3 }}>⚠ watch</div>
+                <div style={{ fontSize: 9.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{nWatch ? watchFlags.join(" · ") : "no red flags"}</div>
               </div>
-            );
-          })() : null}
-
-          {/* Broad-market regime warning — the swing signal judges this stock on its OWN
-              trend (relative strength), so it can fire STRONG BUY while SPY is in a downtrend.
-              In a selloff correlation rises and even strong stocks fall — so warn, don't hide. */}
-          {plan && plan.market && plan.market.known && plan.market.spy_bearish ? (
-            <div style={{ marginTop: 6, padding: "6px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                          color: "var(--red)", border: "1px solid var(--red)",
-                          background: "var(--negative-dim, rgba(220,80,80,0.12))", lineHeight: 1.5 }}
-                 title="This signal is based on the stock's OWN strength, but the broad market is in a downtrend — in a selloff correlation rises and even strong stocks fall. Use extra caution.">
-              ⚠️ Broad market is DOWN (SPY {plan.market.spy_price} below its {plan.market.spy_ema21} avg) — signal is the stock's own strength; beware buying against the trend
             </div>
           ) : null}
 
-          {/* H1: Score bars with points/max */}
-          <div className="an-sect-title">
-            Technical factors{compRows.length ? " · " + techSum + "/" + techMax : ""}
+          {/* ── TRADE PLAN — visual axis + metric cards ── */}
+          <div className="an-sect-title">Trade plan{strat ? " · " + strat : ""}</div>
+          {hasBar ? (
+            <div style={{ position: "relative", height: 30, margin: "10px 6px 14px" }}>
+              <div style={{ position: "absolute", top: 13, left: 0, right: 0, height: 3, borderRadius: 2, background: "var(--border)" }}></div>
+              <div style={{ position: "absolute", top: 13, height: 3, borderRadius: 2, background: "var(--positive)",
+                            left: ppos(entry) + "%", width: Math.max(0, ppos(tp3 || tp2 || tp1) - ppos(entry)) + "%" }}></div>
+              {[["stop", stop, "var(--negative)"], ["entry", entry, "var(--text)"], ["T1", tp1, "var(--positive)"], ["T2", tp2, "var(--positive)"], ["T3", tp3, "var(--positive)"]]
+                .filter(m => m[1] && Number(m[1]) > 0).map((m, i) => (
+                <div key={i} style={{ position: "absolute", top: 4, left: ppos(m[1]) + "%", transform: "translateX(-50%)", textAlign: "center" }}>
+                  <div style={{ width: 2, height: 17, background: m[2], margin: "0 auto" }}></div>
+                  <div style={{ fontSize: 8.5, color: m[2], marginTop: 1, whiteSpace: "nowrap" }}>{m[0]} {Number(m[1]).toFixed(0)}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
+            <div style={{ background: "var(--bg-raised)", borderRadius: 6, padding: "6px 8px" }}>
+              <div style={{ fontSize: 9, color: "var(--text-muted)" }}>R / R</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }} title="Blended across a tiered exit (50% TP1 / 30% TP2 / 20% TP3) — not TP1 alone">{rr != null ? "1:" + Number(rr).toFixed(1) : "—"}</div>
+            </div>
+            <div style={{ background: "var(--bg-raised)", borderRadius: 6, padding: "6px 8px" }}>
+              <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Size</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{shares != null ? shares : "—"}<span style={{ fontSize: 9, color: "var(--text-muted)" }}>{shares != null ? " sh" : ""}</span></div>
+            </div>
+            <div style={{ background: "var(--bg-raised)", borderRadius: 6, padding: "6px 8px" }}>
+              <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Risk</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--negative)" }}>{riskAmt != null ? "$" + Number(riskAmt).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}</div>
+              {riskPctEq != null && <div style={{ fontSize: 8, color: "var(--text-muted)" }}>{riskPctEq}% eq</div>}
+            </div>
+            <div style={{ background: "var(--bg-raised)", borderRadius: 6, padding: "6px 8px" }}>
+              <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Hold</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{holdDays != null ? "~" + holdDays + "d" : "~20d"}</div>
+            </div>
           </div>
+          {isStale && (
+            <div style={{ fontSize: 8.5, color: "var(--amber, #d9a441)", marginTop: 6, lineHeight: 1.4 }}>
+              ⚠ Plan computed at ${Number(entry).toFixed(2)} — price is now ${Number(signal.price).toFixed(2)}
+            </div>
+          )}
+
+          {/* ── BUY BUTTON ── */}
+          <button className="an-trade" onClick={() => handleTrade(signal)} disabled={!canTrade} style={{ marginTop: 10 }}>
+            <i className="fas fa-paper-plane" style={{ marginRight: 6 }}></i>
+            {!signal.halal ? "Blocked — halal fail" : canTrade ? "Send to paper trade" : loading ? <span className="pulse" style={{ opacity: 0.5 }}>Loading plan…</span> : "Sizing unavailable"}
+          </button>
+          {brokerHealth ? (
+            <div style={{ marginTop: 6, fontSize: 9, textAlign: "center", color: brokerHealth.connected ? "var(--positive)" : "var(--text-muted)" }}>
+              IBKR paper {brokerHealth.connected ? "✓" : "offline"}
+              {brokerHealth.account && brokerHealth.account.equity ? ` · $${Number(brokerHealth.account.equity).toLocaleString()}` : ""}
+            </div>
+          ) : null}
+
+          {/* ════ DETAILS (deep dive) ════ */}
+          <div style={{ marginTop: 14, marginBottom: 2, fontSize: 9.5, fontWeight: 700, color: "var(--text-muted)",
+                        borderTop: "1px solid var(--border)", paddingTop: 10, letterSpacing: 0.5 }}>DETAILS</div>
+
+          {/* Technical factor bars */}
+          <div className="an-sect-title">Technical factors{compRows.length ? " · " + techSum + "/" + techMax : ""}</div>
           {loading ? (
-            <div className="an-bar-row"><div className="an-skel-bar" style={{width:"100%",height:4,borderRadius:2,background:"var(--bg-raised)",animation:"pulse 1.5s ease-in-out infinite"}}></div></div>
+            <div className="an-bar-row"><div className="an-skel-bar" style={{ width: "100%", height: 4, borderRadius: 2, background: "var(--bg-raised)", animation: "pulse 1.5s ease-in-out infinite" }}></div></div>
           ) : scErr ? (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>Scoring unavailable</span></div>
           ) : compRows.length ? compRows.map((c) => (
@@ -331,56 +390,21 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           )) : (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>—</span></div>
           )}
-
           {techNote ? (
-            <div style={{ marginTop: 4, fontSize: 9, color: "var(--text-muted)", lineHeight: 1.4 }}>
-              ⓘ {techNote}
-            </div>
+            <div style={{ marginTop: 4, fontSize: 9, color: "var(--text-muted)", lineHeight: 1.4 }}>ⓘ {techNote}</div>
           ) : null}
 
-          {/* H3: Signal⇄Forecast agreement chip */}
+          {/* Signal⇄Forecast agreement chip */}
           {agreeChip ? (
             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
               <span className={"an-agree-chip" + (agreeChip === "agree" ? " an-agree-ok" : " an-agree-warn")}
-                    title="قياس أوّلي (n=902): الصفقات الموافقة كانت أفضل — عيّنة صغيرة، ليس ضماناً">
-                {agreeChip === "agree" ? "✓ التوقّع يوافق الإشارة" : "⚠ التوقّع يخالف الإشارة"}
+                    title="Early measurement (n=902): agreeing trades did better — small sample, not a guarantee">
+                {agreeChip === "agree" ? "✓ forecast agrees with the signal" : "⚠ forecast disagrees with the signal"}
               </span>
             </div>
-          ) : (fcForChip && !agreeChip) ? (
-            <div style={{ marginTop: 6, fontSize: 9, color: "var(--text-muted)" }}>—</div>
           ) : null}
 
-          {/* H2: Trade plan accuracy */}
-          <div className="an-sect-title">Trade plan{strat ? " · " + strat : ""}</div>
-          <div className="an-grid">
-            <div className="row"><span className="l">Entry</span><span className="v">{_anFx(entry)}</span></div>
-            <div className="row"><span className="l">Size</span><span className="v">{shares != null ? shares + " sh" : "—"}</span></div>
-            <div className="row"><span className="l">Stop</span><span className="v txt-negative">{_anFx(stop)}</span></div>
-            <div className="row"><span className="l">Target 1</span><span className="v txt-positive">{_anFx(tp1)}</span></div>
-            <div className="row"><span className="l">Target 2</span><span className="v txt-positive">{_anFx(tp2)}</span></div>
-            <div className="row"><span className="l">Target 3</span><span className="v txt-positive">{_anFx(tp3)}</span></div>
-            <div className="row">
-              <span className="l">R / R</span>
-              <span className="v" title="1:1.7 = نسبة مرجّحة لخطة خروج متدرّجة (50% عند TP1، 30% TP2، 20% TP3) — ليست نسبة TP1 وحده">
-                {rr != null ? "1 : " + Number(rr).toFixed(1) : "—"}
-              </span>
-            </div>
-            <div className="row">
-              <span className="l">Risk</span>
-              <span className="v txt-negative">
-                {riskAmt != null ? "$" + Number(riskAmt).toLocaleString("en-US", { maximumFractionDigits: 0 }) : "—"}
-                {riskPctEq != null && <span style={{ fontSize: 8, color: "var(--text-muted)", marginLeft: 4 }}>({riskPctEq}% equity)</span>}
-              </span>
-            </div>
-          </div>
-
-          {/* H2: Stale-entry guard */}
-          {isStale && (
-            <div style={{ fontSize: 8.5, color: "var(--amber)", marginTop: 6, lineHeight: 1.4 }}>
-              ⚠ الخطة محسوبة على ${Number(entry).toFixed(2)} — السعر الآن ${Number(signal.price).toFixed(2)}
-            </div>
-          )}
-
+          {/* Forecast detail */}
           {(() => {
             const fc = (forecast && forecast.data && !forecast.data.error) ? forecast.data : null;
             const fcLoading = forecast && forecast.loading;
@@ -395,11 +419,10 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                   </select>
                 </div>
                 {fcLoading ? (
-                  <div className="an-bar-row"><div className="an-skel-bar" style={{width:"100%",height:4,borderRadius:2,background:"var(--bg-raised)",animation:"pulse 1.5s ease-in-out infinite"}}></div></div>
+                  <div className="an-bar-row"><div className="an-skel-bar" style={{ width: "100%", height: 4, borderRadius: 2, background: "var(--bg-raised)", animation: "pulse 1.5s ease-in-out infinite" }}></div></div>
                 ) : fc ? (
                   <>
                     {_forecastFanSvg(fc)}
-                    {/* H5: P5-P95 range bar mini-visual */}
                     {last && _rangeBar(last.p5, last.median, last.p95, fc.current_price)}
                     <div className="an-grid" style={{ marginTop: 6 }}>
                       <div className="row"><span className="l">Expected</span><span className="v">{_anFx(fc.expected_price)} <span style={{ fontSize: 9, color: fc.expected_change_pct >= 0 ? "var(--positive)" : "var(--negative)" }}>{fmtPct(fc.expected_change_pct)}</span></span></div>
@@ -418,7 +441,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             );
           })()}
 
-          {/* On-demand backtest (Chan Ch.2) — historical OOS evidence, run only on click */}
+          {/* On-demand backtest */}
           {(() => {
             const bt = (backtest && backtest.symbol === signal.symbol) ? backtest : null;
             const s0 = bt && Array.isArray(bt.data) && bt.data.length ? bt.data[0] : null;
@@ -429,15 +452,15 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                 <div className="an-sect-title">Backtest · 2y walk-forward</div>
                 {!bt ? (
                   <button onClick={() => onBacktest && onBacktest(signal.symbol)}
-                          title="backtest سيري سنتين — بلا look-ahead، بتكاليف، Deflated Sharpe"
+                          title="2-year walk-forward backtest — no look-ahead, with costs, Deflated Sharpe"
                           style={{ width: "100%", padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
                                    borderRadius: 6, border: "1px solid var(--accent)", color: "var(--accent)", background: "var(--accent-dim)" }}>
-                    🔬 شغّل Backtest (سنتان)
+                    🔬 Run backtest (2 years)
                   </button>
                 ) : bt.loading ? (
                   <div className="an-bar-row"><div className="an-skel-bar" style={{ width: "100%", height: 4, borderRadius: 2, background: "var(--bg-raised)", animation: "pulse 1.5s ease-in-out infinite" }}></div></div>
                 ) : err ? (
-                  <div style={{ fontSize: 9, color: "var(--text-muted)" }}>تعذّر الـbacktest: {String(err).slice(0, 80)}</div>
+                  <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Backtest failed: {String(err).slice(0, 80)}</div>
                 ) : s0 ? (
                   <>
                     <div className="an-grid">
@@ -446,31 +469,20 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                       <div className="row"><span className="l">Trades</span><span className="v">{s0["Total Trades"] != null ? s0["Total Trades"] : "—"}</span></div>
                       <div className="row"><span className="l">Return</span><span className="v">{_n(s0["Return %"], 1)}%</span></div>
                       <div className="row"><span className="l">Max drawdown</span><span className="v txt-negative">{_n(s0["Max Drawdown %"], 1)}%</span></div>
-                      <div className="row"><span className="l" title="Deflated Sharpe — يعاقب تعدّد المحاولات (Bailey & López de Prado)">Deflated Sharpe</span><span className="v">{_n(s0["Deflated Sharpe"])}</span></div>
+                      <div className="row"><span className="l" title="Deflated Sharpe — penalizes multiple testing (Bailey & López de Prado)">Deflated Sharpe</span><span className="v">{_n(s0["Deflated Sharpe"])}</span></div>
                       <div className="row"><span className="l">Permutation p</span><span className="v">{_n(s0["Permutation p-value"], 3)}</span></div>
                     </div>
                     <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.4 }}>
-                      تاريخي OOS · سنتان · بلا look-ahead · بتكاليف — ليس وعداً. الحَكَم النهائي هو الدفتر الورقي الأمامي.
+                      Historical OOS · 2y · no look-ahead · with costs — not a promise. The forward paper ledger is the final judge.
                     </div>
                   </>
                 ) : (
-                  <div style={{ fontSize: 9, color: "var(--text-muted)" }}>لا نتائج</div>
+                  <div style={{ fontSize: 9, color: "var(--text-muted)" }}>No results</div>
                 )}
               </div>
             );
           })()}
 
-          {/* H4: WAIT-confirm guard on buy button */}
-          <button className="an-trade" onClick={() => handleTrade(signal)} disabled={!canTrade}>
-            <i className="fas fa-paper-plane" style={{ marginRight: 6 }}></i>
-            {!signal.halal ? "Blocked — halal fail" : canTrade ? "Send to paper trade" : loading ? <span className="pulse" style={{opacity:0.5}}>Loading plan…</span> : "Sizing unavailable"}
-          </button>
-          {brokerHealth ? (
-            <div style={{ marginTop: 6, fontSize: 9, textAlign: "center", color: brokerHealth.connected ? "var(--positive)" : "var(--text-muted)" }}>
-              IBKR paper {brokerHealth.connected ? "✓" : "offline"}
-              {brokerHealth.account && brokerHealth.account.equity ? ` · $${Number(brokerHealth.account.equity).toLocaleString()}` : ""}
-            </div>
-          ) : null}
         </div>
       </div>
     </div>
