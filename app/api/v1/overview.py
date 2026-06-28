@@ -47,6 +47,8 @@ async def _get_system_status():
         "telegram": health.get("telegram", "unknown"),
         "data_source": health.get("data_source", "unknown"),
         "auto_trading": health.get("auto_trading", "unknown"),
+        "auto_paper": ("enabled" if __import__("os").environ.get(
+            "AUTO_PAPER_TRADE", "false").strip().lower() in ("true", "1", "yes", "on") else "disabled"),
         "kill_switch": getattr(app_cfg, 'killed', False),
         "regime": regime_state,
         "uptime_seconds": health.get("uptime_seconds", 0),

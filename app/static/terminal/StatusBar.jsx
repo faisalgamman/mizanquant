@@ -14,10 +14,15 @@ function StatusBar({ pipelineRunning, system, portfolio, brokerHealth }) {
     brokerLabel = "Alpaca (IBKR offline)";
   }
 
+  // LIVE auto-trade (real money). ON is amber — a state to notice.
   const at = system && system.auto_trading;
   const autoTrade = at === "enabled" ? "ON" : at === "disabled" ? "OFF" : "—";
-  // ON is amber, not green: auto-execution being active is a state to notice.
   const autoColor = at === "enabled" ? "var(--warning)" : "var(--text-secondary)";
+
+  // AUTO-PAPER (simulated IBKR paper executor) — separate from live auto-trade.
+  const ap = system && system.auto_paper;
+  const autoPaper = ap === "enabled" ? "ON" : ap === "disabled" ? "OFF" : "—";
+  const apColor = ap === "enabled" ? "var(--accent)" : "var(--text-secondary)";
 
   const regime = (system && system.regime) || "—";
   const regimeColor = regime === "BULL" ? "var(--positive)"
@@ -32,7 +37,9 @@ function StatusBar({ pipelineRunning, system, portfolio, brokerHealth }) {
         <span className={"dot " + (brokerConnected ? "dot-green" : "")}></span>
         <span>Broker · {brokerLabel}</span>
         <span className="sep">·</span>
-        <span>Auto-trade <span style={{ color: autoColor, fontWeight: 600 }}>{autoTrade}</span></span>
+        <span title="LIVE auto-trade engine (real money) — kept OFF until a strategy graduates">Live-trade <span style={{ color: autoColor, fontWeight: 600 }}>{autoTrade}</span></span>
+        <span className="sep">·</span>
+        <span title="Auto-paper: simulated IBKR paper orders from the scanners (no real money)">Auto-paper <span style={{ color: apColor, fontWeight: 600 }}>{autoPaper}</span></span>
         <span className="sep">·</span>
         <span>Regime <span style={{ color: regimeColor, fontWeight: 600 }}>{regime}</span></span>
       </div>
