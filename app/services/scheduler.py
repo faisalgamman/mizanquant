@@ -622,6 +622,14 @@ def _scheduler_loop():
                         logger.info("Paper validation: auto-recording weekly picks (cache warm)...")
                         from app.services.paper_validation import record_weekly_picks
                         logger.info("Paper validation weekly record: %s", record_weekly_picks())
+                        # Auto-paper: also place the picks as REAL IBKR PAPER bracket orders
+                        # (opt-in AUTO_PAPER_TRADE, paper-only guard, capped/deduped — no-op
+                        # when disabled). Builds a real paper track record alongside the sim.
+                        try:
+                            from app.services.auto_paper import run_auto_paper
+                            logger.info("Auto-paper weekly: %s", run_auto_paper("weekly"))
+                        except Exception as _ap_e:
+                            logger.error("Auto-paper weekly failed: %s", _ap_e)
                 except Exception as e:
                     logger.error(f"Paper validation record failed: {e}", exc_info=True)
 
@@ -649,6 +657,11 @@ def _scheduler_loop():
                     from app.services.paper_validation import rebalance_monthly
                     res = rebalance_monthly()
                     logger.info("Monthly rebalance: %s", res)
+                    try:
+                        from app.services.auto_paper import run_auto_paper
+                        logger.info("Auto-paper monthly: %s", run_auto_paper("monthly"))
+                    except Exception as _ap_e:
+                        logger.error("Auto-paper monthly failed: %s", _ap_e)
                 except Exception as e:
                     logger.error(f"Paper validation monthly rebalance failed: {e}", exc_info=True)
 

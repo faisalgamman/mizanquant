@@ -307,3 +307,12 @@ async def v1_paper_record_now(scanner: str = Query("weekly")):
     except Exception as e:
         logger.error("paper record-now %s: %s", s, e)
         return {"status": "error", "detail": str(e)[:160]}
+
+
+@router.post("/paper/auto-run")
+async def v1_paper_auto_run(scanner: str = Query("weekly")):
+    """Manually trigger the auto-paper executor (places the scanner's halal picks as IBKR
+    PAPER bracket orders, capped & deduped). Session-gated; honors AUTO_PAPER_TRADE and the
+    paper-only guard. The blocking broker calls run in a worker thread."""
+    from app.services.auto_paper import run_auto_paper
+    return await asyncio.to_thread(run_auto_paper, scanner)
