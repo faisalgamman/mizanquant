@@ -113,6 +113,20 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
         return {"error": f"No data for {symbol}"}
     plan = generate_trade_plan(df, portfolio_equity=portfolio)
     plan["symbol"] = symbol.upper()
+    # Reference price + halal verdict — lets the Analyze card build a signal for symbols
+    # opened from the Pairs / intel rows that aren't in any scanner list (so it can analyze
+    # them + gate Send-to-paper). Sizing already used `portfolio` (the real account equity).
+    try:
+        plan["price"] = round(float(df["close"].iloc[-1]), 2)
+    except Exception:
+        plan.setdefault("price", None)
+    try:
+        from app.services.halal_screening import verify_halal
+        _okh, _ = verify_halal(symbol)
+        plan["halal"] = bool(_okh)
+        plan["halal_verdict"] = "halal" if _okh else "non_compliant"
+    except Exception:
+        plan.setdefault("halal", None)
 
     try:
         spy_df = fetch("SPY", period="6mo")

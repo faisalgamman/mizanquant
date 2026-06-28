@@ -394,7 +394,7 @@ function App() {
   // Fix: define window.selectIntelSymbol so clicking a Stock Intelligence row
   // actually opens the Stock ID Card (was called in StockIntel.jsx but never defined).
   useEffect(() => {
-    window.selectIntelSymbol = (sym) => setCardSymbol(sym);
+    window.selectIntelSymbol = (sym) => { setCardSymbol(sym); setSelectedSymbol(sym); };
     return () => { try { delete window.selectIntelSymbol; } catch (e) {} };
   }, []);
 
@@ -520,9 +520,12 @@ function App() {
     setBacktest(null);  // backtest is on-demand per stock — clear stale result on symbol change
     setAnalyze({ symbol: selectedSym, scoring: null, plan: null, loading: true });
     (async () => {
+      // Size the plan to the REAL account equity (IBKR paper ~$1M) — not the $100k default.
+      const _eq = (brokerHealth && brokerHealth.account && Number(brokerHealth.account.equity))
+               || (portfolio && Number(portfolio.equity)) || 100000;
       const [scoring, plan] = await Promise.all([
         fetch('/api/v1/scoring/weighted?symbol=' + encodeURIComponent(selectedSym)).then(r => r.json()).catch(() => null),
-        fetch('/api/v1/trade/plan?symbol=' + encodeURIComponent(selectedSym)).then(r => r.json()).catch(() => null),
+        fetch('/api/v1/trade/plan?symbol=' + encodeURIComponent(selectedSym) + '&portfolio=' + Math.round(_eq)).then(r => r.json()).catch(() => null),
       ]);
       if (!cancelled) setAnalyze({ symbol: selectedSym, scoring, plan, loading: false });
     })();
@@ -572,12 +575,23 @@ function App() {
   const filteredSignals = useMemo(() => _filterByQuery(displaySignals), [query, displaySignals]);
   const filteredMonthly = useMemo(() => _filterByQuery(monthly), [query, monthly]);
 
-  const selected =
+  const _hit =
     activeList.find(s => s.symbol === selectedSym) ||
     displaySignals.find(s => s.symbol === selectedSym) ||
     monthly.find(s => s.symbol === selectedSym) ||
-    daytradeSignals.find(s => s.symbol === selectedSym) ||
-    activeList[0] || displaySignals[0];
+    daytradeSignals.find(s => s.symbol === selectedSym);
+  // Symbol opened from a Pairs / intel row (not in any scanner list): synthesize a minimal
+  // signal from the loaded analyze (price + halal from the plan) so the Decision Card and
+  // Send-to-paper still work on it. Shows the RIGHT symbol while the analyze loads.
+  const _synth = (!_hit && selectedSymbol && selectedSym === selectedSymbol)
+    ? { symbol: selectedSymbol, company: selectedSymbol, industry: "—", chg: 0, spark: [],
+        price: Number((analyze && analyze.plan && (analyze.plan.price || analyze.plan.entry_price || analyze.plan.strategy_entry)) || 0),
+        halal: !!(analyze && analyze.plan && analyze.plan.halal),
+        halalVerdict: (analyze && analyze.plan && analyze.plan.halal_verdict) || "halal",
+        score: Math.round((analyze && analyze.scoring && (analyze.scoring.smart_score || analyze.scoring.total)) || 0),
+        verdict: (analyze && analyze.scoring && analyze.scoring.verdict) || "" }
+    : null;
+  const selected = _hit || _synth || activeList[0] || displaySignals[0];
 
   // Trigger the REAL pipeline and reflect its actual stage status (no fake
   // timed animation). Progress is shown from /api/v1/overview pipeline.stages.
