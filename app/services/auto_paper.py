@@ -147,12 +147,21 @@ def run_auto_paper(scanner: str = "weekly", *, _broker=None, _picks_fn=None, _su
         held = set()
     held |= _today_manual_symbols()
 
+    # Size to the REAL paper-account equity so trades scale to the actual balance (~$1M),
+    # not a fixed default. Falls back to AUTO_PAPER_ACCOUNT (100k) if the read fails.
+    try:
+        equity = float((broker.get_account(_MANUAL) or {}).get("equity") or 0)
+    except Exception:
+        equity = 0.0
+    if equity <= 0:
+        equity = float(os.environ.get("AUTO_PAPER_ACCOUNT", "100000"))
+
     if _picks_fn is not None:
         picks = _picks_fn(scn)
     elif scn.startswith("month"):
-        picks = _monthly_bracket_picks()
+        picks = _monthly_bracket_picks(account=equity)
     else:
-        picks = _weekly_bracket_picks()
+        picks = _weekly_bracket_picks(account=equity)
 
     placed: list[str] = []
     skipped = 0
