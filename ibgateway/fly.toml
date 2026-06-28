@@ -1,0 +1,24 @@
+# Fly app for the IB Gateway (paper) — clones the Railway `ibgateway` service onto Fly.
+#
+# Runs the gnzsnz/ib-gateway image (IBC auto-login). INTERNAL ONLY: the TWS API socket is
+# reachable ONLY over Fly's private 6PN network by the main app (mizanquant). It is NEVER
+# exposed publicly — the TWS socket has no auth/TLS, so a public port would be unsafe. The
+# main app connects to `mizanquant-gateway.internal:4004` (the paper SOCAT relay; the direct
+# 4002 port binds to container-localhost only and is unreachable cross-machine).
+#
+# Credentials are SECRETS, never in code:
+#   fly secrets set -a mizanquant-gateway TWS_USERID=<paper user> TWS_PASSWORD=<paper pass>
+app = "mizanquant-gateway"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TRADING_MODE = "paper"
+
+# No [http_service] / public [[services]] on purpose — internal 6PN access only.
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2048"
