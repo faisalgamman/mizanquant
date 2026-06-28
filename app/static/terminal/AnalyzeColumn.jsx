@@ -88,7 +88,42 @@ function _convictionGauge(score) {
   );
 }
 
-function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth, backtest, onBacktest }) {
+// Market-context rows (SPY/VIX/credit/breadth/liquidity/sectors) with traffic-light
+// verdicts — the broad backdrop, shown right inside the Decision Card.
+function _marketRows(market, sectors) {
+  const m = market || {};
+  const amber = "var(--amber, #d9a441)", green = "var(--positive)", red = "var(--negative)", muted = "var(--text-muted)";
+  const n2 = (v, d = 2) => (v == null || isNaN(Number(v))) ? "—" : Number(v).toFixed(d);
+  const rows = [
+    { lab: "SPY", val: n2(m.spy_price),
+      verdict: m.spy_regime || "—",
+      color: m.spy_regime === "BULL" ? green : m.spy_regime === "BEAR" ? red : m.spy_regime === "NEUTRAL" ? amber : muted },
+    { lab: "VIX", val: n2(m.vix),
+      verdict: m.vix == null ? "—" : m.vix < 20 ? "NORMAL" : m.vix < 30 ? "ELEVATED" : "STRESS",
+      color: m.vix == null ? muted : m.vix < 20 ? green : m.vix < 30 ? amber : red },
+    { lab: "VIX %ile", val: m.vix_pctile == null ? "—" : Math.round(m.vix_pctile) + "%",
+      verdict: m.vix_pctile == null ? "—" : m.vix_pctile < 80 ? "OK" : "HIGH",
+      color: m.vix_pctile == null ? muted : m.vix_pctile < 80 ? green : amber },
+    { lab: "HY/IG", val: n2(m.credit, 3),
+      verdict: m.credit == null ? "—" : m.credit >= 0.80 ? "OK" : "STRESS",
+      color: m.credit == null ? muted : m.credit >= 0.80 ? green : red },
+    { lab: "Breadth", val: m.breadth == null ? "—" : n2(m.breadth, 1) + "%",
+      verdict: m.breadth == null ? "—" : m.breadth >= 50 ? "OK" : "WEAK",
+      color: m.breadth == null ? muted : m.breadth >= 50 ? green : red },
+    { lab: "Liquidity", val: m.liquidity == null ? "—" : Math.round(m.liquidity) + "%",
+      verdict: m.liquidity == null ? "—" : "OK", color: m.liquidity == null ? muted : green },
+  ];
+  if (sectors && sectors.length) {
+    const up = sectors.filter(s => Number(s.chg) > 0).length, tot = sectors.length;
+    const r = up / tot;
+    rows.push({ lab: "Sectors", val: up + "/" + tot,
+      verdict: r >= 0.6 ? "OK+" : r >= 0.45 ? "MIXED" : "WEAK",
+      color: r >= 0.6 ? green : r >= 0.45 ? amber : red });
+  }
+  return rows;
+}
+
+function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade, brokerHealth, backtest, onBacktest, market, sectors }) {
   if (!signal) {
     return (
       <div className="col col-analyze">
@@ -314,6 +349,22 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                 <div style={{ fontSize: 9.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{nWatch ? watchFlags.join(" · ") : "no red flags"}</div>
               </div>
             </div>
+          ) : null}
+
+          {/* ── MARKET CONTEXT — the broad backdrop, traffic-light verdicts ── */}
+          {market ? (
+            <>
+              <div className="an-sect-title">Market context</div>
+              <div style={{ marginBottom: 2 }}>
+                {_marketRows(market, sectors).map((r, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto 58px", gap: 8, alignItems: "center", fontSize: 10, padding: "2.5px 0" }}>
+                    <span style={{ color: "var(--text-muted)" }}>{r.lab}</span>
+                    <span className="mono" style={{ fontWeight: 600, textAlign: "right" }}>{r.val}</span>
+                    <span style={{ fontWeight: 700, color: r.color, textAlign: "right" }}>{r.verdict}</span>
+                  </div>
+                ))}
+              </div>
+            </>
           ) : null}
 
           {/* ── TRADE PLAN — visual axis + metric cards ── */}

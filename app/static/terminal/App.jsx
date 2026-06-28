@@ -110,7 +110,9 @@ function App() {
       const sreg = mc.spy_regime || {};
       setMarket({
         vix:        num((sreg && sreg.vix) ?? (mc.vix && mc.vix.vix) ?? mc.vix),
+        vix_pctile: num(mc.vix && mc.vix.vix_pctile),
         spy_regime: (sreg.regime ?? mc.regime ?? "—"),
+        spy_price:  num(sreg.price ?? sreg.spy_price ?? sreg.last ?? sreg.close),
         spy_trend:  (sreg.ema_50 != null && sreg.ema_200 != null) ? "EMA50 vs EMA200" : "",
         breadth:    num((mc.breadth && mc.breadth.breadth_pct) ?? mc.breadth),
         credit:     num((mc.credit && mc.credit.ratio) ?? mc.credit),
@@ -733,6 +735,8 @@ function App() {
             onHorizon={setForecastHorizon}
             onTrade={sendToPaper}
             brokerHealth={brokerHealth}
+            market={market}
+            sectors={sectors}
             backtest={backtest}
             onBacktest={runBacktest}
           />
