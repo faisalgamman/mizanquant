@@ -269,6 +269,22 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                           .map(t => t.label + (t.value && t.value !== "—" ? ` (${t.value})` : ""));
   const nGood = goodFlags.length, nWatch = watchFlags.length;
 
+  // "Why this score" — the REAL signed drivers (no invented numbers): technical factor
+  // points (from scoring.components) + the live fundamentals/insider selection adjustments,
+  // ranked by magnitude. Gate-type signals (earnings/regime/analyst) listed as cautions.
+  const whyPos = [], whyNeg = [];
+  compRows.forEach(c => { const v = Number(c.v) || 0; if (v >= 8) whyPos.push({ lab: c.lab, val: v }); });
+  if (fund && Number(fund.score_adj)) { const v = Math.round(Number(fund.score_adj)); (v >= 0 ? whyPos : whyNeg).push({ lab: "Fundamentals", val: v }); }
+  if (ins && ins.heavy_sell) whyNeg.push({ lab: "Insider selling", val: -15 });
+  else if (ins && ins.net_value > 0) whyPos.push({ lab: "Insider buying", val: 5 });
+  whyPos.sort((a, b) => b.val - a.val);
+  whyNeg.sort((a, b) => a.val - b.val);
+  const whyDrivers = whyPos.concat(whyNeg);
+  const whyCautions = [];
+  if (earn && earn.within_blackout) whyCautions.push("earnings in " + earn.business_days + "d");
+  if (mkt && mkt.spy_bearish) whyCautions.push("market risk-off");
+  if (ana && ana.bearish) whyCautions.push("analyst bearish tilt");
+
   // Verdict banner color
   const vColor = verdict.includes("SELL") ? "var(--negative)" : verdictBuy ? "var(--positive)" : "var(--text-muted)";
   const vBg    = verdict.includes("SELL") ? "var(--negative-dim, rgba(220,80,80,0.12))" : verdictBuy ? "var(--accent-dim, rgba(80,200,120,0.10))" : "var(--bg-raised)";
@@ -356,6 +372,28 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
                 <div style={{ fontSize: 9.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{nWatch ? watchFlags.join(" · ") : "no red flags"}</div>
               </div>
             </div>
+          ) : null}
+
+          {/* ── WHY THIS SCORE — the real ranked drivers ── */}
+          {!loading && whyDrivers.length ? (
+            <>
+              <div className="an-sect-title">Why this score</div>
+              <div>
+                {whyDrivers.slice(0, 7).map((w, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "16px 1fr auto", gap: 8, alignItems: "center", fontSize: 10.5, padding: "2px 0" }}>
+                    <span style={{ color: w.val >= 0 ? "var(--positive)" : "var(--negative)", fontWeight: 700, textAlign: "center" }}>{w.val >= 0 ? "▲" : "▼"}</span>
+                    <span style={{ color: "var(--text-secondary)" }}>{w.lab}</span>
+                    <span className="mono" style={{ color: w.val >= 0 ? "var(--positive)" : "var(--negative)", fontWeight: 700 }}>{w.val >= 0 ? "+" : ""}{w.val}</span>
+                  </div>
+                ))}
+                {whyCautions.length ? (
+                  <div style={{ fontSize: 9.5, color: "var(--amber, #d9a441)", marginTop: 3, lineHeight: 1.4 }}>⚠ also: {whyCautions.join(" · ")}</div>
+                ) : null}
+              </div>
+              <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.4 }}>
+                Real drivers — technical points + fundamentals/insider adjustments (from the live data), biggest first.
+              </div>
+            </>
           ) : null}
 
           {/* ── MARKET CONTEXT — the broad backdrop, traffic-light verdicts ── */}
