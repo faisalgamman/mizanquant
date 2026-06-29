@@ -79,9 +79,11 @@ TOOL_SCHEMAS = [
     {
         "name": "get_buy_signals",
         "description": (
-            "Get today's top buy opportunities from the halal stock universe. "
-            "Returns up to 15 stocks ranked by swing score with technical signals. "
-            "Use this when the user asks for best stocks to buy or opportunities."
+            "Today's top buy opportunities from the WEEKLY swing scanner (halal universe, "
+            "ranked by technical swing_score). This is the WEEKLY tab — DISTINCT from "
+            "get_deep_picks (the Monthly composite). Use it whenever the user wants weekly / "
+            "swing picks, and call BOTH this AND get_deep_picks when they ask to 'scan' or for "
+            "the best stocks broadly, then merge + tag each name's source. Cache-first (no heavy scan)."
         ),
         "input_schema": {
             "type": "object",
@@ -577,12 +579,18 @@ def _exec_check_halal(symbol: str) -> dict:
 
 
 def _exec_get_buy_signals() -> dict:
-    """Top buy opportunities from halal universe."""
+    """Top WEEKLY swing buy opportunities from the halal universe (cache-first)."""
     import halal_screener as hs
 
-    results = hs.run_screener()
-    if not results:
-        return {"message": "Screener data not available yet. Try again in 1-2 minutes."}
+    # Cache-first: read the warm 'screener' cache (the same the Weekly tab serves) so the
+    # agent NEVER triggers a heavy ~650-symbol scan on the request path (the 503 lesson).
+    try:
+        results, _status = hs._get_cached("screener")
+    except Exception:
+        results = None
+    if not isinstance(results, list) or not results:
+        return {"message": "Weekly screener not warmed yet — open the Weekly tab (or wait for the "
+                           "~08:00 ET pre-market warm) and try again. Don't claim weekly picks meanwhile."}
 
     # Filter for buys, limit to top 15
     buys = [r for r in results if r.get("swing_score", 0) >= 55][:15]
