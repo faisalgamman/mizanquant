@@ -18,11 +18,45 @@ function _pcVol(v) {
   return String(v);
 }
 
+// Detect horizontal support/resistance from OHLC: fractal pivots (a high/low that is the
+// extreme of a ±k-bar window) clustered into multi-touch levels (more touches = stronger).
+// Returns the strongest levels, classified above/below the last close. No deps.
+function _computeSR(bars, price) {
+  const n = bars.length;
+  if (n < 20 || !price) return [];
+  const k = 3, piv = [];
+  for (let i = k; i < n - k; i++) {
+    let hi = true, lo = true;
+    for (let j = i - k; j <= i + k; j++) {
+      if (j === i) continue;
+      if (bars[j].high >= bars[i].high) hi = false;
+      if (bars[j].low <= bars[i].low) lo = false;
+    }
+    if (hi) piv.push(bars[i].high);
+    if (lo) piv.push(bars[i].low);
+  }
+  if (!piv.length) return [];
+  piv.sort((a, b) => a - b);
+  const tol = 0.015, levels = [];
+  for (const p of piv) {
+    const L = levels[levels.length - 1];
+    if (L && Math.abs(p - L.avg) / L.avg <= tol) { L.sum += p; L.touches++; L.avg = L.sum / L.touches; }
+    else levels.push({ avg: p, sum: p, touches: 1 });
+  }
+  let strong = levels.filter(l => l.touches >= 2);
+  if (strong.length < 3) strong = levels;
+  strong.sort((a, b) => b.touches - a.touches);
+  return strong.slice(0, 6).map(l => ({
+    price: l.avg, touches: l.touches, kind: l.avg >= price ? "resistance" : "support",
+  }));
+}
+
 function PriceChart({ symbol }) {
   const [range, setRange] = useState("6mo");
   const [bars, setBars] = useState(null);   // null=loading, []=no data
   const [hover, setHover] = useState(null);  // bar index under cursor
   const [chartType, setChartType] = useState("candle");  // candle | line
+  const [showSR, setShowSR] = useState(true);            // support/resistance overlay
   const svgRef = useRef(null);
 
   useEffect(() => {
@@ -68,6 +102,7 @@ function PriceChart({ symbol }) {
   const vy = (v) => volBase - (v / (volMax || 1)) * volH;
 
   const first = closes[0], last = closes[n - 1];
+  const srLevels = (showSR && n >= 20) ? _computeSR(data, last) : [];
   const up = (last ?? 0) >= (first ?? 0);
   const lineColor = up ? "var(--positive)" : "var(--negative)";
   const chg = (first && last) ? ((last / first - 1) * 100) : null;
@@ -118,6 +153,8 @@ function PriceChart({ symbol }) {
                 onClick={() => setChartType("candle")} title="Japanese candlesticks">Candles</button>
         <button className={"sc-range-chip" + (chartType === "line" ? " active" : "")}
                 onClick={() => setChartType("line")} title="Line">Line</button>
+        <button className={"sc-range-chip" + (showSR ? " active" : "")}
+                onClick={() => setShowSR(s => !s)} title="Support / resistance levels (multi-touch pivots)">S/R</button>
       </div>
 
       {bars === null ? (
@@ -155,6 +192,17 @@ function PriceChart({ symbol }) {
                 <path d={linePath} fill="none" stroke={lineColor} strokeWidth={1.5} />
               </>
             )}
+            {srLevels.map((L, i) => {
+              if (L.price < yMin || L.price > yMax) return null;
+              const col = L.kind === "resistance" ? "var(--negative)" : "var(--positive)";
+              const yy = y(L.price);
+              return (
+                <g key={"sr" + i}>
+                  <line x1={padL} y1={yy} x2={W - padR} y2={yy} stroke={col} strokeWidth={0.6} strokeDasharray="5 3" opacity={0.5} />
+                  <text x={W - padR + 1.5} y={yy + 2.4} fill={col} fontSize="6.5" opacity={0.95}>{L.price.toFixed(L.price < 50 ? 1 : 0)}{L.touches >= 3 ? "•" : ""}</text>
+                </g>
+              );
+            })}
             {last != null ? (
               <line x1={padL} y1={y(last)} x2={W - padR} y2={y(last)} stroke={lineColor}
                     strokeWidth={0.8} strokeDasharray="3 3" opacity={0.7} />
@@ -185,7 +233,9 @@ function PriceChart({ symbol }) {
           ) : null}
         </div>
       )}
-      <div className="sc-chart-disc">بيانات يومية حقيقية من السوق — لا رقم إلا حقيقي.</div>
+      <div className="sc-chart-disc">
+        شموع يومية حقيقية · الدعم (أخضر) والمقاومة (أحمر) من القمم/القيعان متعدّدة اللمسات · • = مستوى أقوى (≥3 لمسات).
+      </div>
     </div>
   );
 }
