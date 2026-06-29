@@ -130,6 +130,7 @@ function App() {
         setPortfolio({
           equity: pf.equity || 0, dayPnl: pf.daily_pnl || 0, dayPnlPct: pf.daily_pnl_pct || 0,
           cash: pf.cash || 0, buyPower: pf.buying_power || 0, openPos: pf.open_positions || 0, todayExits: 0,
+          realizedPl: pf.realized_pl || 0, accountType: pf.account_type || "",
           ibkrOffline: pf.ibkr_offline === true, brokerLabel: pf.broker_type || "",
         });
       }

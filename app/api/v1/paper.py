@@ -316,3 +316,17 @@ async def v1_paper_auto_run(scanner: str = Query("weekly")):
     paper-only guard. The blocking broker calls run in a worker thread."""
     from app.services.auto_paper import run_auto_paper
     return await asyncio.to_thread(run_auto_paper, scanner)
+
+
+@router.get("/broker/orders")
+async def v1_broker_orders():
+    """Open orders on the IBKR paper account (strategy 'MANUAL'). Returns [] when the
+    gateway is offline — never raises, so the cockpit degrades gracefully."""
+    from app.services.broker.factory import get_broker
+    try:
+        broker = get_broker(strategy_id="MANUAL")
+        orders = await asyncio.to_thread(broker.get_orders, "open", 50, "MANUAL")
+        return orders or []
+    except Exception as e:
+        logger.warning("broker/orders failed: %s", e)
+        return []

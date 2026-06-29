@@ -145,6 +145,42 @@ function Schedule({ items }) {
   );
 }
 
+// Live IBKR open orders (strategy MANUAL) — self-fetching, polls every 30s.
+function BrokerOrders() {
+  const { useState, useEffect } = React;
+  const [orders, setOrders] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch('/api/v1/broker/orders').then(r => r.json())
+      .then(d => { if (alive) setOrders(Array.isArray(d) ? d : []); })
+      .catch(() => { if (alive) setOrders([]); });
+    load();
+    const id = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  if (orders == null) return <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "10px 4px", textAlign: "center" }}>loading…</div>;
+  if (orders.length === 0) return <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "10px 4px", textAlign: "center" }}>No open orders on the paper account.</div>;
+  return (
+    <table className="pos-table">
+      <thead><tr><th>SYM</th><th>SIDE</th><th>TYPE</th><th>QTY</th><th>FILLED</th><th>LIMIT</th><th>STOP</th><th>STATUS</th></tr></thead>
+      <tbody>
+        {orders.map((o, i) => (
+          <tr key={o.id || i}>
+            <td style={{ fontWeight: 600 }}>{o.symbol || "—"}</td>
+            <td className="mono" style={{ color: (o.side === "buy") ? "var(--positive)" : "var(--negative)" }}>{(o.side || "").toUpperCase()}</td>
+            <td className="mono">{o.type || "—"}</td>
+            <td className="mono">{o.qty || "—"}</td>
+            <td className="mono">{o.filled_qty || "0"}</td>
+            <td className="mono">{Number(o.limit_price) > 0 ? "$" + Number(o.limit_price).toFixed(2) : "—"}</td>
+            <td className="mono">{Number(o.stop_price) > 0 ? "$" + Number(o.stop_price).toFixed(2) : "—"}</td>
+            <td className="mono" style={{ color: "var(--text-muted)" }}>{o.status || "—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function TradeColumn(props) {
   const { portfolio, positions, onSell } = props;
   const p = portfolio || {};
@@ -161,6 +197,7 @@ function TradeColumn(props) {
     { l: "Buying power", v: fmt$(p.buyPower, 0) },
     { l: "Positions value", v: fmt$(totVal, 0) },
     { l: "Open P&L", v: (totUpl >= 0 ? "+" : "") + fmt$(totUpl, 0), c: totUpl >= 0 ? "var(--positive)" : "var(--negative)" },
+    { l: "Realized P&L", v: (p.realizedPl >= 0 ? "+" : "") + fmt$(p.realizedPl, 0), c: (p.realizedPl || 0) >= 0 ? "var(--positive)" : "var(--negative)" },
     { l: "Open positions", v: p.openPos != null ? p.openPos : pos.length },
   ];
   return (
@@ -171,7 +208,7 @@ function TradeColumn(props) {
           <span className="wf-sub">
             {p.ibkrOffline
               ? <span style={{ color: "var(--negative)" }}>⚠️ IBKR offline — Alpaca fallback · restart the gateway</span>
-              : <span style={{ color: "var(--positive)" }}>IBKR ✓ · real-time</span>}
+              : <span style={{ color: "var(--positive)" }}>IBKR ✓ · real-time{p.accountType ? " · " + p.accountType : ""}</span>}
           </span>
         </div>
         <div className="ibkr-strip">
@@ -187,6 +224,10 @@ function TradeColumn(props) {
         <div className="wf-head"><span className="wf-title">Positions</span><span className="wf-sub">{pos.length} open · real-time · click a row to analyze</span></div>
         {pos.length ? <PositionsTable positions={pos} onSell={onSell} />
           : <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "14px 4px", textAlign: "center" }}>No open positions on the IBKR paper account.</div>}
+      </div>
+      <div className="wf-section">
+        <div className="wf-head"><span className="wf-title">Open orders</span><span className="wf-sub">live · IBKR paper · bracket legs</span></div>
+        <BrokerOrders />
       </div>
     </div>
   );

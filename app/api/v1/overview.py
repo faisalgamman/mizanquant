@@ -176,6 +176,8 @@ async def _get_portfolio():
         "equity": equity, "cash": cash, "buying_power": buying_power,
         "portfolio_value": portfolio_value, "daily_pnl": daily_pnl,
         "daily_pnl_pct": daily_pnl_pct, "open_positions": len(positions),
+        "realized_pl": float((account or {}).get("realized_pl") or 0),
+        "account_type": (account or {}).get("account_type"),
         "auto_trade_enabled": cfg.AUTO_TRADE_ENABLED,
         "positions": positions_list,
     }
