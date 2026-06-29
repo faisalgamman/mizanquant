@@ -146,27 +146,47 @@ function Schedule({ items }) {
 }
 
 function TradeColumn(props) {
-  const { portfolio, positions, paper, onSell } = props;
+  const { portfolio, positions, onSell } = props;
+  const p = portfolio || {};
+  const pos = positions || [];
+  const pnlC = (p.dayPnl || 0) >= 0 ? "var(--positive)" : "var(--negative)";
+  // Aggregate the open book (from the live IBKR positions).
+  const totVal = pos.reduce((a, x) => a + (Number(x.mktVal) || 0), 0);
+  const totUpl = pos.reduce((a, x) => a + (Number(x.pnl) || 0), 0);
+  const dayPct = p.dayPnlPct != null ? ` (${p.dayPnlPct >= 0 ? "+" : ""}${Number(p.dayPnlPct).toFixed(2)}%)` : "";
+  const cards = [
+    { l: "Equity", v: fmt$(p.equity, 0) },
+    { l: "Day P&L", v: (p.dayPnl >= 0 ? "+" : "") + fmt$(p.dayPnl, 2) + dayPct, c: pnlC },
+    { l: "Cash", v: fmt$(p.cash, 0) },
+    { l: "Buying power", v: fmt$(p.buyPower, 0) },
+    { l: "Positions value", v: fmt$(totVal, 0) },
+    { l: "Open P&L", v: (totUpl >= 0 ? "+" : "") + fmt$(totUpl, 0), c: totUpl >= 0 ? "var(--positive)" : "var(--negative)" },
+    { l: "Open positions", v: p.openPos != null ? p.openPos : pos.length },
+  ];
   return (
-    <div className="col col-trade">
+    <div className="ibkr-cockpit">
       <div className="wf-section">
         <div className="wf-head">
-          <span className="wf-title">Portfolio</span>
+          <span className="wf-title">Interactive Brokers · Paper</span>
           <span className="wf-sub">
-            {(portfolio && portfolio.ibkrOffline)
-              ? <span style={{ color: "var(--negative)" }}>⚠️ IBKR منقطع — عرض Alpaca احتياطياً · أعد تشغيل gway</span>
-              : <span style={{ color: "var(--positive)" }}>IBKR ✓</span>}
+            {p.ibkrOffline
+              ? <span style={{ color: "var(--negative)" }}>⚠️ IBKR offline — Alpaca fallback · restart the gateway</span>
+              : <span style={{ color: "var(--positive)" }}>IBKR ✓ · real-time</span>}
           </span>
         </div>
-        <PortfolioStrip p={portfolio} />
+        <div className="ibkr-strip">
+          {cards.map((c) => (
+            <div key={c.l} className="ibkr-card">
+              <div className="ibkr-card-l">{c.l}</div>
+              <div className="ibkr-card-v" style={{ color: c.c || "var(--text-primary)" }}>{c.v}</div>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="wf-section">
-        <div className="wf-head"><span className="wf-title">Positions</span><span className="wf-sub">Open · real-time</span></div>
-        <PositionsTable positions={positions} onSell={onSell} />
-      </div>
-      <div className="wf-section">
-        <div className="wf-head"><span className="wf-title">Paper</span><span className="wf-sub">recent trades</span></div>
-        <PaperTradesList trades={paper} />
+        <div className="wf-head"><span className="wf-title">Positions</span><span className="wf-sub">{pos.length} open · real-time · click a row to analyze</span></div>
+        {pos.length ? <PositionsTable positions={pos} onSell={onSell} />
+          : <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "14px 4px", textAlign: "center" }}>No open positions on the IBKR paper account.</div>}
       </div>
     </div>
   );
