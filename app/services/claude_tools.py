@@ -42,7 +42,10 @@ TOOL_SCHEMAS = [
             "Monthly composite score + verdict, price, change, the technical factor "
             "breakdown (RS-vs-SPY, Trend, Regime, MACD, Volume, RSI, ADX, Bollinger, VWAP, "
             "Gap), AAOIFI halal verdict, and ATR-based trade levels (entry/stop/take-profit). "
-            "Report the numbers it returns verbatim — they match the on-screen card."
+            "Returns EVERY layer in one call: fundamentals (revenue growth / FCF / ROE / 0-100 "
+            "score), analyst_consensus, insider_activity (top_seller.pct_of_stake), earnings, "
+            "market_regime + market_context (VIX / HY-IG / breadth / liquidity), near_term_red_flags, "
+            "and recent news. Report the numbers it returns verbatim — they match the on-screen card."
         ),
         "input_schema": {
             "type": "object",
@@ -504,9 +507,37 @@ def _exec_analyze_stock(symbol: str) -> dict:
             "analyst_consensus / insider_activity / earnings / fundamentals ARE available here "
             "(Finnhub free tier) — when their known=true, cite them (analyst buy/hold/sell split, "
             "heavy insider selling with % of stake, earnings within the blackout window, "
-            "fundamentals.revenue_growth / fcf_per_share / roe); when known=false, say the data is "
-            "unavailable — never invent or deny it generically."),
+            "fundamentals.revenue_growth / fcf_per_share / roe / score); when known=false, say the "
+            "data is unavailable — never invent or deny it generically. market_context (VIX / HY-IG "
+            "credit / breadth / liquidity / SPY regime) and recent `news` are ALSO included here — "
+            "weave the backdrop in, and cite news ONLY from the `news` field (never invent headlines; "
+            "if news_status != 'ok', say the call is technical/quant-driven, not news-driven)."),
     })
+
+    # Broad-market context (VIX / credit / breadth / liquidity) so the agent reasons about the
+    # backdrop, plus recent NEWS — so a single analyze_stock call carries every layer the
+    # dashboard shows (cached; degrades to None on any failure).
+    try:
+        from app.services.market_context import get_market_context
+        _mc = get_market_context() or {}
+        out["market_context"] = {
+            "vix": (_mc.get("vix") or {}).get("vix"),
+            "vix_pctile": (_mc.get("vix") or {}).get("vix_pctile"),
+            "spy_regime_short": (_mc.get("spy_regime") or {}).get("regime_short"),
+            "credit_hy_ig": (_mc.get("credit") or {}).get("ratio"),
+            "credit_status": (_mc.get("credit") or {}).get("classification"),
+            "breadth_pct": (_mc.get("breadth") or {}).get("breadth_pct"),
+            "liquidity_vol_pct": (_mc.get("liquidity") or {}).get("liquidity_pct"),
+        }
+    except Exception as e:
+        logger.debug("analyze market_context failed for %s: %s", symbol, e)
+    try:
+        _nws = _exec_get_stock_news(symbol, limit=5)
+        out["news"] = _nws.get("news") if isinstance(_nws, dict) else None
+        out["news_status"] = _nws.get("status") if isinstance(_nws, dict) else None
+    except Exception as e:
+        logger.debug("analyze news failed for %s: %s", symbol, e)
+
     return out
 
 
