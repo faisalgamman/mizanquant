@@ -22,6 +22,7 @@ function PriceChart({ symbol }) {
   const [range, setRange] = useState("6mo");
   const [bars, setBars] = useState(null);   // null=loading, []=no data
   const [hover, setHover] = useState(null);  // bar index under cursor
+  const [chartType, setChartType] = useState("candle");  // candle | line
   const svgRef = useRef(null);
 
   useEffect(() => {
@@ -51,12 +52,16 @@ function PriceChart({ symbol }) {
   const n = data.length;
   const closes = data.map(b => b.close);
   const vols = data.map(b => b.volume || 0);
-  const lo = n ? Math.min(...closes) : 0;
-  const hi = n ? Math.max(...closes) : 1;
+  // Scale to the high/low extremes so candlestick wicks always fit on-screen.
+  const lows = data.map(b => (b.low != null ? b.low : b.close));
+  const highs = data.map(b => (b.high != null ? b.high : b.close));
+  const lo = n ? Math.min(...lows) : 0;
+  const hi = n ? Math.max(...highs) : 1;
   const padv = (hi - lo) * 0.06 || 1;
   const yMin = lo - padv, yMax = hi + padv;
   const volMax = n ? Math.max(...vols) : 1;
   const plotW = W - padL - padR;
+  const cw = Math.max(1, Math.min(8, (plotW / Math.max(n, 1)) * 0.66));   // candle body width
   const x = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
   const y = (v) => padT + (1 - (v - yMin) / ((yMax - yMin) || 1)) * plotH;
   const volBase = (H - padB) + volH;        // volume baseline (zero)
@@ -108,6 +113,11 @@ function PriceChart({ symbol }) {
           <button key={rr.k} className={"sc-range-chip" + (range === rr.r ? " active" : "")}
                   onClick={() => setRange(rr.r)}>{rr.k}</button>
         ))}
+        <span style={{ flex: 1 }} />
+        <button className={"sc-range-chip" + (chartType === "candle" ? " active" : "")}
+                onClick={() => setChartType("candle")} title="Japanese candlesticks">Candles</button>
+        <button className={"sc-range-chip" + (chartType === "line" ? " active" : "")}
+                onClick={() => setChartType("line")} title="Line">Line</button>
       </div>
 
       {bars === null ? (
@@ -128,8 +138,23 @@ function PriceChart({ symbol }) {
               <rect key={i} x={x(i) - 1} y={vy(b.volume || 0)} width={2}
                     height={Math.max(0, volBase - vy(b.volume || 0))} fill="var(--border-strong)" />
             ))}
-            <path d={areaPath} fill={`url(#${gid})`} stroke="none" />
-            <path d={linePath} fill="none" stroke={lineColor} strokeWidth={1.5} />
+            {chartType === "candle" ? data.map((b, i) => {
+              const o = b.open != null ? b.open : b.close, c = b.close;
+              const h = b.high != null ? b.high : Math.max(o, c), l = b.low != null ? b.low : Math.min(o, c);
+              const col = c >= o ? "var(--positive)" : "var(--negative)";
+              const top = Math.min(y(o), y(c)), bot = Math.max(y(o), y(c));
+              return (
+                <g key={"c" + i}>
+                  <line x1={x(i)} y1={y(h)} x2={x(i)} y2={y(l)} stroke={col} strokeWidth={0.8} />
+                  <rect x={x(i) - cw / 2} y={top} width={cw} height={Math.max(0.8, bot - top)} fill={col} />
+                </g>
+              );
+            }) : (
+              <>
+                <path d={areaPath} fill={`url(#${gid})`} stroke="none" />
+                <path d={linePath} fill="none" stroke={lineColor} strokeWidth={1.5} />
+              </>
+            )}
             {last != null ? (
               <line x1={padL} y1={y(last)} x2={W - padR} y2={y(last)} stroke={lineColor}
                     strokeWidth={0.8} strokeDasharray="3 3" opacity={0.7} />
