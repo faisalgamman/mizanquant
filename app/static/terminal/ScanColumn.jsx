@@ -201,10 +201,9 @@ function ScanTabs({ mode, onMode }) {
   );
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-      {tab("weekly", "Weekly", "swing · technical")}
       {tab("monthly", "Monthly", "composite · fund.")}
+      {tab("weekly", "Weekly", "swing · technical")}
       {tab("pairs", "Pairs", "cointegration")}
-      {tab("daytrade", "Explosion", "technical · research")}
     </div>
   );
 }

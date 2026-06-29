@@ -47,8 +47,10 @@ function App() {
   // deep-picks, rebalanced). Each scanner has its OWN simulated paper ledger
   // (weekly=PV, monthly=PVM); real money for either half is released ONLY after
   // its ledger graduates. The tab below switches the ScanColumn's source.
-  const [scanMode, setScanMode]   = useState(() =>
-    (typeof location !== "undefined" && location.hash.replace("#", "") === "monthly") ? "monthly" : "weekly");
+  const [scanMode, setScanMode]   = useState(() => {
+    const h = (typeof location !== "undefined" && location.hash.replace("#", "")) || "";
+    return ["weekly", "pairs", "monthly"].includes(h) ? h : "monthly";   // Monthly is the default scanner
+  });
   const [monthly, setMonthly]     = useState([]);          // composite picks (real or honest empty)
   const [monthlyStatus, setMonthlyStatus] = useState("computing"); // computing | ready | empty
   const [monthlyScanPct, setMonthlyScanPct] = useState(0);
@@ -699,7 +701,7 @@ function App() {
       <MarketStrip market={market} clock={clock} />
 
       <main className="main">
-        <div className="workflow">
+        <div className="workflow workflow-2">
           <ScanColumn
             scanMode={scanMode}
             onScanMode={(m) => {
@@ -742,6 +744,13 @@ function App() {
             backtest={backtest}
             onBacktest={runBacktest}
           />
+        </div>
+        {/* Full-width chart of the analyzed symbol (candlesticks added in the next phase). */}
+        <div className="full-row">
+          <PriceChart symbol={selectedSym || "SPY"} />
+        </div>
+        {/* Full-width IBKR cockpit — account + all positions. */}
+        <div className="full-row">
           <TradeColumn
             portfolio={portfolio}
             positions={positions}
@@ -749,32 +758,6 @@ function App() {
             onSell={closePosition}
           />
         </div>
-        <OpsBand
-          pipeline={realStages.length ? realStages : pipeline}
-          running={pipelineRunning}
-          dryRun={dryRun}
-          setDryRun={setDryRun}
-          onRunPipeline={runPipeline}
-          guards={guards}
-          schedule={schedule}
-        />
-        <div className="si-split">
-          <StockIntel />
-          <PriceChart symbol={cardSymbol || selectedSym || "SPY"} />
-        </div>
-        {cardSymbol && (
-          <StockCard
-            symbol={cardSymbol}
-            account={(portfolio && portfolio.equity) || 10000}
-            onClose={() => setCardSymbol(null)}
-          />
-        )}
-        <LowerRow
-          risers={risers}
-          marketNews={marketNews}
-          indicators={indicators}
-          risersMeta={risersMeta}
-        />
       </main>
 
       <StatusBar pipelineRunning={pipelineRunning} system={system} portfolio={portfolio} brokerHealth={brokerHealth} />

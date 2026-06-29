@@ -44,9 +44,9 @@ function StatusBar({ pipelineRunning, system, portfolio, brokerHealth }) {
         <span>Regime <span style={{ color: regimeColor, fontWeight: 600 }}>{regime}</span></span>
       </div>
       <div className="sb-side">
-        <span>Pipeline <span style={{ color: pipelineRunning ? "var(--accent)" : "var(--text-secondary)" }}>{pipelineRunning ? "running" : "idle"}</span></span>
-        <span className="sep">·</span>
-        <span>Kill-switch <span style={{ color: killed ? "var(--negative)" : "var(--text-secondary)", fontWeight: 600 }}>{killed ? "ON" : "off"}</span></span>
+        {killed ? (
+          <span>Kill-switch <span style={{ color: "var(--negative)", fontWeight: 700 }}>ON</span></span>
+        ) : null}
       </div>
     </div>
   );

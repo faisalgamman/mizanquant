@@ -163,6 +163,12 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   grid-template-columns: 2.5fr 1.8fr 1.8fr;
   gap: var(--space-3); align-items: start;
 }
+/* Cockpit layout: top row = Scanners | Analyze; chart + IBKR span full width below. */
+.workflow.workflow-2 { grid-template-columns: 1.7fr 1.6fr; }
+.full-row { width: 100%; margin-top: var(--space-3); }
+@media (max-width: 1100px) { .workflow.workflow-2 { grid-template-columns: 1.5fr 1.4fr; } }
+@media (max-width: 900px)  { .workflow.workflow-2 { grid-template-columns: 1fr; } }
+.workflow.workflow-2 .col-analyze { position: static; }
 .lower {
   display: grid;
   grid-template-columns: 1fr;
