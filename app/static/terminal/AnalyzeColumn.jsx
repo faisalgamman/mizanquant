@@ -285,9 +285,28 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   if (mkt && mkt.spy_bearish) whyCautions.push("market risk-off");
   if (ana && ana.bearish) whyCautions.push("analyst bearish tilt");
 
-  // Verdict banner color
-  const vColor = verdict.includes("SELL") ? "var(--negative)" : verdictBuy ? "var(--positive)" : "var(--text-muted)";
-  const vBg    = verdict.includes("SELL") ? "var(--negative-dim, rgba(220,80,80,0.12))" : verdictBuy ? "var(--accent-dim, rgba(80,200,120,0.10))" : "var(--bg-raised)";
+  // Verdict guard — don't let momentum alone mislabel a weak name. Demote the DISPLAYED
+  // verdict when contradictions pile up (more cautions than strengths, weak fundamentals,
+  // bearish analysts, a negative/coin-flip forecast, a risk-off market, heavy insider selling,
+  // or an earnings blackout). The raw `verdict` still drives the matrix; only the headline is tempered.
+  const _fcNeg = !!(fcForChip && (Number(fcForChip.expected_change_pct) < 0
+                 || (fcForChip.prob_profit_pct != null && Number(fcForChip.prob_profit_pct) < 50)));
+  const _redFlags = [
+    nWatch > nGood, fund && fund.weak, ana && ana.bearish, _fcNeg,
+    mkt && mkt.spy_bearish, ins && ins.heavy_sell, earn && earn.within_blackout,
+  ].filter(Boolean).length;
+  let dispVerdict = verdict, guardNote = "";
+  if (verdictBuy && _redFlags >= 2) {
+    dispVerdict = _redFlags >= 3 ? "CAUTION" : (verdict === "STRONG BUY" ? "BUY" : "CAUTION");
+    guardNote = `Momentum-driven — ${_redFlags} signals disagree (fundamentals · forecast · analysts · regime). The high score is recent price thrust, not high conviction.`;
+  }
+  const _dispBuy = dispVerdict !== "CAUTION" && /(?:BUY|STRONG)/i.test(dispVerdict);
+  const vColor = dispVerdict.includes("SELL") ? "var(--negative)"
+               : dispVerdict === "CAUTION" ? "var(--amber, #d9a441)"
+               : _dispBuy ? "var(--positive)" : "var(--text-muted)";
+  const vBg = dispVerdict.includes("SELL") ? "var(--negative-dim, rgba(220,80,80,0.12))"
+            : dispVerdict === "CAUTION" ? "var(--warning-dim, rgba(217,164,65,0.12))"
+            : _dispBuy ? "var(--accent-dim, rgba(80,200,120,0.10))" : "var(--bg-raised)";
 
   // Trade-plan visual axis
   const planVals = [stop, entry, tp1, tp2, tp3].map(Number).filter(v => v > 0);
@@ -318,7 +337,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
               {_convictionGauge(score)}
-              <Badge kind={badgeClassFor(verdict).replace("b-", "")}>{verdict}</Badge>
+              <Badge kind={dispVerdict === "CAUTION" ? "amber" : badgeClassFor(dispVerdict).replace("b-", "")}>{dispVerdict}</Badge>
             </div>
           </div>
 
@@ -327,13 +346,16 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           {/* ── VERDICT BANNER ── */}
           <div style={{ marginTop: 8, padding: "7px 11px", borderRadius: 7, background: vBg,
                         display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 14, fontWeight: 800, color: vColor }}>{verdict}</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: vColor }}>{dispVerdict}</span>
             <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
               {nGood} strong · {nWatch} caution
               {halalV === "halal" ? " · halal ✓" : ""}
               {score > 0 ? ` · ${score}/100` : ""}
             </span>
           </div>
+          {guardNote ? (
+            <div style={{ marginTop: 5, fontSize: 9.5, color: "var(--amber, #d9a441)", lineHeight: 1.5 }}>⚖ {guardNote}</div>
+          ) : null}
           {(verdict || "").includes("SELL") && (
             <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.4 }}>
               ⚠ SELL signals are historically unreliable (~38% accuracy) — not actioned
