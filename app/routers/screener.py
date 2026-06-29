@@ -27,7 +27,13 @@ def _autorecord_weekly_if_due(buys: list) -> None:
         def _go():
             try:
                 logger.info("Weekly auto-record (triggered by /buys serving %d buys)...", len(buys))
-                logger.info("Weekly auto-record result: %s", record_weekly_picks())
+                _res = record_weekly_picks()
+                logger.info("Weekly auto-record result: %s", _res)
+                # Keep the daily claim ONLY when something was recorded; a regime SKIP (SPY
+                # bearish) or no picks must allow a retry on the next /buys (e.g. once SPY turns
+                # bullish), instead of silently burning the day.
+                if not (isinstance(_res, dict) and _res.get("recorded", 0) > 0):
+                    _LAST_WEEKLY_AUTORECORD["date"] = None
             except Exception as e:
                 logger.error("Weekly auto-record failed: %s", e, exc_info=True)
                 _LAST_WEEKLY_AUTORECORD["date"] = None  # allow a retry on the next /buys

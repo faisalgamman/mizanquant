@@ -618,18 +618,22 @@ def _scheduler_loop():
                     _cached, _ = _hs._get_cached("screener")
                     if isinstance(_cached, list) and any(
                             isinstance(r, dict) and (r.get("swing_score") or 0) >= 55 for r in _cached):
-                        last_paper_record = today_str
                         logger.info("Paper validation: auto-recording weekly picks (cache warm)...")
                         from app.services.paper_validation import record_weekly_picks
-                        logger.info("Paper validation weekly record: %s", record_weekly_picks())
-                        # Auto-paper: also place the picks as REAL IBKR PAPER bracket orders
-                        # (opt-in AUTO_PAPER_TRADE, paper-only guard, capped/deduped — no-op
-                        # when disabled). Builds a real paper track record alongside the sim.
-                        try:
-                            from app.services.auto_paper import run_auto_paper
-                            logger.info("Auto-paper weekly: %s", run_auto_paper("weekly"))
-                        except Exception as _ap_e:
-                            logger.error("Auto-paper weekly failed: %s", _ap_e)
+                        _wres = record_weekly_picks()
+                        logger.info("Paper validation weekly record: %s", _wres)
+                        # Claim the day ONLY when something was actually recorded — a regime SKIP
+                        # (SPY bearish at fire-time) or an empty pick set must NOT burn the daily
+                        # slot, so it retries once SPY turns bullish / picks appear later the same day.
+                        if isinstance(_wres, dict) and _wres.get("recorded", 0) > 0:
+                            last_paper_record = today_str
+                            # Auto-paper: also place the picks as REAL IBKR PAPER bracket orders
+                            # (opt-in AUTO_PAPER_TRADE, paper-only guard, capped/deduped).
+                            try:
+                                from app.services.auto_paper import run_auto_paper
+                                logger.info("Auto-paper weekly: %s", run_auto_paper("weekly"))
+                            except Exception as _ap_e:
+                                logger.error("Auto-paper weekly failed: %s", _ap_e)
                 except Exception as e:
                     logger.error(f"Paper validation record failed: {e}", exc_info=True)
 
