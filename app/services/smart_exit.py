@@ -37,7 +37,38 @@ EXIT_TECH_WEAKENING: bool = (
 )
 EXIT_TECH_MIN_PROFIT_PCT: float = float(os.environ.get("EXIT_TECH_MIN_PROFIT_PCT", "3"))  # only protect a real gain
 
-__all__ = ["SMART_EXIT", "compute_exit_indicators", "simulate_smart_exit"]
+__all__ = ["SMART_EXIT", "compute_exit_indicators", "simulate_smart_exit", "post_entry_bars"]
+
+
+def post_entry_bars(df, created_at, tail: int = 25):
+    """Bars strictly AFTER the entry timestamp.
+
+    market_data.fetch returns a RangeIndex frame with a tz-aware ``date`` COLUMN
+    (not a DatetimeIndex), so the natural ``df[df.index > created_at]`` raises
+    int-vs-datetime and silently falls back to a wrong trailing window. This
+    slices correctly off the ``date`` column (or a DatetimeIndex), returning an
+    EMPTY frame when entry is after the last bar (→ "not matured"), and only
+    falling back to the last ``tail`` bars when there's genuinely no timestamp."""
+    if df is None or len(df) == 0:
+        return df
+    if created_at is None:
+        return df.tail(tail)
+    try:
+        import pandas as pd
+        ca = pd.Timestamp(created_at)
+        if ca.tz is None:
+            ca = ca.tz_localize("UTC")
+        if "date" in df.columns:
+            d = pd.to_datetime(df["date"], utc=True)
+            return df[(d > ca).values]
+        if isinstance(df.index, pd.DatetimeIndex):
+            idx = df.index
+            if idx.tz is None:
+                idx = idx.tz_localize("UTC")
+            return df[idx > ca]
+        return df.tail(tail)
+    except Exception:
+        return df.tail(tail)
 
 
 def compute_exit_indicators(df):

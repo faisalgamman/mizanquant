@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from app.services.smart_exit import compute_exit_indicators, simulate_smart_exit
+from app.services.smart_exit import compute_exit_indicators, post_entry_bars, simulate_smart_exit
 
 
 def _bars(rows: list[dict]) -> pd.DataFrame:
@@ -114,3 +114,43 @@ def test_compute_exit_indicators_attaches_columns():
     for col in ("_ema10", "_rsi", "_macd_hist"):
         assert col in out.columns
     assert np.isfinite(out["_ema10"].iloc[-1])
+
+
+# ── 7. post-entry slicing (the market_data.fetch 'date'-column shape) ──────────
+
+def _fetch_shaped(n: int = 30):
+    """Mimic market_data.fetch: RangeIndex + tz-aware 'date' COLUMN (NOT index)."""
+    dates = pd.date_range("2024-05-01", periods=n, freq="B", tz="UTC")
+    return pd.DataFrame({
+        "date": dates,
+        "close": [100 + i for i in range(n)],
+        "high": [101 + i for i in range(n)],
+        "low": [99 + i for i in range(n)],
+    })  # default RangeIndex
+
+
+def test_post_entry_bars_slices_on_date_column():
+    df = _fetch_shaped(30)
+    cutoff = df["date"].iloc[20]            # entered at bar 20
+    post = post_entry_bars(df, cutoff, tail=5)
+    assert len(post) == 9                   # bars 21..29 are strictly after
+    assert (pd.to_datetime(post["date"], utc=True) > cutoff).all()
+
+
+def test_post_entry_bars_naive_timestamp_ok():
+    # A tz-naive DB created_at must not raise against the tz-aware 'date' column.
+    df = _fetch_shaped(30)
+    naive = df["date"].iloc[25].tz_localize(None).to_pydatetime()
+    post = post_entry_bars(df, naive, tail=5)
+    assert len(post) == 4                    # bars 26..29
+
+
+def test_post_entry_bars_entry_after_all_is_empty():
+    df = _fetch_shaped(30)
+    future = df["date"].iloc[-1] + pd.Timedelta(days=10)
+    assert len(post_entry_bars(df, future, tail=5)) == 0   # not matured, NOT a tail fallback
+
+
+def test_post_entry_bars_none_falls_back_to_tail():
+    df = _fetch_shaped(30)
+    assert len(post_entry_bars(df, None, tail=5)) == 5

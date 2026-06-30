@@ -222,7 +222,8 @@ def mature_open_paper_trades() -> dict:
     fixed-stop/time exit. The trigger reason is stored on signal_details."""
     from app.services.market_data import fetch as fetch_market_data
     from app.services.signal_tracker import _simulate_fixed_exit
-    from app.services.smart_exit import SMART_EXIT, compute_exit_indicators, simulate_smart_exit
+    from app.services.smart_exit import (
+        SMART_EXIT, compute_exit_indicators, simulate_smart_exit, post_entry_bars)
 
     hold_days = int(os.environ.get("EXIT_HOLD_DAYS", getattr(settings, "SWING_MAX_HOLD_DAYS", 20)))
     stop_pct = float(os.environ.get("EXIT_STOP_PCT", getattr(settings, "SWING_TRAIL_PCT", 15.0)))
@@ -246,19 +247,13 @@ def mature_open_paper_trades() -> dict:
                 exit_reason = None
                 if SMART_EXIT:
                     dfi = compute_exit_indicators(df)
-                    try:
-                        post = dfi[dfi.index > t.created_at]
-                    except Exception:
-                        post = dfi.tail(hold_days + 5)
+                    post = post_entry_bars(dfi, t.created_at, hold_days + 5)
                     sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
                     if sim is None:
                         continue  # not matured yet
                     ret_pct, exit_price, exit_reason = sim
                 else:
-                    try:
-                        post = df[df.index > t.created_at]
-                    except Exception:
-                        post = df.tail(hold_days + 5)
+                    post = post_entry_bars(df, t.created_at, hold_days + 5)
                     sim = _simulate_fixed_exit(post, entry, hold_days, stop_pct, is_sell=False)
                     if sim is None:
                         continue  # not matured yet
@@ -696,6 +691,7 @@ def mature_pairs_paper_trades() -> dict:
     from app.services.signal_tracker import _simulate_fixed_exit
     from app.services.cointegration import spread_zscore
     from app.services.pairs_strategy import PAIRS_EXIT_Z, pair_breakdown, pairs_spread
+    from app.services.smart_exit import post_entry_bars
 
     hold_days = int(os.environ.get("PAIRS_MAX_HOLD_DAYS", "30"))
     db = SessionLocal()
@@ -716,10 +712,7 @@ def mature_pairs_paper_trades() -> dict:
                 df = fetch_market_data(t.symbol, period="6mo")
                 if df is None or len(df) == 0:
                     continue
-                try:
-                    post = df[df.index > t.created_at]
-                except Exception:
-                    post = df.tail(hold_days + 5)
+                post = post_entry_bars(df, t.created_at, hold_days + 5)
 
                 exit_price = ret_pct = exit_reason = None
                 broke_why = None

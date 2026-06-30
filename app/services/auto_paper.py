@@ -273,7 +273,8 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
     opt-in (AUTO_PAPER_TRADE), kill-switch-respecting. Never raises."""
     if not _on("AUTO_PAPER_TRADE"):
         return {"status": "disabled"}
-    from app.services.smart_exit import SMART_EXIT, compute_exit_indicators, simulate_smart_exit
+    from app.services.smart_exit import (
+        SMART_EXIT, compute_exit_indicators, simulate_smart_exit, post_entry_bars)
     if not SMART_EXIT:
         return {"status": "smart_exit_off"}
 
@@ -314,10 +315,7 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
             if df is None or len(df) == 0:
                 continue
             dfi = compute_exit_indicators(df)
-            try:
-                post = dfi[dfi.index > created_at] if created_at is not None else dfi.tail(hold_days + 5)
-            except Exception:
-                post = dfi.tail(hold_days + 5)
+            post = post_entry_bars(dfi, created_at, hold_days + 5)
             sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
             if sim is None:
                 continue
