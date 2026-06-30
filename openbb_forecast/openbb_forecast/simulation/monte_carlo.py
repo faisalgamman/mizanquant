@@ -45,6 +45,7 @@ class MonteCarloSimulator:
         forecast_days: int = 30,
         dynamic_volatility: bool = False,
         volatility_window: int = 30,
+        drift_shrink: float = 1.0,
     ) -> dict:
         """Run Monte Carlo simulation.
 
@@ -54,6 +55,11 @@ class MonteCarloSimulator:
             forecast_days: Days to simulate forward.
             dynamic_volatility: If True, re-estimate sigma each step.
             volatility_window: Rolling window for dynamic volatility.
+            drift_shrink: Shrink the estimated drift toward zero, in [0, 1].
+                1.0 = full historical drift; 0.0 = martingale (zero drift).
+                Historical mean return is a poor predictor of future return
+                (unlike volatility), so over-weighting it biases the path and
+                inflates/deflates prob_profit — shrinking it improves calibration.
 
         Returns:
             Dict with simulation paths, statistics per day, and summary.
@@ -63,9 +69,13 @@ class MonteCarloSimulator:
 
         # Estimate parameters from historical data
         log_returns = np.diff(np.log(prices))
-        mu_daily = np.mean(log_returns)
+        mu_daily_raw = float(np.mean(log_returns))
         sigma_daily = np.std(log_returns, ddof=1)
         dt = 1.0  # daily
+
+        # Shrink ONLY the drift (vol is far more predictable, so it is kept).
+        shrink = float(np.clip(drift_shrink, 0.0, 1.0))
+        mu_daily = shrink * mu_daily_raw
 
         mu_annual = mu_daily * 252
         sigma_annual = sigma_daily * np.sqrt(252)
@@ -92,7 +102,7 @@ class MonteCarloSimulator:
 
             for t in range(forecast_days):
                 current_sigma = np.std(recent_returns[-volatility_window:], ddof=1)
-                current_mu = np.mean(recent_returns[-volatility_window:])
+                current_mu = shrink * np.mean(recent_returns[-volatility_window:])
                 drift = (current_mu - 0.5 * current_sigma**2) * dt
                 diffusion = current_sigma * np.sqrt(dt)
 
@@ -138,7 +148,9 @@ class MonteCarloSimulator:
             "n_simulations": n_simulations,
             "forecast_days": forecast_days,
             "initial_price": float(last_price),
-            "annualized_drift": float(mu_annual),
+            "annualized_drift": float(mu_annual),              # effective (after shrink)
+            "annualized_drift_raw": float(mu_daily_raw * 252),  # historical, pre-shrink
+            "drift_shrink": shrink,
             "annualized_volatility": float(sigma_annual),
             "prob_profit": float(np.mean(terminal_prices > last_price)),
             "expected_terminal_price": float(np.mean(terminal_prices)),

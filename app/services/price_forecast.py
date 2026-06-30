@@ -14,6 +14,8 @@ for the original field mapping.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 _MIN_HISTORY = 30  # need enough closes to estimate drift + volatility
@@ -62,8 +64,12 @@ def monte_carlo_forecast(prices, horizon: int, sims: int = 1000) -> dict:
 
     from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
 
+    # Shrink the drift toward zero (default 0.3): historical mean return barely
+    # predicts future return, so over-weighting it biases prob_profit + the path.
+    # Vol is kept full. MC_DRIFT_SHRINK=1 → full historical drift, 0 → martingale.
+    drift_shrink = float(os.environ.get("MC_DRIFT_SHRINK", "0.3"))
     result = MonteCarloSimulator(seed=42).simulate(
-        arr, n_simulations=int(sims), forecast_days=int(horizon)
+        arr, n_simulations=int(sims), forecast_days=int(horizon), drift_shrink=drift_shrink
     )
     s = result["summary"]
     current = float(s["initial_price"])
@@ -91,7 +97,9 @@ def monte_carlo_forecast(prices, horizon: int, sims: int = 1000) -> dict:
         "expected_change_pct": round((expected / current - 1.0) * 100.0, 2) if current else 0.0,
         "prob_profit_pct": round(float(s["prob_profit"]) * 100.0, 1),
         "annual_vol_pct": round(float(s["annualized_volatility"]) * 100.0, 1),
-        "annual_drift_pct": round(float(s["annualized_drift"]) * 100.0, 1),
+        "annual_drift_pct": round(float(s["annualized_drift"]) * 100.0, 1),          # effective (used)
+        "annual_drift_raw_pct": round(float(s.get("annualized_drift_raw", s["annualized_drift"])) * 100.0, 1),
+        "drift_shrink": round(float(s.get("drift_shrink", 1.0)), 2),
         "var_95_pct": round(float(s["terminal_var_95"]) * 100.0, 1),
         "cvar_95_pct": round(float(s["terminal_cvar_95"]) * 100.0, 1),
         "bands": bands,

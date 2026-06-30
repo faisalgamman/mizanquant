@@ -61,3 +61,30 @@ def test_horizon_is_honoured():
     prices = _synthetic_prices()
     out = monte_carlo_forecast(prices, horizon=5, sims=400)
     assert out["bands"][-1]["day"] == 5
+
+
+def test_drift_shrink_pulls_prob_profit_toward_half():
+    # A strong historical uptrend makes FULL drift inflate prob_profit. Shrinking
+    # the drift toward zero pulls it back toward ~50% (less trend extrapolation) —
+    # the calibration win. Vol must be untouched, and the raw drift still reported.
+    from openbb_forecast.simulation.monte_carlo import MonteCarloSimulator
+    up = np.array(_synthetic_prices(mu=0.003, sigma=0.012, seed=3))  # strong uptrend
+    full = MonteCarloSimulator(seed=1).simulate(up, n_simulations=3000, forecast_days=20, drift_shrink=1.0)
+    zero = MonteCarloSimulator(seed=1).simulate(up, n_simulations=3000, forecast_days=20, drift_shrink=0.0)
+    pf_full = full["summary"]["prob_profit"]
+    pf_zero = zero["summary"]["prob_profit"]
+    assert pf_full > pf_zero, (pf_full, pf_zero)
+    assert abs(pf_zero - 0.5) < abs(pf_full - 0.5)         # zero-drift closer to coin-flip
+    assert zero["summary"]["annualized_drift"] == 0.0       # effective drift is zero
+    assert zero["summary"]["annualized_drift_raw"] > 0.0    # raw trend still surfaced
+    # drift shrink must NOT change the volatility estimate
+    assert abs(full["summary"]["annualized_volatility"]
+               - zero["summary"]["annualized_volatility"]) < 1e-9
+
+
+def test_forecast_surfaces_drift_shrink(monkeypatch):
+    monkeypatch.setenv("MC_DRIFT_SHRINK", "0.0")
+    out = monte_carlo_forecast(_synthetic_prices(mu=0.003, seed=3), horizon=20, sims=500)
+    assert out["drift_shrink"] == 0.0
+    assert out["annual_drift_pct"] == 0.0          # effective drift used = 0
+    assert out["annual_drift_raw_pct"] != 0.0      # historical trend still shown
