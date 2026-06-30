@@ -223,6 +223,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const mkt    = plan && plan.market && plan.market.known ? plan.market : null;
   // Gold has its OWN ruling (AAOIFI 57: spot + possession), not the equity screen.
   const goldKind = plan && plan.gold_kind;            // "etf" | "miner" | undefined
+  const goldEtf  = goldKind === "etf";                // commodity: equity composite N/A
   const goldNote = plan && plan.is_gold ? (plan.halal_note || "") : "";
   const halalV = goldKind === "etf"
     ? "doubtful"                                       // paper gold → debated, never a hard verdict
@@ -242,11 +243,12 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   } else {
     tiles.push({ icon: "💰", label: "Fundamentals", isNew: true, value: "—", sub: "no data", status: "neutral" });
   }
-  tiles.push({ icon: goldKind === "etf" ? "🥇" : "🕌", label: "Halal AAOIFI",
-               value: goldKind === "etf" ? "Review"
+  tiles.push({ icon: goldEtf ? "🥇" : "🕌", label: "Halal AAOIFI",
+               value: goldEtf ? "Review"
                     : halalV === "halal" ? "Compliant" : halalV === "doubtful" ? "Doubtful" : "Non-compliant",
-               sub: goldKind === "etf" ? "Gold · Std 57" : "Standard 21",
-               status: halalV === "halal" ? "good" : halalV === "doubtful" ? "warn" : "bad" });
+               sub: goldEtf ? "Gold · Std 57" : "Standard 21",
+               // Gold "Review" is an informational caveat, NOT a verdict-killing flag.
+               status: goldEtf ? "neutral" : halalV === "halal" ? "good" : halalV === "doubtful" ? "warn" : "bad" });
   if (ins) {
     const heavy = ins.heavy_sell, top = ins.top_seller;
     tiles.push({ icon: "👤", label: "Insider 90d",
@@ -263,7 +265,8 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   } else {
     tiles.push({ icon: "🎯", label: "Analysts", value: "—", sub: "no data", status: "neutral" });
   }
-  if (earn && earn.within_blackout) tiles.push({ icon: "📅", label: "Earnings", value: `In ${earn.business_days}d`, sub: "blackout — don't enter", status: "bad" });
+  if (goldEtf) tiles.push({ icon: "📅", label: "Earnings", value: "N/A", sub: "commodity — no earnings", status: "neutral" });
+  else if (earn && earn.within_blackout) tiles.push({ icon: "📅", label: "Earnings", value: `In ${earn.business_days}d`, sub: "blackout — don't enter", status: "bad" });
   else if (earn && earn.known) tiles.push({ icon: "📅", label: "Earnings", value: `In ${earn.business_days}d`, sub: "outside blackout", status: "neutral" });
   else tiles.push({ icon: "📅", label: "Earnings", value: "Unconfirmed", sub: "verify before entry", status: "warn" });
   if (mkt) tiles.push({ icon: "📈", label: "Market regime", value: mkt.spy_bearish ? "Risk-off" : "Risk-on",
@@ -305,13 +308,29 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   // or an earnings blackout). The raw `verdict` still drives the matrix; only the headline is tempered.
   const _fcNeg = !!(fcForChip && (Number(fcForChip.expected_change_pct) < 0
                  || (fcForChip.prob_profit_pct != null && Number(fcForChip.prob_profit_pct) < 50)));
+
+  // ── Gold (ETF): the equity composite (fundamentals/halal) doesn't apply, so it
+  // would auto-AVOID any gold regardless of the chart. Derive the headline from the
+  // TECHNICAL read + forecast; the Shariah "Review" stays a separate caveat (banner). ──
+  let convScore = score, headVerdict = verdict, goldHeadNote = "";
+  if (goldEtf) {
+    const techPct = techMax > 0 ? techSum / techMax : 0;
+    const fcAdj = fcForChip ? Math.max(-8, Math.min(8, Number(fcForChip.expected_change_pct) * 2)) : 0;
+    convScore = Math.round(Math.max(0, Math.min(100, techPct * 100 + fcAdj)));
+    headVerdict = verdictFromScore(convScore);
+    goldHeadNote = "حكم فنّي فقط — معايير الأسهم (أساسيات/حلال) لا تنطبق على سلعة؛ راجع الملاحظة الشرعية.";
+  }
+  const _headBuy = /(?:BUY|STRONG)/i.test(headVerdict);
+
   const _redFlags = [
     nWatch > nGood, fund && fund.weak, ana && ana.bearish, _fcNeg,
     mkt && mkt.spy_bearish, ins && ins.heavy_sell, earn && earn.within_blackout,
   ].filter(Boolean).length;
-  let dispVerdict = verdict, guardNote = "";
-  if (verdictBuy && _redFlags >= 2) {
-    dispVerdict = _redFlags >= 3 ? "CAUTION" : (verdict === "STRONG BUY" ? "BUY" : "CAUTION");
+  let dispVerdict = headVerdict, guardNote = "";
+  // The equity verdict-guard doesn't apply to gold (its verdict is already a pure
+  // technical read, not a momentum-vs-fundamentals contradiction).
+  if (!goldEtf && _headBuy && _redFlags >= 2) {
+    dispVerdict = _redFlags >= 3 ? "CAUTION" : (headVerdict === "STRONG BUY" ? "BUY" : "CAUTION");
     guardNote = `Momentum-driven — ${_redFlags} signals disagree (fundamentals · forecast · analysts · regime). The high score is recent price thrust, not high conviction.`;
   }
   const _dispBuy = dispVerdict !== "CAUTION" && /(?:BUY|STRONG)/i.test(dispVerdict);
@@ -350,7 +369,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-              {_convictionGauge(score)}
+              {_convictionGauge(convScore)}
               <Badge kind={dispVerdict === "CAUTION" ? "amber" : badgeClassFor(dispVerdict).replace("b-", "")}>{dispVerdict}</Badge>
             </div>
           </div>
@@ -364,9 +383,12 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
             <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
               {nGood} strong · {nWatch} caution
               {halalV === "halal" ? " · halal ✓" : ""}
-              {score > 0 ? ` · ${score}/100` : ""}
+              {convScore > 0 ? ` · ${convScore}/100${goldEtf ? " فني" : ""}` : ""}
             </span>
           </div>
+          {goldHeadNote ? (
+            <div dir="rtl" style={{ marginTop: 5, fontSize: 9.5, color: "var(--text-muted)", lineHeight: 1.5 }}>🥇 {goldHeadNote}</div>
+          ) : null}
           {guardNote ? (
             <div style={{ marginTop: 5, fontSize: 9.5, color: "var(--amber, #d9a441)", lineHeight: 1.5 }}>⚖ {guardNote}</div>
           ) : null}
@@ -531,7 +553,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           )) : (
             <div className="an-bar-row"><span className="lab" style={{ color: "var(--text-muted)" }}>—</span></div>
           )}
-          {techNote ? (
+          {techNote && !goldEtf ? (
             <div style={{ marginTop: 4, fontSize: 9, color: "var(--text-muted)", lineHeight: 1.4 }}>ⓘ {techNote}</div>
           ) : null}
 
