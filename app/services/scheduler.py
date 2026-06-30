@@ -646,6 +646,14 @@ def _scheduler_loop():
                     mature_open_paper_trades()
                 except Exception as e:
                     logger.error(f"Paper validation mature failed: {e}", exc_info=True)
+                # Smart-exit the live IBKR-paper positions on the day's close:
+                # trailing / technical-weakening / time exits (the broker bracket
+                # already owns the catastrophe stop + fixed TP). PAPER-ONLY, opt-in.
+                try:
+                    from app.services.auto_paper import run_smart_exit_monitor
+                    logger.info("Smart-exit monitor: %s", run_smart_exit_monitor())
+                except Exception as e:
+                    logger.error(f"Smart-exit monitor failed: {e}", exc_info=True)
 
             # --- MONTHLY COMPOSITE REBALANCE (simulated ledger "PVM") ---
             # Fires on the FIRST trading day of each month at ~09:30 ET: the

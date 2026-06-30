@@ -186,3 +186,148 @@ def run_auto_paper(scanner: str = "weekly", *, _broker=None, _picks_fn=None, _su
             skipped += 1
     logger.info("auto_paper %s: placed=%s skipped=%d cap=%d", scn, placed, skipped, cap)
     return {"status": "ok", "scanner": scn, "placed": placed, "skipped": skipped, "cap": cap}
+
+
+# ── Smart-exit monitor for the live IBKR-paper positions ─────────────────────
+# The broker bracket already arms the catastrophe stop + a fixed take-profit, so
+# the monitor only ADDS what the bracket can't do: a trailing stop, a technical-
+# weakening exit, and a time backstop. We never act on a "stop" trigger — that's
+# the broker bracket's job — only on these.
+_SMART_EXIT_ACT = {"trailing", "weakening", "time"}
+
+
+def _open_manual_entries() -> dict:
+    """{symbol: (entry_price, created_at)} for OPEN auto-paper (MANUAL) rows —
+    the most recent still-open buy per symbol (pnl_pct IS NULL)."""
+    from app.db.database import SessionLocal
+    from app.db.models import TradeHistory
+    db = SessionLocal()
+    out: dict = {}
+    try:
+        rows = (db.query(TradeHistory)
+                  .filter(TradeHistory.strategy_id == _MANUAL,
+                          TradeHistory.side == "buy",
+                          TradeHistory.pnl_pct.is_(None))
+                  .order_by(TradeHistory.created_at.desc()).all())
+        for r in rows:
+            sym = (r.symbol or "").upper()
+            if sym and sym not in out and r.entry_price and float(r.entry_price) > 0:
+                out[sym] = (float(r.entry_price), r.created_at)
+    except Exception as e:
+        logger.debug("auto_paper _open_manual_entries failed: %s", e)
+    finally:
+        db.close()
+    return out
+
+
+def _flatten_manual(broker, symbol: str) -> bool:
+    """Cancel the symbol's open bracket legs, THEN market-close the position.
+    Cancel first so no dangling OCA stop/TP can later fill and open a short."""
+    try:
+        for o in (broker.get_orders(status="open", strategy_id=_MANUAL) or []):
+            if (o.get("symbol") or "").upper() == symbol and o.get("id"):
+                try:
+                    broker.cancel_order(o["id"], strategy_id=_MANUAL)
+                except Exception:
+                    logger.debug("auto_paper cancel leg failed for %s", symbol, exc_info=True)
+        return broker.close_position(symbol, strategy_id=_MANUAL) is not None
+    except Exception as e:
+        logger.error("auto_paper flatten failed for %s: %s", symbol, e)
+        return False
+
+
+def _mark_manual_closed(symbol: str, exit_price: float, ret_pct: float, reason: str) -> None:
+    from app.db.database import SessionLocal
+    from app.db.models import TradeHistory
+    db = SessionLocal()
+    try:
+        row = (db.query(TradeHistory)
+                 .filter(TradeHistory.strategy_id == _MANUAL, TradeHistory.symbol == symbol,
+                         TradeHistory.pnl_pct.is_(None))
+                 .order_by(TradeHistory.created_at.desc()).first())
+        if row:
+            entry = float(row.entry_price or 0)
+            row.exit_price = round(float(exit_price), 4)
+            row.pnl = round((float(exit_price) - entry) * float(row.qty or 0), 2)
+            row.pnl_pct = ret_pct
+            row.closed_at = datetime.now(timezone.utc)
+            row.status = "closed"
+            sd = dict(row.signal_details or {})
+            sd["exit_reason"] = reason
+            row.signal_details = sd
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("auto_paper mark closed failed for %s: %s", symbol, e)
+    finally:
+        db.close()
+
+
+def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> dict:
+    """Smart-exit the live IBKR-paper positions (the manager the user asked for).
+
+    For each held auto-paper position, replay its bars through simulate_smart_exit;
+    on a trailing / technical-weakening / time trigger, cancel its bracket and
+    flatten — locking a winner that's rolling over instead of letting it ride back.
+    The broker bracket still owns the hard catastrophe stop + fixed TP. PAPER-ONLY,
+    opt-in (AUTO_PAPER_TRADE), kill-switch-respecting. Never raises."""
+    if not _on("AUTO_PAPER_TRADE"):
+        return {"status": "disabled"}
+    from app.services.smart_exit import SMART_EXIT, compute_exit_indicators, simulate_smart_exit
+    if not SMART_EXIT:
+        return {"status": "smart_exit_off"}
+
+    # PAPER-ONLY hard guard — same line that makes real-money execution impossible.
+    from app.services.broker.ibkr_config import get_ibkr_config
+    mode = (get_ibkr_config().get("mode") or "")
+    if "paper" not in mode.lower():
+        logger.error("smart_exit_monitor ABORTED — broker is NOT paper (mode=%s)", mode)
+        return {"status": "aborted", "reason": "not_paper", "mode": mode}
+
+    broker = _broker if _broker is not None else _default_broker()
+    if broker is None:
+        return {"status": "aborted", "reason": "broker_offline"}
+    try:
+        held = {(pos.get("symbol") or "").upper()
+                for pos in (broker.get_positions(_MANUAL) or []) if pos.get("symbol")}
+    except Exception:
+        held = set()
+    if not held:
+        return {"status": "ok", "checked": 0, "closed": 0, "exits": []}
+
+    entries = (_entries_fn or _open_manual_entries)()
+    bars_fn = _bars_fn
+    if bars_fn is None:
+        from app.services.market_data import fetch as _fetch
+        bars_fn = lambda s: _fetch(s, period="6mo")  # noqa: E731
+    hold_days = int(os.environ.get("EXIT_HOLD_DAYS", "20"))
+    stop_pct = float(os.environ.get("EXIT_STOP_PCT", "15"))
+
+    exits: list[dict] = []
+    for sym in sorted(held):
+        meta = entries.get(sym)
+        if not meta:
+            continue
+        entry, created_at = meta
+        try:
+            df = bars_fn(sym)
+            if df is None or len(df) == 0:
+                continue
+            dfi = compute_exit_indicators(df)
+            try:
+                post = dfi[dfi.index > created_at] if created_at is not None else dfi.tail(hold_days + 5)
+            except Exception:
+                post = dfi.tail(hold_days + 5)
+            sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
+            if sim is None:
+                continue
+            ret_pct, exit_price, reason = sim
+            if reason not in _SMART_EXIT_ACT:
+                continue  # broker bracket owns the catastrophe stop
+            if _flatten_manual(broker, sym):
+                _mark_manual_closed(sym, exit_price, ret_pct, reason)
+                exits.append({"symbol": sym, "reason": reason, "ret_pct": ret_pct})
+        except Exception as e:
+            logger.debug("smart_exit_monitor %s failed: %s", sym, e)
+    logger.info("smart_exit_monitor: checked=%d closed=%d exits=%s", len(held), len(exits), exits)
+    return {"status": "ok", "checked": len(held), "closed": len(exits), "exits": exits}
