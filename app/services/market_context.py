@@ -444,6 +444,16 @@ def get_market_status(force_refresh: bool = False) -> dict:
         "cached_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Gold (GLD) as a macro safe-haven / inflation signal (non-blocking)
+    try:
+        gold = get_gold_context()
+        result["gold_price"] = gold.get("price")
+        result["gold_trend"] = gold.get("trend")
+        result["gold_signal"] = gold.get("signal")
+        result["gold_change_20d_pct"] = gold.get("change_20d_pct")
+    except Exception:
+        pass
+
     # Enrich with real FRED macro context (non-blocking — failure is silent)
     try:
         from app.services.openbb_data import get_economic_indicators
@@ -490,6 +500,42 @@ def _etf_snapshot(symbol: str, period: str = "5d") -> dict:
     except Exception:
         pass
     return {"price": None, "change_pct": None}
+
+
+def get_gold_context() -> dict:
+    """Gold (via GLD) as a MACRO safe-haven / inflation signal — not a tradable
+    pick. Trend vs EMA50/EMA200: an uptrend = haven bid / inflation hedge
+    (often risk-off); a downtrend = risk-on. Returns price, trend, signal label
+    and the 20-day change. Fail-soft to unknown."""
+    try:
+        from app.services.market_data import fetch as _md_fetch
+        df = _md_fetch("GLD", period="1y")
+        if df is None or df.empty or len(df) < 60:
+            return {"price": None, "trend": "unknown", "signal": "unknown"}
+        close = df["close"].astype(float).values
+        price = float(close[-1])
+        ema50 = float(_ema_series(close, 50)[-1])
+        ema200 = float(_ema_series(close, 200)[-1]) if len(close) >= 200 else None
+        chg_20 = round((price / float(close[-21]) - 1) * 100, 2) if len(close) >= 21 else None
+        above50 = price > ema50
+        above200 = ema200 is not None and price > ema200
+        if above50 and (ema200 is None or above200):
+            trend, signal = "uptrend", "haven_bid"      # risk-off / inflation hedge
+        elif not above50 and not above200:
+            trend, signal = "downtrend", "risk_on"
+        else:
+            trend, signal = "mixed", "neutral"
+        return {
+            "price": round(price, 2),
+            "ema_50": round(ema50, 2),
+            "ema_200": round(ema200, 2) if ema200 is not None else None,
+            "change_20d_pct": chg_20,
+            "above_ema50": above50,
+            "trend": trend,
+            "signal": signal,
+        }
+    except Exception:
+        return {"price": None, "trend": "unknown", "signal": "unknown"}
 
 
 def get_qqq_snapshot() -> dict:

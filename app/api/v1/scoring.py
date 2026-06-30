@@ -121,10 +121,25 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
     except Exception:
         plan.setdefault("price", None)
     try:
-        from app.services.halal_screening import verify_halal
-        _okh, _ = verify_halal(symbol)
-        plan["halal"] = bool(_okh)
-        plan["halal_verdict"] = "halal" if _okh else "non_compliant"
+        from app.services.gold import gold_instrument
+        _gold = gold_instrument(symbol)
+        if _gold and _gold["kind"] == "etf":
+            # Gold has its OWN ruling (AAOIFI 57: spot + possession) — bypass the
+            # equity debt-ratio screen and flag paper gold as debated/uncertain.
+            plan["halal"] = None
+            plan["halal_verdict"] = "uncertain"
+            plan["halal_note"] = _gold["note"]
+            plan["is_gold"] = True
+            plan["gold_kind"] = "etf"
+        else:
+            from app.services.halal_screening import verify_halal
+            _okh, _ = verify_halal(symbol)
+            plan["halal"] = bool(_okh)
+            plan["halal_verdict"] = "halal" if _okh else "non_compliant"
+            if _gold and _gold["kind"] == "miner":
+                plan["halal_note"] = _gold["note"]
+                plan["is_gold"] = True
+                plan["gold_kind"] = "miner"
     except Exception:
         plan.setdefault("halal", None)
 

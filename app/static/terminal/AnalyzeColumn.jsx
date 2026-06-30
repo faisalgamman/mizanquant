@@ -119,6 +119,13 @@ function _marketRows(market, sectors, planMarket) {
       color: m.breadth == null ? muted : m.breadth >= 50 ? green : red },
     { lab: "Liquidity (vol)", val: m.liquidity == null ? "—" : Math.round(m.liquidity) + "%",
       verdict: m.liquidity == null ? "—" : "OK", color: m.liquidity == null ? muted : green },
+    // Gold as a macro safe-haven / inflation signal: uptrend = haven bid (caution),
+    // downtrend = risk appetite. Not a tradable pick — backdrop only.
+    { lab: "Gold (GLD)", val: m.gold_price == null ? "—" : "$" + n2(m.gold_price),
+      verdict: (m.gold_trend == null || m.gold_trend === "unknown") ? "—"
+             : m.gold_signal === "haven_bid" ? "HAVEN" : m.gold_signal === "risk_on" ? "RISK-ON" : "MIXED",
+      color: (m.gold_trend == null || m.gold_trend === "unknown") ? muted
+           : m.gold_signal === "haven_bid" ? amber : m.gold_signal === "risk_on" ? green : muted },
   ];
   if (sectors && sectors.length) {
     const up = sectors.filter(s => Number(s.chg) > 0).length, tot = sectors.length;
@@ -214,7 +221,12 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const ana    = plan && plan.analyst && plan.analyst.known ? plan.analyst : null;
   const earn   = plan && plan.earnings ? plan.earnings : null;
   const mkt    = plan && plan.market && plan.market.known ? plan.market : null;
-  const halalV = signal.halalVerdict || (signal.halal ? "halal" : "non_compliant");
+  // Gold has its OWN ruling (AAOIFI 57: spot + possession), not the equity screen.
+  const goldKind = plan && plan.gold_kind;            // "etf" | "miner" | undefined
+  const goldNote = plan && plan.is_gold ? (plan.halal_note || "") : "";
+  const halalV = goldKind === "etf"
+    ? "doubtful"                                       // paper gold → debated, never a hard verdict
+    : (signal.halalVerdict || (signal.halal ? "halal" : "non_compliant"));
   const r1 = (n) => (n == null || isNaN(Number(n))) ? "—" : Math.round(Number(n));
 
   const tiles = [];
@@ -230,9 +242,11 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   } else {
     tiles.push({ icon: "💰", label: "Fundamentals", isNew: true, value: "—", sub: "no data", status: "neutral" });
   }
-  tiles.push({ icon: "🕌", label: "Halal AAOIFI",
-               value: halalV === "halal" ? "Compliant" : halalV === "doubtful" ? "Doubtful" : "Non-compliant",
-               sub: "Standard 21", status: halalV === "halal" ? "good" : halalV === "doubtful" ? "warn" : "bad" });
+  tiles.push({ icon: goldKind === "etf" ? "🥇" : "🕌", label: "Halal AAOIFI",
+               value: goldKind === "etf" ? "Review"
+                    : halalV === "halal" ? "Compliant" : halalV === "doubtful" ? "Doubtful" : "Non-compliant",
+               sub: goldKind === "etf" ? "Gold · Std 57" : "Standard 21",
+               status: halalV === "halal" ? "good" : halalV === "doubtful" ? "warn" : "bad" });
   if (ins) {
     const heavy = ins.heavy_sell, top = ins.top_seller;
     tiles.push({ icon: "👤", label: "Insider 90d",
@@ -355,6 +369,14 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
           </div>
           {guardNote ? (
             <div style={{ marginTop: 5, fontSize: 9.5, color: "var(--amber, #d9a441)", lineHeight: 1.5 }}>⚖ {guardNote}</div>
+          ) : null}
+          {goldNote ? (
+            <div dir="rtl" style={{ marginTop: 6, padding: "6px 10px", borderRadius: 6,
+                                    background: "var(--warning-dim, rgba(217,164,65,0.12))",
+                                    border: "1px solid var(--amber, #d9a441)",
+                                    fontSize: 9.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              🥇 <strong>ملاحظة شرعية للذهب:</strong> {goldNote}
+            </div>
           ) : null}
           {(verdict || "").includes("SELL") && (
             <div style={{ fontSize: 8.5, color: "var(--text-muted)", marginTop: 3, lineHeight: 1.4 }}>
