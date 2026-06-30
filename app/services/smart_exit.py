@@ -37,7 +37,8 @@ EXIT_TECH_WEAKENING: bool = (
 )
 EXIT_TECH_MIN_PROFIT_PCT: float = float(os.environ.get("EXIT_TECH_MIN_PROFIT_PCT", "3"))  # only protect a real gain
 
-__all__ = ["SMART_EXIT", "compute_exit_indicators", "simulate_smart_exit", "post_entry_bars"]
+__all__ = ["SMART_EXIT", "compute_exit_indicators", "simulate_smart_exit",
+           "live_exit_decision", "post_entry_bars"]
 
 
 def post_entry_bars(df, created_at, tail: int = 25):
@@ -164,3 +165,56 @@ def simulate_smart_exit(
         return _ret(px, entry_price), round(px, 2), "time"
 
     return None  # not matured yet
+
+
+def live_exit_decision(
+    post_bars,
+    entry_price: float,
+    *,
+    stop_pct: float,
+    hold_days: int | None,
+    trail_arm_pct: float = EXIT_TRAIL_ARM_PCT,
+    trail_giveback_pct: float = EXIT_TRAIL_GIVEBACK_PCT,
+    use_technical: bool = True,
+    tech_min_profit_pct: float = EXIT_TECH_MIN_PROFIT_PCT,
+):
+    """Decide whether to exit a CURRENTLY-OPEN position from its LATEST bar
+    (forward management), using the peak SINCE ENTRY.
+
+    Unlike :func:`simulate_smart_exit` — which replays from entry and books the
+    FIRST historical trigger (correct for the validation ledger's measurement) —
+    this acts ONLY on the current state, so it won't flatten a winner now just
+    because a trailing trigger fired weeks ago (e.g. a position up +30% sitting
+    at its peak is HELD, not closed at a stale +4% trigger). Returns
+    ``(reason, exit_price, ret_pct)`` to close at the latest price, or None to hold.
+
+    Pass ``hold_days=None`` to disable the time backstop (e.g. for monthly names
+    whose horizon is longer than the swing hold).
+    """
+    if entry_price <= 0 or post_bars is None or len(post_bars) == 0:
+        return None
+    n = len(post_bars)
+    close = float(post_bars["close"].iloc[-1])
+    low = float(post_bars["low"].iloc[-1])
+    peak = max(float(entry_price), float(post_bars["high"].max()))
+
+    # 1) time backstop (optional)
+    if hold_days is not None and n >= hold_days:
+        return "time", round(close, 2), _ret(close, entry_price)
+    # 2) catastrophe stop on the current bar
+    stop_price = entry_price * (1.0 - stop_pct / 100.0)
+    if low <= stop_price:
+        return "stop", round(stop_price, 2), _ret(stop_price, entry_price)
+    # 3) trailing — armed by the peak since entry, giving back from THAT peak
+    if peak >= entry_price * (1.0 + trail_arm_pct / 100.0) and close <= peak * (1.0 - trail_giveback_pct / 100.0):
+        return "trailing", round(close, 2), _ret(close, entry_price)
+    # 4) technical weakening — only when protecting a real profit
+    if (use_technical and EXIT_TECH_WEAKENING and close >= entry_price * (1.0 + tech_min_profit_pct / 100.0)
+            and all(c in post_bars.columns for c in ("_ema10", "_rsi", "_macd_hist"))):
+        ema10 = float(post_bars["_ema10"].iloc[-1])
+        rsi = float(post_bars["_rsi"].iloc[-1])
+        mh = float(post_bars["_macd_hist"].iloc[-1])
+        if (np.isfinite(ema10) and np.isfinite(rsi) and np.isfinite(mh)
+                and close < ema10 and (rsi < 50.0 or mh < 0.0)):
+            return "weakening", round(close, 2), _ret(close, entry_price)
+    return None  # hold

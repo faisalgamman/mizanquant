@@ -274,7 +274,7 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
     if not _on("AUTO_PAPER_TRADE"):
         return {"status": "disabled"}
     from app.services.smart_exit import (
-        SMART_EXIT, compute_exit_indicators, simulate_smart_exit, post_entry_bars)
+        SMART_EXIT, compute_exit_indicators, live_exit_decision, post_entry_bars)
     if not SMART_EXIT:
         return {"status": "smart_exit_off"}
 
@@ -316,10 +316,13 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
                 continue
             dfi = compute_exit_indicators(df)
             post = post_entry_bars(dfi, created_at, hold_days + 5)
-            sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
-            if sim is None:
+            # FORWARD management — act on the position's CURRENT state, not a stale
+            # historical trigger (a winner sitting at its peak must not be flattened
+            # at an old +x% level). Exit at the latest price.
+            decision = live_exit_decision(post, entry, stop_pct=stop_pct, hold_days=hold_days)
+            if decision is None:
                 continue
-            ret_pct, exit_price, reason = sim
+            reason, exit_price, ret_pct = decision
             if reason not in _SMART_EXIT_ACT:
                 continue  # broker bracket owns the catastrophe stop
             if _flatten_manual(broker, sym):

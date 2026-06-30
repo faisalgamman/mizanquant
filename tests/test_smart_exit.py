@@ -15,7 +15,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from app.services.smart_exit import compute_exit_indicators, post_entry_bars, simulate_smart_exit
+from app.services.smart_exit import (
+    compute_exit_indicators, live_exit_decision, post_entry_bars, simulate_smart_exit)
 
 
 def _bars(rows: list[dict]) -> pd.DataFrame:
@@ -154,3 +155,51 @@ def test_post_entry_bars_entry_after_all_is_empty():
 def test_post_entry_bars_none_falls_back_to_tail():
     df = _fetch_shaped(30)
     assert len(post_entry_bars(df, None, tail=5)) == 5
+
+
+# ── 8. live (forward) exit decision — current-bar, peak-since-entry ────────────
+
+def test_live_winner_at_peak_is_held():
+    # THE case: a position up +30% sitting AT its peak must HOLD — never flattened
+    # at a stale earlier trigger (this is what simulate_smart_exit would mis-do).
+    post = _bars([
+        {"close": 110, "high": 111, "low": 109},
+        {"close": 122, "high": 123, "low": 121},
+        {"close": 130, "high": 131, "low": 129},   # latest = at the peak
+    ])
+    assert live_exit_decision(post, 100.0, stop_pct=15, hold_days=None) is None
+
+
+def test_live_trailing_locks_current_price_off_peak():
+    # Peak 131, now 120 (>5% off peak) → trailing at the CURRENT price, not a stale level.
+    post = _bars([
+        {"close": 110, "high": 111, "low": 109},
+        {"close": 130, "high": 131, "low": 129},   # peak
+        {"close": 120, "high": 121, "low": 119},   # gave back from peak
+    ])
+    out = live_exit_decision(post, 100.0, stop_pct=15, hold_days=None)
+    assert out is not None
+    reason, price, ret = out
+    assert reason == "trailing" and price == 120.0 and ret == 20.0
+
+
+def test_live_catastrophe_stop_current_bar():
+    post = _bars([{"close": 95, "high": 96, "low": 94}, {"close": 86, "high": 88, "low": 84}])
+    out = live_exit_decision(post, 100.0, stop_pct=15, hold_days=None)
+    assert out is not None and out[0] == "stop" and out[1] == 85.0
+
+
+def test_live_weakening_on_latest_bar():
+    post = _bars([
+        {"close": 103, "high": 104, "low": 102, "_ema10": 102, "_rsi": 58, "_macd_hist": 0.3},
+        {"close": 104, "high": 105, "low": 103, "_ema10": 106, "_rsi": 46, "_macd_hist": -0.2},
+    ])
+    out = live_exit_decision(post, 100.0, stop_pct=15, hold_days=None)
+    assert out is not None and out[0] == "weakening" and out[1] == 104.0
+
+
+def test_live_time_backstop_optional():
+    flat = _bars([{"close": 101, "high": 102, "low": 100} for _ in range(3)])
+    assert live_exit_decision(flat, 100.0, stop_pct=15, hold_days=None) is None   # disabled
+    out = live_exit_decision(flat, 100.0, stop_pct=15, hold_days=3)               # enabled
+    assert out is not None and out[0] == "time"
