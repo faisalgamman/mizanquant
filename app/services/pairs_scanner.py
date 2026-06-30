@@ -48,6 +48,13 @@ PAIRS_PVALUE_MAX: float = float(os.environ.get("PAIRS_PVALUE_MAX", "0.05"))
 PAIRS_MAX_HALF_LIFE: float = float(os.environ.get("PAIRS_MAX_HALF_LIFE", "30"))
 PAIRS_CORRELATION_MIN: float = float(os.environ.get("PAIRS_CORRELATION_MIN", "0.7"))
 PAIRS_MAX_PAIRS: int = int(os.environ.get("PAIRS_MAX_PAIRS", "20"))
+# Out-of-sample validation — only list a pair whose cointegration learned on the
+# TRAIN split still holds (stationary spread) on the held-out TEST split. Kills
+# in-sample-only / spurious pairs from multiple-testing. Fail-OPEN when there
+# isn't enough history to judge (passed=None → kept, just not OOS-stamped).
+PAIRS_OOS: bool = os.environ.get("PAIRS_OOS", "true").lower() not in ("false", "0", "no")
+PAIRS_OOS_TRAIN_FRAC: float = float(os.environ.get("PAIRS_OOS_TRAIN_FRAC", "0.7"))
+PAIRS_OOS_PVALUE_MAX: float = float(os.environ.get("PAIRS_OOS_PVALUE_MAX", "0.15"))
 PAIRS_SCAN_TTL: float = float(os.environ.get("PAIRS_SCAN_TTL", "86400"))
 PAIRS_SCAN_LOOKBACK: str = os.environ.get("PAIRS_SCAN_LOOKBACK", "1y")
 PAIRS_MIN_SECTOR_SIZE: int = int(os.environ.get("PAIRS_MIN_SECTOR_SIZE", "3"))
@@ -61,6 +68,10 @@ PAIRS_MIN_SECTOR_SIZE: int = int(os.environ.get("PAIRS_MIN_SECTOR_SIZE", "3"))
 PAIRS_SECTOR_FMP_CAP: int = int(os.environ.get("PAIRS_SECTOR_FMP_CAP", "25"))
 
 _CACHE_PATH = Path(os.environ.get("PAIRS_SCAN_CACHE", "pairs_scan_cache.json"))
+# Bumped when the scan's acceptance logic changes so a stale cache from the old
+# logic is ignored (e.g. adding OOS validation → don't serve yesterday's
+# un-validated pairs for a day). v2: out-of-sample gate.
+_CACHE_VERSION = 2
 # Resolved symbol→sector map persists to the durable volume (CACHE_DIR=/data on
 # Railway) so the one-time sector lookup survives restarts and never re-pays.
 _SECTOR_CACHE_PATH = Path(
@@ -105,6 +116,7 @@ class PairReport:
     intercept: float
     half_life: float
     zscore: float
+    oos_pvalue: float | None = None   # ADF p on the held-out test spread (None = not validated)
 
     @property
     def pair_key(self) -> str:
@@ -121,6 +133,7 @@ class PairReport:
             "intercept": round(self.intercept, 4),
             "half_life_bars": round(self.half_life, 2),
             "zscore": round(self.zscore, 3),
+            "oos_pvalue": round(self.oos_pvalue, 4) if self.oos_pvalue is not None else None,
         }
 
 
@@ -272,7 +285,8 @@ def _returns_correlation(s_a, s_b) -> float:
 def _save_cache(pairs: list[PairReport]) -> None:
     try:
         _CACHE_PATH.write_text(
-            json.dumps({"ts": time.time(), "pairs": [p.as_dict() for p in pairs]}, indent=2)
+            json.dumps({"v": _CACHE_VERSION, "ts": time.time(),
+                        "pairs": [p.as_dict() for p in pairs]}, indent=2)
         )
     except Exception as exc:
         logger.debug("pairs_scanner: cache save failed: %s", exc)
@@ -283,6 +297,8 @@ def _load_disk_cache() -> list[PairReport] | None:
         if not _CACHE_PATH.exists():
             return None
         data = json.loads(_CACHE_PATH.read_text())
+        if data.get("v") != _CACHE_VERSION:          # stale schema (pre-OOS) → rescan
+            return None
         if time.time() - float(data.get("ts", 0)) > PAIRS_SCAN_TTL:
             return None
         pairs = []
@@ -291,7 +307,7 @@ def _load_disk_cache() -> list[PairReport] | None:
                 y_symbol=d["y_symbol"], x_symbol=d["x_symbol"], sector=d["sector"],
                 pvalue=d["pvalue"], hedge_ratio=d["hedge_ratio"],
                 intercept=d.get("intercept", 0.0), half_life=d["half_life_bars"],
-                zscore=d["zscore"],
+                zscore=d["zscore"], oos_pvalue=d.get("oos_pvalue"),
             ))
         return pairs
     except Exception:
@@ -324,7 +340,7 @@ def find_cointegrated_pairs(
             _cache_ts = time.time()
             return disk[:max_pairs]
 
-    from app.services.cointegration import cointegration_report
+    from app.services.cointegration import cointegration_report, validate_oos
 
     global _last_scan_stats
     sectors = _group_by_sector()
@@ -338,6 +354,8 @@ def find_cointegrated_pairs(
     n_passed_corr = 0             # survived the |corr| pre-filter
     n_eg_tested = 0               # Engle–Granger actually run
     n_passed_pvalue = 0           # p ≤ threshold (ignoring half-life)
+    n_oos_tested = 0              # in-sample-cointegrated pairs put through OOS
+    n_rejected_oos = 0           # dropped: cointegration didn't hold out-of-sample
     best_pvalue = 1.0
     best_pair = None
 
@@ -378,11 +396,26 @@ def find_cointegrated_pairs(
                 if rep.pvalue <= PAIRS_PVALUE_MAX:
                     n_passed_pvalue += 1
                 if rep.is_cointegrated:
+                    # Out-of-sample gate: drop a pair whose cointegration doesn't
+                    # survive on held-out data (overfit / spurious). Fail-OPEN when
+                    # there isn't enough history to judge (passed is None).
+                    oos_p = None
+                    if PAIRS_OOS:
+                        oos = validate_oos(
+                            y_vals, x_vals,
+                            train_frac=PAIRS_OOS_TRAIN_FRAC,
+                            oos_pvalue_max=PAIRS_OOS_PVALUE_MAX,
+                        )
+                        n_oos_tested += 1
+                        if oos["passed"] is False:
+                            n_rejected_oos += 1
+                            continue
+                        oos_p = oos["oos_pvalue"]
                     results.append(PairReport(
                         y_symbol=a, x_symbol=b, sector=sector,
                         pvalue=rep.pvalue, hedge_ratio=rep.hedge_ratio,
                         intercept=rep.intercept, half_life=rep.half_life,
-                        zscore=rep.zscore,
+                        zscore=rep.zscore, oos_pvalue=oos_p,
                     ))
             except Exception as exc:
                 logger.debug("pairs_scanner: report failed for %s/%s: %s", a, b, exc)
@@ -404,6 +437,9 @@ def find_cointegrated_pairs(
         "passed_correlation": n_passed_corr,
         "eg_tested": n_eg_tested,
         "passed_pvalue": n_passed_pvalue,
+        "oos_enabled": PAIRS_OOS,
+        "oos_tested": n_oos_tested,
+        "rejected_oos": n_rejected_oos,
         "cointegrated": len(results),
         "best_pvalue": round(best_pvalue, 4),
         "best_pair": best_pair,
@@ -411,14 +447,17 @@ def find_cointegrated_pairs(
             "pvalue_max": PAIRS_PVALUE_MAX,
             "max_half_life_bars": PAIRS_MAX_HALF_LIFE,
             "correlation_min": PAIRS_CORRELATION_MIN,
+            "oos_pvalue_max": PAIRS_OOS_PVALUE_MAX,
+            "oos_train_frac": PAIRS_OOS_TRAIN_FRAC,
         },
     }
 
     logger.info(
         "pairs_scanner: found %d cointegrated pairs "
-        "(statsmodels=%s, %d candidates, %d passed corr, %d EG-tested, best p=%.3f)",
+        "(statsmodels=%s, %d candidates, %d passed corr, %d EG-tested, "
+        "%d OOS-rejected, best p=%.3f)",
         len(results), _last_scan_stats["statsmodels_available"],
-        n_candidate_pairs, n_passed_corr, n_eg_tested, best_pvalue,
+        n_candidate_pairs, n_passed_corr, n_eg_tested, n_rejected_oos, best_pvalue,
     )
     return results[:max_pairs]
 

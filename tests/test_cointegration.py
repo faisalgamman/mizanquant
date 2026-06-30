@@ -17,11 +17,13 @@ from __future__ import annotations
 import numpy as np
 
 from app.services.cointegration import (
+    adf_pvalue,
     cointegration_report,
     engle_granger_pvalue,
     hedge_ratio,
     spread_series,
     spread_zscore,
+    validate_oos,
 )
 
 
@@ -134,3 +136,55 @@ def test_report_accepts_cointegrated_pair():
     assert rep.is_cointegrated is True, f"expected cointegrated: {rep.reason}"
     assert abs(rep.hedge_ratio - 1.5) < 0.10
     assert np.isfinite(rep.half_life) and rep.half_life > 0
+
+
+# ---------------------------------------------------------------------------
+# ADF unit-root test
+# ---------------------------------------------------------------------------
+
+def test_adf_stationary_vs_random_walk():
+    rng = np.random.default_rng(42)
+    white_noise = rng.normal(0.0, 1.0, 300)          # stationary
+    random_walk = np.cumsum(rng.normal(0.0, 1.0, 300))  # unit root
+    assert adf_pvalue(white_noise) < 0.05, "white noise should be stationary"
+    assert adf_pvalue(random_walk) > 0.10, "random walk should not be stationary"
+
+
+def test_adf_fails_closed_on_degenerate():
+    assert adf_pvalue([1.0] * 50) == 1.0     # constant
+    assert adf_pvalue([1.0, 2.0, 3.0]) == 1.0  # too few points
+
+
+# ---------------------------------------------------------------------------
+# Out-of-sample validation
+# ---------------------------------------------------------------------------
+
+def test_validate_oos_accepts_cointegrated_pair():
+    # A genuinely cointegrated pair's spread stays stationary on the held-out
+    # test split, so the train-fit relationship validates out-of-sample.
+    y, x = _cointegrated_pair(n=600, seed=11)
+    res = validate_oos(y, x)
+    assert res["passed"] is True, res["reason"]          # cleared the OOS gate
+    assert res["oos_pvalue"] is not None                 # and produced a real p-value
+
+
+def test_validate_oos_rejects_spurious_pairs():
+    # Independent random walks may look cointegrated in-sample by chance, but the
+    # train-fit spread is non-stationary out-of-sample. Across many seeds, the
+    # OOS gate must reject the large majority (control the false-discovery rate).
+    rejected = 0
+    trials = 10
+    for k in range(trials):
+        y = _random_walk(seed=200 + 2 * k)
+        x = _random_walk(seed=201 + 2 * k)
+        if validate_oos(y, x)["passed"] is False:
+            rejected += 1
+    assert rejected >= 7, f"OOS only rejected {rejected}/{trials} spurious pairs"
+
+
+def test_validate_oos_insufficient_data_returns_none():
+    # Too little history to split → no verdict (caller fails open).
+    y, x = _cointegrated_pair(n=80, seed=12)
+    res = validate_oos(y, x)
+    assert res["passed"] is None
+    assert "insufficient" in res["reason"]

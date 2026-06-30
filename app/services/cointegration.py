@@ -111,6 +111,27 @@ def engle_granger_pvalue(y: Iterable[float], x: Iterable[float]) -> float:
         return 1.0
 
 
+def adf_pvalue(series: Iterable[float]) -> float:
+    """Augmented Dickey–Fuller p-value for a SINGLE series (unit-root test).
+
+    Low p (≤ ~0.05) ⇒ reject the unit root ⇒ the series is stationary
+    (mean-reverting). Used by the out-of-sample check to ask "is the test-window
+    spread still stationary?". Returns 1.0 when the test can't run (too few
+    points, constant series, or statsmodels missing) — i.e. "no evidence of
+    stationarity"."""
+    arr = np.asarray(list(series), dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if len(arr) < 20 or np.ptp(arr) == 0:
+        return 1.0
+    if not _HAS_COINT:  # adfuller ships in the same statsmodels module as coint
+        return 1.0
+    try:
+        from statsmodels.tsa.stattools import adfuller
+        return float(adfuller(arr, autolag="AIC")[1])
+    except Exception:
+        return 1.0
+
+
 def spread_zscore(spread: Iterable[float], lookback: int = 60) -> float:
     """Z-score of the latest spread value vs the trailing window."""
     arr = np.asarray(list(spread), dtype=float)
@@ -163,11 +184,69 @@ def cointegration_report(
     )
 
 
+def validate_oos(
+    y: Iterable[float],
+    x: Iterable[float],
+    train_frac: float = 0.7,
+    oos_pvalue_max: float = 0.15,
+    min_test: int = 40,
+) -> dict:
+    """Out-of-sample cointegration check — the guard against overfit/spurious pairs.
+
+    A pair that's only cointegrated in-sample (because we tested many candidates
+    and this one looked good by chance) will FAIL here. We:
+
+      1. fit the hedge ratio β/α on the TRAIN split only,
+      2. form the spread on the held-out TEST split with those *train* β/α
+         (no re-fit — that's the whole point: does the learned relationship still
+         hold on data it never saw?),
+      3. ADF-test that test-window spread for stationarity.
+
+    The OOS p-value threshold is intentionally looser than the in-sample EG gate
+    (default 0.15 vs 0.05): the test window is shorter, so the ADF test has less
+    power — we still demand evidence of stationarity, just don't punish the shorter
+    sample (empirically 0.15 cleanly separates planted pairs from spurious random
+    walks). Returns a dict; ``passed`` is None when there isn't enough data to
+    judge (caller decides — the scanner fails OPEN in that case)."""
+    y_arr = np.asarray(list(y), dtype=float)
+    x_arr = np.asarray(list(x), dtype=float)
+    mask = np.isfinite(y_arr) & np.isfinite(x_arr)
+    y_arr = y_arr[mask]
+    x_arr = x_arr[mask]
+    n = len(y_arr)
+    n_train = int(n * train_frac)
+    n_test = n - n_train
+    if n_train < 60 or n_test < min_test:
+        return {"passed": None, "oos_pvalue": None, "oos_half_life": None,
+                "train_n": n_train, "test_n": n_test,
+                "reason": f"insufficient data for OOS (train={n_train}, test={n_test})"}
+
+    y_tr, x_tr = y_arr[:n_train], x_arr[:n_train]
+    y_te, x_te = y_arr[n_train:], x_arr[n_train:]
+    beta, alpha = hedge_ratio(y_tr, x_tr)
+    if beta == 0.0:
+        return {"passed": False, "oos_pvalue": 1.0, "oos_half_life": None,
+                "train_n": n_train, "test_n": n_test,
+                "reason": "train hedge ratio undefined"}
+
+    test_spread = y_te - beta * x_te - alpha
+    p_oos = adf_pvalue(test_spread)
+    hl_oos = half_life_ou(test_spread)
+    passed = p_oos <= oos_pvalue_max
+    reason = ("OOS spread stationary" if passed
+              else f"OOS spread not stationary (ADF p={p_oos:.3f} > {oos_pvalue_max})")
+    return {"passed": bool(passed), "oos_pvalue": float(p_oos),
+            "oos_half_life": float(hl_oos) if np.isfinite(hl_oos) else None,
+            "train_n": n_train, "test_n": n_test, "reason": reason}
+
+
 __all__ = [
     "CointegrationReport",
     "hedge_ratio",
     "spread_series",
     "engle_granger_pvalue",
+    "adf_pvalue",
     "spread_zscore",
     "cointegration_report",
+    "validate_oos",
 ]
