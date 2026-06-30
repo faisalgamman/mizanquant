@@ -214,9 +214,15 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
 
 
 def mature_open_paper_trades() -> dict:
-    """Close any open PV trade whose Option-A exit (15% stop / 20-day time) has fired."""
+    """Close any open PV (weekly swing) trade whose exit has fired.
+
+    With SMART_EXIT on (default) this is the smart-exit policy — catastrophe stop,
+    trailing stop (locks a runner), technical-weakening exit (sells a winner whose
+    chart rolls over), and a time backstop. With it off, the legacy Option-A
+    fixed-stop/time exit. The trigger reason is stored on signal_details."""
     from app.services.market_data import fetch as fetch_market_data
     from app.services.signal_tracker import _simulate_fixed_exit
+    from app.services.smart_exit import SMART_EXIT, compute_exit_indicators, simulate_smart_exit
 
     hold_days = int(os.environ.get("EXIT_HOLD_DAYS", getattr(settings, "SWING_MAX_HOLD_DAYS", 20)))
     stop_pct = float(os.environ.get("EXIT_STOP_PCT", getattr(settings, "SWING_TRAIL_PCT", 15.0)))
@@ -237,19 +243,38 @@ def mature_open_paper_trades() -> dict:
                 df = fetch_market_data(t.symbol, period="6mo")
                 if df is None or len(df) == 0:
                     continue
-                try:
-                    post = df[df.index > t.created_at]
-                except Exception:
-                    post = df.tail(hold_days + 5)
-                sim = _simulate_fixed_exit(post, entry, hold_days, stop_pct, is_sell=False)
-                if sim is None:
-                    continue  # not matured yet
-                ret_pct, exit_price = sim
+                exit_reason = None
+                if SMART_EXIT:
+                    dfi = compute_exit_indicators(df)
+                    try:
+                        post = dfi[dfi.index > t.created_at]
+                    except Exception:
+                        post = dfi.tail(hold_days + 5)
+                    sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
+                    if sim is None:
+                        continue  # not matured yet
+                    ret_pct, exit_price, exit_reason = sim
+                else:
+                    try:
+                        post = df[df.index > t.created_at]
+                    except Exception:
+                        post = df.tail(hold_days + 5)
+                    sim = _simulate_fixed_exit(post, entry, hold_days, stop_pct, is_sell=False)
+                    if sim is None:
+                        continue  # not matured yet
+                    ret_pct, exit_price = sim
+                    exit_reason = "stop_or_time"
                 t.exit_price = exit_price
                 t.pnl = round((exit_price - entry) * float(t.qty or 0), 2)
                 t.pnl_pct = ret_pct
                 t.closed_at = _utc_now()
                 t.status = "closed"
+                try:  # audit: which trigger closed it (trailing / weakening / stop / time)
+                    sd = dict(t.signal_details or {})
+                    sd["exit_reason"] = exit_reason
+                    t.signal_details = sd
+                except Exception:
+                    pass
                 closed += 1
             except Exception as e:  # one bad symbol must not abort the batch
                 logger.debug("paper_validation mature %s failed: %s", t.symbol, e)
