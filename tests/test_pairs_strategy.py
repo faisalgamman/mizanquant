@@ -67,7 +67,8 @@ def _report(y_sym="AA", x_sym="BB") -> PairReport:
 def test_negative_spread_buys_y():
     from app.services.pairs_strategy import evaluate_pair
 
-    y, x = _forced_pair(z_target=-4.0)
+    # z=-3.0: past entry (2.0), comfortably below the breakdown cut (4.0).
+    y, x = _forced_pair(z_target=-3.0)
     sig = evaluate_pair(_report(), _ohlc(y), _ohlc(x))
     assert sig is not None
     assert sig.zscore < 0, f"expected negative z, got {sig.zscore}"
@@ -78,7 +79,7 @@ def test_negative_spread_buys_y():
 def test_positive_spread_buys_x():
     from app.services.pairs_strategy import evaluate_pair
 
-    y, x = _forced_pair(z_target=+4.0)
+    y, x = _forced_pair(z_target=+3.0)
     sig = evaluate_pair(_report(), _ohlc(y), _ohlc(x))
     assert sig is not None
     assert sig.zscore > 0, f"expected positive z, got {sig.zscore}"
@@ -100,12 +101,51 @@ def test_entry_bracket_geometry_long_only():
     """Long entry: stop < entry < take-profit (never an inverted/short bracket)."""
     from app.services.pairs_strategy import evaluate_pair
 
-    y, x = _forced_pair(z_target=-4.0)
+    y, x = _forced_pair(z_target=-3.0)
     sig = evaluate_pair(_report(), _ohlc(y), _ohlc(x))
     assert sig.action == "long_y"
     assert sig.stop_loss < sig.entry < sig.take_profit, (
         f"long bracket geometry violated: sl={sig.stop_loss} entry={sig.entry} tp={sig.take_profit}"
     )
+
+
+# ── breakdown stop ────────────────────────────────────────────────────────────
+
+def test_pair_breakdown_blowout_on_z_alone():
+    """|z| ≥ PAIRS_BREAKDOWN_Z trips the breakdown from z alone (no series)."""
+    from app.services import pairs_strategy as ps
+
+    broke, why = ps.pair_breakdown(ps.PAIRS_BREAKDOWN_Z + 0.5)
+    assert broke is True and "blowout" in (why or "")
+    # within the band → no breakdown
+    assert ps.pair_breakdown(ps.PAIRS_ENTRY_Z + 0.1)[0] is False
+
+
+def test_blown_out_spread_exits_not_enters():
+    """A spread blown out past the breakdown band must EXIT (cut), never enter."""
+    from app.services.pairs_strategy import evaluate_pair, PAIRS_BREAKDOWN_Z
+
+    y, x = _forced_pair(z_target=-(PAIRS_BREAKDOWN_Z + 1.0))
+    sig = evaluate_pair(_report(), _ohlc(y), _ohlc(x))
+    assert sig is not None
+    assert sig.action == "exit", f"expected breakdown exit, got {sig.action} (z={sig.zscore})"
+    assert sig.long_symbol is None
+    assert sig.reason.startswith("breakdown")
+
+
+def test_breakdown_pvalue_decay_cuts(monkeypatch):
+    """Even at a moderate z, a decayed cointegration p-value trips the stop."""
+    from app.services import pairs_strategy as ps
+
+    # Force the recent-window Engle–Granger p-value above the decay threshold.
+    monkeypatch.setattr(
+        "app.services.cointegration.engle_granger_pvalue",
+        lambda y, x: ps.PAIRS_BREAKDOWN_PVAL + 0.2,
+    )
+    y = list(range(100, 200))           # ≥60 points each so the test runs
+    x = list(range(300, 400))
+    broke, why = ps.pair_breakdown(ps.PAIRS_ENTRY_Z + 0.2, y, x)
+    assert broke is True and "decay" in (why or "")
 
 
 def test_never_emits_short(monkeypatch):

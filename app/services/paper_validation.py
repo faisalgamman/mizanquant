@@ -664,11 +664,13 @@ def record_pairs_signals(max_pairs: int | None = None) -> dict:
 
 def mature_pairs_paper_trades() -> dict:
     """Close any open PVP trade whose pairs exit fired: spread z-reversion
-    (|z| <= PAIRS_EXIT_Z), the long-leg catastrophe stop, or a max-hold cap."""
+    (|z| <= PAIRS_EXIT_Z), a cointegration BREAKDOWN (spread blowout / decay —
+    cuts a thesis that's failing), the long-leg catastrophe stop, or a max-hold
+    cap. The exit reason is stored on signal_details for later attribution."""
     from app.services.market_data import fetch as fetch_market_data
     from app.services.signal_tracker import _simulate_fixed_exit
     from app.services.cointegration import spread_series, spread_zscore
-    from app.services.pairs_strategy import PAIRS_EXIT_Z
+    from app.services.pairs_strategy import PAIRS_EXIT_Z, pair_breakdown
 
     hold_days = int(os.environ.get("PAIRS_MAX_HOLD_DAYS", "30"))
     db = SessionLocal()
@@ -694,15 +696,18 @@ def mature_pairs_paper_trades() -> dict:
                 except Exception:
                     post = df.tail(hold_days + 5)
 
-                exit_price = ret_pct = None
+                exit_price = ret_pct = exit_reason = None
+                broke_why = None
                 # 1) long-leg stop / max-hold time cap (safety)
                 stop_pct = max(1.0, (entry - float(t.stop_loss)) / entry * 100.0) if t.stop_loss else 15.0
                 sim = _simulate_fixed_exit(post, entry, hold_days, stop_pct, is_sell=False)
                 if sim is not None:
                     ret_pct, exit_price = sim
+                    exit_reason = "stop_or_time"
                 else:
-                    # 2) spread z-reversion exit (the actual pairs policy)
+                    # 2) spread z-reversion OR cointegration breakdown (the pairs policy)
                     z_now = None
+                    broke = False
                     if "/" in pair:
                         y_sym, x_sym = pair.split("/", 1)
                         ydf = fetch_market_data(y_sym, period="1y")
@@ -716,10 +721,14 @@ def mature_pairs_paper_trades() -> dict:
                             if len(j) > 60:
                                 spr = spread_series(j["y"].tolist(), j["x"].tolist())
                                 z_now = spread_zscore(spr)
-                    if z_now is not None and abs(z_now) <= PAIRS_EXIT_Z:
+                                broke, broke_why = pair_breakdown(
+                                    z_now, j["y"].tolist(), j["x"].tolist())
+                    if z_now is not None and (abs(z_now) <= PAIRS_EXIT_Z or broke):
                         last = float(df["close"].iloc[-1])
                         exit_price = last
                         ret_pct = round((last - entry) / entry * 100.0, 4)
+                        exit_reason = ("breakdown" if (broke and abs(z_now) > PAIRS_EXIT_Z)
+                                       else "z_revert")
 
                 if exit_price is None or ret_pct is None:
                     continue  # still open
@@ -728,6 +737,15 @@ def mature_pairs_paper_trades() -> dict:
                 t.pnl_pct = ret_pct
                 t.closed_at = _utc_now()
                 t.status = "closed"
+                # audit: why it closed (breakdown vs reversion vs stop/time)
+                try:
+                    sd = dict(t.signal_details or {})
+                    sd["exit_reason"] = exit_reason
+                    if exit_reason == "breakdown" and broke_why:
+                        sd["breakdown_reason"] = broke_why
+                    t.signal_details = sd
+                except Exception:
+                    pass
                 closed += 1
             except Exception as e:  # one bad pair must not abort the batch
                 logger.debug("mature_pairs %s failed: %s", t.symbol, e)

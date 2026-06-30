@@ -26,6 +26,13 @@ PAIRS_ENTRY_Z           |z| at/above which we open (default 2.0).
 PAIRS_EXIT_Z            |z| at/below which we exit (default 0.5).
 PAIRS_ATR_SL            Stop-loss = entry − k·ATR on the long leg (default 2.0).
 PAIRS_ATR_TP            Take-profit = entry + k·ATR on the long leg (default 3.0).
+PAIRS_BREAKDOWN_Z       |z| at/above which the spread is treated as BLOWN OUT —
+                        the relationship is diverging, not reverting, so we CUT
+                        the position instead of holding/adding (default 4.0 —
+                        a full 2σ of room past the 2.0 entry before cutting).
+PAIRS_BREAKDOWN_PVAL    Re-test Engle–Granger on a recent window; p above this
+                        means cointegration has decayed → cut (default 0.10).
+PAIRS_BREAKDOWN_LOOKBACK  Bars used for that recent re-test (default 90).
 """
 
 from __future__ import annotations
@@ -48,6 +55,11 @@ PAIRS_ENTRY_Z: float = float(os.environ.get("PAIRS_ENTRY_Z", "2.0"))
 PAIRS_EXIT_Z: float = float(os.environ.get("PAIRS_EXIT_Z", "0.5"))
 PAIRS_ATR_SL: float = float(os.environ.get("PAIRS_ATR_SL", "2.0"))
 PAIRS_ATR_TP: float = float(os.environ.get("PAIRS_ATR_TP", "3.0"))
+# Breakdown stop — the #1 risk in pairs is the relationship BREAKING (the spread
+# diverges and never reverts). These two independent triggers cut such a position.
+PAIRS_BREAKDOWN_Z: float = float(os.environ.get("PAIRS_BREAKDOWN_Z", "4.0"))
+PAIRS_BREAKDOWN_PVAL: float = float(os.environ.get("PAIRS_BREAKDOWN_PVAL", "0.10"))
+PAIRS_BREAKDOWN_LOOKBACK: int = int(os.environ.get("PAIRS_BREAKDOWN_LOOKBACK", "90"))
 
 
 # ── Data object ───────────────────────────────────────────────────────────────
@@ -106,6 +118,42 @@ def _confidence_from_z(z: float) -> float:
     return float(min(95.0, 55.0 + abs(z) * 12.0))
 
 
+def pair_breakdown(z: float, y_close=None, x_close=None) -> tuple[bool, str | None]:
+    """Has this pair's cointegration BROKEN? (the #1 way pairs trades lose).
+
+    Two independent triggers — either one cuts the position:
+      • spread blowout: |z| ≥ PAIRS_BREAKDOWN_Z — the spread has diverged far
+        past the entry extreme and is NOT reverting (the thesis is failing). This
+        also catches the long-only blind spot where our held leg is flat but the
+        *other* leg ran away, so the ATR stop never fires.
+      • cointegration decay: re-running Engle–Granger on the last
+        PAIRS_BREAKDOWN_LOOKBACK bars gives p > PAIRS_BREAKDOWN_PVAL — the
+        statistical relationship that justified the trade has weakened.
+
+    The price-series test is fail-open: any error → no breakdown signalled, so a
+    data hiccup can never force-close a position. Returns (cut?, reason).
+    """
+    # 1) spread blowout — primary, always available from z alone
+    if math.isfinite(z) and abs(z) >= PAIRS_BREAKDOWN_Z:
+        return True, (f"spread blowout |z|={abs(z):.2f} ≥ {PAIRS_BREAKDOWN_Z} "
+                      f"— diverging, not reverting")
+    # 2) cointegration decay — secondary, needs the two price series
+    if y_close is not None and x_close is not None:
+        try:
+            from app.services.cointegration import engle_granger_pvalue
+            n = PAIRS_BREAKDOWN_LOOKBACK
+            yc = list(y_close)[-n:]
+            xc = list(x_close)[-n:]
+            if len(yc) >= 60 and len(xc) >= 60 and len(yc) == len(xc):
+                p = engle_granger_pvalue(yc, xc)
+                if math.isfinite(p) and p > PAIRS_BREAKDOWN_PVAL:
+                    return True, (f"cointegration decay p={p:.3f} > "
+                                  f"{PAIRS_BREAKDOWN_PVAL} on last {n} bars")
+        except Exception:
+            pass
+    return False, None
+
+
 # ── Core evaluation ─────────────────────────────────────────────────────────
 
 def evaluate_pair(report, y_df, x_df) -> PairSignal | None:
@@ -146,6 +194,19 @@ def evaluate_pair(report, y_df, x_df) -> PairSignal | None:
             zscore=z, hedge_ratio=report.hedge_ratio, half_life=report.half_life,
             confidence=_confidence_from_z(z),
             reason=f"|z|={abs(z):.2f} ≤ exit_z={PAIRS_EXIT_Z} — reversion complete",
+        )
+
+    # ── Breakdown zone (checked before entry) ──
+    # A spread this far out is failing, not setting up: cut a held leg, and never
+    # OPEN here (this branch returns "exit", so compute_signals won't enter it).
+    broke, why = pair_breakdown(z, y_close, x_close)
+    if broke:
+        return PairSignal(
+            pair=pair_key, action="exit", long_symbol=None,
+            entry=0.0, stop_loss=0.0, take_profit=0.0,
+            zscore=z, hedge_ratio=report.hedge_ratio, half_life=report.half_life,
+            confidence=_confidence_from_z(z),
+            reason=f"breakdown — {why}",
         )
 
     # ── Entry zone ──
@@ -386,6 +447,7 @@ __all__ = [
     "PairSignal",
     "PAIRS_STRATEGY_ID",
     "PAIRS_TRADING_ENABLED",
+    "pair_breakdown",
     "evaluate_pair",
     "compute_signals",
     "run_pairs_cycle",
