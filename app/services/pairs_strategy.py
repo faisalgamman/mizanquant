@@ -60,6 +60,13 @@ PAIRS_ATR_TP: float = float(os.environ.get("PAIRS_ATR_TP", "3.0"))
 PAIRS_BREAKDOWN_Z: float = float(os.environ.get("PAIRS_BREAKDOWN_Z", "4.0"))
 PAIRS_BREAKDOWN_PVAL: float = float(os.environ.get("PAIRS_BREAKDOWN_PVAL", "0.10"))
 PAIRS_BREAKDOWN_LOOKBACK: int = int(os.environ.get("PAIRS_BREAKDOWN_LOOKBACK", "90"))
+# Kalman time-varying hedge ratio — adapts β to relationship drift instead of a
+# stale static OLS β. Drives the trading spread/z only; pair *identification*
+# (Engle-Granger) stays static. Fail-open to OLS, so it can never break a signal.
+PAIRS_KALMAN: bool = (
+    os.environ.get("PAIRS_KALMAN", "true").lower() not in ("false", "0", "no")
+)
+PAIRS_KALMAN_DELTA: float = float(os.environ.get("PAIRS_KALMAN_DELTA", "0.0001"))
 
 
 # ── Data object ───────────────────────────────────────────────────────────────
@@ -154,6 +161,26 @@ def pair_breakdown(z: float, y_close=None, x_close=None) -> tuple[bool, str | No
     return False, None
 
 
+def pairs_spread(y_close, x_close):
+    """Spread series that drives the trading z-score.
+
+    Kalman time-varying hedge ratio when PAIRS_KALMAN is on (adapts to drift),
+    else the static OLS spread. Fail-open: any Kalman error or a too-short result
+    falls back to the OLS spread, so the signal path can never break.
+    """
+    from app.services.cointegration import spread_series
+
+    if PAIRS_KALMAN:
+        try:
+            from app.services.kalman_hedge import kalman_spread_series
+            s = kalman_spread_series(y_close, x_close, delta=PAIRS_KALMAN_DELTA)
+            if s is not None and len(s) >= 60:
+                return s
+        except Exception:
+            pass
+    return spread_series(y_close, x_close)
+
+
 # ── Core evaluation ─────────────────────────────────────────────────────────
 
 def evaluate_pair(report, y_df, x_df) -> PairSignal | None:
@@ -167,7 +194,7 @@ def evaluate_pair(report, y_df, x_df) -> PairSignal | None:
 
     Returns a PairSignal, or None if data is insufficient.
     """
-    from app.services.cointegration import spread_series, spread_zscore
+    from app.services.cointegration import spread_zscore
 
     try:
         y_close = y_df["close"].astype(float).values
@@ -178,7 +205,7 @@ def evaluate_pair(report, y_df, x_df) -> PairSignal | None:
     if len(y_close) < 60 or len(x_close) < 60 or len(y_close) != len(x_close):
         return None
 
-    spread = spread_series(y_close, x_close)
+    spread = pairs_spread(y_close, x_close)
     z = spread_zscore(spread)
     if not math.isfinite(z):
         return None
@@ -448,6 +475,7 @@ __all__ = [
     "PAIRS_STRATEGY_ID",
     "PAIRS_TRADING_ENABLED",
     "pair_breakdown",
+    "pairs_spread",
     "evaluate_pair",
     "compute_signals",
     "run_pairs_cycle",

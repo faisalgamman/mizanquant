@@ -22,6 +22,14 @@ from app.services.cointegration import hedge_ratio
 from app.services.pairs_scanner import PairReport
 
 
+@pytest.fixture(autouse=True)
+def _static_spread(monkeypatch):
+    """Pin the entry/exit/breakdown LOGIC on the deterministic static OLS spread —
+    the synthetic pairs below are calibrated to it. The Kalman time-varying
+    estimator has its own coverage in test_kalman_hedge.py."""
+    monkeypatch.setattr("app.services.pairs_strategy.PAIRS_KALMAN", False)
+
+
 # ── synthetic OHLC builders ───────────────────────────────────────────────────
 
 def _ohlc(close: np.ndarray) -> pd.DataFrame:

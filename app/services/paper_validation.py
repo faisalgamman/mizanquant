@@ -669,8 +669,8 @@ def mature_pairs_paper_trades() -> dict:
     cap. The exit reason is stored on signal_details for later attribution."""
     from app.services.market_data import fetch as fetch_market_data
     from app.services.signal_tracker import _simulate_fixed_exit
-    from app.services.cointegration import spread_series, spread_zscore
-    from app.services.pairs_strategy import PAIRS_EXIT_Z, pair_breakdown
+    from app.services.cointegration import spread_zscore
+    from app.services.pairs_strategy import PAIRS_EXIT_Z, pair_breakdown, pairs_spread
 
     hold_days = int(os.environ.get("PAIRS_MAX_HOLD_DAYS", "30"))
     db = SessionLocal()
@@ -719,7 +719,7 @@ def mature_pairs_paper_trades() -> dict:
                                            xdf["close"].reset_index(drop=True).rename("x")],
                                           axis=1).dropna()
                             if len(j) > 60:
-                                spr = spread_series(j["y"].tolist(), j["x"].tolist())
+                                spr = pairs_spread(j["y"].tolist(), j["x"].tolist())
                                 z_now = spread_zscore(spr)
                                 broke, broke_why = pair_breakdown(
                                     z_now, j["y"].tolist(), j["x"].tolist())
