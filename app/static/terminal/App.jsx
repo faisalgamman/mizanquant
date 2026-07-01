@@ -121,6 +121,9 @@ function App() {
         breadth:    num((mc.breadth && mc.breadth.breadth_pct) ?? mc.breadth),
         credit:     num((mc.credit && mc.credit.ratio) ?? mc.credit),
         liquidity:  num((mc.liquidity && mc.liquidity.liquidity_pct) ?? mc.liquidity),
+        gold_price:  num(mc.gold_price),
+        gold_trend:  mc.gold_trend || null,
+        gold_signal: mc.gold_signal || null,
         market_open: mc._market_open ?? false,
       });
 

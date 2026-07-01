@@ -274,9 +274,15 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   else tiles.push({ icon: "📈", label: "Market regime", value: "—", sub: "SPY trend", status: "neutral" });
   if (fcForChip) {
     const up = fcForChip.expected_change_pct >= 0;
+    // Judge by PROBABILITY of profit, not the sign of the expected move: a 48-52%
+    // forecast is a coin-flip (no edge) and must NOT count as a "why buy". Only a
+    // real edge (>55%) is good; a real negative edge (<45%) is a caution.
+    const pp = fcForChip.prob_profit_pct;
+    const fcStatus = pp == null ? (up ? "good" : "warn")
+                   : pp >= 55 ? "good" : pp < 45 ? "warn" : "neutral";
     tiles.push({ icon: "🔮", label: "Forecast 20d", value: `${up ? "+" : ""}${Number(fcForChip.expected_change_pct).toFixed(1)}%`,
-                 sub: fcForChip.prob_profit_pct != null ? `${fcForChip.prob_profit_pct}% prob profit` : "probabilistic",
-                 status: up ? "good" : "warn" });
+                 sub: pp != null ? `${pp}% prob profit` : "probabilistic",
+                 status: fcStatus });
   } else {
     tiles.push({ icon: "🔮", label: "Forecast", value: "—", sub: "loading", status: "neutral" });
   }
@@ -322,16 +328,27 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   }
   const _headBuy = /(?:BUY|STRONG)/i.test(headVerdict);
 
+  // SEVERE single signals that should temper a BUY on their own, not only when ≥2
+  // pile up: an insider dumping a big slice of their OWN stake, or revenue falling
+  // hard (a −23% top line is "weak" no matter what the blended fundamental score says).
+  const _bigInsiderDump = !!(ins && ins.heavy_sell && ins.top_seller
+                             && Number(ins.top_seller.pct_of_stake) >= 15);
+  const _revCrash = !!(fund && fund.revenue_growth != null && Number(fund.revenue_growth) <= -15);
+
   const _redFlags = [
-    nWatch > nGood, fund && fund.weak, ana && ana.bearish, _fcNeg,
+    nWatch > nGood, (fund && fund.weak) || _revCrash, ana && ana.bearish, _fcNeg,
     mkt && mkt.spy_bearish, ins && ins.heavy_sell, earn && earn.within_blackout,
   ].filter(Boolean).length;
   let dispVerdict = headVerdict, guardNote = "";
   // The equity verdict-guard doesn't apply to gold (its verdict is already a pure
   // technical read, not a momentum-vs-fundamentals contradiction).
-  if (!goldEtf && _headBuy && _redFlags >= 2) {
-    dispVerdict = _redFlags >= 3 ? "CAUTION" : (headVerdict === "STRONG BUY" ? "BUY" : "CAUTION");
-    guardNote = `Momentum-driven — ${_redFlags} signals disagree (fundamentals · forecast · analysts · regime). The high score is recent price thrust, not high conviction.`;
+  if (!goldEtf && _headBuy && (_redFlags >= 2 || _bigInsiderDump)) {
+    const _severe = _bigInsiderDump || _redFlags >= 3;
+    dispVerdict = _severe ? "CAUTION" : (headVerdict === "STRONG BUY" ? "BUY" : "CAUTION");
+    const _rz = [];
+    if (_bigInsiderDump) _rz.push(`insider sold ${Math.round(Number(ins.top_seller.pct_of_stake))}% of stake`);
+    if (_revCrash) _rz.push(`revenue ${Number(fund.revenue_growth)}%`);
+    guardNote = `Momentum-driven — ${_redFlags} signals disagree${_rz.length ? " (" + _rz.join(" · ") + ")" : " (fundamentals · forecast · analysts · regime)"}. The high score is recent price thrust, not high conviction.`;
   }
   const _dispBuy = dispVerdict !== "CAUTION" && /(?:BUY|STRONG)/i.test(dispVerdict);
   const vColor = dispVerdict.includes("SELL") ? "var(--negative)"

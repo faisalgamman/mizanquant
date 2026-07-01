@@ -207,6 +207,10 @@ async def _get_market():
         sectors = []
 
     context["_market_open"] = status.get("market_open", False)
+    # Gold macro signal lives on the flat market STATUS — thread it onto the bundle
+    # the dashboard reads, else the top strip + market panel show "—".
+    for _k in ("gold_price", "gold_trend", "gold_signal", "gold_change_20d_pct"):
+        context[_k] = status.get(_k)
     context["_sectors"] = sectors
     return context
 
