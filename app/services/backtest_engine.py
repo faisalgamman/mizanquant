@@ -86,21 +86,18 @@ def _metrics(port, spy, rebalance_days: int) -> dict:
     }
 
 
-def _permutation_pvalue(port, spy, iters: int = 500, seed: int = 7) -> float | None:
-    """Is the mean alpha better than shuffling which forward return each pick got?
-    Reassign returns at random and see how often the shuffled mean alpha ≥ actual."""
-    p = np.asarray(port, dtype=float)
-    s = np.asarray(spy, dtype=float)
-    n = len(p)
+def _bootstrap_alpha_pvalue(port, spy, iters: int = 2000, seed: int = 7) -> float | None:
+    """Is the per-rebalance alpha RELIABLY positive? Bootstrap-resample the alpha
+    series and return the fraction of resamples whose mean ≤ 0 (low = a positive
+    edge that survives resampling; a raw permutation of returns is mean-invariant
+    and would be useless here)."""
+    a = np.asarray(port, dtype=float) - np.asarray(spy, dtype=float)
+    n = len(a)
     if n < 5:
         return None
-    actual = float((p - s).mean())
     rng = np.random.default_rng(seed)
-    ge = 0
-    for _ in range(iters):
-        if float((rng.permutation(p) - s).mean()) >= actual:
-            ge += 1
-    return round((ge + 1) / (iters + 1), 4)
+    le = sum(1 for _ in range(iters) if float(rng.choice(a, n, replace=True).mean()) <= 0.0)
+    return round(le / iters, 4)
 
 
 # ── data + engine ────────────────────────────────────────────────────────────
@@ -169,7 +166,7 @@ def run_backtest(symbols, factor_fn, *, spy="SPY", rebalance_days: int = 20,
 
     rep = _metrics(port, spy_ret, rebalance_days)
     rep["rebalances"] = n_rebal
-    rep["perm_pvalue"] = _permutation_pvalue(port, spy_ret)
+    rep["alpha_boot_p"] = _bootstrap_alpha_pvalue(port, spy_ret)
     return rep
 
 
