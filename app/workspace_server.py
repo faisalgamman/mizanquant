@@ -3426,7 +3426,9 @@ def _sentiment_score(symbol: str, info: dict | None = None) -> dict:
     Never raises — returns neutral (10) on any failure.
     """
     from app.services.sentiment_engine import get_sentiment_score
-    return get_sentiment_score(symbol, info)
+    # Shortlist path (deep-picks enrichment) → allow the finance-aware LLM sentiment
+    # (cached, fail-open to VADER). The bulk universe scan never reaches here.
+    return get_sentiment_score(symbol, info, use_llm=True)
 
 
 def _analyze_smart(symbol: str, watchlist_set: set | None = None, spy_df: pd.DataFrame | None = None) -> dict | None:

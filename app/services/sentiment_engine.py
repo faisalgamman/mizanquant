@@ -46,10 +46,12 @@ def _safe_float(val, default=0.0):
 def get_sentiment_score(
     symbol: str,
     info: dict | None = None,
+    use_llm: bool = False,
 ) -> dict:
     """Composite sentiment score 0-20.
 
-    10 pts from VADER on recent news headlines (FMP → yfinance fallback).
+    10 pts from news sentiment on recent headlines — a finance-aware LLM score when
+    ``use_llm`` (shortlist paths only) with a VADER fallback, else VADER.
     10 pts from analyst consensus (recommendation key + price target upside).
     Never raises — returns neutral on any failure.
 
@@ -106,9 +108,24 @@ def get_sentiment_score(
             details.setdefault("news_source", "alpaca")
 
         if headlines:
-            sia = SentimentIntensityAnalyzer()
-            compounds = [sia.polarity_scores(h)["compound"] for h in headlines]
-            compound = float(np.mean(compounds))
+            compound = None
+            # Finance-aware LLM sentiment (shortlist only) — reuses the fetched
+            # headlines; falls back to VADER on any miss so it can't break scoring.
+            if use_llm:
+                try:
+                    from app.services.llm_sentiment import llm_news_sentiment
+                    llm = llm_news_sentiment(symbol, headlines)
+                    if llm is not None:
+                        compound = float(llm["score"])
+                        details["news_method"] = "llm"
+                        details["news_why"] = llm.get("why", "")
+                except Exception:
+                    compound = None
+            if compound is None:
+                sia = SentimentIntensityAnalyzer()
+                compounds = [sia.polarity_scores(h)["compound"] for h in headlines]
+                compound = float(np.mean(compounds))
+                details.setdefault("news_method", "vader")
             news_score = max(0, min(10, int((compound + 1.0) / 2.0 * 10)))
             details["news_compound"] = round(compound, 3)
             details["headlines_analyzed"] = len(headlines)
