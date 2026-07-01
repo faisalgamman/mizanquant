@@ -290,7 +290,8 @@ def mature_open_paper_trades() -> dict:
                 # (b) Full exit
                 exit_reason = None
                 if SMART_EXIT:
-                    sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
+                    be = bool((t.signal_details or {}).get("tp1_taken"))  # remainder rides at break-even
+                    sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days, breakeven=be)
                     if sim is None:
                         continue  # not matured yet
                     ret_pct, exit_price, exit_reason = sim

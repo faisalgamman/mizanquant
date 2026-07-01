@@ -193,7 +193,7 @@ def run_auto_paper(scanner: str = "weekly", *, _broker=None, _picks_fn=None, _su
 # the monitor only ADDS what the bracket can't do: a trailing stop, a technical-
 # weakening exit, and a time backstop. We never act on a "stop" trigger — that's
 # the broker bracket's job — only on these.
-_SMART_EXIT_ACT = {"trailing", "weakening", "time"}
+_SMART_EXIT_ACT = {"trailing", "weakening", "time", "breakdown", "breakeven"}
 
 
 def _open_manual_entries() -> dict:
@@ -386,8 +386,9 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
             dfi = compute_exit_indicators(df)
             post = post_entry_bars(dfi, created_at, hold_days + 5)
 
+            already_partial = _recent_partial_taken(sym)
             # (a) Partial take-profit — bank a slice once (de-duped via the ledger).
-            if EXIT_TP_ENABLED and not _recent_partial_taken(sym):
+            if EXIT_TP_ENABLED and not already_partial:
                 hit = partial_tp_hit(post, entry, EXIT_TP1_PCT)
                 if hit is not None:
                     sell_qty = int(qty * EXIT_TP1_FRACTION)
@@ -397,9 +398,10 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
                         continue
 
             # (b) Full exit. A legacy (un-bracketed) position has NO broker stop, so
-            # act on the catastrophe stop too; auto_paper brackets own their own stop.
+            # act on the price stop too; auto_paper brackets own their own stop. After
+            # a partial the remainder's stop is at break-even.
             act = _SMART_EXIT_ACT | ({"stop"} if not bracketed else set())
-            decision = live_exit_decision(post, entry, stop_pct=stop_pct,
+            decision = live_exit_decision(post, entry, stop_pct=stop_pct, breakeven=already_partial,
                                           hold_days=(hold_days if bracketed else None))
             if decision is None:
                 continue

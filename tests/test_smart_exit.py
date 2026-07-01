@@ -27,16 +27,17 @@ def _bars(rows: list[dict]) -> pd.DataFrame:
 # ── 1. catastrophe stop ───────────────────────────────────────────────────────
 
 def test_catastrophe_stop_fires():
+    # No ATR column → the base 15% stop is capped by the −10% safety net.
     post = _bars([
         {"close": 98, "high": 99, "low": 97},
-        {"close": 90, "high": 92, "low": 88},
-        {"close": 84, "high": 86, "low": 83},   # low 83 ≤ 85 stop
+        {"close": 90, "high": 92, "low": 88},   # low 88 ≤ 90 (10% safety net)
+        {"close": 84, "high": 86, "low": 83},
     ])
     res = simulate_smart_exit(post, 100.0, stop_pct=15, hold_days=20)
     assert res is not None
     ret, price, reason = res
     assert reason == "stop"
-    assert price == 85.0 and ret == -15.0
+    assert price == 90.0 and ret == -10.0
 
 
 # ── 2. trailing stop locks a runner ───────────────────────────────────────────
@@ -186,7 +187,7 @@ def test_live_trailing_locks_current_price_off_peak():
 def test_live_catastrophe_stop_current_bar():
     post = _bars([{"close": 95, "high": 96, "low": 94}, {"close": 86, "high": 88, "low": 84}])
     out = live_exit_decision(post, 100.0, stop_pct=15, hold_days=None)
-    assert out is not None and out[0] == "stop" and out[1] == 85.0
+    assert out is not None and out[0] == "stop" and out[1] == 90.0   # 10% safety net
 
 
 def test_live_weakening_on_latest_bar():
@@ -222,3 +223,34 @@ def test_partial_tp_holds_below_target():
 def test_partial_tp_guards_bad_input():
     assert partial_tp_hit(None, 100.0) is None
     assert partial_tp_hit(_bars([{"close": 110, "high": 111, "low": 109}]), 0.0) is None
+
+
+# ── 10. loss discipline: ATR stop + safety net + breakdown + break-even ───────
+
+def test_effective_stop_is_atr_scaled_and_clamped():
+    from app.services.smart_exit import _effective_stop_pct
+    assert _effective_stop_pct(_bars([{"close": 100, "high": 100, "low": 100, "_atr_pct": 1.0}]), 15) == 5.0   # 2.5·1 → min 5
+    assert _effective_stop_pct(_bars([{"close": 100, "high": 100, "low": 100, "_atr_pct": 3.0}]), 15) == 7.5   # 2.5·3 in range
+    assert _effective_stop_pct(_bars([{"close": 100, "high": 100, "low": 100, "_atr_pct": 6.0}]), 15) == 10.0  # 2.5·6 → max 10 (safety net)
+
+
+def test_safety_net_caps_stop_without_atr():
+    from app.services.smart_exit import _effective_stop_pct
+    assert _effective_stop_pct(_bars([{"close": 100, "high": 100, "low": 100}]), 15) == 10.0   # no ATR → capped at 10
+
+
+def test_technical_breakdown_cuts_a_loser():
+    # Down only −4% but the thesis broke (close < EMA20 AND MACD < 0) → cut now,
+    # don't wait for the price stop.
+    post = _bars([{"close": 96, "high": 97, "low": 95, "_ema20": 100, "_macd_hist": -0.3}])
+    out = live_exit_decision(post, 100.0, stop_pct=15, hold_days=None)
+    assert out is not None and out[0] == "breakdown" and out[1] == 96.0 and out[2] == -4.0
+
+
+def test_breakeven_stop_after_partial():
+    # After a partial (breakeven=True), a pullback to entry exits flat, not at a loss.
+    post = _bars([{"close": 100, "high": 101, "low": 99}])
+    out = live_exit_decision(post, 100.0, stop_pct=15, hold_days=None, breakeven=True)
+    assert out is not None and out[0] == "breakeven" and out[2] == 0.0
+    # without breakeven the 10% stop is far below → hold
+    assert live_exit_decision(post, 100.0, stop_pct=15, hold_days=None, breakeven=False) is None
