@@ -27,6 +27,17 @@ logger = logging.getLogger("screener")
 
 from app.services.scheduler_metrics import scheduler_metrics
 
+
+def _smart_exit_monitor_bg():
+    """Run the IBKR-paper smart-exit monitor OFF the scheduler thread (48 positions
+    × a fetch each can take a while — never block the loop). The monitor self-gates
+    on AUTO_PAPER_TRADE + paper-only and never raises."""
+    try:
+        from app.services.auto_paper import run_smart_exit_monitor
+        logger.info("Smart-exit monitor: %s", run_smart_exit_monitor())
+    except Exception as e:
+        logger.error("Smart-exit monitor failed: %s", e, exc_info=True)
+
 _scheduler_thread = None
 _scheduler_running = False
 
@@ -246,6 +257,7 @@ def _scheduler_loop():
     last_pipeline_full = ""
     last_paper_record = ""
     last_paper_mature = ""
+    last_smart_exit_intraday = ""   # 30-min slot key, market hours
     last_paper_rebalance = ""  # YYYY-MM — monthly composite rebalance (fires 1st trading day)
     last_halal_rescreen = ""   # YYYY-MM — monthly AAOIFI financial re-screen of the universe
     last_weight_fit = ""       # YYYY-MM — monthly Chan walk-forward composite-weight fit (auto-adopt)
@@ -487,6 +499,19 @@ def _scheduler_loop():
                 except Exception as e:
                     logger.warning('Scheduler: screener warm failed: %s', e)
 
+            # Intraday smart-exit monitor — cut losers / bank partials DURING the
+            # session (ATR stop, technical breakdown, trailing, partial TP) instead
+            # of waiting for the 17:00 close, since the legacy broker positions have
+            # no intraday stop order. Every 30 min in market hours; threaded so it
+            # never blocks the loop; self-gates on AUTO_PAPER_TRADE.
+            if (os.environ.get("SMART_EXIT_INTRADAY", "true").lower() not in ("false", "0", "no")
+                    and _is_market_hours(now)):
+                _se_slot = f"{today_str}:{now.hour}:{'30' if now.minute >= 30 else '00'}"
+                if last_smart_exit_intraday != _se_slot:
+                    last_smart_exit_intraday = _se_slot
+                    threading.Thread(target=_smart_exit_monitor_bg, daemon=True,
+                                     name="smart-exit-intraday").start()
+
             # Intraday screener re-warm — keep the dashboard fresh without a redeploy.
             # Gentle cadence (every ~2h in market hours) — the 650-symbol scan is heavy, so NOT more often.
             if (_is_weekday(now) and not _is_market_holiday(now) and now.hour in (11, 13, 15)
@@ -646,14 +671,10 @@ def _scheduler_loop():
                     mature_open_paper_trades()
                 except Exception as e:
                     logger.error(f"Paper validation mature failed: {e}", exc_info=True)
-                # Smart-exit the live IBKR-paper positions on the day's close:
-                # trailing / technical-weakening / time exits (the broker bracket
-                # already owns the catastrophe stop + fixed TP). PAPER-ONLY, opt-in.
-                try:
-                    from app.services.auto_paper import run_smart_exit_monitor
-                    logger.info("Smart-exit monitor: %s", run_smart_exit_monitor())
-                except Exception as e:
-                    logger.error(f"Smart-exit monitor failed: {e}", exc_info=True)
+                # Smart-exit the live IBKR-paper positions on the day's close
+                # (the intraday pass below handles the session). PAPER-ONLY, opt-in.
+                threading.Thread(target=_smart_exit_monitor_bg, daemon=True,
+                                 name="smart-exit-close").start()
 
             # --- MONTHLY COMPOSITE REBALANCE (simulated ledger "PVM") ---
             # Fires on the FIRST trading day of each month at ~09:30 ET: the
