@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from app.services.smart_exit import (
-    compute_exit_indicators, live_exit_decision, post_entry_bars, simulate_smart_exit)
+    compute_exit_indicators, live_exit_decision, partial_tp_hit, post_entry_bars, simulate_smart_exit)
 
 
 def _bars(rows: list[dict]) -> pd.DataFrame:
@@ -203,3 +203,22 @@ def test_live_time_backstop_optional():
     assert live_exit_decision(flat, 100.0, stop_pct=15, hold_days=None) is None   # disabled
     out = live_exit_decision(flat, 100.0, stop_pct=15, hold_days=3)               # enabled
     assert out is not None and out[0] == "time"
+
+
+# ── 9. partial take-profit trigger ────────────────────────────────────────────
+
+def test_partial_tp_fires_at_target():
+    post = _bars([{"close": 103, "high": 104, "low": 102},
+                  {"close": 107, "high": 108, "low": 106}])   # +7% latest
+    hit = partial_tp_hit(post, 100.0, tp1_pct=6)
+    assert hit is not None and hit[0] == 107.0 and hit[1] == 7.0
+
+
+def test_partial_tp_holds_below_target():
+    post = _bars([{"close": 104, "high": 105, "low": 103}])   # +4% < 6%
+    assert partial_tp_hit(post, 100.0, tp1_pct=6) is None
+
+
+def test_partial_tp_guards_bad_input():
+    assert partial_tp_hit(None, 100.0) is None
+    assert partial_tp_hit(_bars([{"close": 110, "high": 111, "low": 109}]), 0.0) is None

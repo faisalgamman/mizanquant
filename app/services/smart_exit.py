@@ -36,9 +36,30 @@ EXIT_TECH_WEAKENING: bool = (
     os.environ.get("EXIT_TECH_WEAKENING", "true").lower() not in ("false", "0", "no")
 )
 EXIT_TECH_MIN_PROFIT_PCT: float = float(os.environ.get("EXIT_TECH_MIN_PROFIT_PCT", "3"))  # only protect a real gain
+# Partial take-profit (scale-out): lock a slice of a winner at a modest target,
+# then let the rest ride the trailing/weakening exit — banks profit early without
+# capping the big winners a pure trailing stop is there to catch.
+EXIT_TP_ENABLED: bool = os.environ.get("EXIT_TP_ENABLED", "true").lower() not in ("false", "0", "no")
+EXIT_TP1_PCT: float = float(os.environ.get("EXIT_TP1_PCT", "6"))        # lock once +6%
+EXIT_TP1_FRACTION: float = float(os.environ.get("EXIT_TP1_FRACTION", "0.5"))  # sell half
 
 __all__ = ["SMART_EXIT", "compute_exit_indicators", "simulate_smart_exit",
-           "live_exit_decision", "post_entry_bars"]
+           "live_exit_decision", "post_entry_bars", "partial_tp_hit",
+           "EXIT_TP_ENABLED", "EXIT_TP1_PCT", "EXIT_TP1_FRACTION"]
+
+
+def partial_tp_hit(post_bars, entry_price: float, tp1_pct: float = EXIT_TP1_PCT):
+    """Is the position AT/ABOVE its take-profit target now? (forward — latest bar).
+
+    Returns ``(price, ret_pct)`` at the current price when the gain ≥ tp1_pct, else
+    None. The caller sells a fraction and marks the partial taken so it fires once.
+    """
+    if entry_price <= 0 or post_bars is None or len(post_bars) == 0:
+        return None
+    close = float(post_bars["close"].iloc[-1])
+    if close >= entry_price * (1.0 + tp1_pct / 100.0):
+        return round(close, 2), round((close / entry_price - 1.0) * 100.0, 2)
+    return None
 
 
 def post_entry_bars(df, created_at, tail: int = 25):

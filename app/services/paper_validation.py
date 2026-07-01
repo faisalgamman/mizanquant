@@ -213,17 +213,50 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
         db.close()
 
 
-def mature_open_paper_trades() -> dict:
-    """Close any open PV (weekly swing) trade whose exit has fired.
+def _split_partial(db, t, price: float, fraction: float) -> bool:
+    """Bank ``fraction`` of an open position at ``price``: record the sold slice as
+    a CLOSED trade, shrink the open row to the remainder, and mark ``tp1_taken`` so
+    the partial fires exactly once. The remainder keeps riding the smart exit."""
+    try:
+        entry = float(t.entry_price or 0)
+        full_qty = float(t.qty or 0)
+        sold = round(full_qty * float(fraction), 6)
+        remain = round(full_qty - sold, 6)
+        if entry <= 0 or sold <= 0 or remain <= 0:
+            return False
+        db.add(TradeHistory(
+            strategy_id=t.strategy_id, symbol=t.symbol, side=t.side or "buy",
+            qty=sold, entry_price=entry, exit_price=round(price, 4),
+            pnl=round((price - entry) * sold, 2),
+            pnl_pct=round((price / entry - 1.0) * 100.0, 4),
+            position_value=round(sold * entry, 2),
+            stop_loss=t.stop_loss, take_profit=t.take_profit,
+            created_at=t.created_at, closed_at=_utc_now(), status="closed",
+            signal_details={**(t.signal_details or {}), "exit_reason": "tp1_partial", "partial": True},
+        ))
+        t.qty = remain
+        t.position_value = round(remain * entry, 2)
+        sd = dict(t.signal_details or {})
+        sd["tp1_taken"] = True
+        t.signal_details = sd
+        return True
+    except Exception as e:
+        logger.debug("partial split failed for %s: %s", getattr(t, "symbol", "?"), e)
+        return False
 
-    With SMART_EXIT on (default) this is the smart-exit policy — catastrophe stop,
-    trailing stop (locks a runner), technical-weakening exit (sells a winner whose
-    chart rolls over), and a time backstop. With it off, the legacy Option-A
-    fixed-stop/time exit. The trigger reason is stored on signal_details."""
+
+def mature_open_paper_trades() -> dict:
+    """Close/scale open PV (weekly swing) trades whose exit has fired.
+
+    With SMART_EXIT on (default): a partial take-profit banks a slice at +EXIT_TP1_PCT
+    (keeps the rest riding), then the full exit — catastrophe stop, trailing stop,
+    technical-weakening, time backstop. With it off, the legacy fixed-stop/time exit.
+    Trigger reasons are stored on signal_details."""
     from app.services.market_data import fetch as fetch_market_data
     from app.services.signal_tracker import _simulate_fixed_exit
     from app.services.smart_exit import (
-        SMART_EXIT, compute_exit_indicators, simulate_smart_exit, post_entry_bars)
+        SMART_EXIT, compute_exit_indicators, simulate_smart_exit, post_entry_bars,
+        partial_tp_hit, EXIT_TP_ENABLED, EXIT_TP1_PCT, EXIT_TP1_FRACTION)
 
     hold_days = int(os.environ.get("EXIT_HOLD_DAYS", getattr(settings, "SWING_MAX_HOLD_DAYS", 20)))
     stop_pct = float(os.environ.get("EXIT_STOP_PCT", getattr(settings, "SWING_TRAIL_PCT", 15.0)))
@@ -234,7 +267,7 @@ def mature_open_paper_trades() -> dict:
             TradeHistory.strategy_id == PV_STRATEGY,
             TradeHistory.pnl_pct.is_(None),
         ).all()
-        checked = closed = 0
+        checked = closed = partial = 0
         for t in open_trades:
             checked += 1
             try:
@@ -244,16 +277,24 @@ def mature_open_paper_trades() -> dict:
                 df = fetch_market_data(t.symbol, period="6mo")
                 if df is None or len(df) == 0:
                     continue
+                dfi = compute_exit_indicators(df) if SMART_EXIT else df
+                post = post_entry_bars(dfi, t.created_at, hold_days + 5)
+
+                # (a) Partial take-profit — bank a slice at the target, let the rest ride.
+                if SMART_EXIT and EXIT_TP_ENABLED and not (t.signal_details or {}).get("tp1_taken"):
+                    hit = partial_tp_hit(post, entry, EXIT_TP1_PCT)
+                    if hit is not None and _split_partial(db, t, float(hit[0]), EXIT_TP1_FRACTION):
+                        partial += 1
+                        continue  # remainder stays open, re-checked next run
+
+                # (b) Full exit
                 exit_reason = None
                 if SMART_EXIT:
-                    dfi = compute_exit_indicators(df)
-                    post = post_entry_bars(dfi, t.created_at, hold_days + 5)
                     sim = simulate_smart_exit(post, entry, stop_pct=stop_pct, hold_days=hold_days)
                     if sim is None:
                         continue  # not matured yet
                     ret_pct, exit_price, exit_reason = sim
                 else:
-                    post = post_entry_bars(df, t.created_at, hold_days + 5)
                     sim = _simulate_fixed_exit(post, entry, hold_days, stop_pct, is_sell=False)
                     if sim is None:
                         continue  # not matured yet
@@ -274,7 +315,7 @@ def mature_open_paper_trades() -> dict:
             except Exception as e:  # one bad symbol must not abort the batch
                 logger.debug("paper_validation mature %s failed: %s", t.symbol, e)
         db.commit()
-        return {"checked": checked, "closed": closed}
+        return {"checked": checked, "closed": closed, "partial": partial}
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("paper_validation mature failed: %s", e)
