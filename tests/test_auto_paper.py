@@ -83,26 +83,29 @@ def test_skips_already_auto_placed_today(monkeypatch):
 
 # ── smart-exit monitor (IBKR-paper position manager) ─────────────────────────
 
+
+
 class _FakeExitBroker:
-    def __init__(self, held=(), orders=()):
-        self._held = list(held)
+    """Broker double whose positions are the ACTUAL holdings (symbol/qty/avg cost)."""
+    def __init__(self, positions=(), orders=()):
+        self._positions = [dict(p) for p in positions]
         self._orders = list(orders)
-        self.canceled = []
-        self.closed = []
+        self.canceled, self.closed, self.sold = [], [], []
 
     def get_positions(self, strategy_id=None):
-        return [{"symbol": s} for s in self._held]
+        return [dict(p) for p in self._positions]
 
     def get_orders(self, status="all", strategy_id=None):
         return list(self._orders)
 
     def cancel_order(self, order_id, strategy_id=None):
-        self.canceled.append(order_id)
-        return True
+        self.canceled.append(order_id); return True
 
     def close_position(self, symbol, strategy_id=None):
-        self.closed.append(symbol)
-        return {"id": "close-" + symbol}
+        self.closed.append(symbol); return {"id": "close-" + symbol}
+
+    def submit_order(self, payload, strategy_id=None):
+        self.sold.append(payload); return {"id": "sell-" + payload["symbol"]}
 
 
 def _exit_bars(rows):
@@ -111,8 +114,17 @@ def _exit_bars(rows):
     return pd.DataFrame([{"close": c, "high": h, "low": l} for c, h, l in rows], index=idx)
 
 
-_RUNNER = [(102, 103, 101), (108, 109, 107), (115, 116, 114), (120, 121, 119), (113, 114, 112)]
-_STOPPED = [(98, 99, 97), (84, 86, 83)]
+def _pos(sym, qty, avg):
+    return {"symbol": sym, "qty": str(qty), "avg_entry_price": str(avg), "side": "long" if qty >= 0 else "short"}
+
+
+_RUNNER = [(102, 103, 101), (108, 109, 107), (115, 116, 114), (120, 121, 119), (113, 114, 112)]  # +13%, off a +21% peak
+_STOPPED = [(98, 99, 97), (84, 86, 83)]  # low 83 <= 85 catastrophe stop
+
+
+def _no_db(monkeypatch):
+    monkeypatch.setattr(ap, "_record_broker_exit", lambda *a, **k: None)
+    monkeypatch.setattr(ap, "_recent_partial_taken", lambda *a, **k: False)
 
 
 def test_smart_exit_monitor_disabled(monkeypatch):
@@ -124,32 +136,60 @@ def test_smart_exit_monitor_aborts_when_not_paper(monkeypatch):
     monkeypatch.setenv("AUTO_PAPER_TRADE", "true")
     monkeypatch.setattr("app.services.broker.ibkr_config.get_ibkr_config", lambda: _LIVE)
     out = ap.run_smart_exit_monitor(
-        _broker=_FakeExitBroker(held=["AAA"]),
-        _entries_fn=lambda: {"AAA": (100.0, None)}, _bars_fn=lambda s: _exit_bars(_RUNNER))
+        _broker=_FakeExitBroker(positions=[_pos("AAA", 100, 100)]),
+        _entries_fn=lambda: {}, _bars_fn=lambda s: _exit_bars(_RUNNER))
     assert out["status"] == "aborted" and out["reason"] == "not_paper"
 
 
-def test_smart_exit_monitor_flattens_runner(monkeypatch):
+def test_partial_taken_on_broker_winner(monkeypatch):
+    # A legacy broker winner (avg cost 100, now +13%, no ledger row) → sell half.
     monkeypatch.setenv("AUTO_PAPER_TRADE", "true")
     monkeypatch.setattr("app.services.broker.ibkr_config.get_ibkr_config", lambda: _PAPER)
-    marks = []
-    monkeypatch.setattr(ap, "_mark_manual_closed", lambda *a, **k: marks.append(a))
-    br = _FakeExitBroker(held=["AAA"], orders=[{"id": "O1", "symbol": "AAA"}])
-    out = ap.run_smart_exit_monitor(
-        _broker=br, _entries_fn=lambda: {"AAA": (100.0, None)}, _bars_fn=lambda s: _exit_bars(_RUNNER))
-    assert out["status"] == "ok" and out["closed"] == 1
-    assert out["exits"][0]["reason"] == "trailing" and out["exits"][0]["ret_pct"] > 0
-    assert br.canceled == ["O1"]   # bracket leg canceled BEFORE the flatten
-    assert br.closed == ["AAA"]
-    assert len(marks) == 1
+    _no_db(monkeypatch)
+    br = _FakeExitBroker(positions=[_pos("AAA", 100, 100)])
+    out = ap.run_smart_exit_monitor(_broker=br, _entries_fn=lambda: {}, _bars_fn=lambda s: _exit_bars(_RUNNER))
+    assert out["partial"] == 1 and out["closed"] == 0
+    assert br.sold and int(br.sold[0]["qty"]) == 50 and br.sold[0]["side"] == "sell"
+    assert br.closed == []                       # partial only — not flattened
 
 
-def test_smart_exit_monitor_skips_catastrophe_stop(monkeypatch):
-    # A "stop" trigger is the broker bracket's job — the monitor must NOT act.
+def test_full_trailing_exit_when_partial_already_taken(monkeypatch):
     monkeypatch.setenv("AUTO_PAPER_TRADE", "true")
     monkeypatch.setattr("app.services.broker.ibkr_config.get_ibkr_config", lambda: _PAPER)
-    monkeypatch.setattr(ap, "_mark_manual_closed", lambda *a, **k: None)
-    br = _FakeExitBroker(held=["AAA"], orders=[{"id": "O1", "symbol": "AAA"}])
+    monkeypatch.setattr(ap, "_record_broker_exit", lambda *a, **k: None)
+    monkeypatch.setattr(ap, "_recent_partial_taken", lambda *a, **k: True)   # already scaled out
+    br = _FakeExitBroker(positions=[_pos("AAA", 100, 100)], orders=[{"id": "O1", "symbol": "AAA"}])
+    out = ap.run_smart_exit_monitor(_broker=br, _entries_fn=lambda: {}, _bars_fn=lambda s: _exit_bars(_RUNNER))
+    assert out["closed"] == 1 and out["exits"][0]["reason"] == "trailing"
+    assert br.canceled == ["O1"] and br.closed == ["AAA"]
+
+
+def test_short_positions_are_skipped(monkeypatch):
+    monkeypatch.setenv("AUTO_PAPER_TRADE", "true")
+    monkeypatch.setattr("app.services.broker.ibkr_config.get_ibkr_config", lambda: _PAPER)
+    _no_db(monkeypatch)
+    br = _FakeExitBroker(positions=[_pos("SHT", -50, 100)])
+    out = ap.run_smart_exit_monitor(_broker=br, _entries_fn=lambda: {}, _bars_fn=lambda s: _exit_bars(_RUNNER))
+    assert out["shorts"] == 1 and out["closed"] == 0 and out["partial"] == 0
+    assert br.sold == [] and br.closed == []      # a short is never touched
+
+
+def test_legacy_position_acts_on_catastrophe_stop(monkeypatch):
+    # No ledger row → no broker bracket → the monitor DOES honour the stop.
+    monkeypatch.setenv("AUTO_PAPER_TRADE", "true")
+    monkeypatch.setattr("app.services.broker.ibkr_config.get_ibkr_config", lambda: _PAPER)
+    _no_db(monkeypatch)
+    br = _FakeExitBroker(positions=[_pos("AAA", 100, 100)])
+    out = ap.run_smart_exit_monitor(_broker=br, _entries_fn=lambda: {}, _bars_fn=lambda s: _exit_bars(_STOPPED))
+    assert out["closed"] == 1 and out["exits"][0]["reason"] == "stop" and br.closed == ["AAA"]
+
+
+def test_bracketed_position_skips_catastrophe_stop(monkeypatch):
+    # Ledger row present → auto_paper bracket owns the stop → monitor must NOT flatten.
+    monkeypatch.setenv("AUTO_PAPER_TRADE", "true")
+    monkeypatch.setattr("app.services.broker.ibkr_config.get_ibkr_config", lambda: _PAPER)
+    _no_db(monkeypatch)
+    br = _FakeExitBroker(positions=[_pos("AAA", 100, 100)])
     out = ap.run_smart_exit_monitor(
         _broker=br, _entries_fn=lambda: {"AAA": (100.0, None)}, _bars_fn=lambda s: _exit_bars(_STOPPED))
-    assert out["closed"] == 0 and br.closed == [] and br.canceled == []
+    assert out["closed"] == 0 and br.closed == []

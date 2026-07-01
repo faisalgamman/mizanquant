@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("screener")
 
@@ -263,18 +263,77 @@ def _mark_manual_closed(symbol: str, exit_price: float, ret_pct: float, reason: 
         db.close()
 
 
-def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> dict:
-    """Smart-exit the live IBKR-paper positions (the manager the user asked for).
+def _partial_sell_broker(broker, symbol: str, qty: int) -> bool:
+    """Market-sell `qty` shares (a scale-out slice). Returns True on submit."""
+    try:
+        res = broker.submit_order(
+            {"symbol": symbol, "side": "sell", "qty": int(qty), "type": "market",
+             "time_in_force": "day"}, strategy_id=_MANUAL)
+        return bool(res)
+    except Exception as e:
+        logger.error("auto_paper partial sell failed for %s: %s", symbol, e)
+        return False
 
-    For each held auto-paper position, replay its bars through simulate_smart_exit;
-    on a trailing / technical-weakening / time trigger, cancel its bracket and
-    flatten — locking a winner that's rolling over instead of letting it ride back.
-    The broker bracket still owns the hard catastrophe stop + fixed TP. PAPER-ONLY,
-    opt-in (AUTO_PAPER_TRADE), kill-switch-respecting. Never raises."""
+
+def _record_broker_exit(symbol: str, entry: float, price: float, qty: float, reason: str) -> None:
+    """Record a smart-exit realization (full or partial) as a CLOSED ledger row —
+    so realized P&L shows up and the partial state persists for de-dup."""
+    from app.db.database import SessionLocal
+    from app.db.models import TradeHistory
+    db = SessionLocal()
+    try:
+        db.add(TradeHistory(
+            strategy_id=_MANUAL, symbol=symbol, side="buy", qty=float(qty),
+            entry_price=float(entry), exit_price=round(float(price), 4),
+            pnl=round((float(price) - float(entry)) * float(qty), 2),
+            pnl_pct=round((float(price) / float(entry) - 1.0) * 100.0, 4) if entry else 0.0,
+            position_value=round(float(qty) * float(entry), 2),
+            created_at=datetime.now(timezone.utc), closed_at=datetime.now(timezone.utc),
+            status="closed",
+            signal_details={"source": "smart_exit_monitor", "exit_reason": reason,
+                            "partial": reason == "tp1_partial"},
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("auto_paper record broker exit failed for %s: %s", symbol, e)
+    finally:
+        db.close()
+
+
+def _recent_partial_taken(symbol: str, days: int = 30) -> bool:
+    """Has a partial already been banked on this symbol recently? (fire TP1 once)."""
+    from app.db.database import SessionLocal
+    from app.db.models import TradeHistory
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = (db.query(TradeHistory)
+                  .filter(TradeHistory.strategy_id == _MANUAL, TradeHistory.symbol == symbol,
+                          TradeHistory.created_at >= cutoff)
+                  .order_by(TradeHistory.created_at.desc()).limit(20).all())
+        return any((r.signal_details or {}).get("exit_reason") == "tp1_partial" for r in rows)
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
+def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> dict:
+    """Smart-exit the live IBKR-paper positions — the ACTUAL broker holdings, not
+    only the ones auto_paper recorded (the account holds legacy positions with no
+    ledger row; those went unmanaged).
+
+    For each LONG position (shorts are skipped — the account is long-only halal),
+    entry = the ledger entry when we have it, else the broker's avg cost. Then:
+    bank a partial take-profit at the target (once), and on a trailing / weakening /
+    time / (catastrophe-stop for un-bracketed legacy) trigger, cancel + flatten.
+    Every action is recorded to the ledger. PAPER-ONLY, opt-in, kill-switch-safe."""
     if not _on("AUTO_PAPER_TRADE"):
         return {"status": "disabled"}
     from app.services.smart_exit import (
-        SMART_EXIT, compute_exit_indicators, live_exit_decision, post_entry_bars)
+        SMART_EXIT, compute_exit_indicators, live_exit_decision, post_entry_bars,
+        partial_tp_hit, EXIT_TP_ENABLED, EXIT_TP1_PCT, EXIT_TP1_FRACTION)
     if not SMART_EXIT:
         return {"status": "smart_exit_off"}
 
@@ -289,12 +348,11 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
     if broker is None:
         return {"status": "aborted", "reason": "broker_offline"}
     try:
-        held = {(pos.get("symbol") or "").upper()
-                for pos in (broker.get_positions(_MANUAL) or []) if pos.get("symbol")}
+        positions = broker.get_positions(_MANUAL) or []
     except Exception:
-        held = set()
-    if not held:
-        return {"status": "ok", "checked": 0, "closed": 0, "exits": []}
+        positions = []
+    if not positions:
+        return {"status": "ok", "checked": 0, "closed": 0, "partial": 0, "shorts": 0, "exits": []}
 
     entries = (_entries_fn or _open_manual_entries)()
     bars_fn = _bars_fn
@@ -305,30 +363,55 @@ def run_smart_exit_monitor(*, _broker=None, _entries_fn=None, _bars_fn=None) -> 
     stop_pct = float(os.environ.get("EXIT_STOP_PCT", "15"))
 
     exits: list[dict] = []
-    for sym in sorted(held):
-        meta = entries.get(sym)
-        if not meta:
+    partials: list[dict] = []
+    shorts = 0
+    for pos in positions:
+        sym = (pos.get("symbol") or "").upper()
+        qty = int(float(pos.get("qty") or 0))
+        if not sym or qty == 0:
             continue
-        entry, created_at = meta
+        if qty < 0:                       # long-only halal — never manage/trade shorts here
+            shorts += 1
+            continue
         try:
+            meta = entries.get(sym)       # ledger record → auto_paper placed it (has a bracket)
+            bracketed = meta is not None
+            entry = float(meta[0]) if bracketed else float(pos.get("avg_entry_price") or 0)
+            created_at = meta[1] if bracketed else None
+            if entry <= 0:
+                continue
             df = bars_fn(sym)
             if df is None or len(df) == 0:
                 continue
             dfi = compute_exit_indicators(df)
             post = post_entry_bars(dfi, created_at, hold_days + 5)
-            # FORWARD management — act on the position's CURRENT state, not a stale
-            # historical trigger (a winner sitting at its peak must not be flattened
-            # at an old +x% level). Exit at the latest price.
-            decision = live_exit_decision(post, entry, stop_pct=stop_pct, hold_days=hold_days)
+
+            # (a) Partial take-profit — bank a slice once (de-duped via the ledger).
+            if EXIT_TP_ENABLED and not _recent_partial_taken(sym):
+                hit = partial_tp_hit(post, entry, EXIT_TP1_PCT)
+                if hit is not None:
+                    sell_qty = int(qty * EXIT_TP1_FRACTION)
+                    if sell_qty >= 1 and _partial_sell_broker(broker, sym, sell_qty):
+                        _record_broker_exit(sym, entry, float(hit[0]), sell_qty, "tp1_partial")
+                        partials.append({"symbol": sym, "qty": sell_qty, "ret_pct": hit[1]})
+                        continue
+
+            # (b) Full exit. A legacy (un-bracketed) position has NO broker stop, so
+            # act on the catastrophe stop too; auto_paper brackets own their own stop.
+            act = _SMART_EXIT_ACT | ({"stop"} if not bracketed else set())
+            decision = live_exit_decision(post, entry, stop_pct=stop_pct,
+                                          hold_days=(hold_days if bracketed else None))
             if decision is None:
                 continue
             reason, exit_price, ret_pct = decision
-            if reason not in _SMART_EXIT_ACT:
-                continue  # broker bracket owns the catastrophe stop
+            if reason not in act:
+                continue
             if _flatten_manual(broker, sym):
-                _mark_manual_closed(sym, exit_price, ret_pct, reason)
+                _record_broker_exit(sym, entry, float(exit_price), qty, reason)
                 exits.append({"symbol": sym, "reason": reason, "ret_pct": ret_pct})
         except Exception as e:
             logger.debug("smart_exit_monitor %s failed: %s", sym, e)
-    logger.info("smart_exit_monitor: checked=%d closed=%d exits=%s", len(held), len(exits), exits)
-    return {"status": "ok", "checked": len(held), "closed": len(exits), "exits": exits}
+    logger.info("smart_exit_monitor: positions=%d partial=%d closed=%d shorts=%d",
+                len(positions), len(partials), len(exits), shorts)
+    return {"status": "ok", "checked": len(positions), "closed": len(exits),
+            "partial": len(partials), "shorts": shorts, "exits": exits}
