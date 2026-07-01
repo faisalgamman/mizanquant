@@ -1048,9 +1048,9 @@ def _exec_record_recommendation(symbol: str, verdict: str,
                                 confidence: float, rationale: str) -> dict:
     """Persist agent recommendation to AgentDecision table."""
     try:
-        from app.db.connection import get_session
+        from app.db.database import SessionLocal
         from app.db.models import AgentDecision
-        session = get_session()
+        session = SessionLocal()
         try:
             dec = AgentDecision(
                 symbol=symbol.upper(),
