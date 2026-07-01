@@ -3935,9 +3935,15 @@ async def screener_deep_picks(
         # sentiment has no real data it is excluded (not counted as a constant),
         # so the score reflects only signals we can actually stand behind.
         # Phase 1: AI slice zeroed — measured coin-flip models; still DISPLAYED.
+        # Evidence-based (component_attribution, n=276): the OLD VADER sentiment had
+        # a NEGATIVE rank-corr with realized pnl (−0.09) — it was hurting the score,
+        # so its weight is cut (env COMPOSITE_SENT_WEIGHT, default 8 vs the old 20).
+        # It earns weight back only if the new DeepSeek sentiment proves out forward.
+        _sent_w = int(os.environ.get("COMPOSITE_SENT_WEIGHT", "8"))
         parts = [(tech, 30), (fund, 25), (halal_s, 10)]
-        if sent_available:
-            parts.append((sent_s, 20))
+        if sent_available and _sent_w > 0 and sent_s is not None:
+            # sent_s is on a 0-20 scale → rescale to the (reduced) weight.
+            parts.append((float(sent_s) * _sent_w / 20.0, _sent_w))
         composite = _composite_from_parts(parts)
 
         # Fundamental grade
