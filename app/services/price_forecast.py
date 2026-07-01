@@ -39,7 +39,8 @@ def _sample_days(day_stats: list, max_points: int = _MAX_BAND_POINTS) -> list:
     return sampled
 
 
-def monte_carlo_forecast(prices, horizon: int, sims: int = 1000) -> dict:
+def monte_carlo_forecast(prices, horizon: int, sims: int = 1000,
+                         drift_shrink: float | None = None) -> dict:
     """Probabilistic price forecast for one symbol.
 
     Args:
@@ -67,7 +68,8 @@ def monte_carlo_forecast(prices, horizon: int, sims: int = 1000) -> dict:
     # Shrink the drift toward zero (default 0.3): historical mean return barely
     # predicts future return, so over-weighting it biases prob_profit + the path.
     # Vol is kept full. MC_DRIFT_SHRINK=1 → full historical drift, 0 → martingale.
-    drift_shrink = float(os.environ.get("MC_DRIFT_SHRINK", "0.3"))
+    if drift_shrink is None:
+        drift_shrink = float(os.environ.get("MC_DRIFT_SHRINK", "0.3"))
     result = MonteCarloSimulator(seed=42).simulate(
         arr, n_simulations=int(sims), forecast_days=int(horizon), drift_shrink=drift_shrink
     )
