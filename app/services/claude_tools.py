@@ -513,7 +513,9 @@ def _exec_analyze_stock(symbol: str) -> dict:
             "data is unavailable — never invent or deny it generically. market_context (VIX / HY-IG "
             "credit / breadth / liquidity / SPY regime) and recent `news` are ALSO included here — "
             "weave the backdrop in, and cite news ONLY from the `news` field (never invent headlines; "
-            "if news_status != 'ok', say the call is technical/quant-driven, not news-driven)."),
+            "if news_status != 'ok', say the call is technical/quant-driven, not news-driven). A "
+            "`premortem` field (devil's-advocate risk + flags for why this long could FAIL) is included "
+            "— you MUST weigh it against the bullish case and surface its flags, not ignore them."),
     })
 
     # Broad-market context (VIX / credit / breadth / liquidity) so the agent reasons about the
@@ -539,6 +541,14 @@ def _exec_analyze_stock(symbol: str) -> dict:
         out["news_status"] = _nws.get("status") if isinstance(_nws, dict) else None
     except Exception as e:
         logger.debug("analyze news failed for %s: %s", symbol, e)
+
+    # Pre-mortem — the devil's-advocate risk check (why this long might FAIL). The
+    # agent must weigh these against the bullish case, not ignore them.
+    try:
+        from app.services.llm_premortem import llm_premortem
+        out["premortem"] = llm_premortem(symbol)
+    except Exception as e:
+        logger.debug("analyze premortem failed for %s: %s", symbol, e)
 
     return out
 

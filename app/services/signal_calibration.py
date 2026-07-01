@@ -33,7 +33,8 @@ _BANDS: dict[str, list[tuple[int, int, str]]] = {
 }
 
 # Composite component fields the monthly ledger stores (after the recording enrichment).
-_MONTHLY_PARTS = ("score_tech", "score_fund", "score_sentiment", "score_halal", "conviction_score")
+_MONTHLY_PARTS = ("score_tech", "score_fund", "score_sentiment", "score_halal",
+                  "conviction_score", "score_momentum")
 
 
 def _closed_trades(strategy_id: str) -> list[dict]:

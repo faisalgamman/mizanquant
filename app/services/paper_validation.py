@@ -423,7 +423,7 @@ def _normalize_picks(picks) -> list[dict]:
         else:
             parts = {k: p.get(k) for k in
                      ("score_tech", "score_fund", "score_sentiment", "score_halal",
-                      "conviction_score", "confirmation_count")
+                      "conviction_score", "confirmation_count", "score_momentum")
                      if isinstance(p.get(k), (int, float))}
         out.append({"symbol": sym, "price": price, "score": float(score or 0), "parts": parts})
     return out

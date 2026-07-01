@@ -155,6 +155,15 @@ def run_auto_paper(scanner: str = "weekly", *, _broker=None, _picks_fn=None, _su
         equity = 0.0
     if equity <= 0:
         equity = float(os.environ.get("AUTO_PAPER_ACCOUNT", "100000"))
+    # Regime-aware sizing: run a smaller book in a weaker tape (Phase 3).
+    try:
+        from app.services.position_sizing import regime_size_multiplier
+        _rm = regime_size_multiplier()
+        if _rm and _rm > 0:
+            equity *= _rm
+            logger.info("auto_paper regime size multiplier=%.2f → sizing equity=%.0f", _rm, equity)
+    except Exception:
+        pass
 
     if _picks_fn is not None:
         picks = _picks_fn(scn)
