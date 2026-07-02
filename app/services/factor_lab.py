@@ -23,6 +23,7 @@ replay is faithful:
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 
@@ -235,7 +236,11 @@ def factor_lab_report(symbols=None, *, force: bool = False) -> dict:
     if not symbols:
         try:
             from app.services.universe import build_halal_candidates
-            symbols = list(build_halal_candidates(cap=120) or [])
+            # A bounded, liquid sample — enough for a cross-sectional estimate, and the
+            # engine drops thin-history names anyway. Keeps the cold-cache warm from
+            # hammering Alpaca (the full micro-cap universe 429-throttles for minutes).
+            cap = int(os.environ.get("FACTOR_LAB_UNIVERSE", "60"))
+            symbols = list(build_halal_candidates(cap=cap) or [])
         except Exception as e:
             logger.debug("factor_lab universe load failed: %s", e)
             symbols = []
