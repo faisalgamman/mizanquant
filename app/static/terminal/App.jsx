@@ -231,6 +231,8 @@ function App() {
         // Composite breakdown (real sub-scores from deep-picks)
         tech:   r.score_tech, fund: r.score_fund, sent: r.score_sentiment,
         ai:     r.score_ai,   halalS: r.score_halal, grade: r.f_grade,
+        momentum: r.score_momentum,          // RS-vs-SPY factor (0-10), evidence-weighted
+
       })));
       setMonthlyStatus("ready");
       return true;

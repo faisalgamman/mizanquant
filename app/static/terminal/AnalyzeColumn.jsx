@@ -225,6 +225,7 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
   const goldKind = plan && plan.gold_kind;            // "etf" | "miner" | undefined
   const goldEtf  = goldKind === "etf";                // commodity: equity composite N/A
   const goldNote = plan && plan.is_gold ? (plan.halal_note || "") : "";
+  const premortem = plan && plan.premortem && (plan.premortem.flags || []).length ? plan.premortem : null;
   const halalV = goldKind === "etf"
     ? "doubtful"                                       // paper gold → debated, never a hard verdict
     : (signal.halalVerdict || (signal.halal ? "halal" : "non_compliant"));
@@ -403,6 +404,15 @@ function AnalyzeColumn({ signal, analyze, forecast, horizon, onHorizon, onTrade,
               {convScore > 0 ? ` · ${convScore}/100${goldEtf ? " فني" : ""}` : ""}
             </span>
           </div>
+          {premortem ? (
+            <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 6,
+                          background: premortem.risk === "high" ? "var(--negative-dim, rgba(220,80,80,0.12))" : "var(--warning-dim, rgba(217,164,65,0.10))",
+                          border: "1px solid " + (premortem.risk === "high" ? "var(--negative)" : "var(--amber, #d9a441)"),
+                          fontSize: 9.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              🔮 <strong>Pre-mortem · risk {String(premortem.risk || "").toUpperCase()}</strong>
+              {" — "}{(premortem.flags || []).join(" · ")}
+            </div>
+          ) : null}
           {goldHeadNote ? (
             <div dir="rtl" style={{ marginTop: 5, fontSize: 9.5, color: "var(--text-muted)", lineHeight: 1.5 }}>🥇 {goldHeadNote}</div>
           ) : null}

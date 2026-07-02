@@ -145,7 +145,9 @@ function MonthlyTable({ signals, selectedSymbol, onSelect }) {
           <tr>
             <th>Symbol</th><th>Comp</th><th>Signal</th><th>Price</th>
             <th title="Technical /30">T</th><th title="Fundamental /25">F</th>
-            <th title="Sentiment /20">S</th><th title="AI/ML /15 — unvalidated (~coin-flip)">AI*</th>
+            <th title="Sentiment /20">S</th>
+            <th title="Momentum — relative strength vs SPY /10 (NEW)">M</th>
+            <th title="AI/ML /15 — unvalidated (~coin-flip)">AI*</th>
             <th title="Fundamental grade">Gr</th>
           </tr>
         </thead>
@@ -166,6 +168,7 @@ function MonthlyTable({ signals, selectedSymbol, onSelect }) {
                 <td className="mono">{cell(s.tech)}</td>
                 <td className="mono">{cell(s.fund)}</td>
                 <td className="mono">{cell(s.sent)}</td>
+                <td className="mono" style={{ color: s.momentum >= 5 ? "var(--positive)" : s.momentum != null ? "var(--negative)" : "var(--text-muted)" }}>{cell(s.momentum)}</td>
                 <td className="mono" style={{ color: "var(--text-muted)" }}>{cell(s.ai)}</td>
                 <td className="mono">{cell(s.grade)}</td>
               </tr>

@@ -196,6 +196,15 @@ async def v1_trade_plan(symbol: str = "AAPL", portfolio: float = 100000.0):
         for _k in ("earnings", "analyst", "insider"):
             plan.setdefault(_k, {"known": False})
 
+    # Pre-mortem — devil's-advocate risk flags (why this long might FAIL), so the
+    # Analyze card surfaces the bear case too, not only the bullish setup. Cached,
+    # fail-open (None → the card just omits the chip).
+    try:
+        from app.services.llm_premortem import llm_premortem
+        plan["premortem"] = llm_premortem(symbol)
+    except Exception:
+        plan.setdefault("premortem", None)
+
     # Sanitize numpy scalars (e.g. numpy.bool_ inside sig.details) so FastAPI's
     # encoder can serialize the response instead of 500-ing.
     return _to_jsonable(plan)
