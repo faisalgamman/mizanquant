@@ -35,6 +35,9 @@ _BANDS: dict[str, list[tuple[int, int, str]]] = {
 # Composite component fields the monthly ledger stores (after the recording enrichment).
 _MONTHLY_PARTS = ("score_tech", "score_fund", "score_sentiment", "score_halal",
                   "conviction_score", "score_momentum")
+# Weekly swing entry-time factor signals (stored on each PV trade by
+# paper_validation._weekly_signal_parts) — lets us measure the weekly per-factor edge.
+_WEEKLY_PARTS = ("wk_rs", "wk_rsi", "wk_above_ema20", "wk_atr_pct", "wk_dist_ema20_pct")
 
 
 def _closed_trades(strategy_id: str) -> list[dict]:
@@ -161,14 +164,14 @@ def component_attribution(scanner: str = "monthly", min_n: int = 30) -> dict:
     strat = _STRATEGY.get(key)
     if not strat:
         return {"error": f"unknown scanner '{scanner}'"}
-    if key != "monthly":
+    if key not in ("monthly", "weekly"):
         return {"scanner": key, "status": "unsupported",
-                "note": "Component attribution is available for the monthly composite only "
-                        "(weekly swing_score has no stored sub-scores)."}
+                "note": "Component attribution is available for the monthly + weekly scanners."}
+    part_list = _WEEKLY_PARTS if key == "weekly" else _MONTHLY_PARTS
 
     trades = _closed_trades(strat)
     out = {}
-    for part in _MONTHLY_PARTS:
+    for part in part_list:
         pairs = [(float(t["details"].get(part)), t["ret"]) for t in trades
                  if isinstance(t["details"], dict) and isinstance(t["details"].get(part), (int, float))]
         if len(pairs) >= min_n:

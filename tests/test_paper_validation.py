@@ -156,7 +156,7 @@ def test_mature_closes_stopped_trade(tdb, monkeypatch):
     _seed_open(tdb, "AAA", entry=100.0, qty=10)
     idx = pd.date_range("2024-01-02", periods=5, freq="D")
     bars = pd.DataFrame({"low": [99, 84, 90, 90, 90], "high": [101, 100, 99, 96, 97],
-                         "close": [99, 80, 90, 90, 95]}, index=idx)  # day2 low 84 <= 85 → stop
+                         "close": [99, 80, 90, 90, 95]}, index=idx)  # day2 low 84 ≤ 90 → 10% safety-net stop
     monkeypatch.setattr("app.services.market_data.fetch", lambda *a, **k: bars)
 
     out = pv.mature_open_paper_trades()
@@ -166,8 +166,9 @@ def test_mature_closes_stopped_trade(tdb, monkeypatch):
     try:
         t = db.query(TradeHistory).filter(TradeHistory.symbol == "AAA").first()
         assert t.status == "closed"
-        assert t.pnl_pct == -15.0 and t.exit_price == 85.0
-        assert t.pnl == round((85.0 - 100.0) * 10, 2) and t.closed_at is not None
+        # Loss discipline: stop is now capped at the −10% safety net (was a fixed −15%).
+        assert t.pnl_pct == -10.0 and t.exit_price == 90.0
+        assert t.pnl == round((90.0 - 100.0) * 10, 2) and t.closed_at is not None
     finally:
         db.close()
 
@@ -395,3 +396,16 @@ def test_vol_weights_clamp_prevents_domination():
     assert abs(sum(w.values()) - 1.0) < 1e-9
     assert w["AAA"] == max(w.values()) and w["AAA"] < 0.8     # clamped down from ~0.99
     assert w["BBB"] == w["CCC"] and w["BBB"] > 0.05           # floor lifted them
+
+
+def test_weekly_row_stores_factor_parts():
+    """Weekly picks carry entry-time factor signals into signal_details so
+    component_attribution can measure the per-factor edge (Phase 1: instrument)."""
+    from app.services.paper_validation import _paper_row_from_pick
+    row = _paper_row_from_pick({
+        "symbol": "AAA", "shares": 10, "entry": 100.0, "verdict": "BUY",
+        "parts": {"wk_rs": 5.2, "wk_rsi": 58.0, "wk_above_ema20": 1, "wk_atr_pct": 2.1},
+    })
+    sd = row["signal_details"]
+    assert sd["source"] == "paper_validation"
+    assert sd["wk_rs"] == 5.2 and sd["wk_above_ema20"] == 1 and sd["wk_atr_pct"] == 2.1

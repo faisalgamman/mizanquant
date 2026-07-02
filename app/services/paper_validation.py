@@ -96,6 +96,35 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _weekly_signal_parts(symbol: str) -> dict:
+    """Capture the weekly pick's factor signals AT ENTRY (wk_rs / wk_rsi / trend /
+    vol) so component_attribution can later measure WHICH one predicts pnl — the
+    weekly was previously un-instrumented (swing_score only). Fail-open to {}."""
+    try:
+        from app.services.market_data import fetch as _f
+        from app.services.smart_exit import compute_exit_indicators
+        from app.services.backtest_engine import factor_rs_vs_spy
+        df = _f(symbol, period="1y")
+        if df is None or len(df) < 70:
+            return {}
+        closes = df["close"].astype(float).values
+        last = compute_exit_indicators(df).iloc[-1]
+        spy = _f("SPY", period="1y")
+        rs = (factor_rs_vs_spy(closes, spy["close"].astype(float).values, 63)
+              if spy is not None and len(spy) >= 70 else None)
+        c = float(closes[-1])
+        ema20 = float(last.get("_ema20") or 0)
+        return {
+            "wk_rs": round(rs * 100, 2) if rs is not None else None,       # RS vs SPY %, 3-mo
+            "wk_rsi": round(float(last.get("_rsi") or 0), 1),
+            "wk_above_ema20": 1 if (ema20 and c > ema20) else 0,           # with-trend flag
+            "wk_atr_pct": round(float(last.get("_atr_pct") or 0), 2),
+            "wk_dist_ema20_pct": round((c / ema20 - 1) * 100, 2) if ema20 else None,
+        }
+    except Exception:
+        return {}
+
+
 def _paper_row_from_pick(pick: dict) -> dict:
     """Map a weekly-report pick to TradeHistory column kwargs (pure, testable)."""
     return {
@@ -118,6 +147,9 @@ def _paper_row_from_pick(pick: dict) -> dict:
             "stop_pct": pick.get("stop_pct"),
             "time_exit_date": pick.get("time_exit_date"),
             "votes": pick.get("votes"),
+            # Entry-time factor signals (top-level, like the monthly parts) so
+            # component_attribution can measure the weekly per-factor edge.
+            **(pick.get("parts") or {}),
         },
     }
 
@@ -179,6 +211,7 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
             if not sym or float(p.get("shares") or 0) <= 0 or sym in open_syms:
                 skipped += 1
                 continue
+            p["parts"] = _weekly_signal_parts(sym)   # instrument the pick for attribution
             db.add(TradeHistory(created_at=_utc_now(), **_paper_row_from_pick(p)))
             open_syms.add(sym)
             # C4: Also persist to SignalHistory for the weekly scanner's track record
