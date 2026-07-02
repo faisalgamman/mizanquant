@@ -1,0 +1,110 @@
+"""Selection-quality scorecard for the dashboard — the honest, at-a-glance answer to
+**"does our stock SELECTION actually add value over just buying SPY?"**
+
+Bundles two READ-ONLY measurements already in the codebase:
+  • ``beta_benchmark.alpha_vs_spy`` — each closed trade's return minus SPY over the SAME
+    holding window → mean alpha + a t-stat (so a near-zero result on a small sample is not
+    mistaken for edge).
+  • ``signal_calibration.calibration_report`` — does a higher scanner score actually yield
+    a higher forward return (score→return rank correlation)?
+
+…into one plain-language GRADE per scanner. It is deliberately conservative: it never
+claims edge on a thin sample or without statistical significance. Pure measurement from
+the paper ledgers (no trade-path impact); cached because it does not change intra-session.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from datetime import datetime, timezone
+
+logger = logging.getLogger("screener")
+
+_CACHE: dict = {"at": 0.0, "data": None}
+_TTL = 1800.0            # 30 min — this is slow-moving measurement, not live data
+_MIN_N = 20             # below this the sample is too thin to grade honestly
+
+# dashboard scanner → (ledger strategy id, Arabic label)
+_SCANNERS = (("weekly", "PV", "الأسبوعي"), ("monthly", "PVM", "الشهري"))
+
+
+def _grade(alpha, t, n) -> dict:
+    """Numbers → honest verdict + a colour key the UI maps to a token.
+
+    ``good`` = positive alpha that is statistically distinguishable from zero;
+    ``warn`` = profitable but that profit is market beta, not proven selection edge;
+    ``bad``  = significantly WORSE than SPY; ``muted`` = not enough data / no edge.
+    """
+    if n < _MIN_N:
+        return {"key": "insufficient", "grade": "—",
+                "label": "بيانات غير كافية بعد", "color": "muted"}
+    if t is not None and t <= -2:
+        return {"key": "negative", "grade": "ضعيف",
+                "label": "أسوأ من SPY — ألفا سالبة مؤكَّدة", "color": "bad"}
+    if t is not None and t >= 2 and (alpha or 0) > 0:
+        return {"key": "alpha", "grade": "قوي",
+                "label": "يتفوّق على SPY — ألفا موجبة مؤكَّدة", "color": "good"}
+    if (alpha or 0) > 0:
+        return {"key": "beta", "grade": "بيتا",
+                "label": "ربح من السوق لا من الاختيار — لا ألفا مؤكَّدة", "color": "warn"}
+    return {"key": "flat", "grade": "محايد",
+            "label": "لا قيمة اختيار مقاسة بعد", "color": "muted"}
+
+
+def _one(scanner: str, strat: str, name_ar: str) -> dict:
+    from app.services.beta_benchmark import alpha_vs_spy
+    from app.services.signal_calibration import calibration_report
+
+    a = alpha_vs_spy(strategy_ids=(strat,), days=365)
+    n = int(a.get("n") or 0)
+
+    rank_corr = None
+    try:
+        rank_corr = calibration_report(scanner, min_n=_MIN_N).get("score_return_rank_corr")
+    except Exception as e:
+        logger.debug("selection_quality calibration %s failed: %s", scanner, e)
+
+    g = _grade(a.get("mean_alpha"), a.get("alpha_t"), n)
+    return {
+        "scanner": scanner,
+        "name": name_ar,
+        "n": n,
+        "alpha": a.get("mean_alpha"),          # mean (trade − SPY) %/trade over its window
+        "alpha_t": a.get("alpha_t"),           # |t| ≥ ~2 ⇒ distinguishable from zero
+        "pct_beat_spy": a.get("pct_beat_spy"),  # % of trades that beat SPY
+        "score_rank_corr": rank_corr,          # higher score → higher return? (+1 best)
+        **g,
+    }
+
+
+def selection_quality_summary(force: bool = False) -> dict:
+    """Per-scanner selection-quality scorecard (weekly + monthly). Cached ~30 min."""
+    now = time.time()
+    cached = _CACHE.get("data")
+    if not force and cached is not None and (now - _CACHE["at"]) < _TTL:
+        return cached
+
+    scanners = []
+    for scanner, strat, name in _SCANNERS:
+        try:
+            scanners.append(_one(scanner, strat, name))
+        except Exception as e:
+            logger.debug("selection_quality %s failed: %s", scanner, e)
+            scanners.append({"scanner": scanner, "name": name, "n": 0,
+                             "key": "insufficient", "grade": "—",
+                             "label": "تعذّر القياس", "color": "muted"})
+
+    out = {
+        "scanners": scanners,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "method": ("مقياس أمين: عائد كل صفقة مُغلقة مطروحاً منه عائد SPY على نفس نافذة "
+                   "الاحتفاظ (ألفا)، مع دلالة إحصائية (t)، وارتباط الرتبة بين الدرجة "
+                   "والعائد. قياس فقط من الدفتر الورقي — لا يؤثّر في التنفيذ."),
+        "caveat": "عيّنات صغيرة (<100 صفقة) إرشادية لا قاطعة — دع الدفتر يتراكم.",
+    }
+    _CACHE.update(at=now, data=out)
+    return out
+
+
+__all__ = ["selection_quality_summary"]

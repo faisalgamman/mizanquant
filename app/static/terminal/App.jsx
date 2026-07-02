@@ -707,6 +707,8 @@ function App() {
       <MarketStrip market={market} clock={clock} />
 
       <main className="main">
+        {/* Honest selection-quality scorecard — does our picking beat just holding SPY? */}
+        <div className="full-row"><SelectionQuality /></div>
         <div className="workflow workflow-2">
           <ScanColumn
             scanMode={scanMode}

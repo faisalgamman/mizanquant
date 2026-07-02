@@ -766,3 +766,25 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   color: var(--text-secondary); background: var(--bg-overlay); border: 1px solid var(--border);
   border-radius: 4px; padding: 2px 6px; pointer-events: none; white-space: nowrap; }
 .sc-chart-disc { padding: 2px 10px 8px; font-size: 11px; color: var(--text-muted); }
+
+/* ── Selection-quality scorecard (honest "does the selection beat SPY?") ── */
+.selq { background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 10px 13px; font-family: var(--font-body); }
+.selq-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.selq-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.selq-sub { font-size: 11px; color: var(--text-muted); cursor: help; }
+.selq-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+.selq-empty { font-size: 12px; color: var(--text-muted); padding: 6px 2px; }
+.selq-card { flex: 1 1 240px; min-width: 220px; background: var(--bg-raised);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px 11px; }
+.selq-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.selq-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.selq-grade { font-size: 12px; font-weight: 700; padding: 1px 8px;
+  border: 1px solid; border-radius: 999px; background: var(--bg-surface); }
+.selq-label { font-size: 11px; margin: 4px 0 6px; font-weight: 600; }
+.selq-metrics { display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--font-mono);
+  font-size: 11px; color: var(--text-secondary); }
+.selq-metrics b { color: var(--text-primary); font-weight: 700; }
+.selq-metrics span { cursor: help; }
+.selq-n { color: var(--text-muted); }
+.selq-caveat { margin-top: 8px; font-size: 10.5px; color: var(--text-muted); font-style: italic; }

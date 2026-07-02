@@ -183,6 +183,15 @@ async def signal_calibration(scanner: str = "weekly", view: str = "calibration")
     return calibration_report(scanner)
 
 
+@router.get("/api/selection-quality")
+async def selection_quality(force: bool = False):
+    """Honest at-a-glance scorecard: does the SELECTION beat just buying SPY? Bundles the
+    alpha-vs-SPY t-stat with the score→return calibration into a plain-language grade per
+    scanner (weekly + monthly). READ-ONLY measurement from the paper ledgers; cached ~30 min."""
+    from app.services.selection_quality import selection_quality_summary
+    return selection_quality_summary(force=force)
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,
