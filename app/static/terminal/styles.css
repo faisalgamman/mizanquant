@@ -794,4 +794,17 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
 .selq-est-title { font-family: var(--font-body); font-weight: 700; color: var(--accent); }
 .selq-estimate span { cursor: help; }
 .selq-dim { color: var(--text-muted); }
+.selq-gate { margin-top: 8px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+  padding-top: 8px; border-top: 1px dashed var(--border-subtle); }
+.selq-gate b { color: var(--text-primary); font-weight: 700; }
+.selq-gate-title { font-family: var(--font-body); font-weight: 700; color: var(--accent); }
+.selq-gate-reco { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.selq-gate-msg { color: var(--positive); font-weight: 600; }
+.selq-approve { font-family: var(--font-body); font-size: 11px; font-weight: 700;
+  padding: 3px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--positive); background: transparent; color: var(--positive);
+  transition: background 0.15s, color 0.15s; }
+.selq-approve:hover:not(:disabled) { background: var(--positive); color: var(--bg-root); }
+.selq-approve:disabled { opacity: 0.5; cursor: default; }
 .selq-caveat { margin-top: 8px; font-size: 10.5px; color: var(--text-muted); font-style: italic; }

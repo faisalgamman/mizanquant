@@ -61,3 +61,35 @@ def test_gate_ab_insufficient_history_is_flagged():
     syms = [c for c in short.columns if c != "SPY"]
     r = fl.gate_ab_replay(syms, _mat=short, warmup=252, rebalance_days=5, hold_days=20)
     assert r.get("error") == "insufficient history"
+
+
+# --- ①② self-calibrating gate ------------------------------------------------
+
+def test_eval_gate_threshold_excludes_low_rs():
+    # records: (di, wk_rs, above_ema20, fwd, spy_fwd) — high-RS names return more
+    recs = [(0, 5.0, 1, 0.10, 0.01), (0, 4.0, 1, 0.08, 0.01),
+            (0, -6.0, 1, -0.04, 0.01), (0, -8.0, 0, -0.05, 0.01)]
+    loose = fl._eval_gate(recs, min_rs=-10, require_ema20=True)   # passes 3 (ema ok)
+    strict = fl._eval_gate(recs, min_rs=0, require_ema20=True)    # passes only the 2 high-RS
+    assert loose["n_pass"] == 3 and strict["n_pass"] == 2
+    assert strict["pass_ret_pct"] > loose["pass_ret_pct"]         # tighter → better avg
+
+
+def test_gate_threshold_sweep_ranks_by_uplift():
+    syms = [c for c in _panel().columns if c != "SPY"]
+    r = fl.gate_threshold_sweep(syms, _mat=_panel(), warmup=120, rebalance_days=10, hold_days=20)
+    assert "error" not in r and r["n_records"] > 0
+    ups = [g["uplift_pct"] for g in r["grid"] if g["uplift_pct"] is not None]
+    assert ups == sorted(ups, reverse=True)          # sorted best-first
+    assert r["best"]["uplift_pct"] >= 0
+
+
+def test_gate_calibration_oos_split_and_reco(monkeypatch):
+    syms = [c for c in _panel(rows=460).columns if c != "SPY"]
+    cal = fl.gate_calibration(_mat=_panel(rows=460), grid=[-10, -5, -2, 0, 2],
+                              min_t=1.0, _cache=False)
+    assert "error" not in cal
+    assert cal["split"]["train"] > 0 and cal["split"]["test"] > 0
+    # every grid row carries an OOS (train + test) evaluation
+    assert all("train" in g and "test" in g for g in cal["grid"])
+    assert "recommendation" in cal and cal["recommendation"]["action"] in ("keep", "raise", "lower")

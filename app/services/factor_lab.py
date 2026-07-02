@@ -200,6 +200,184 @@ def cross_sectional_ic(symbols, factor_fn, *, spy: str = "SPY", period: str = "2
     }
 
 
+# ── ①② self-calibrating gate: threshold-grid sweep + OOS judge ───────────────
+
+def _collect_gate_records(mat, spy: str = "SPY", *, rebalance_days: int = 5,
+                          hold_days: int = 20, warmup: int = 252) -> list:
+    """Compute (rebal_ordinal, wk_rs, above_ema20, fwd_ret, spy_fwd) for EVERY
+    (rebalance, candidate) ONCE — so a whole grid of gate thresholds can be scored on the
+    same look-ahead-safe records instead of re-replaying per threshold."""
+    universe = [s for s in mat.columns if s != spy]
+    dates = mat.index
+    spy_col = mat[spy].values
+    recs, i, di = [], warmup, 0
+    while i + hold_days < len(dates):
+        spy_hist = mat[spy].iloc[:i + 1].dropna().values
+        s0, s1 = spy_col[i], spy_col[i + hold_days]
+        spy_fwd = float(s1 / s0 - 1.0) if (np.isfinite(s0) and np.isfinite(s1) and s0 > 0) else 0.0
+        for s in universe:
+            col = mat[s].iloc[:i + 1].dropna().values
+            if len(col) < warmup:
+                continue
+            p0, p1 = mat[s].iloc[i], mat[s].iloc[i + hold_days]
+            if not (np.isfinite(p0) and np.isfinite(p1) and p0 > 0):
+                continue
+            parts = _asof_gate_parts(col, spy_hist)
+            recs.append((di, parts.get("wk_rs"), parts.get("wk_above_ema20"),
+                         float(p1 / p0 - 1.0), spy_fwd))
+        i += rebalance_days
+        di += 1
+    return recs
+
+
+def _eval_gate(recs, min_rs: float, require_ema20: bool = True) -> dict:
+    """Apply ONE candidate gate to precomputed records → pass/fail/uplift/t. Uplift =
+    gate-PASS alpha − pooled alpha (how much this threshold would lift the weekly)."""
+    pass_r, fail_r, pass_a, all_a = [], [], [], []
+    for _di, rs, above, r, spy in recs:
+        allow = True
+        if require_ema20 and above == 0:
+            allow = False
+        if allow and rs is not None and float(rs) < min_rs:
+            allow = False
+        all_a.append(r - spy)
+        if allow:
+            pass_r.append(r)
+            pass_a.append(r - spy)
+        else:
+            fail_r.append(r)
+    pa = float(np.mean(pass_a)) * 100 if pass_a else None
+    aa = float(np.mean(all_a)) * 100 if all_a else None
+    return {
+        "min_rs": min_rs, "require_ema20": require_ema20,
+        "n_pass": len(pass_r), "n_fail": len(fail_r),
+        "pass_ret_pct": round(float(np.mean(pass_r)) * 100, 3) if pass_r else None,
+        "uplift_pct": round(pa - aa, 3) if (pa is not None and aa is not None) else None,
+        "t_pass_vs_fail": _welch_t(pass_r, fail_r),
+    }
+
+
+_GRID_DEFAULT = [-10, -8, -6, -5, -4, -3, -2, -1, 0, 1, 2]
+
+
+def gate_threshold_sweep(symbols, *, grid=None, spy: str = "SPY", period: str = "2y",
+                         rebalance_days: int = 5, hold_days: int = 20,
+                         warmup: int = 252, _mat=None) -> dict:
+    """① Score a GRID of MIN_RS thresholds on one look-ahead-safe pass; sorted by uplift."""
+    from app.services.backtest_engine import _aligned_closes
+    grid = grid or _GRID_DEFAULT
+    mat = _mat if _mat is not None else _aligned_closes(list(symbols) + [spy], period)
+    if mat is None or spy not in mat.columns:
+        return {"error": "no data"}
+    if len(mat.index) < warmup + hold_days + rebalance_days:
+        return {"error": "insufficient history", "rows": len(mat.index)}
+    recs = _collect_gate_records(mat, spy, rebalance_days=rebalance_days,
+                                 hold_days=hold_days, warmup=warmup)
+    results = [_eval_gate(recs, m) for m in grid]
+    results.sort(key=lambda r: (r["uplift_pct"] if r["uplift_pct"] is not None else -1e9), reverse=True)
+    return {"grid": results, "best": results[0] if results else None, "n_records": len(recs)}
+
+
+def _gate_recommendation(best_oos, current: float, min_delta: float = 0.5) -> dict:
+    """Turn the best OOS-robust threshold into a plain-language proposal vs the current
+    one. Conservative: proposes a change only if a robust winner beats current by
+    ≥ min_delta % uplift on the OOS (test) half."""
+    if best_oos is None:
+        return {"action": "keep", "min_rs": current,
+                "reason": "لا عتبة تتفوّق خارج العيّنة بدلالة — أبقِ الحالية."}
+    cand = float(best_oos["min_rs"])
+    te = best_oos["test"]["uplift_pct"] or 0.0
+    if abs(cand - current) < 1e-9:
+        return {"action": "keep", "min_rs": current,
+                "reason": f"العتبة الحالية ({current}) هي الأفضل خارج العيّنة أصلاً."}
+    return {
+        "action": "raise" if cand > current else "lower",
+        "min_rs": cand, "from": current,
+        "expected_uplift_pct": te,
+        "train_t": best_oos["train"]["t_pass_vs_fail"],
+        "test_t": best_oos["test"]["t_pass_vs_fail"],
+        "reason": (f"الدليل يدعم ضبط MIN_RS إلى {cand}% — رفع متوقّع "
+                   f"+{te}%/صفقة خارج العيّنة (t تدريب {best_oos['train']['t_pass_vs_fail']}, "
+                   f"t اختبار {best_oos['test']['t_pass_vs_fail']})."),
+    }
+
+
+_GATE_CAL_CACHE: dict = {"at": 0.0, "data": None}
+
+
+def gate_calibration(symbols=None, *, grid=None, min_t: float = 2.0,
+                     period: str = "2y", force: bool = False, _mat=None, _cache: bool = True) -> dict:
+    """② OOS judge. Split the records train(first half)/test(second half); a threshold is
+    ROBUST only if uplift>0 AND t≥min_t in BOTH halves (no overfit). Recommend the robust
+    threshold with the best OOS uplift vs the current live gate. Cached 6h."""
+    now = time.time()
+    if _cache and not force and _GATE_CAL_CACHE["data"] is not None and (now - _GATE_CAL_CACHE["at"]) < _TTL:
+        return _GATE_CAL_CACHE["data"]
+
+    from app.services.backtest_engine import _aligned_closes
+    grid = grid or _GRID_DEFAULT
+    if _mat is not None:
+        mat = _mat
+    else:
+        if not symbols:
+            try:
+                from app.services.universe import build_halal_candidates
+                symbols = list(build_halal_candidates(cap=int(os.environ.get("FACTOR_LAB_UNIVERSE", "60"))) or [])
+            except Exception:
+                symbols = []
+        mat = _aligned_closes(list(symbols) + ["SPY"], period) if symbols else None
+    if mat is None or "SPY" not in getattr(mat, "columns", []) or len(mat.index) < 300:
+        out = {"error": "insufficient data", "grid": [], "best_oos": None}
+        if _cache:
+            _GATE_CAL_CACHE.update(at=now, data=out)
+        return out
+
+    recs = _collect_gate_records(mat, "SPY")
+    if not recs:
+        out = {"error": "no records", "grid": [], "best_oos": None}
+        if _cache:
+            _GATE_CAL_CACHE.update(at=now, data=out)
+        return out
+    max_di = max(r[0] for r in recs)
+    mid = max_di // 2
+    train = [r for r in recs if r[0] <= mid]
+    test = [r for r in recs if r[0] > mid]
+
+    rows = []
+    for m in grid:
+        tr, te = _eval_gate(train, m), _eval_gate(test, m)
+        robust = ((tr["uplift_pct"] or -1) > 0 and (te["uplift_pct"] or -1) > 0
+                  and (tr["t_pass_vs_fail"] or 0) >= min_t and (te["t_pass_vs_fail"] or 0) >= min_t)
+        rows.append({"min_rs": m, "train": tr, "test": te, "robust": robust})
+
+    robust_rows = [r for r in rows if r["robust"]]
+    best = max(robust_rows, key=lambda r: (r["test"]["uplift_pct"] or -1e9)) if robust_rows else None
+
+    try:
+        from app.services.gate_config import get_min_rs
+        current = float(get_min_rs())
+    except Exception:
+        current = float(os.environ.get("WEEKLY_MIN_RS", "-2"))
+
+    out = {
+        "grid": rows, "best_oos": best, "current_min_rs": current,
+        "n_records": len(recs), "split": {"train": len(train), "test": len(test)},
+        "recommendation": _gate_recommendation(best, current),
+        "caveat": ("Out-of-sample validated (train/test split), price-only, look-ahead-safe. "
+                   "Gates the PAPER ledger only — never a real order."),
+    }
+    if _cache:
+        _GATE_CAL_CACHE.update(at=now, data=out)
+    return out
+
+
+def gate_calibration_cached():
+    """Cache-only read of gate_calibration (never computes on a request path)."""
+    now = time.time()
+    d = _GATE_CAL_CACHE.get("data")
+    return d if (d is not None and (now - _GATE_CAL_CACHE["at"]) < _TTL) else None
+
+
 # ── combined report (cached — the replay is heavy) ───────────────────────────
 
 _CACHE: dict = {"at": 0.0, "data": None}
@@ -260,6 +438,11 @@ def factor_lab_report(symbols=None, *, force: bool = False) -> dict:
         out["ic_mom"] = cross_sectional_ic(symbols, factor_momentum_12_1, _mat=mat)
     except Exception as e:
         logger.debug("cross_sectional_ic failed: %s", e)
+    try:  # ② self-calibrating gate — OOS-validated threshold recommendation
+        out["gate_calibration"] = gate_calibration(symbols=symbols, force=force)
+    except Exception as e:
+        logger.debug("gate_calibration failed: %s", e)
+        out["gate_calibration"] = {"error": str(e)}
     out["caveat"] = ("Price-only, look-ahead-safe ESTIMATE (no PIT fundamentals/halal/"
                      "sentiment). Guides the decision fast; the live ledger still confirms.")
     _CACHE.update(at=now, data=out)

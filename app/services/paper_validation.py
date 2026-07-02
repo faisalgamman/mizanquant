@@ -139,7 +139,11 @@ def _weekly_entry_ok(parts: dict) -> tuple[bool, str]:
     if parts.get("wk_above_ema20") == 0:
         return False, "below EMA20 (counter-trend)"
     rs = parts.get("wk_rs")
-    min_rs = float(os.environ.get("WEEKLY_MIN_RS", "-2"))
+    try:  # approved (self-calibrated) threshold if set, else the WEEKLY_MIN_RS default
+        from app.services.gate_config import get_min_rs
+        min_rs = get_min_rs()
+    except Exception:
+        min_rs = float(os.environ.get("WEEKLY_MIN_RS", "-2"))
     if rs is not None and float(rs) < min_rs:
         return False, f"RS {rs}% < {min_rs}% (lagging SPY)"
     return True, ""
@@ -514,6 +518,61 @@ def weekly_shadow_ab(horizon_days: int = 10, mature: bool = True) -> dict:
         }
     except SQLAlchemyError as e:
         logger.error("weekly_shadow_ab failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+def weekly_gate_forward_eval(min_rs=None, require_ema20: bool = True, horizon_days: int = 10) -> dict:
+    """③ Evaluate ANY candidate MIN_RS threshold on the accumulated FORWARD cross-section.
+    Because the shadow ledger (PVSH) already stores the gate-REJECTED picks with their
+    entry factors (wk_rs / wk_above_ema20) plus the fixed-horizon label, we can re-derive
+    the pass/fail split for any threshold and score it — a live confirmation of the
+    history-replay recommendation, with NO new recording. Returns a paired A/B."""
+    import numpy as np
+    from app.services.factor_lab import _welch_t
+    if min_rs is None:
+        try:
+            from app.services.gate_config import get_min_rs
+            min_rs = get_min_rs()
+        except Exception:
+            min_rs = float(os.environ.get("WEEKLY_MIN_RS", "-2"))
+    thr = float(min_rs)
+    key = f"fwd_{int(horizon_days)}d_ret"
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id.in_([PV_WEEKLY, PV_SHADOW])).all()
+        p_ret, f_ret = [], []
+        for t in rows:
+            sd = t.signal_details if isinstance(t.signal_details, dict) else {}
+            v = sd.get(key)
+            if not isinstance(v, (int, float)):
+                continue
+            above = sd.get("wk_above_ema20")
+            rs = sd.get("wk_rs")
+            allow = True
+            if require_ema20 and above == 0:
+                allow = False
+            if allow and isinstance(rs, (int, float)) and float(rs) < thr:
+                allow = False
+            (p_ret if allow else f_ret).append(float(v))
+
+        def _summ(x):
+            a = np.asarray(x, dtype=float)
+            n = len(a)
+            return {"n": n, "mean_ret_pct": round(float(a.mean()), 3) if n else None,
+                    "win_rate_pct": round(100.0 * float((a > 0).mean()), 1) if n else None}
+
+        sp, sf = _summ(p_ret), _summ(f_ret)
+        delta = (round(sp["mean_ret_pct"] - sf["mean_ret_pct"], 3)
+                 if sp["mean_ret_pct"] is not None and sf["mean_ret_pct"] is not None else None)
+        return {"min_rs": thr, "require_ema20": require_ema20, "label": key,
+                "pass": sp, "fail": sf, "delta_pct": delta,
+                "t_pass_vs_fail": _welch_t(p_ret, f_ret),
+                "note": "Candidate threshold scored on the accumulated forward cross-section (PV+PVSH)."}
+    except SQLAlchemyError as e:
+        logger.error("weekly_gate_forward_eval failed: %s", e)
         return {"error": str(e)}
     finally:
         db.close()

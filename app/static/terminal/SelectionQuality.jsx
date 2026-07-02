@@ -27,6 +27,27 @@ function SelectionQuality() {
     return () => { alive = false; };
   }, []);
 
+  const [applying, setApplying] = useState(false);
+
+  const approveGate = async (rec) => {
+    if (!rec || applying) return;
+    const ok = window.confirm(
+      `اعتماد عتبة الدخول MIN_RS = ${rec.min_rs}%؟\n\n` +
+      `رفع متوقّع +${rec.expected_uplift_pct}%/صفقة (t اختبار ${rec.test_t}).\n` +
+      `يؤثّر على الدفتر الورقي فقط — لا صفقات حقيقية — وقابل للعكس.`);
+    if (!ok) return;
+    setApplying(true);
+    try {
+      const qs = `min_rs=${rec.min_rs}` +
+        (rec.test_t != null ? `&test_t=${rec.test_t}` : "") +
+        (rec.train_t != null ? `&train_t=${rec.train_t}` : "");
+      await fetch("/api/gate-config/apply?" + qs, { method: "POST" });
+      const j = await fetch("/api/selection-quality").then(r => r.json());
+      setData(j || {});
+    } catch (e) { /* leave the proposal visible on failure */ }
+    setApplying(false);
+  };
+
   const scanners = (data && Array.isArray(data.scanners)) ? data.scanners : [];
 
   return (
@@ -90,6 +111,33 @@ function SelectionQuality() {
       {data && !data.estimate && !data.error && (
         <div className="selq-estimate selq-dim">…يُحسب التقدير التاريخي الفوري</div>
       )}
+
+      {data && data.gate && (() => {
+        const g = data.gate;
+        const rec = g.recommendation;
+        const actionable = rec && (rec.action === "raise" || rec.action === "lower");
+        return (
+          <div className="selq-gate">
+            <span className="selq-gate-title">بوّابة الدخول ذاتية المعايرة</span>
+            <span className="selq-dim">
+              العتبة الحالية MIN_RS <b>{_sqNum(g.current_min_rs, 1)}%</b>
+              {" "}({g.source === "approved" ? "معتمَدة بالدليل" : "افتراضية"})
+            </span>
+            {actionable ? (
+              <span className="selq-gate-reco">
+                <span className="selq-gate-msg" title="مُتحقَّق خارج العيّنة (تدريب/اختبار)">
+                  ⬆ {rec.reason}
+                </span>
+                <button className="selq-approve" disabled={applying} onClick={() => approveGate(rec)}>
+                  {applying ? "…يُعتمد" : `اعتمد ${rec.min_rs}%`}
+                </button>
+              </span>
+            ) : (
+              <span className="selq-dim">{rec ? rec.reason : "…يُعاير من التاريخ"}</span>
+            )}
+          </div>
+        );
+      })()}
 
       {data && data.caveat && <div className="selq-caveat">{data.caveat}</div>}
     </div>

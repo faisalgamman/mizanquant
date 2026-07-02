@@ -564,3 +564,30 @@ def test_weekly_shadow_ab(tdb):
     assert r["pass"]["mean_ret_pct"] > r["fail"]["mean_ret_pct"]
     assert r["delta_pct"] > 0
     assert r["t_pass_vs_fail"] is not None and r["t_pass_vs_fail"] > 0
+
+
+# --- ③ candidate-threshold forward eval on PV+PVSH -----------------------------
+
+def test_weekly_gate_forward_eval_candidate_threshold(tdb):
+    """A candidate MIN_RS re-derives the pass/fail split from the stored factors +
+    fixed-horizon labels across BOTH ledgers — no new recording needed."""
+    db = tdb()
+    try:
+        # high-RS winners, low-RS losers — all above EMA20 so only RS decides
+        rows = [("H0", 6.0, 8.0), ("H1", 5.0, 7.0), ("H2", 4.0, 6.0),
+                ("L0", -6.0, -4.0), ("L1", -8.0, -5.0), ("L2", -9.0, -6.0)]
+        for sym, rs, fwd in rows:
+            db.add(TradeHistory(strategy_id="PVSH", symbol=sym, side="buy", qty=1,
+                                entry_price=100.0, status="open", created_at=datetime(2026, 1, 1),
+                                signal_details={"wk_rs": rs, "wk_above_ema20": 1, "fwd_10d_ret": fwd}))
+        db.commit()
+    finally:
+        db.close()
+    # threshold 0% keeps only the high-RS names → pass beats fail decisively
+    r = pv.weekly_gate_forward_eval(min_rs=0.0, require_ema20=True)
+    assert r["min_rs"] == 0.0
+    assert r["pass"]["n"] == 3 and r["fail"]["n"] == 3
+    assert r["delta_pct"] > 0 and r["t_pass_vs_fail"] > 0
+    # a very loose threshold lets the losers in → pass set grows, delta shrinks
+    loose = pv.weekly_gate_forward_eval(min_rs=-20.0, require_ema20=True)
+    assert loose["pass"]["n"] == 6 and loose["fail"]["n"] == 0

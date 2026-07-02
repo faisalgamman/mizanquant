@@ -209,6 +209,50 @@ async def weekly_shadow_ab_ep(horizon_days: int = 10):
     return weekly_shadow_ab(horizon_days=horizon_days)
 
 
+# ── self-calibrating gate: OOS recommendation + live confirmation + approval ──
+
+@router.get("/api/gate-calibration")
+async def gate_calibration_ep():
+    """② OOS-validated threshold-grid recommendation for the weekly entry gate. Cache-only
+    on the request path (heavy compute runs in the factor-lab background warm)."""
+    from app.services.factor_lab import gate_calibration_cached, factor_lab_cached
+    cached = gate_calibration_cached()
+    if cached is not None:
+        return cached
+    factor_lab_cached(warm=True)   # kick the single-flight warm (computes gate_calibration too)
+    return {"status": "computing", "recommendation": None}
+
+
+@router.get("/api/gate-forward")
+async def gate_forward_ep(min_rs: float | None = None, require_ema20: bool = True):
+    """③ Score a candidate MIN_RS on the accumulated forward cross-section (PV+PVSH)."""
+    from app.services.paper_validation import weekly_gate_forward_eval
+    return weekly_gate_forward_eval(min_rs=min_rs, require_ema20=require_ema20)
+
+
+@router.get("/api/gate-config")
+async def gate_config_ep():
+    """Current live gate threshold + provenance/audit history."""
+    from app.services.gate_config import gate_config_state
+    return gate_config_state()
+
+
+@router.post("/api/gate-config/apply")
+async def gate_config_apply_ep(min_rs: float, test_t: float | None = None,
+                               train_t: float | None = None):
+    """④ Approve a new MIN_RS threshold (PAPER ledger only; never a real order). Persisted,
+    audited, reversible. This is the user's explicit approval action from the dashboard."""
+    from app.services.gate_config import set_min_rs
+    return set_min_rs(min_rs, evidence={"test_t": test_t, "train_t": train_t, "via": "dashboard"})
+
+
+@router.post("/api/gate-config/reset")
+async def gate_config_reset_ep():
+    """Revert the gate threshold to the env/default (delete the approved override)."""
+    from app.services.gate_config import reset_min_rs
+    return reset_min_rs()
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,

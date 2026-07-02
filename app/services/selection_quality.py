@@ -105,6 +105,24 @@ def _read_estimate():
         return None
 
 
+def _read_gate_reco():
+    """④ The self-calibrating gate's OOS recommendation + the current live threshold, read
+    FRESH from factor_lab's gate-calibration cache (cheap; the heavy compute is the warm)."""
+    try:
+        from app.services.factor_lab import gate_calibration_cached
+        from app.services.gate_config import gate_config_state
+        cal = gate_calibration_cached()
+        state = gate_config_state()
+        reco = (cal or {}).get("recommendation") if cal else None
+        return {"current_min_rs": state.get("min_rs"),
+                "source": state.get("source"),
+                "recommendation": reco,
+                "updated_at": state.get("updated_at")}
+    except Exception as e:
+        logger.debug("gate reco read failed: %s", e)
+        return None
+
+
 def selection_quality_summary(force: bool = False) -> dict:
     """Per-scanner selection-quality scorecard (weekly + monthly). The per-scanner alpha/
     calibration block is cached ~30 min; the fast history estimate is read fresh each call."""
@@ -126,6 +144,7 @@ def selection_quality_summary(force: bool = False) -> dict:
     return {
         "scanners": cached,
         "estimate": _read_estimate(),
+        "gate": _read_gate_reco(),
         "as_of": datetime.now(timezone.utc).isoformat(),
         "method": ("مقياس أمين: عائد كل صفقة مُغلقة مطروحاً منه عائد SPY على نفس نافذة "
                    "الاحتفاظ (ألفا)، مع دلالة إحصائية (t)، وارتباط الرتبة بين الدرجة "
