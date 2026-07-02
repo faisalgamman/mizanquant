@@ -190,7 +190,7 @@ def cross_sectional_ic(symbols, factor_fn, *, spy: str = "SPY", period: str = "2
         return {"n_dates": 0, "mean_ic": None, "ic_ir": None, "pct_positive": None}
     a = np.asarray(ics, dtype=float)
     sd = float(a.std(ddof=1)) if n > 1 else 0.0
-    ir = round(float(a.mean()) / (sd / np.sqrt(n)), 2) if sd > 0 else None
+    ir = round(float(a.mean() / (sd / np.sqrt(n))), 2) if sd > 0 else None  # plain float (JSON-safe)
     return {
         "n_dates": n,
         "mean_ic": round(float(a.mean()), 4),
