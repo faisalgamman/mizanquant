@@ -59,6 +59,29 @@ def _closed_trades(strategy_id: str) -> list[dict]:
         db.close()
 
 
+def _labeled_trades(strategy_id: str, label_key: str) -> list[dict]:
+    """Trades (OPEN or closed) carrying a fixed-horizon label in signal_details →
+    [{score, ret, symbol, details}]. Lets attribution use the fast-maturing ``fwd_Nd_ret``
+    label (paper_validation.mature_fixed_horizon_labels) instead of waiting for the exit."""
+    from app.db.database import SessionLocal
+    from app.db.models import TradeHistory
+    db = SessionLocal()
+    try:
+        rows = (db.query(TradeHistory.confidence, TradeHistory.signal_details, TradeHistory.symbol)
+                  .filter(TradeHistory.strategy_id == strategy_id).all())
+        out = []
+        for conf, sd, sym in rows:
+            if isinstance(sd, dict) and isinstance(sd.get(label_key), (int, float)):
+                out.append({"score": float(conf or 0), "ret": float(sd[label_key]),
+                            "symbol": sym, "details": sd})
+        return out
+    except Exception as e:
+        logger.debug("labeled read failed for %s/%s: %s", strategy_id, label_key, e)
+        return []
+    finally:
+        db.close()
+
+
 def _stats(rets: list[float]) -> dict:
     n = len(rets)
     if n == 0:
@@ -152,13 +175,15 @@ def calibration_report(scanner: str = "weekly", min_n: int = 30) -> dict:
     }
 
 
-def component_attribution(scanner: str = "monthly", min_n: int = 30) -> dict:
+def component_attribution(scanner: str = "monthly", min_n: int = 30, label: str | None = None) -> dict:
     """Per-component rank correlation with the realized return.
 
-    Reads the score parts stored on each closed trade's ``signal_details`` and correlates
-    each with ``pnl_pct`` — i.e. which inputs actually carry forward signal. Monthly stores
-    the composite parts (tech/fund/sentiment/halal/conviction) after the recording
-    enrichment; until enough trades carry them it reports "accumulating".
+    Reads the score parts stored on each trade's ``signal_details`` and correlates each
+    with the return — i.e. which inputs actually carry forward signal. By default the
+    return is the closed ``pnl_pct``; pass ``label="fwd_10d_ret"`` to instead use the
+    fast-maturing fixed-horizon label (③) so the edge can be measured from OPEN trades too,
+    weeks sooner. Monthly stores the composite parts; weekly the entry factors; until
+    enough trades carry a part it reports "accumulating".
     """
     key = str(scanner).lower()
     strat = _STRATEGY.get(key)
@@ -169,7 +194,7 @@ def component_attribution(scanner: str = "monthly", min_n: int = 30) -> dict:
                 "note": "Component attribution is available for the monthly + weekly scanners."}
     part_list = _WEEKLY_PARTS if key == "weekly" else _MONTHLY_PARTS
 
-    trades = _closed_trades(strat)
+    trades = _labeled_trades(strat, label) if label else _closed_trades(strat)
     out = {}
     for part in part_list:
         pairs = [(float(t["details"].get(part)), t["ret"]) for t in trades
@@ -184,6 +209,7 @@ def component_attribution(scanner: str = "monthly", min_n: int = 30) -> dict:
     return {
         "scanner": key,
         "strategy_id": strat,
+        "label": label or "pnl_pct (closed)",
         "closed_trades": len(trades),
         "components": out,
         "ready_components": have,

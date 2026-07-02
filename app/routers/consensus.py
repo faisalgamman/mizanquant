@@ -192,6 +192,23 @@ async def selection_quality(force: bool = False):
     return selection_quality_summary(force=force)
 
 
+@router.get("/api/factor-lab")
+async def factor_lab(force: bool = False):
+    """Offline, look-ahead-safe ESTIMATE (available now, no waiting): the with-trend gate
+    A/B replay over history + the cross-sectional Information Coefficient of RS and 12-1
+    momentum. Price-only (PIT-clean); the live ledger still confirms. Cached 6h."""
+    from app.services.factor_lab import factor_lab_report
+    return factor_lab_report(force=force)
+
+
+@router.get("/api/weekly-shadow-ab")
+async def weekly_shadow_ab_ep(horizon_days: int = 10):
+    """Forward PAIRED A/B of the with-trend gate: fixed-horizon return of gate-PASS (PV)
+    vs gate-REJECTED (shadow PVSH) picks — the live confirmation of the history replay."""
+    from app.services.paper_validation import weekly_shadow_ab
+    return weekly_shadow_ab(horizon_days=horizon_days)
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,

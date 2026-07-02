@@ -46,6 +46,7 @@ logger = logging.getLogger("screener")
 PV_WEEKLY = "PV"     # weekly swing scanner — Option-A exit (15% stop / 20-day time)
 PV_MONTHLY = "PVM"   # monthly composite scanner — rebalanced (hold top-N, drop the rest)
 PV_PAIRS = "PVP"     # halal long-only relative-value pairs (cointegration) — z-reversion exit
+PV_SHADOW = "PVSH"   # weekly SHADOW ledger — gate-REJECTED picks, inert (measurement only)
 PV_STRATEGY = PV_WEEKLY  # backward-compat alias (older callers / tests use PV_STRATEGY)
 
 
@@ -144,6 +145,14 @@ def _weekly_entry_ok(parts: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def _shadow_row_from_pick(pick: dict) -> dict:
+    """Same as a weekly row but tagged to the SHADOW ledger — the gate-rejected pick,
+    kept only for the forward paired A/B (the exit engine never touches PVSH)."""
+    row = _paper_row_from_pick(pick)
+    row["strategy_id"] = PV_SHADOW
+    return row
+
+
 def _paper_row_from_pick(pick: dict) -> dict:
     """Map a weekly-report pick to TradeHistory column kwargs (pure, testable)."""
     return {
@@ -224,7 +233,14 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                 TradeHistory.pnl_pct.is_(None),
             ).all()
         }
-        recorded = skipped = filtered = 0
+        shadow_on = os.environ.get("WEEKLY_SHADOW", "true").strip().lower() in ("true", "1", "yes", "on")
+        open_shadow = {
+            r[0] for r in db.query(TradeHistory.symbol).filter(
+                TradeHistory.strategy_id == PV_SHADOW,
+                TradeHistory.pnl_pct.is_(None),
+            ).all()
+        } if shadow_on else set()
+        recorded = skipped = filtered = shadow = 0
         filtered_syms: list[str] = []
         for p in picks:
             sym = p.get("symbol")
@@ -236,9 +252,19 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
             # swings (the structural fix for the weekly's measured negative alpha). The
             # Weekly tab still SHOWS these; the gate only decides what enters the ledger.
             ok, why = _weekly_entry_ok(p["parts"])
+            if isinstance(p["parts"], dict):
+                p["parts"]["gate_pass"] = bool(ok)   # paired-A/B flag (④ shadow)
             if not ok:
                 filtered += 1
                 filtered_syms.append(sym)
+                # ④ Paired shadow logging — record the REJECTED pick to the shadow ledger
+                # as an inert measurement row (never traded/closed by the exit engine). A
+                # fixed-horizon forward label then lets weekly_shadow_ab() score gate-PASS
+                # vs gate-FAIL on the SAME dates — a live confirmation of the history replay.
+                if shadow_on and sym not in open_shadow:
+                    db.add(TradeHistory(created_at=_utc_now(), **_shadow_row_from_pick(p)))
+                    open_shadow.add(sym)
+                    shadow += 1
                 logger.info("weekly entry filtered: %s — %s", sym, why)
                 continue
             db.add(TradeHistory(created_at=_utc_now(), **_paper_row_from_pick(p)))
@@ -264,10 +290,10 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                 logger.debug("weekly pick SignalHistory record skipped", exc_info=True)
             recorded += 1
         db.commit()
-        logger.info("weekly paper recorded: %d new, %d skipped, %d filtered (funnel=%s, picks=%d)",
-                    recorded, skipped, filtered, funnel, len(picks))
-        return {"recorded": recorded, "skipped": skipped,
-                "filtered": filtered, "filtered_syms": filtered_syms}
+        logger.info("weekly paper recorded: %d new, %d skipped, %d filtered, %d shadow (funnel=%s, picks=%d)",
+                    recorded, skipped, filtered, shadow, funnel, len(picks))
+        return {"recorded": recorded, "skipped": skipped, "filtered": filtered,
+                "shadow": shadow, "filtered_syms": filtered_syms}
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("paper_validation record failed: %s", e)
@@ -383,6 +409,111 @@ def mature_open_paper_trades() -> dict:
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("paper_validation mature failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+def mature_fixed_horizon_labels(strategy_id: str = PV_WEEKLY, horizon_days: int = 10) -> dict:
+    """③ Fast-maturing labels. For every trade whose entry is ≥ ``horizon_days`` trading
+    days old, store the forward horizon-day return (entry → entry+H) in signal_details as
+    ``fwd_{H}d_ret`` — INDEPENDENT of the trailing-stop exit. A fixed window matures in ~H
+    days instead of waiting for the trade to close, so component_attribution can measure
+    the per-factor edge weeks sooner. Idempotent (skips trades already labelled)."""
+    from app.services.market_data import fetch as fetch_market_data
+    from app.services.smart_exit import post_entry_bars
+
+    h = int(horizon_days)
+    key = f"fwd_{h}d_ret"
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeHistory).filter(TradeHistory.strategy_id == strategy_id).all()
+        checked = labeled = 0
+        for t in rows:
+            sd = t.signal_details if isinstance(t.signal_details, dict) else {}
+            if sd.get(key) is not None:
+                continue
+            entry = float(t.entry_price or 0)
+            if entry <= 0 or not t.created_at:
+                continue
+            checked += 1
+            try:
+                df = fetch_market_data(t.symbol, period="1y")
+                if df is None or len(df) == 0:
+                    continue
+                post = post_entry_bars(df, t.created_at, h + 5)
+                if post is None or len(post) < h:
+                    continue  # not matured yet — try again next run
+                px = float(post["close"].iloc[h - 1])
+                if px <= 0:
+                    continue
+                new_sd = dict(sd)
+                new_sd[key] = round((px / entry - 1.0) * 100.0, 3)
+                t.signal_details = new_sd
+                labeled += 1
+            except Exception as e:  # one bad symbol must not abort the batch
+                logger.debug("fwd-label %s failed: %s", t.symbol, e)
+        db.commit()
+        return {"strategy": strategy_id, "horizon_days": h, "checked": checked, "labeled": labeled}
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("fixed-horizon labelling failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+def weekly_shadow_ab(horizon_days: int = 10, mature: bool = True) -> dict:
+    """④ Forward PAIRED A/B of the with-trend gate. Using the fixed-horizon labels,
+    compare the forward horizon-day return of gate-PASS picks (PV ledger) vs the
+    gate-REJECTED picks logged to the shadow ledger (PVSH) — a live confirmation of what
+    factor_lab's history replay estimates now. Paired on the same dates ⇒ high power."""
+    import numpy as np
+    from app.services.factor_lab import _welch_t
+
+    h = int(horizon_days)
+    key = f"fwd_{h}d_ret"
+    if mature:
+        try:
+            mature_fixed_horizon_labels(PV_WEEKLY, h)
+            mature_fixed_horizon_labels(PV_SHADOW, h)
+        except Exception as e:
+            logger.debug("shadow A/B pre-maturation failed: %s", e)
+
+    db = SessionLocal()
+    try:
+        rows = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id.in_([PV_WEEKLY, PV_SHADOW])).all()
+        p_ret, f_ret = [], []
+        for t in rows:
+            sd = t.signal_details if isinstance(t.signal_details, dict) else {}
+            v = sd.get(key)
+            if not isinstance(v, (int, float)):
+                continue
+            gp = sd.get("gate_pass")
+            # PV rows are gate-PASS by construction; PVSH rows are gate-FAIL. Trust the
+            # explicit flag when present, else fall back to the ledger id.
+            is_pass = bool(gp) if gp is not None else (t.strategy_id == PV_WEEKLY)
+            (p_ret if is_pass else f_ret).append(float(v))
+
+        def _summ(x):
+            a = np.asarray(x, dtype=float)
+            n = len(a)
+            return {"n": n, "mean_ret_pct": round(float(a.mean()), 3) if n else None,
+                    "win_rate_pct": round(100.0 * float((a > 0).mean()), 1) if n else None}
+
+        sp, sf = _summ(p_ret), _summ(f_ret)
+        delta = (round(sp["mean_ret_pct"] - sf["mean_ret_pct"], 3)
+                 if sp["mean_ret_pct"] is not None and sf["mean_ret_pct"] is not None else None)
+        return {
+            "horizon_days": h, "label": key,
+            "pass": sp, "fail": sf,
+            "delta_pct": delta, "t_pass_vs_fail": _welch_t(p_ret, f_ret),
+            "note": ("Forward paired A/B via fixed-horizon labels (gate-PASS PV vs gate-FAIL "
+                     "shadow PVSH). Confirms the factor_lab history replay as data accrues."),
+        }
+    except SQLAlchemyError as e:
+        logger.error("weekly_shadow_ab failed: %s", e)
         return {"error": str(e)}
     finally:
         db.close()

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("screener")
 
-_CACHE: dict = {"at": 0.0, "data": None}
+_CACHE: dict = {"at": 0.0, "scanners": None}
 _TTL = 1800.0            # 30 min — this is slow-moving measurement, not live data
 _MIN_N = 20             # below this the sample is too thin to grade honestly
 
@@ -78,33 +78,56 @@ def _one(scanner: str, strat: str, name_ar: str) -> dict:
     }
 
 
+def _read_estimate():
+    """Fast ESTIMATE (no ledger wait): the history gate A/B uplift + the RS Information
+    Coefficient. Read FRESH each call from factor_lab's own 6h cache (cheap; warms in the
+    background if cold) so it appears as soon as the warm finishes, not on the summary TTL."""
+    try:
+        from app.services.factor_lab import factor_lab_cached
+        rep = factor_lab_cached(warm=True)   # cache-only; never blocks the request path
+        if rep is None:
+            return None
+        gab = rep.get("gate_ab") or {}
+        ic_rs = rep.get("ic_rs") or {}
+        return {
+            "gate_alpha_uplift_pct": gab.get("alpha_uplift_pct"),
+            "gate_t_pass_vs_fail": gab.get("t_pass_vs_fail"),
+            "rs_ic": ic_rs.get("mean_ic"),
+            "rs_ic_ir": ic_rs.get("ic_ir"),
+            "note": "تقدير تاريخي فوري (آمن ضد التطلّع، أسعار فقط) — يوجّه الآن، والدفتر يؤكّد.",
+        }
+    except Exception as e:
+        logger.debug("selection_quality estimate failed: %s", e)
+        return None
+
+
 def selection_quality_summary(force: bool = False) -> dict:
-    """Per-scanner selection-quality scorecard (weekly + monthly). Cached ~30 min."""
+    """Per-scanner selection-quality scorecard (weekly + monthly). The per-scanner alpha/
+    calibration block is cached ~30 min; the fast history estimate is read fresh each call."""
     now = time.time()
-    cached = _CACHE.get("data")
-    if not force and cached is not None and (now - _CACHE["at"]) < _TTL:
-        return cached
+    cached = _CACHE.get("scanners")
+    if force or cached is None or (now - _CACHE["at"]) >= _TTL:
+        scanners = []
+        for scanner, strat, name in _SCANNERS:
+            try:
+                scanners.append(_one(scanner, strat, name))
+            except Exception as e:
+                logger.debug("selection_quality %s failed: %s", scanner, e)
+                scanners.append({"scanner": scanner, "name": name, "n": 0,
+                                 "key": "insufficient", "grade": "—",
+                                 "label": "تعذّر القياس", "color": "muted"})
+        _CACHE.update(at=now, scanners=scanners)
+        cached = scanners
 
-    scanners = []
-    for scanner, strat, name in _SCANNERS:
-        try:
-            scanners.append(_one(scanner, strat, name))
-        except Exception as e:
-            logger.debug("selection_quality %s failed: %s", scanner, e)
-            scanners.append({"scanner": scanner, "name": name, "n": 0,
-                             "key": "insufficient", "grade": "—",
-                             "label": "تعذّر القياس", "color": "muted"})
-
-    out = {
-        "scanners": scanners,
+    return {
+        "scanners": cached,
+        "estimate": _read_estimate(),
         "as_of": datetime.now(timezone.utc).isoformat(),
         "method": ("مقياس أمين: عائد كل صفقة مُغلقة مطروحاً منه عائد SPY على نفس نافذة "
                    "الاحتفاظ (ألفا)، مع دلالة إحصائية (t)، وارتباط الرتبة بين الدرجة "
                    "والعائد. قياس فقط من الدفتر الورقي — لا يؤثّر في التنفيذ."),
         "caveat": "عيّنات صغيرة (<100 صفقة) إرشادية لا قاطعة — دع الدفتر يتراكم.",
     }
-    _CACHE.update(at=now, data=out)
-    return out
 
 
 __all__ = ["selection_quality_summary"]

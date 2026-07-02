@@ -464,7 +464,103 @@ def test_record_filters_counter_trend_pick(tdb, monkeypatch):
     assert res["filtered_syms"] == ["DWN"]
     db = tdb()
     try:
-        syms = {r[0] for r in db.query(TradeHistory.symbol).all()}
-        assert "UPP" in syms and "DWN" not in syms
+        syms = {r[0] for r in db.query(TradeHistory.symbol).filter(
+            TradeHistory.strategy_id == "PV").all()}
+        assert "UPP" in syms and "DWN" not in syms   # DWN is gated out of the PV ledger
     finally:
         db.close()
+
+
+# --- ④ paired shadow logging + gate_pass flag ---------------------------------
+
+def test_shadow_records_rejected_pick(tdb, monkeypatch):
+    """The gate-rejected pick goes to the PVSH shadow ledger (gate_pass=False); the
+    recorded pick carries gate_pass=True — the paired-A/B flags."""
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    monkeypatch.setenv("WEEKLY_SHADOW", "true")
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report",
+                        lambda *a, **k: {"picks": [_pick("UPP"), _pick("DWN")]})
+    monkeypatch.setattr(pv, "_weekly_signal_parts",
+                        lambda s: {"wk_above_ema20": 1 if s == "UPP" else 0, "wk_rs": 2.0})
+    res = pv.record_weekly_picks(_regime_fn=lambda: {"known": True, "spy_bearish": False})
+    assert res["recorded"] == 1 and res["filtered"] == 1 and res["shadow"] == 1
+    db = tdb()
+    try:
+        pv_rows = {r.symbol: r for r in db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == "PV").all()}
+        sh_rows = {r.symbol: r for r in db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == "PVSH").all()}
+        assert pv_rows["UPP"].signal_details["gate_pass"] is True
+        assert "DWN" in sh_rows and sh_rows["DWN"].signal_details["gate_pass"] is False
+        assert "DWN" not in pv_rows          # never enters the real ledger
+    finally:
+        db.close()
+
+
+def test_shadow_off_by_env(tdb, monkeypatch):
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    monkeypatch.setenv("WEEKLY_SHADOW", "false")
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report",
+                        lambda *a, **k: {"picks": [_pick("DWN")]})
+    monkeypatch.setattr(pv, "_weekly_signal_parts", lambda s: {"wk_above_ema20": 0, "wk_rs": 2.0})
+    res = pv.record_weekly_picks(_regime_fn=lambda: {"known": True, "spy_bearish": False})
+    assert res["filtered"] == 1 and res["shadow"] == 0
+    db = tdb()
+    try:
+        assert db.query(TradeHistory).filter(TradeHistory.strategy_id == "PVSH").count() == 0
+    finally:
+        db.close()
+
+
+# --- ③ fixed-horizon labelling ------------------------------------------------
+
+def test_fixed_horizon_label(tdb, monkeypatch):
+    """A trade ≥ horizon old gets fwd_10d_ret = (close@+10 / entry − 1)·100, idempotently."""
+    import pandas as pd
+    db = tdb()
+    try:
+        db.add(TradeHistory(strategy_id="PV", symbol="AAA", side="buy", qty=10,
+                            entry_price=100.0, status="open", created_at=datetime(2026, 1, 1),
+                            signal_details={"source": "paper_validation"}))
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr("app.services.market_data.fetch",
+                        lambda *a, **k: pd.DataFrame({"close": [1.0] * 30}))
+    # 10th post-entry bar (iloc[9]) closes at 110 → +10%
+    post = pd.DataFrame({"close": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]})
+    monkeypatch.setattr("app.services.smart_exit.post_entry_bars", lambda df, ts, n: post)
+    r = pv.mature_fixed_horizon_labels("PV", horizon_days=10)
+    assert r["labeled"] == 1
+    db = tdb()
+    try:
+        t = db.query(TradeHistory).filter(TradeHistory.symbol == "AAA").first()
+        assert t.signal_details["fwd_10d_ret"] == 10.0
+    finally:
+        db.close()
+    # idempotent — a second run relabels nothing
+    assert pv.mature_fixed_horizon_labels("PV", horizon_days=10)["labeled"] == 0
+
+
+# --- ④ forward paired A/B -----------------------------------------------------
+
+def test_weekly_shadow_ab(tdb):
+    """gate-PASS (PV) forward labels beat gate-FAIL (PVSH) → positive delta + t."""
+    db = tdb()
+    try:
+        for i in range(3):
+            db.add(TradeHistory(strategy_id="PV", symbol=f"P{i}", side="buy", qty=1,
+                                entry_price=100.0, status="open", created_at=datetime(2026, 1, 1),
+                                signal_details={"gate_pass": True, "fwd_10d_ret": 5.0 + i}))
+        for i in range(3):
+            db.add(TradeHistory(strategy_id="PVSH", symbol=f"F{i}", side="buy", qty=1,
+                                entry_price=100.0, status="open", created_at=datetime(2026, 1, 1),
+                                signal_details={"gate_pass": False, "fwd_10d_ret": -3.0 - i}))
+        db.commit()
+    finally:
+        db.close()
+    r = pv.weekly_shadow_ab(horizon_days=10, mature=False)
+    assert r["pass"]["n"] == 3 and r["fail"]["n"] == 3
+    assert r["pass"]["mean_ret_pct"] > r["fail"]["mean_ret_pct"]
+    assert r["delta_pct"] > 0
+    assert r["t_pass_vs_fail"] is not None and r["t_pass_vs_fail"] > 0

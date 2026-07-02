@@ -71,6 +71,26 @@ function SelectionQuality() {
         })}
       </div>
 
+      {data && data.estimate && (() => {
+        const e = data.estimate;
+        const up = e.gate_alpha_uplift_pct;
+        return (
+          <div className="selq-estimate" title={e.note || ""}>
+            <span className="selq-est-title">تقدير فوري (تاريخي)</span>
+            <span title="كم كانت بوّابة الدخول سترفع ألفا الأسبوعي — إعادة تشغيل تاريخية آمنة ضد التطلّع">
+              رفع البوّابة <b style={{ color: up > 0 ? "var(--positive)" : (up < 0 ? "var(--negative)" : "inherit") }}>{_sqPct(up)}</b>/صفقة
+              <span className="selq-dim"> (t {_sqNum(e.gate_t_pass_vs_fail)})</span>
+            </span>
+            <span title="معامل المعلومات المقطعي للقوة النسبية — موجب يعني إشارة تنبّؤية">
+              IC(RS) <b>{_sqNum(e.rs_ic, 3)}</b><span className="selq-dim"> (IR {_sqNum(e.rs_ic_ir)})</span>
+            </span>
+          </div>
+        );
+      })()}
+      {data && !data.estimate && !data.error && (
+        <div className="selq-estimate selq-dim">…يُحسب التقدير التاريخي الفوري</div>
+      )}
+
       {data && data.caveat && <div className="selq-caveat">{data.caveat}</div>}
     </div>
   );

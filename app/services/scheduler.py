@@ -667,8 +667,13 @@ def _scheduler_loop():
                 last_paper_mature = today_str
                 logger.info("Paper validation: maturing open paper trades...")
                 try:
-                    from app.services.paper_validation import mature_open_paper_trades
+                    from app.services.paper_validation import (
+                        mature_open_paper_trades, mature_fixed_horizon_labels, PV_WEEKLY, PV_SHADOW)
                     mature_open_paper_trades()
+                    # ③ fast-maturing fixed-horizon labels (weekly + its shadow) so
+                    # attribution + the paired A/B can score without waiting for exits.
+                    mature_fixed_horizon_labels(PV_WEEKLY, 10)
+                    mature_fixed_horizon_labels(PV_SHADOW, 10)
                 except Exception as e:
                     logger.error(f"Paper validation mature failed: {e}", exc_info=True)
                 # Smart-exit the live IBKR-paper positions on the day's close
