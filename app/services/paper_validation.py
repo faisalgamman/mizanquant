@@ -115,7 +115,7 @@ def _weekly_signal_parts(symbol: str) -> dict:
         c = float(closes[-1])
         ema20 = float(last.get("_ema20") or 0)
         return {
-            "wk_rs": round(rs * 100, 2) if rs is not None else None,       # RS vs SPY %, 3-mo
+            "wk_rs": round(float(rs) * 100, 2) if rs is not None else None,  # RS vs SPY %, 3-mo (plain float — JSON-safe)
             "wk_rsi": round(float(last.get("_rsi") or 0), 1),
             "wk_above_ema20": 1 if (ema20 and c > ema20) else 0,           # with-trend flag
             "wk_atr_pct": round(float(last.get("_atr_pct") or 0), 2),

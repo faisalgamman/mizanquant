@@ -3999,7 +3999,7 @@ async def screener_deep_picks(
             "analyst_target":     _adet.get("target_mean") if _an_av else None,
             # Composite breakdown
             "composite_score":    composite,
-            "score_momentum":     round(mom_component, 2) if mom_component is not None else None,
+            "score_momentum":     round(float(mom_component), 2) if mom_component is not None else None,
             "score_tech":         tech,
             "tech_version":       tech_version,  # Phase 3: v1 or tech-v2-date
             "score_fund":         fund,
