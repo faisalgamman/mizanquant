@@ -125,6 +125,25 @@ def _weekly_signal_parts(symbol: str) -> dict:
         return {}
 
 
+def _weekly_entry_ok(parts: dict) -> tuple[bool, str]:
+    """With-trend entry filter — the structural fix for the weekly's falling-knife
+    buys (its measured −5.5% alpha). Only take a swing when it's WITH the trend:
+    above EMA20 and not badly lagging SPY. Uses the entry signals from
+    _weekly_signal_parts. Fails OPEN on missing data (never drop a pick for a gap).
+    Env: WEEKLY_ENTRY_FILTER (default on), WEEKLY_MIN_RS (default −2%)."""
+    if os.environ.get("WEEKLY_ENTRY_FILTER", "true").strip().lower() not in ("true", "1", "yes", "on"):
+        return True, ""
+    if not parts:
+        return True, "no signals (fail-open)"
+    if parts.get("wk_above_ema20") == 0:
+        return False, "below EMA20 (counter-trend)"
+    rs = parts.get("wk_rs")
+    min_rs = float(os.environ.get("WEEKLY_MIN_RS", "-2"))
+    if rs is not None and float(rs) < min_rs:
+        return False, f"RS {rs}% < {min_rs}% (lagging SPY)"
+    return True, ""
+
+
 def _paper_row_from_pick(pick: dict) -> dict:
     """Map a weekly-report pick to TradeHistory column kwargs (pure, testable)."""
     return {
@@ -205,13 +224,23 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                 TradeHistory.pnl_pct.is_(None),
             ).all()
         }
-        recorded = skipped = 0
+        recorded = skipped = filtered = 0
+        filtered_syms: list[str] = []
         for p in picks:
             sym = p.get("symbol")
             if not sym or float(p.get("shares") or 0) <= 0 or sym in open_syms:
                 skipped += 1
                 continue
             p["parts"] = _weekly_signal_parts(sym)   # instrument the pick for attribution
+            # Phase 2 — with-trend entry gate: don't record counter-trend / SPY-lagging
+            # swings (the structural fix for the weekly's measured negative alpha). The
+            # Weekly tab still SHOWS these; the gate only decides what enters the ledger.
+            ok, why = _weekly_entry_ok(p["parts"])
+            if not ok:
+                filtered += 1
+                filtered_syms.append(sym)
+                logger.info("weekly entry filtered: %s — %s", sym, why)
+                continue
             db.add(TradeHistory(created_at=_utc_now(), **_paper_row_from_pick(p)))
             open_syms.add(sym)
             # C4: Also persist to SignalHistory for the weekly scanner's track record
@@ -235,9 +264,10 @@ def record_weekly_picks(account: float = 10000.0, top: int = 15,
                 logger.debug("weekly pick SignalHistory record skipped", exc_info=True)
             recorded += 1
         db.commit()
-        logger.info("weekly paper recorded: %d new, %d skipped (funnel=%s, picks=%d)",
-                    recorded, skipped, funnel, len(picks))
-        return {"recorded": recorded, "skipped": skipped}
+        logger.info("weekly paper recorded: %d new, %d skipped, %d filtered (funnel=%s, picks=%d)",
+                    recorded, skipped, filtered, funnel, len(picks))
+        return {"recorded": recorded, "skipped": skipped,
+                "filtered": filtered, "filtered_syms": filtered_syms}
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("paper_validation record failed: %s", e)

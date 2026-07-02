@@ -30,6 +30,14 @@ def tdb(monkeypatch):
     return TestSession
 
 
+@pytest.fixture(autouse=True)
+def _stub_weekly_signal_parts(monkeypatch):
+    """Keep the record_weekly_picks tests offline and independent of the Phase-2
+    with-trend entry gate: default the entry signals to empty so the gate fails OPEN
+    (records as before). Tests that exercise the gate override this with their own stub."""
+    monkeypatch.setattr(pv, "_weekly_signal_parts", lambda s: {})
+
+
 def _pick(sym, entry=100.0, shares=10, verdict="BUY", conf=60.0):
     return {
         "symbol": sym, "entry": entry, "catastrophe_stop": round(entry * 0.85, 2),
@@ -409,3 +417,54 @@ def test_weekly_row_stores_factor_parts():
     sd = row["signal_details"]
     assert sd["source"] == "paper_validation"
     assert sd["wk_rs"] == 5.2 and sd["wk_above_ema20"] == 1 and sd["wk_atr_pct"] == 2.1
+
+
+# --- Phase 2: with-trend entry gate -------------------------------------------------
+
+def test_entry_gate_passes_with_trend(monkeypatch):
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    ok, _ = pv._weekly_entry_ok({"wk_above_ema20": 1, "wk_rs": 3.0})
+    assert ok is True
+
+
+def test_entry_gate_rejects_below_ema20(monkeypatch):
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    ok, why = pv._weekly_entry_ok({"wk_above_ema20": 0, "wk_rs": 3.0})
+    assert ok is False and "EMA20" in why
+
+
+def test_entry_gate_rejects_deeply_lagging_rs(monkeypatch):
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    monkeypatch.setenv("WEEKLY_MIN_RS", "-2")
+    ok, why = pv._weekly_entry_ok({"wk_above_ema20": 1, "wk_rs": -5.0})
+    assert ok is False and "RS" in why
+
+
+def test_entry_gate_fails_open_on_missing_signals(monkeypatch):
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    assert pv._weekly_entry_ok({})[0] is True           # no signals → allow
+    assert pv._weekly_entry_ok({"wk_rsi": 55})[0] is True  # rs/above absent → allow
+
+
+def test_entry_gate_off_bypasses(monkeypatch):
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "false")
+    ok, _ = pv._weekly_entry_ok({"wk_above_ema20": 0, "wk_rs": -20.0})
+    assert ok is True
+
+
+def test_record_filters_counter_trend_pick(tdb, monkeypatch):
+    """A below-EMA20 pick is NOT recorded to the ledger; a with-trend one is."""
+    monkeypatch.setenv("WEEKLY_ENTRY_FILTER", "true")
+    monkeypatch.setattr("app.services.weekly_report.build_weekly_report",
+                        lambda *a, **k: {"picks": [_pick("UPP"), _pick("DWN")]})
+    monkeypatch.setattr(pv, "_weekly_signal_parts",
+                        lambda s: {"wk_above_ema20": 1 if s == "UPP" else 0, "wk_rs": 2.0})
+    res = pv.record_weekly_picks(_regime_fn=lambda: {"known": True, "spy_bearish": False})
+    assert res["recorded"] == 1 and res["filtered"] == 1
+    assert res["filtered_syms"] == ["DWN"]
+    db = tdb()
+    try:
+        syms = {r[0] for r in db.query(TradeHistory.symbol).all()}
+        assert "UPP" in syms and "DWN" not in syms
+    finally:
+        db.close()
