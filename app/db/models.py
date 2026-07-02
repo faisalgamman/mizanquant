@@ -44,7 +44,8 @@ class FactorSnapshot(Base):
     sector = Column(String(40), nullable=True)
     price = Column(Float)
     factors = Column(JSON)                                     # {rs, rsi, above_ema20, atr_pct, ...}
-    fwd_ret = Column(JSON, nullable=True)                      # {"10": pct, "20": pct} filled on maturity
+    # none_as_null so an unlabelled row is SQL NULL, not JSON 'null' (else is_(None) misses it)
+    fwd_ret = Column(JSON(none_as_null=True), nullable=True)   # {"10": pct, "20": pct} filled on maturity
     created_at = Column(DateTime, default=_utcnow)
 
     __table_args__ = (

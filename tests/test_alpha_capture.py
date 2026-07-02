@@ -89,3 +89,26 @@ def test_meta_model_trains_and_scores(sdb):
 def test_meta_probability_none_when_untrained(sdb):
     from app.services.meta_label import meta_probability
     assert meta_probability({"rs": 1.0}) is None       # no model file yet → fall back
+
+
+def test_unlabelled_rows_counted_and_matured(sdb, monkeypatch):
+    """Regression: a fwd_ret=None row must count as UNlabelled and be picked up by
+    label_snapshots (a JSON None can round-trip as JSON 'null', so an is_(None) SQL filter
+    silently labels nothing)."""
+    import pandas as pd
+    from app.services.alpha_capture import capture_status, label_snapshots
+    db = sdb()
+    try:
+        db.add(FactorSnapshot(snap_date=datetime(2026, 1, 1), symbol="AAA", price=100.0,
+                              factors={"rs": 1.0}, fwd_ret=None))
+        db.commit()
+    finally:
+        db.close()
+    assert capture_status()["labelled"] == 0            # None → NOT labelled
+    monkeypatch.setattr("app.services.market_data.fetch",
+                        lambda *a, **k: pd.DataFrame({"close": [1.0] * 30}))
+    post = pd.DataFrame({"close": [100, 100, 100, 100, 100, 100, 100, 100, 100, 112]})
+    monkeypatch.setattr("app.services.smart_exit.post_entry_bars", lambda df, ts, n: post)
+    res = label_snapshots(10)
+    assert res["labeled"] == 1                           # the None row got matured
+    assert capture_status()["labelled"] == 1

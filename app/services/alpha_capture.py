@@ -101,7 +101,11 @@ def label_snapshots(horizon_days: int = 10) -> dict:
     db = SessionLocal()
     checked = labeled = 0
     try:
-        rows = db.query(FactorSnapshot).filter(FactorSnapshot.fwd_ret.is_(None)).all()
+        # Load all rows and skip those already carrying THIS horizon in Python — robust to
+        # how the JSON column stores nulls (a stored Python None can round-trip as JSON null,
+        # so a SQL is_(None) filter is unreliable here).
+        rows = [r for r in db.query(FactorSnapshot).all()
+                if not (isinstance(r.fwd_ret, dict) and key in r.fwd_ret)]
         # group by symbol to reuse one fetch per symbol
         by_sym: dict = {}
         for r in rows:
@@ -207,7 +211,8 @@ def capture_status() -> dict:
     db = SessionLocal()
     try:
         total = db.query(FactorSnapshot).count()
-        labelled = db.query(FactorSnapshot).filter(FactorSnapshot.fwd_ret.isnot(None)).count()
+        # count in Python — a stored None can round-trip as JSON null, so isnot(None) lies
+        labelled = sum(1 for (f,) in db.query(FactorSnapshot.fwd_ret).all() if isinstance(f, dict) and f)
         dates = db.query(FactorSnapshot.snap_date).distinct().count()
         return {"rows": total, "labelled": labelled, "snap_dates": dates}
     finally:
