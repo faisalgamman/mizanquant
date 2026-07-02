@@ -234,9 +234,10 @@ def factor_lab_report(symbols=None, *, force: bool = False) -> dict:
 
     if not symbols:
         try:
-            from app.services.halal_screener import build_halal_candidates
-            symbols = list(build_halal_candidates() or [])[:120]
-        except Exception:
+            from app.services.universe import build_halal_candidates
+            symbols = list(build_halal_candidates(cap=120) or [])
+        except Exception as e:
+            logger.debug("factor_lab universe load failed: %s", e)
             symbols = []
     symbols = list(dict.fromkeys(symbols or []))
 

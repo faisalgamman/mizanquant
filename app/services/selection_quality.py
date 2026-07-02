@@ -89,6 +89,10 @@ def _read_estimate():
             return None
         gab = rep.get("gate_ab") or {}
         ic_rs = rep.get("ic_rs") or {}
+        # if the replay produced no usable numbers (empty universe / thin data), report
+        # None so the UI shows the "computing" hint rather than a row full of dashes.
+        if gab.get("alpha_uplift_pct") is None and ic_rs.get("mean_ic") is None:
+            return None
         return {
             "gate_alpha_uplift_pct": gab.get("alpha_uplift_pct"),
             "gate_t_pass_vs_fail": gab.get("t_pass_vs_fail"),
