@@ -253,6 +253,38 @@ async def gate_config_reset_ep():
     return reset_min_rs()
 
 
+# ── quant-fund overlays: alpha capture, meta-model, HMM regime ────────────────
+
+@router.get("/api/alpha-capture")
+async def alpha_capture_ep(horizon_days: int = 10, sector_neutral: bool = False):
+    """① Per-factor IC across the daily whole-universe capture panel + row/label counts."""
+    from app.services.alpha_capture import snapshot_attribution, capture_status
+    return {"status": capture_status(),
+            "attribution": snapshot_attribution(horizon_days=horizon_days, sector_neutral=sector_neutral)}
+
+
+@router.get("/api/meta-model")
+async def meta_model_ep():
+    """② Meta-labeling model status (in-sample AUC, base rate, top features)."""
+    from app.services.meta_label import meta_model_status
+    return meta_model_status()
+
+
+@router.get("/api/regime-hmm")
+async def regime_hmm_ep():
+    """④ HMM regime probabilities on SPY (calm_bull / choppy / crisis) + book multiplier."""
+    from app.services.regime_hmm import regime_probabilities
+    from app.services.position_sizing import book_multiplier
+    try:
+        from app.services.market_data import fetch
+        df = fetch("SPY", period="1y")
+        closes = df["close"].astype(float).values if df is not None and len(df) > 60 else None
+    except Exception:
+        closes = None
+    return {"regime": regime_probabilities(closes) if closes is not None else None,
+            "book_multiplier": book_multiplier()}
+
+
 @router.get("/refresh_consensus")
 async def refresh_consensus(symbol: str = "AAPL", x_api_key: OperatorAPIKey = None):
     from halal_screener import (_require_api_key, validate_symbol, _cache_key, _cache_lock,

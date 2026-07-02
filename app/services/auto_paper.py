@@ -155,13 +155,16 @@ def run_auto_paper(scanner: str = "weekly", *, _broker=None, _picks_fn=None, _su
         equity = 0.0
     if equity <= 0:
         equity = float(os.environ.get("AUTO_PAPER_ACCOUNT", "100000"))
-    # Regime-aware sizing: run a smaller book in a weaker tape (Phase 3).
+    # Book-level sizing: regime × HMM crisis-aware × vol-target (Phase 3 + quant overlays).
+    # Smaller book in a weaker/more-volatile tape; each overlay env-flagged, fails soft.
     try:
-        from app.services.position_sizing import regime_size_multiplier
-        _rm = regime_size_multiplier()
+        from app.services.position_sizing import book_multiplier
+        bm = book_multiplier()
+        _rm = bm["mult"]
         if _rm and _rm > 0:
             equity *= _rm
-            logger.info("auto_paper regime size multiplier=%.2f → sizing equity=%.0f", _rm, equity)
+            logger.info("auto_paper book multiplier=%.2f (regime=%.2f hmm=%.2f vol=%.2f) → equity=%.0f",
+                        _rm, bm["regime"], bm["hmm"], bm["vol_target"], equity)
     except Exception:
         pass
 

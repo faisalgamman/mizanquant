@@ -807,4 +807,10 @@ nav { flex: 1; padding: 6px; overflow-y: auto; }
   transition: background 0.15s, color 0.15s; }
 .selq-approve:hover:not(:disabled) { background: var(--positive); color: var(--bg-root); }
 .selq-approve:disabled { opacity: 0.5; cursor: default; }
+.selq-overlays { margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+  padding-top: 8px; border-top: 1px dashed var(--border-subtle); }
+.selq-overlays b { color: var(--text-primary); font-weight: 700; }
+.selq-overlays span { cursor: help; }
+.selq-ov-title { font-family: var(--font-body); font-weight: 700; color: var(--accent); }
 .selq-caveat { margin-top: 8px; font-size: 10.5px; color: var(--text-muted); font-style: italic; }

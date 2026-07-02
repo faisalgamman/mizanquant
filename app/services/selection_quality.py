@@ -123,6 +123,31 @@ def _read_gate_reco():
         return None
 
 
+def _read_overlays():
+    """Quant-fund overlays for the scorecard: ① capture size, ② meta-model AUC, ④ HMM
+    regime, ⑤ gate PBO trust. Cheap reads (capture/meta are DB/JSON; regime + PBO come
+    from factor_lab's 6h cache) — never computes on the request path."""
+    try:
+        from app.services.alpha_capture import capture_status
+        from app.services.meta_label import meta_model_status
+        from app.services.factor_lab import factor_lab_cached
+        rep = factor_lab_cached() or {}
+        cap = capture_status()
+        meta = meta_model_status()
+        regime = rep.get("regime")
+        pbo = ((rep.get("gate_calibration") or {}).get("pbo") or {}) if isinstance(rep.get("gate_calibration"), dict) else {}
+        return {
+            "capture_rows": cap.get("rows"), "capture_labelled": cap.get("labelled"),
+            "meta_status": meta.get("status"), "meta_auc": meta.get("auc_in_sample"),
+            "regime": regime.get("dominant") if isinstance(regime, dict) else None,
+            "crisis_prob": regime.get("crisis_prob") if isinstance(regime, dict) else None,
+            "pbo": pbo.get("pbo"), "pbo_trust": pbo.get("trust"),
+        }
+    except Exception as e:
+        logger.debug("overlays read failed: %s", e)
+        return None
+
+
 def selection_quality_summary(force: bool = False) -> dict:
     """Per-scanner selection-quality scorecard (weekly + monthly). The per-scanner alpha/
     calibration block is cached ~30 min; the fast history estimate is read fresh each call."""
@@ -145,6 +170,7 @@ def selection_quality_summary(force: bool = False) -> dict:
         "scanners": cached,
         "estimate": _read_estimate(),
         "gate": _read_gate_reco(),
+        "overlays": _read_overlays(),
         "as_of": datetime.now(timezone.utc).isoformat(),
         "method": ("مقياس أمين: عائد كل صفقة مُغلقة مطروحاً منه عائد SPY على نفس نافذة "
                    "الاحتفاظ (ألفا)، مع دلالة إحصائية (t)، وارتباط الرتبة بين الدرجة "

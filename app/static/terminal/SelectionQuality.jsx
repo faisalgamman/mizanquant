@@ -139,6 +139,31 @@ function SelectionQuality() {
         );
       })()}
 
+      {data && data.overlays && (() => {
+        const o = data.overlays;
+        const crisis = o.crisis_prob;
+        return (
+          <div className="selq-overlays" title="طبقات الصناديق الكمّية: التقاط ألفا · Meta-labeling · نظام HMM · حارس فرط التخصيص">
+            <span className="selq-ov-title">الطبقات الكمّية</span>
+            <span title="قاعدة التقاط الألفا: صفوف/مُسمّاة">التقاط <b>{o.capture_rows ?? "—"}</b><span className="selq-dim">/{o.capture_labelled ?? 0}</span></span>
+            <span title="نموذج Meta-labeling — AUC داخل العيّنة">Meta <b>{o.meta_status === "trained" ? _sqNum(o.meta_auc) : "…يتراكم"}</b></span>
+            {o.regime && (
+              <span title="نظام السوق (HMM) + احتمال الأزمة"
+                    style={{ color: crisis > 0.5 ? "var(--negative)" : (o.regime === "calm_bull" ? "var(--positive)" : "inherit") }}>
+                النظام <b>{o.regime === "calm_bull" ? "هدوء صاعد" : (o.regime === "crisis" ? "أزمة" : "تذبذب")}</b>
+                <span className="selq-dim"> (أزمة {crisis != null ? Math.round(crisis * 100) + "%" : "—"})</span>
+              </span>
+            )}
+            {o.pbo != null && (
+              <span title="احتمال فرط التخصيص للبوّابة (López de Prado CSCV) — أقل=أوثق"
+                    style={{ color: o.pbo_trust === "low" ? "var(--negative)" : (o.pbo_trust === "high" ? "var(--positive)" : "inherit") }}>
+                PBO <b>{_sqNum(o.pbo)}</b>
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       {data && data.caveat && <div className="selq-caveat">{data.caveat}</div>}
     </div>
   );

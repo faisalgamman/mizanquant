@@ -31,6 +31,27 @@ class MarketDataCache(Base):
     )
 
 
+class FactorSnapshot(Base):
+    """① Alpha-capture: a daily point-in-time snapshot of EVERY universe name's factors,
+    labelled later with the forward return. This is the base that multiplies statistical
+    power ~universe-fold (one row per name per day, not per traded pick)."""
+
+    __tablename__ = "factor_snapshot"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snap_date = Column(DateTime, nullable=False, index=True)   # PIT date (UTC midnight)
+    symbol = Column(String(10), nullable=False, index=True)
+    sector = Column(String(40), nullable=True)
+    price = Column(Float)
+    factors = Column(JSON)                                     # {rs, rsi, above_ema20, atr_pct, ...}
+    fwd_ret = Column(JSON, nullable=True)                      # {"10": pct, "20": pct} filled on maturity
+    created_at = Column(DateTime, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_snap_date_symbol", "snap_date", "symbol", unique=True),
+    )
+
+
 class SignalHistory(Base):
     """Audit trail of every signal the system generates."""
 

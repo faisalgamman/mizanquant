@@ -278,10 +278,11 @@ def gate_threshold_sweep(symbols, *, grid=None, spy: str = "SPY", period: str = 
     return {"grid": results, "best": results[0] if results else None, "n_records": len(recs)}
 
 
-def _gate_recommendation(best_oos, current: float, min_delta: float = 0.5) -> dict:
+def _gate_recommendation(best_oos, current: float, min_delta: float = 0.5, pbo=None) -> dict:
     """Turn the best OOS-robust threshold into a plain-language proposal vs the current
     one. Conservative: proposes a change only if a robust winner beats current by
-    ≥ min_delta % uplift on the OOS (test) half."""
+    ≥ min_delta % uplift on the OOS (test) half AND the grid search isn't likely overfit
+    (⑤ PBO ≤ 0.5)."""
     if best_oos is None:
         return {"action": "keep", "min_rs": current,
                 "reason": "لا عتبة تتفوّق خارج العيّنة بدلالة — أبقِ الحالية."}
@@ -290,15 +291,22 @@ def _gate_recommendation(best_oos, current: float, min_delta: float = 0.5) -> di
     if abs(cand - current) < 1e-9:
         return {"action": "keep", "min_rs": current,
                 "reason": f"العتبة الحالية ({current}) هي الأفضل خارج العيّنة أصلاً."}
+    pbo_v = (pbo or {}).get("pbo") if isinstance(pbo, dict) else None
+    if pbo_v is not None and pbo_v > 0.5:
+        return {"action": "keep", "min_rs": current, "pbo": pbo_v,
+                "reason": (f"عتبة {cand}% تبدو أفضل ظاهرياً، لكن احتمال فرط التخصيص "
+                           f"PBO={pbo_v} مرتفع — لا تُغيّر بناءً على بحث شبكة غير موثوق.")}
+    trust_note = f" · موثوقية PBO={pbo_v}" if pbo_v is not None else ""
     return {
         "action": "raise" if cand > current else "lower",
         "min_rs": cand, "from": current,
         "expected_uplift_pct": te,
         "train_t": best_oos["train"]["t_pass_vs_fail"],
         "test_t": best_oos["test"]["t_pass_vs_fail"],
+        "pbo": pbo_v,
         "reason": (f"الدليل يدعم ضبط MIN_RS إلى {cand}% — رفع متوقّع "
                    f"+{te}%/صفقة خارج العيّنة (t تدريب {best_oos['train']['t_pass_vs_fail']}, "
-                   f"t اختبار {best_oos['test']['t_pass_vs_fail']})."),
+                   f"t اختبار {best_oos['test']['t_pass_vs_fail']}){trust_note}."),
     }
 
 
@@ -359,10 +367,32 @@ def gate_calibration(symbols=None, *, grid=None, min_t: float = 2.0,
     except Exception:
         current = float(os.environ.get("WEEKLY_MIN_RS", "-2"))
 
+    # ⑤ PBO/CSCV — is the grid search overfit? Build a (rebalance × threshold) matrix of
+    # per-date gate-PASS alpha and run CSCV, then stamp the recommendation with a trust.
+    pbo = None
+    try:
+        from app.services.overfitting import pbo_cscv
+        dts = sorted({r[0] for r in recs})
+        di_ix = {d: i for i, d in enumerate(dts)}
+        by_date: dict = {}
+        for di, rs, above, r, spy in recs:
+            by_date.setdefault(di, []).append((rs, above, r, spy))
+        M = np.full((len(dts), len(grid)), np.nan)
+        for d, rd in by_date.items():
+            for j, m in enumerate(grid):
+                pa = [(r - spy) for (rs, above, r, spy) in rd
+                      if above != 0 and (rs is None or float(rs) >= m)]
+                if pa:
+                    M[di_ix[d], j] = float(np.mean(pa))
+        pbo = pbo_cscv(M, s_splits=10)
+    except Exception as e:
+        logger.debug("gate PBO failed: %s", e)
+
     out = {
         "grid": rows, "best_oos": best, "current_min_rs": current,
         "n_records": len(recs), "split": {"train": len(train), "test": len(test)},
-        "recommendation": _gate_recommendation(best, current),
+        "pbo": pbo,
+        "recommendation": _gate_recommendation(best, current, pbo=pbo),
         "caveat": ("Out-of-sample validated (train/test split), price-only, look-ahead-safe. "
                    "Gates the PAPER ledger only — never a real order."),
     }
@@ -443,6 +473,12 @@ def factor_lab_report(symbols=None, *, force: bool = False) -> dict:
     except Exception as e:
         logger.debug("gate_calibration failed: %s", e)
         out["gate_calibration"] = {"error": str(e)}
+    try:  # ④ HMM regime — computed here (heavy) so the scorecard reads it from cache
+        from app.services.regime_hmm import regime_probabilities
+        spy_closes = mat["SPY"].dropna().values if (mat is not None and "SPY" in mat.columns) else None
+        out["regime"] = regime_probabilities(spy_closes) if spy_closes is not None else None
+    except Exception as e:
+        logger.debug("regime_hmm in report failed: %s", e)
     out["caveat"] = ("Price-only, look-ahead-safe ESTIMATE (no PIT fundamentals/halal/"
                      "sentiment). Guides the decision fast; the live ledger still confirms.")
     _CACHE.update(at=now, data=out)

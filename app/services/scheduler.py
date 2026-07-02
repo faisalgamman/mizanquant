@@ -676,6 +676,18 @@ def _scheduler_loop():
                     mature_fixed_horizon_labels(PV_SHADOW, 10)
                 except Exception as e:
                     logger.error(f"Paper validation mature failed: {e}", exc_info=True)
+                # ① Alpha capture: snapshot the whole universe's factors, label matured
+                # ones, and retrain the ② meta-model. Read-only measurement, best-effort.
+                try:
+                    from app.services.alpha_capture import capture_snapshot, label_snapshots
+                    from app.services.meta_label import train_meta_model
+                    cap = capture_snapshot()
+                    lab = label_snapshots(10)
+                    mm = train_meta_model(10)
+                    logger.info("alpha-capture: snap=%s label=%s meta=%s",
+                                cap.get("stored"), lab.get("labeled"), mm.get("status"))
+                except Exception as e:
+                    logger.error(f"alpha-capture cycle failed: {e}", exc_info=True)
                 # Smart-exit the live IBKR-paper positions on the day's close
                 # (the intraday pass below handles the session). PAPER-ONLY, opt-in.
                 threading.Thread(target=_smart_exit_monitor_bg, daemon=True,
