@@ -32,6 +32,7 @@ function QuantLab() {
   const [sq, setSq] = useState(null);
   const [ac, setAc] = useState(null);
   const [rg, setRg] = useState(null);
+  const [ema, setEma] = useState(null);
   const [ts, setTs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -39,10 +40,11 @@ function QuantLab() {
   const load = async () => {
     setBusy(true);
     const g = (u) => fetch(u).then(r => r.json()).catch(() => null);
-    const [a, b, c] = await Promise.all([
+    const [a, b, c, e] = await Promise.all([
       g("/api/selection-quality"), g("/api/alpha-capture"), g("/api/regime-hmm"),
+      g("/api/gate-ema20-ab?horizon_days=20"),
     ]);
-    setSq(a); setAc(b); setRg(c); setTs(new Date()); setBusy(false);
+    setSq(a); setAc(b); setRg(c); setEma(e); setTs(new Date()); setBusy(false);
   };
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
 
@@ -164,6 +166,35 @@ function QuantLab() {
           <div className="ql-note ql-dim">القرار بيدك — النظام يجمع الدليل خارج العيّنة ويقترح؛ لا يُطبّق ذاتياً. ورقي فقط · قابل للعكس.</div>
         </Card>
       </div>
+
+      {/* ── shadow hypothesis test: does the EMA20 requirement hurt? ── */}
+      <h2 className="ql-h2">اختبار الفرضيات (ظلّي) — هل يضرّ شرط «فوق EMA20»؟</h2>
+      <Card title="مع-الاتجاه مقابل عكس-الاتجاه" tag={ema && ema.n_dates ? ema.n_dates + " يوم · أفق 20ي" : ""}>
+        {ema && ema.with_ema20_mean_ret != null ? (() => {
+          const conf = ema.hypothesis_confirmed;
+          const strong = ema.paired_t != null && Math.abs(ema.paired_t) >= 2;
+          return (
+            <div>
+              <div className="ql-row">
+                <Stat label="فوق EMA20 (الشرط الحالي)" value={pct(ema.with_ema20_mean_ret, 3)} help="متوسط العائد الأمامي للأسهم فوق EMA20" />
+                <Stat label="تحت EMA20 (المرفوضة حالياً)" value={pct(ema.counter_trend_mean_ret, 3)}
+                      color={ema.counter_trend_mean_ret > ema.with_ema20_mean_ret ? "var(--warning)" : "inherit"}
+                      help="لو لم نشترط فوق EMA20 لدخلت هذه" />
+                <Stat label="الفرق" value={pct(ema.delta_counter_minus_with, 3)} sub={"t " + num(ema.paired_t)}
+                      color={strong ? "var(--negative)" : (conf ? "var(--warning)" : "var(--text-muted)")}
+                      help="عكس−مع · t ≥ 2 = دلالة قويّة" />
+              </div>
+              <div className="ql-note" style={{ color: strong ? "var(--negative)" : (conf ? "var(--warning)" : "var(--text-secondary)") }}>
+                {strong ? "⚠ دليل قويّ: الشرط يضرّ — يستحق التغيير."
+                  : conf ? "🟡 مُرجَّح لكن غير مؤكَّد (t<2): علَم حقيقي، لا يكفي للتغيير بعد."
+                    : "الشرط محايد أو مفيد على هذا الأفق — أبقِه."}
+                {" "}القرار لا يُتّخذ إلا عند t≥2 مع تراكم البيانات.
+              </div>
+            </div>
+          );
+        })() : <div className="ql-empty">{ema && ema.status === "insufficient" ? "بيانات غير كافية بعد — يتراكم" : "…يحسب الاختبار"}</div>}
+        <div className="ql-note ql-dim">اختبار مقترن على قاعدة الالتقاط (الشرط الآخر RS ثابت) + تسجيل ظلّي حيّ يؤكّده أماميّاً. لا يغيّر البوّابة.</div>
+      </Card>
 
       {/* ── factor IC from the capture panel ── */}
       <h2 className="ql-h2">العوامل — أيّها يتنبّأ فعلاً؟ (من قاعدة الالتقاط)</h2>
