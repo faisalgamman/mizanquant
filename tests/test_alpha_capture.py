@@ -112,3 +112,68 @@ def test_unlabelled_rows_counted_and_matured(sdb, monkeypatch):
     res = label_snapshots(10)
     assert res["labeled"] == 1                           # the None row got matured
     assert capture_status()["labelled"] == 1
+
+
+def _seed_regime(session, seed=1):
+    """rs predicts fwd only in 'calm_bull' dates; pure noise in 'choppy' dates."""
+    rng = np.random.default_rng(seed)
+    db = session()
+    try:
+        for d in range(12):
+            regime = "calm_bull" if d % 2 == 0 else "choppy"
+            sd = datetime(2026, 1, 1) + timedelta(days=d)
+            for k in range(24):
+                rs = float(rng.normal(0, 5))
+                fwd = (0.8 * rs if regime == "calm_bull" else 0.0) + float(rng.normal(0, 3))
+                db.add(FactorSnapshot(
+                    snap_date=sd, symbol=f"S{k}", price=100.0,
+                    factors={"rs": rs, "rsi": 50.0, "above_ema20": 1, "atr_pct": 2.0,
+                             "dist_ema20_pct": 0.0, "mom_12_1": 0.0, "regime": regime},
+                    fwd_ret={"10": round(fwd, 3)}))
+        db.commit()
+    finally:
+        db.close()
+
+
+# ── ① regime-conditional IC ──────────────────────────────────────────────────
+
+def test_regime_conditional_ic_differs_by_regime(sdb):
+    _seed_regime(sdb)
+    from app.services.alpha_capture import regime_conditional_ic
+    rep = regime_conditional_ic(horizon_days=10)
+    assert set(rep["regimes"]) >= {"calm_bull", "choppy"}
+    rs = rep["ic_by_regime"]["rs"]
+    assert rs["calm_bull"]["mean_ic"] > 0.3         # rs works in calm
+    assert rs["calm_bull"]["mean_ic"] > (rs["choppy"]["mean_ic"] or 0) + 0.2   # ...not in choppy
+
+
+# ── ④ purged walk-forward CV + meta trust gate ───────────────────────────────
+
+def test_purged_cv_reports_oos_auc(sdb):
+    _seed(sdb, n_dates=40, n_syms=30)                     # ≥ folds + 2·purge dates
+    from app.services.meta_label import purged_cv_auc
+    cv = purged_cv_auc(horizon_days=10, n_folds=5)
+    assert cv.get("oos_auc") is not None and cv["oos_auc"] > 0.55 and cv["n_oos"] >= 20
+
+
+def test_meta_size_fraction_gated_on_oos(sdb, monkeypatch):
+    # pure-noise panel → OOS AUC ≈ 0.5 (< 0.53) → the model must NOT resize the book
+    rng = np.random.default_rng(3)
+    db = sdb()
+    try:
+        for d in range(40):
+            sd = datetime(2026, 1, 1) + timedelta(days=d)
+            for k in range(30):
+                db.add(FactorSnapshot(snap_date=sd, symbol=f"N{k}", price=100.0,
+                                      factors={"rs": float(rng.normal(0, 5)), "rsi": 50.0,
+                                               "above_ema20": 1, "atr_pct": 2.0,
+                                               "dist_ema20_pct": 0.0, "mom_12_1": 0.0},
+                                      fwd_ret={"10": float(rng.normal(0, 3))}))
+        db.commit()
+    finally:
+        db.close()
+    from app.services.meta_label import train_meta_model, meta_size_fraction, meta_model_status
+    train_meta_model(10)
+    assert meta_model_status()["trusted"] is False       # noise → untrusted
+    assert meta_size_fraction({"rs": 9.0, "rsi": 50, "above_ema20": 1,
+                               "atr_pct": 2.0, "dist_ema20_pct": 0.0, "mom_12_1": 0.0}) == 1.0

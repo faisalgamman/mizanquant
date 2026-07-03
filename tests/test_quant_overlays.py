@@ -10,6 +10,7 @@ from app.services.overfitting import pbo_cscv
 from app.services.position_sizing import vol_target_multiplier, fractional_kelly
 from app.services.sector_neutral import sector_neutral_zscores
 from app.services.regime_hmm import regime_probabilities
+from app.services.concentration import effective_number_of_bets
 
 
 # ── ⑤ PBO / CSCV ──────────────────────────────────────────────────────────────
@@ -93,3 +94,23 @@ def test_regime_hmm_detects_crisis_tail():
 
 def test_regime_hmm_short_history_none():
     assert regime_probabilities(np.linspace(100, 110, 30)) is None
+
+
+# ── ② effective number of bets ───────────────────────────────────────────────
+
+def test_enb_uncorrelated_equals_n():
+    assert effective_number_of_bets(np.eye(5)) == pytest.approx(5.0, abs=0.1)
+
+
+def test_enb_collapses_when_correlated():
+    corr = np.full((5, 5), 0.999) + np.eye(5) * 0.001    # one hidden bet
+    enb = effective_number_of_bets(corr)
+    assert enb is not None and enb < 1.5
+
+
+def test_enb_between_for_block_correlation():
+    # two independent blocks of 3 highly-correlated names → ~2 effective bets
+    b = np.full((3, 3), 0.95) + np.eye(3) * 0.05
+    C = np.block([[b, np.zeros((3, 3))], [np.zeros((3, 3)), b]])
+    enb = effective_number_of_bets(C)
+    assert 1.5 < enb < 3.5

@@ -136,12 +136,16 @@ def _read_overlays():
         meta = meta_model_status()
         regime = rep.get("regime")
         pbo = ((rep.get("gate_calibration") or {}).get("pbo") or {}) if isinstance(rep.get("gate_calibration"), dict) else {}
+        enb = rep.get("concentration") or {}
         return {
             "capture_rows": cap.get("rows"), "capture_labelled": cap.get("labelled"),
             "meta_status": meta.get("status"), "meta_auc": meta.get("auc_in_sample"),
+            "meta_oos_auc": meta.get("oos_auc"), "meta_trusted": meta.get("trusted"),
             "regime": regime.get("dominant") if isinstance(regime, dict) else None,
             "crisis_prob": regime.get("crisis_prob") if isinstance(regime, dict) else None,
             "pbo": pbo.get("pbo"), "pbo_trust": pbo.get("trust"),
+            "enb": enb.get("enb"), "enb_ratio": enb.get("enb_ratio"),
+            "concentration": enb.get("concentration"), "enb_n": enb.get("n"),
         }
     except Exception as e:
         logger.debug("overlays read failed: %s", e)

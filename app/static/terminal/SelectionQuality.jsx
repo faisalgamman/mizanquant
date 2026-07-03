@@ -146,7 +146,16 @@ function SelectionQuality() {
           <div className="selq-overlays" title="طبقات الصناديق الكمّية: التقاط ألفا · Meta-labeling · نظام HMM · حارس فرط التخصيص">
             <span className="selq-ov-title">الطبقات الكمّية</span>
             <span title="قاعدة التقاط الألفا: صفوف/مُسمّاة">التقاط <b>{o.capture_rows ?? "—"}</b><span className="selq-dim">/{o.capture_labelled ?? 0}</span></span>
-            <span title="نموذج Meta-labeling — AUC داخل العيّنة">Meta <b>{o.meta_status === "trained" ? _sqNum(o.meta_auc) : "…يتراكم"}</b></span>
+            <span title="نموذج Meta-labeling — AUC خارج العيّنة (مُطهَّر). موثوق فقط إن تجاوز 0.53"
+                  style={{ color: o.meta_trusted ? "var(--positive)" : "inherit" }}>
+              Meta <b>{o.meta_status === "trained" ? (o.meta_oos_auc != null ? _sqNum(o.meta_oos_auc) : "…OOS") : "…يتراكم"}</b>
+            </span>
+            {o.enb != null && (
+              <span title="عدد الرهانات الفعّال (Meucci) للمحفظة المفتوحة — نسبة<0.5 = تركّز عالٍ"
+                    style={{ color: o.concentration === "high" ? "var(--negative)" : (o.concentration === "low" ? "var(--positive)" : "inherit") }}>
+                رهانات <b>{_sqNum(o.enb, 1)}</b><span className="selq-dim">/{o.enb_n}</span>
+              </span>
+            )}
             {o.regime && (
               <span title="نظام السوق (HMM) + احتمال الأزمة"
                     style={{ color: crisis > 0.5 ? "var(--negative)" : (o.regime === "calm_bull" ? "var(--positive)" : "inherit") }}>

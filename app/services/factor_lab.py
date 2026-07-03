@@ -479,6 +479,11 @@ def factor_lab_report(symbols=None, *, force: bool = False) -> dict:
         out["regime"] = regime_probabilities(spy_closes) if spy_closes is not None else None
     except Exception as e:
         logger.debug("regime_hmm in report failed: %s", e)
+    try:  # ② concentration (ENB) of the open book — computed in the warm, read from cache
+        from app.services.concentration import open_positions_enb
+        out["concentration"] = open_positions_enb()
+    except Exception as e:
+        logger.debug("ENB in report failed: %s", e)
     out["caveat"] = ("Price-only, look-ahead-safe ESTIMATE (no PIT fundamentals/halal/"
                      "sentiment). Guides the decision fast; the live ledger still confirms.")
     _CACHE.update(at=now, data=out)

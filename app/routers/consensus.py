@@ -270,6 +270,20 @@ async def meta_model_ep():
     return meta_model_status()
 
 
+@router.get("/api/concentration")
+async def concentration_ep():
+    """② Effective Number of Bets over the open weekly paper book (Meucci PCA-entropy)."""
+    from app.services.concentration import open_positions_enb
+    return open_positions_enb()
+
+
+@router.get("/api/regime-ic")
+async def regime_ic_ep(horizon_days: int = 10):
+    """① × ④ Per-factor Information Coefficient measured WITHIN each market regime."""
+    from app.services.alpha_capture import regime_conditional_ic
+    return regime_conditional_ic(horizon_days=horizon_days)
+
+
 @router.get("/api/regime-hmm")
 async def regime_hmm_ep():
     """④ HMM regime probabilities on SPY (calm_bull / choppy / crisis) + book multiplier."""

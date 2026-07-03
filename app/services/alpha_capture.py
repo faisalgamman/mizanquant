@@ -61,6 +61,16 @@ def capture_snapshot(symbols=None, cap: int = 80) -> dict:
     spy_closes = spy["close"].astype(float).values if spy is not None and len(spy) >= 70 else None
     snap_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # ① market regime today (from the HMM) — stamped on each row so regime_conditional_ic
+    # can later measure which factor works in which regime. Market-wide, computed once.
+    regime = None
+    try:
+        from app.services.regime_hmm import regime_probabilities
+        rp = regime_probabilities(spy_closes) if spy_closes is not None else None
+        regime = rp.get("dominant") if rp else None
+    except Exception:
+        regime = None
+
     db = SessionLocal()
     stored = skipped = 0
     try:
@@ -74,6 +84,7 @@ def capture_snapshot(symbols=None, cap: int = 80) -> dict:
                 fac = _symbol_factors(_f(sym, period="1y"), spy_closes)
                 if not fac:
                     continue
+                fac["regime"] = regime          # market regime stamp (① regime-conditional IC)
                 db.add(FactorSnapshot(snap_date=snap_date, symbol=sym,
                                       price=fac.get("price"), factors=fac, fwd_ret=None))
                 stored += 1
@@ -204,6 +215,56 @@ def snapshot_attribution(horizon_days: int = 10, sector_neutral: bool = False) -
             "note": "Cross-sectional IC from the daily whole-universe capture — power accrues per day."}
 
 
+def regime_conditional_ic(horizon_days: int = 10) -> dict:
+    """① × ④ — the sharp one: each factor's IC measured WITHIN each market regime. Momentum
+    tends to earn in a calm-bull tape and bleed in a choppy one; this quantifies it from the
+    capture panel (each snapshot carries its regime stamp), so the gate can eventually switch
+    criteria by climate instead of using one threshold for all weather."""
+    import numpy as np
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    from app.services.signal_calibration import _spearman
+
+    h = str(int(horizon_days))
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+
+    # per (regime, date) cross-section
+    by_key: dict = {}
+    for sd, fac, fwd in rows:
+        if not (isinstance(fac, dict) and isinstance(fwd, dict) and h in fwd):
+            continue
+        reg = fac.get("regime") or "unknown"
+        by_key.setdefault((reg, sd), []).append((fac, float(fwd[h])))
+
+    regimes = sorted({k[0] for k in by_key})
+    matrix: dict = {}
+    for f in _FACTORS:
+        matrix[f] = {}
+        for reg in regimes:
+            ics = []
+            for (r, sd), items in by_key.items():
+                if r != reg:
+                    continue
+                pairs = [(fa.get(f), fr) for fa, fr in items if isinstance(fa.get(f), (int, float))]
+                if len(pairs) >= 5:
+                    ic = _spearman([p[0] for p in pairs], [p[1] for p in pairs])
+                    if ic is not None:
+                        ics.append(ic)
+            if ics:
+                matrix[f][reg] = {"n_dates": len(ics), "mean_ic": round(float(np.mean(ics)), 4)}
+            else:
+                matrix[f][reg] = {"n_dates": 0, "mean_ic": None}
+
+    return {"horizon_days": int(horizon_days), "regimes": regimes,
+            "ic_by_regime": matrix,
+            "note": "Per-factor IC WITHIN each market regime (HMM). Positive in one climate + "
+                    "negative in another ⇒ make the factor regime-conditional."}
+
+
 def capture_status() -> dict:
     """Row/label counts for the capture base (for the dashboard)."""
     from app.db.database import SessionLocal
@@ -219,4 +280,5 @@ def capture_status() -> dict:
         db.close()
 
 
-__all__ = ["capture_snapshot", "label_snapshots", "snapshot_attribution", "capture_status"]
+__all__ = ["capture_snapshot", "label_snapshots", "snapshot_attribution",
+           "regime_conditional_ic", "capture_status"]

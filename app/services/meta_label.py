@@ -59,17 +59,23 @@ def _path():
 
 def _training_rows(horizon_days: int):
     """(feature-vector, label) pairs from labelled snapshots. label = forward win."""
+    X, y, _ = _training_rows_dated(horizon_days)
+    return X, y
+
+
+def _training_rows_dated(horizon_days: int):
+    """(X, y, dates) from labelled snapshots — dates enable purged temporal CV."""
     from app.db.database import SessionLocal
     from app.db.models import FactorSnapshot
     h = str(int(horizon_days))
     db = SessionLocal()
     try:
-        rows = db.query(FactorSnapshot.factors, FactorSnapshot.fwd_ret).filter(
-            FactorSnapshot.fwd_ret.isnot(None)).all()
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors,
+                        FactorSnapshot.fwd_ret).all()
     finally:
         db.close()
-    X, y = [], []
-    for fac, fwd in rows:
+    X, y, dates = [], [], []
+    for sd, fac, fwd in rows:
         if not (isinstance(fac, dict) and isinstance(fwd, dict) and h in fwd):
             continue
         vec = [fac.get(f) for f in _FEATURES]
@@ -77,7 +83,51 @@ def _training_rows(horizon_days: int):
             continue
         X.append([float(v) for v in vec])
         y.append(1 if float(fwd[h]) > 0 else 0)
-    return X, y
+        dates.append(sd)
+    return X, y, dates
+
+
+def purged_cv_auc(horizon_days: int = 10, n_folds: int = 5, embargo: int = 2) -> dict:
+    """④ Honest OOS AUC via PURGED walk-forward CV (AFML): temporal folds, with training
+    dates within (horizon+embargo) of a test fold REMOVED so the forward label can't leak
+    across the boundary. This is the number we trust — the in-sample AUC always flatters."""
+    try:
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.metrics import roc_auc_score
+    except Exception as e:
+        return {"error": f"sklearn unavailable: {e}"}
+
+    X, y, dates = _training_rows_dated(horizon_days)
+    if len(y) < _MIN_TRAIN or len(set(y)) < 2:
+        return {"status": "accumulating", "n": len(y)}
+    uniq = sorted(set(dates))
+    gap = int(horizon_days + embargo)             # purge in DATE-ORDINAL space (trading-day
+    #                                               horizon), not calendar days
+    if len(uniq) < n_folds + 2 * gap + 2:
+        return {"status": "insufficient_dates", "n_dates": len(uniq), "need": n_folds + 2 * gap + 2}
+
+    ord_of = {d: i for i, d in enumerate(uniq)}
+    oi = np.array([ord_of[d] for d in dates])
+    Xa, ya = np.asarray(X, float), np.asarray(y, int)
+    oos_true, oos_pred = [], []
+    for fold in np.array_split(np.arange(len(uniq)), n_folds):
+        a, b = int(fold.min()), int(fold.max())
+        test_mask = (oi >= a) & (oi <= b)
+        train_mask = (oi < a - gap) | (oi > b + gap)     # purge + embargo around the fold
+        if test_mask.sum() < 5 or train_mask.sum() < _MIN_TRAIN // 2 or len(set(ya[train_mask])) < 2:
+            continue
+        sc = StandardScaler().fit(Xa[train_mask])
+        clf = LogisticRegression(max_iter=1000).fit(sc.transform(Xa[train_mask]), ya[train_mask])
+        pred = clf.predict_proba(sc.transform(Xa[test_mask]))[:, 1]
+        oos_true.extend(ya[test_mask].tolist())
+        oos_pred.extend(pred.tolist())
+
+    if len(set(oos_true)) < 2 or len(oos_true) < 20:
+        return {"status": "insufficient_oos", "n_oos": len(oos_true)}
+    return {"oos_auc": round(float(roc_auc_score(oos_true, oos_pred)), 3),
+            "n_oos": len(oos_true), "n_folds": n_folds, "purge_ordinals": gap}
 
 
 def train_meta_model(horizon_days: int = 10) -> dict:
@@ -104,13 +154,16 @@ def train_meta_model(horizon_days: int = 10) -> dict:
     except Exception:
         auc = None
 
+    cv = purged_cv_auc(horizon_days)              # ④ the honest, leak-free number
+    oos_auc = cv.get("oos_auc")
     model = {
         "features": list(_FEATURES),
         "mean": [float(m) for m in scaler.mean_],
         "scale": [float(s) if s else 1.0 for s in scaler.scale_],
         "coef": [float(c) for c in clf.coef_[0]],
         "intercept": float(clf.intercept_[0]),
-        "n": n, "auc_in_sample": auc, "base_rate": round(float(ya.mean()), 3),
+        "n": n, "auc_in_sample": auc, "oos_auc": oos_auc, "cv": cv,
+        "base_rate": round(float(ya.mean()), 3),
         "horizon_days": int(horizon_days),
         "trained_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -119,7 +172,8 @@ def train_meta_model(horizon_days: int = 10) -> dict:
             json.dump(model, fh, indent=2)
     except Exception as e:
         return {"error": str(e)}
-    return {"status": "trained", "n": n, "auc_in_sample": auc, "base_rate": model["base_rate"]}
+    return {"status": "trained", "n": n, "auc_in_sample": auc, "oos_auc": oos_auc,
+            "base_rate": model["base_rate"]}
 
 
 def _load():
@@ -149,8 +203,19 @@ def meta_probability(factors: dict) -> float | None:
 
 
 def meta_size_fraction(factors: dict) -> float:
-    """Map P(win) → a size fraction via fractional Kelly. 1.0 (base) when the model is
-    absent, so the overlay is additive and safe."""
+    """Map P(win) → a size fraction via fractional Kelly. Returns 1.0 (base size, no effect)
+    unless the model has a PROVEN out-of-sample edge (④ purged OOS AUC > MIN, env
+    META_MIN_OOS_AUC default 0.53) — we never let an unvalidated model resize the book."""
+    m = _load()
+    if not m:
+        return 1.0
+    try:
+        min_auc = float(os.environ.get("META_MIN_OOS_AUC", "0.53"))
+    except (TypeError, ValueError):
+        min_auc = 0.53
+    oos = m.get("oos_auc")
+    if oos is None or oos < min_auc:
+        return 1.0                               # untrusted model → no sizing effect
     p = meta_probability(factors)
     if p is None:
         return 1.0
@@ -162,10 +227,17 @@ def meta_model_status() -> dict:
     m = _load()
     if not m:
         return {"status": "untrained"}
-    return {"status": "trained", "n": m.get("n"), "auc_in_sample": m.get("auc_in_sample"),
+    oos = m.get("oos_auc")
+    try:
+        min_auc = float(os.environ.get("META_MIN_OOS_AUC", "0.53"))
+    except (TypeError, ValueError):
+        min_auc = 0.53
+    return {"status": "trained", "n": m.get("n"),
+            "auc_in_sample": m.get("auc_in_sample"), "oos_auc": oos,
+            "trusted": bool(oos is not None and oos >= min_auc),   # only a proven edge sizes
             "base_rate": m.get("base_rate"), "trained_at": m.get("trained_at"),
             "top_features": sorted(zip(m["features"], m["coef"]), key=lambda t: -abs(t[1]))[:3]}
 
 
-__all__ = ["triple_barrier_labels", "train_meta_model", "meta_probability",
+__all__ = ["triple_barrier_labels", "train_meta_model", "purged_cv_auc", "meta_probability",
            "meta_size_fraction", "meta_model_status"]
