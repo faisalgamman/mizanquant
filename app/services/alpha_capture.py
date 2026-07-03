@@ -42,16 +42,26 @@ def _symbol_factors(df, spy_closes) -> dict | None:
         return None
 
 
-def capture_snapshot(symbols=None, cap: int = 80) -> dict:
-    """Store today's PIT factor row for every universe name (deduped by date+symbol)."""
+def capture_snapshot(symbols=None, cap: int | None = None) -> dict:
+    """Store today's PIT factor row for every universe name (deduped by date+symbol).
+
+    Bounded to ``cap`` symbols (env ALPHA_CAPTURE_CAP, default 120) — build_halal_candidates'
+    own cap arg is NOT honoured (returns the full ~1500), so we slice explicitly to keep the
+    daily fetch load (and Alpaca 429 pressure) sane while still giving a wide cross-section."""
+    import os as _os
     from app.db.database import SessionLocal
     from app.db.models import FactorSnapshot
     from app.services.market_data import fetch as _f
 
+    if cap is None:
+        try:
+            cap = int(_os.environ.get("ALPHA_CAPTURE_CAP", "120"))
+        except (TypeError, ValueError):
+            cap = 120
     if not symbols:
         try:
             from app.services.universe import build_halal_candidates
-            symbols = list(build_halal_candidates(cap=cap) or [])
+            symbols = list(build_halal_candidates() or [])[:cap]   # slice — cap arg is ignored upstream
         except Exception as e:
             logger.debug("alpha_capture universe load failed: %s", e)
             return {"error": "no universe"}
