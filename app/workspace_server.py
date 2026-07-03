@@ -7617,6 +7617,12 @@ async def get_terminal():
     """Terminal Overview kit — served directly so auth gate works correctly."""
     return _html("terminal/index.html")
 
+@app.get("/mizan", include_in_schema=False)
+@app.get("/mizan/", include_in_schema=False)
+async def get_mizan_terminal():
+    """MIZAN unified quant terminal — the new home shell (sidebar + Overview). Phase 1."""
+    return _html("mizan/index.html")
+
 @app.get("/quant-lab", include_in_schema=False)
 @app.get("/quant-lab/", include_in_schema=False)
 async def get_quant_lab():
