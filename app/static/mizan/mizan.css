@@ -171,6 +171,14 @@
 .mz-strat-g b { font-family: var(--font-mono); }
 .mz-strat-rec { font-size: 11px; color: var(--positive); margin-top: 10px; }
 
+/* native views */
+.mz-view { direction: rtl; }
+.mz-tbl-wide td, .mz-tbl-wide th { padding: 8px 8px; }
+.mz-tbl-wide tbody tr:hover td, .mz-tbl-wide tr:hover td { background: rgba(255,255,255,0.02); }
+.mz-toggle { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.mz-toggle input { accent-color: var(--accent); }
+.mz-gate-cur { font-size: 13px; margin-bottom: 6px; font-family: var(--font-mono); }
+
 /* stub */
 .mz-stub { text-align: center; padding: 80px 20px; }
 .mz-stub-ic { font-size: 40px; opacity: 0.5; }

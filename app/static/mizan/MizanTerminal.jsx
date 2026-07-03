@@ -53,11 +53,11 @@ function HeatCell({ f, v }) {
 
 const NAV = [
   { key: "overview", label: "نظرة عامة", icon: "🏠" },
-  { key: "screener", label: "المسح", icon: "🔍", href: "/halal-screener-v2" },
+  { key: "screener", label: "المسح", icon: "🔍" },
   { key: "analysis", label: "تحليل الأسهم", icon: "📊", href: "/terminal" },
-  { key: "portfolio", label: "المحفظة", icon: "💼", href: "/terminal" },
+  { key: "portfolio", label: "المحفظة", icon: "💼" },
   { key: "lab", label: "مختبر الاستراتيجية", icon: "🧪", href: "/quant-lab" },
-  { key: "factors", label: "العوامل", icon: "🧬", href: "/quant-lab" },
+  { key: "factors", label: "العوامل", icon: "🧬" },
   { key: "models", label: "الموديلات", icon: "📈" },
   { key: "market", label: "السوق", icon: "🌍" },
   { key: "reports", label: "التقارير", icon: "📄" },
@@ -285,6 +285,105 @@ function RightRail(props) {
 }
 function dataPct(fic) { const s = fic && fic.status; if (!s || !s.rows) return 60; return Math.min(100, Math.round((s.labelled / s.rows) * 100)); }
 
+function useGet(url) {
+  const [v, setV] = useState(null);
+  useEffect(() => { let a = true; fetch(url).then(r => r.json()).then(x => a && setV(x)).catch(() => a && setV({})); return () => { a = false; }; }, [url]);
+  return v;
+}
+const verdictOf = (s) => s >= 72 ? ["STRONG BUY", POS] : s >= 55 ? ["BUY", POS] : s >= 38 ? ["WATCH", WARN] : ["AVOID", MUT];
+
+function ScreenerView() {
+  const dp = useGet("/api/screener/deep-picks?limit=40");
+  const rows = (dp && dp.results) || [];
+  const [halalOnly, setHO] = useState(false);
+  const shown = halalOnly ? rows.filter(r => r.is_halal) : rows;
+  return (
+    <div className="mz-view">
+      <Panel title={"المسح الحلال — " + rows.length + " سهم"} right={<label className="mz-toggle"><input type="checkbox" checked={halalOnly} onChange={e => setHO(e.target.checked)} /> حلال فقط</label>}>
+        {rows.length ? (
+          <table className="mz-tbl mz-tbl-wide">
+            <thead><tr><th className="tl">الرمز</th><th className="tl">القطاع</th><th>السعر</th><th>المركّب</th><th>الإشارة</th><th>زخم 12-1</th><th>تقني</th><th>أساسي</th><th>حلال</th></tr></thead>
+            <tbody>{shown.map((r, i) => { const [vd, vc] = verdictOf(r.composite_score || 0); return (
+              <tr key={i}><td className="tl mz-fn">{r.symbol}<div className="mz-dim2">{r.company || ""}</div></td>
+                <td className="tl mz-dim2">{r.sector || "—"}</td><td>{money(r.price)}</td>
+                <td style={{ color: (r.composite_score || 0) >= 55 ? POS : "inherit", fontWeight: 700 }}>{Math.round(r.composite_score || 0)}</td>
+                <td style={{ color: vc }}>{vd}</td><td>{num(r.score_mom121, 0)}</td><td>{num(r.score_tech, 0)}</td><td>{num(r.score_fund, 0)}</td>
+                <td>{r.is_halal ? "✓" : "—"}</td></tr>); })}</tbody>
+          </table>
+        ) : <div className="mz-empty">…يمسح الكون الحلال</div>}
+      </Panel>
+    </div>
+  );
+}
+
+function FactorsView() {
+  const fic = useGet("/api/factor-ic-multi");
+  const ricd = useGet("/api/regime-ic?horizon_days=10");
+  const sq = useGet("/api/selection-quality");
+  const attr = fic && fic.attribution && fic.attribution.factors;
+  const gate = (sq && sq.gate) || {}; const rec = gate.recommendation;
+  const facMap = { mom_12_1: "Momentum 12-1", rs: "RS vs SPY", above_ema20: "EMA20 Filter", rsi: "RSI (14)", atr_pct: "Volatility", dist_ema20_pct: "Dist EMA20" };
+  const rows = attr ? Object.entries(attr) : [];
+  const regimes = (ricd && ricd.regimes) || [];
+  return (
+    <div className="mz-view">
+      <Panel title={"العوامل — معامل المعلومات عبر الآفاق" + (fic && fic.attribution ? " · " + fic.attribution.labelled_dates + " يوم" : "")}>
+        {rows.length ? (
+          <table className="mz-tbl mz-tbl-wide">
+            <thead><tr><th className="tl">العامل</th><th>IC 5ي</th><th>IC 10ي</th><th>IR 10ي</th><th>IC 20ي</th><th>IR 20ي</th><th>الاتجاه</th><th className="tl">الخلاصة</th></tr></thead>
+            <tbody>{rows.map(([f, v]) => (<tr key={f}>
+              <td className="tl mz-fn">{facMap[f] || f}{f === "mom_12_1" && <span style={{ color: ACC }}> ★</span>}</td>
+              <td style={{ color: icCol((v.h["5"] || {}).mean_ic) }}>{num((v.h["5"] || {}).mean_ic, 3)}</td>
+              <td style={{ color: icCol((v.h["10"] || {}).mean_ic) }}>{num((v.h["10"] || {}).mean_ic, 3)}</td>
+              <td>{num((v.h["10"] || {}).ir)}</td>
+              <td style={{ color: icCol((v.h["20"] || {}).mean_ic) }}>{num((v.h["20"] || {}).mean_ic, 3)}</td>
+              <td>{num((v.h["20"] || {}).ir)}</td>
+              <td style={{ color: (v.direction || "").includes("↑") ? POS : (v.direction || "").includes("↓") ? NEG : MUT }}>{v.direction}</td>
+              <td className="tl mz-dim2">{v.verdict}</td></tr>))}</tbody>
+          </table>
+        ) : <div className="mz-empty">…يحمّل العوامل</div>}
+      </Panel>
+      <div className="mz-r2">
+        <Panel title="IC المشروط بالنظام">
+          {regimes.length ? (
+            <table className="mz-tbl"><thead><tr><th className="tl">العامل</th>{regimes.map(r => <th key={r}>{r === "calm_bull" ? "هادئ" : r === "crisis" ? "أزمة" : "تذبذب"}</th>)}</tr></thead>
+              <tbody>{Object.entries(ricd.ic_by_regime || {}).map(([f, byr]) => (<tr key={f}><td className="tl mz-fn">{facMap[f] || f}</td>
+                {regimes.map(rg => <td key={rg} style={{ color: icCol((byr[rg] || {}).mean_ic) }}>{num((byr[rg] || {}).mean_ic, 3)}</td>)}</tr>))}</tbody></table>
+          ) : <div className="mz-empty">يتراكم عبر الأنظمة…</div>}
+        </Panel>
+        <Panel title="البوّابة ذاتية المعايرة" right={<a className="mz-more" href="/quant-lab">التفاصيل ←</a>}>
+          <div className="mz-gate-cur">العتبة الحالية <b>MIN_RS {num(gate.current_min_rs, 1)}%</b> ({gate.source === "approved" ? "معتمَدة" : "افتراضية"})</div>
+          <div className="mz-note">{rec ? rec.reason : "…يُعاير"}</div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function PortfolioView() {
+  const ov = useGet("/api/v1/overview");
+  const port = (ov && ov.portfolio) || {}; const pos = port.positions || [];
+  return (
+    <div className="mz-view">
+      <div className="mz-cards">
+        <div className="mz-card"><div className="mz-c-l">إجمالي القيمة</div><div className="mz-c-v">{money(port.equity || port.portfolio_value)}</div></div>
+        <div className="mz-card"><div className="mz-c-l">النقد</div><div className="mz-c-v">{money(port.cash)}</div></div>
+        <div className="mz-card"><div className="mz-c-l">العائد اليومي</div><div className="mz-c-v" style={{ color: (port.daily_pnl_pct || 0) >= 0 ? POS : NEG }}>{pct(port.daily_pnl_pct, 2)}</div></div>
+        <div className="mz-card"><div className="mz-c-l">مراكز مفتوحة</div><div className="mz-c-v">{port.open_positions != null ? port.open_positions : pos.length}</div></div>
+        <div className="mz-card"><div className="mz-c-l">قوّة شرائية</div><div className="mz-c-v">{money(port.buying_power)}</div></div>
+      </div>
+      <Panel title={"المراكز المفتوحة (" + pos.length + ")"} right={<a className="mz-more" href="/terminal">الكوكبيت ←</a>}>
+        {pos.length ? (
+          <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th className="tl">القطاع</th><th>الكمّية</th><th>القيمة</th><th>ربح/خسارة</th></tr></thead>
+            <tbody>{pos.map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td className="tl mz-dim2">{p.sector || "—"}</td>
+              <td>{p.qty || p.shares || "—"}</td><td>{money(p.market_value || p.value)}</td>
+              <td style={{ color: (p.unrealized_pnl || 0) >= 0 ? POS : NEG }}>{p.unrealized_pnl != null ? money(p.unrealized_pnl) : "—"}</td></tr>))}</tbody></table>
+        ) : <div className="mz-empty">لا مراكز مفتوحة حاليّاً</div>}
+      </Panel>
+    </div>
+  );
+}
+
 function Stub({ label }) {
   return <div className="mz-stub"><div className="mz-stub-ic">🧭</div><div className="mz-stub-t">{label}</div>
     <div className="mz-stub-s">هذا القسم قيد الإعداد ضمن الهيكلة الجديدة — يُبنى ببيانات حقيقية (لا بيانات وهمية).</div></div>;
@@ -329,7 +428,11 @@ function MizanTerminal() {
           </div>
         </header>
         <div className="mz-body">
-          {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div> : <Stub label={cur.label} />}
+          {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div>
+            : view === "screener" ? <ScreenerView />
+              : view === "factors" ? <FactorsView />
+                : view === "portfolio" ? <PortfolioView />
+                  : <Stub label={cur.label} />}
         </div>
       </div>
     </div>
