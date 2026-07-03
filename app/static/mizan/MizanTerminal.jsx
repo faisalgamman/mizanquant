@@ -56,6 +56,7 @@ const NAV = [
   { key: "screener", label: "المسح", icon: "🔍" },
   { key: "analysis", label: "تحليل الأسهم", icon: "📊", href: "/terminal" },
   { key: "portfolio", label: "المحفظة", icon: "💼" },
+  { key: "ledger", label: "الدفتر الورقي", icon: "📒" },
   { key: "lab", label: "مختبر الاستراتيجية", icon: "🧪", href: "/quant-lab" },
   { key: "factors", label: "العوامل", icon: "🧬" },
   { key: "models", label: "الموديلات", icon: "📈" },
@@ -362,9 +363,16 @@ function FactorsView() {
 
 function PortfolioView() {
   const ov = useGet("/api/v1/overview");
+  const bh = useGet("/api/v1/broker/health");
   const port = (ov && ov.portfolio) || {}; const pos = port.positions || [];
+  const acc = (bh && bh.account) || {};
   return (
     <div className="mz-view">
+      <Panel title="البروكر" right={<span className="mz-dim3">{bh && bh.mode}</span>}>
+        <div className="mz-broker"><span className={"mz-dot " + (bh && bh.connected ? "on" : "off")} />
+          <b>{bh && bh.connected ? "متّصل — IBKR Paper" : "غير متّصل"}</b>
+          <span className="mz-dim">· {(bh && bh.host) || ""}:{(bh && bh.port) || ""} · {(bh && bh.strategy) || ""}</span></div>
+      </Panel>
       <div className="mz-cards">
         <div className="mz-card"><div className="mz-c-l">إجمالي القيمة</div><div className="mz-c-v">{money(port.equity || port.portfolio_value)}</div></div>
         <div className="mz-card"><div className="mz-c-l">النقد</div><div className="mz-c-v">{money(port.cash)}</div></div>
@@ -383,6 +391,131 @@ function PortfolioView() {
     </div>
   );
 }
+
+const STRAT = { PV: "أسبوعي", PVM: "شهري", PVP: "أزواج", PVSH: "ظلّ" };
+
+function LedgerView() {
+  const pt = useGet("/api/v1/paper/trades");
+  const lw = useGet("/paper_validation/status?scanner=weekly");
+  const lm = useGet("/paper_validation/status?scanner=monthly");
+  const trades = Array.isArray(pt) ? pt : (pt && pt.trades) || [];
+  const open = trades.filter(t => t.status === "open"), closed = trades.filter(t => t.status !== "open");
+  return (
+    <div className="mz-view">
+      <div className="mz-cards">
+        <div className="mz-card"><div className="mz-c-l">الأسبوعي (PV)</div><div className="mz-c-v">{(lw && lw.open) || 0}<span className="mz-c-u"> مفتوح</span></div><div className="mz-c-s">{(lw && lw.closed) || 0} مغلق · {lw && lw.graduated ? "متخرّج" : "قيد التحقّق"}</div></div>
+        <div className="mz-card"><div className="mz-c-l">الشهري (PVM)</div><div className="mz-c-v">{(lm && lm.open) || 0}<span className="mz-c-u"> مفتوح</span></div><div className="mz-c-s">{(lm && lm.closed) || 0} مغلق</div></div>
+        <div className="mz-card"><div className="mz-c-l">إجمالي المفتوحة</div><div className="mz-c-v" style={{ color: POS }}>{open.length}</div></div>
+        <div className="mz-card"><div className="mz-c-l">إجمالي المغلقة</div><div className="mz-c-v">{closed.length}</div></div>
+      </div>
+      <Panel title={"المراكز الورقية المفتوحة (" + open.length + ")"}>
+        {open.length ? <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>الاستراتيجية</th><th>الجانب</th><th>الكمّية</th><th>الدخول</th><th>القيمة</th><th>الثقة</th></tr></thead>
+          <tbody>{open.slice(0, 30).map((t, i) => (<tr key={i}><td className="tl mz-fn">{t.symbol}</td><td className="mz-dim2">{STRAT[t.strategy_id] || t.strategy_id}</td>
+            <td>{t.side === "buy" ? "شراء" : t.side}</td><td>{t.qty}</td><td>{money(t.entry_price)}</td><td>{money(t.position_value)}</td><td>{Math.round(t.confidence || 0)}</td></tr>))}</tbody></table>
+          : <div className="mz-empty">لا مراكز مفتوحة</div>}
+      </Panel>
+      <Panel title={"المغلقة (" + closed.length + ")"}>
+        {closed.length ? <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>الاستراتيجية</th><th>الدخول</th><th>الخروج</th><th>العائد</th></tr></thead>
+          <tbody>{closed.slice(0, 30).map((t, i) => (<tr key={i}><td className="tl mz-fn">{t.symbol}</td><td className="mz-dim2">{STRAT[t.strategy_id] || t.strategy_id}</td>
+            <td>{money(t.entry_price)}</td><td>{money(t.exit_price)}</td><td style={{ color: (t.pnl_pct || 0) >= 0 ? POS : NEG, fontWeight: 700 }}>{pct(t.pnl_pct, 2)}</td></tr>))}</tbody></table>
+          : <div className="mz-empty">لا صفقات مغلقة بعد</div>}
+      </Panel>
+    </div>
+  );
+}
+
+function MarketView() {
+  const mk = useGet("/api/context/bundle");
+  const ind = useGet("/api/market/indicators");
+  const nw = useGet("/api/market/news?limit=8");
+  const macro = (mk && mk.macro) || {};
+  const inds = (ind && ind.indicators) || [];
+  const news = Array.isArray(nw) ? nw : (nw && (nw.news || nw.articles)) || [];
+  const reg = ((mk && mk.regime) || "").toUpperCase();
+  return (
+    <div className="mz-view">
+      <div className="mz-cards">
+        <div className="mz-card"><div className="mz-c-l">النظام</div><div className="mz-c-v" style={{ color: reg.includes("BULL") ? POS : reg.includes("BEAR") ? NEG : WARN }}>{reg || "—"}</div><div className="mz-c-s">{(mk && mk.risk_posture) || ""}</div></div>
+        <div className="mz-card"><div className="mz-c-l">VIX</div><div className="mz-c-v">{num(mk && mk.vix)}</div></div>
+        <div className="mz-card"><div className="mz-c-l">التضخّم (CPI)</div><div className="mz-c-v">{num(macro.cpi_yoy)}%</div></div>
+        <div className="mz-card"><div className="mz-c-l">الفائدة</div><div className="mz-c-v">{num(macro.fed_rate)}%</div></div>
+        <div className="mz-card"><div className="mz-c-l">البطالة</div><div className="mz-c-v">{num(macro.unemployment)}%</div></div>
+      </div>
+      <div className="mz-r2">
+        <Panel title="المؤشّرات الحيّة">
+          <div className="mz-strip">{inds.map((it, i) => (<div className="mz-strip-i" key={i}><div className="mz-strip-k">{it.label}</div><div className="mz-strip-v">{num(it.price)}</div>{it.change_pct != null && <div className="mz-strip-c" style={{ color: it.change_pct >= 0 ? POS : NEG }}>{pct(it.change_pct, 2)}</div>}</div>))}</div>
+        </Panel>
+        <Panel title="أخبار السوق">
+          {news.length ? <div className="mz-news">{news.slice(0, 6).map((n, i) => (<a className="mz-nw" href={n.link} target="_blank" key={i}><div className="mz-nw-t">{n.title}</div><div className="mz-nw-s">{n.publisher} · {(n.published || "").slice(0, 10)}</div></a>))}</div> : <div className="mz-empty">…</div>}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function ModelsView() {
+  const mm = useGet("/api/meta-model");
+  const sq = useGet("/api/selection-quality");
+  const ov2 = (sq && sq.overlays) || {};
+  return (
+    <div className="mz-view">
+      <Panel title="نموذج Meta-labeling">
+        {mm && mm.status === "trained" ? (<div>
+          <div className="mz-cards"><div className="mz-card"><div className="mz-c-l">AUC خارج العيّنة</div><div className="mz-c-v" style={{ color: mm.trusted ? POS : "inherit" }}>{num(mm.oos_auc)}</div><div className="mz-c-s">{mm.trusted ? "موثوق ✓" : "دون عتبة 0.53"}</div></div>
+            <div className="mz-card"><div className="mz-c-l">AUC داخل العيّنة</div><div className="mz-c-v">{num(mm.auc_in_sample)}</div></div>
+            <div className="mz-card"><div className="mz-c-l">العيّنات</div><div className="mz-c-v">{(mm.n || 0).toLocaleString("en")}</div></div>
+            <div className="mz-card"><div className="mz-c-l">المعدّل الأساسي</div><div className="mz-c-v">{num(mm.base_rate)}</div></div></div>
+          <div className="mz-note">أهمّ العوامل: {(mm.top_features || []).map(f => f[0]).join(" · ")}. النموذج لا يُحجّم الدفتر إلا إذا تجاوز AUC خارج العيّنة العتبة (انضباط ضدّ فرط التخصيص).</div>
+        </div>) : <div className="mz-empty">نموذج Meta قيد التعلّم — يتدرّب حين تُسمّى ≥120 لقطة. الحالة: {(mm && mm.status) || "…"}</div>}
+      </Panel>
+      <Panel title="لوحة الموديلات (Leaderboard)"><div className="mz-empty">تتراكم مع تسجيل أداء الاستراتيجيات — لا توجد موديلات مُقيَّمة بعد.</div></Panel>
+    </div>
+  );
+}
+
+function SettingsView() {
+  const gc = useGet("/api/gate-config");
+  const [msg, setMsg] = useState("");
+  const knobs = [
+    ["GATE_MIN_T", "حسّاسية دلالة توصية البوّابة", "2.0"],
+    ["WEEKLY_MIN_RS", "عتبة الدخول الأسبوعي", gc ? num(gc.min_rs, 1) : "-2"],
+    ["COMPOSITE_MOM121_WEIGHT", "وزن الزخم 12-1", "12"],
+    ["COMPOSITE_MOMENTUM_WEIGHT", "وزن RS", "10"],
+    ["VOL_TARGET", "تقلّب المحفظة المستهدف", "0.14"],
+    ["META_MIN_OOS_AUC", "عتبة ثقة نموذج Meta", "0.53"],
+  ];
+  const resetGate = async () => {
+    if (!window.confirm("إعادة عتبة الدخول إلى الافتراضي (−2)؟ ورقي فقط · قابل للعكس.")) return;
+    try { const r = await fetch("/api/gate-config/reset", { method: "POST" }).then(x => x.json()); setMsg("تمّت الإعادة → MIN_RS " + r.now); } catch (e) { setMsg("تعذّر"); }
+  };
+  return (
+    <div className="mz-view">
+      <Panel title="عتبة الدخول (البوّابة)">
+        <div className="mz-gate-cur">MIN_RS الحالية <b>{gc ? num(gc.min_rs, 1) : "…"}%</b> ({gc && gc.source === "approved" ? "معتمَدة بالدليل" : "افتراضية"})</div>
+        <button className="mz-btn" style={{ maxWidth: 220 }} onClick={resetGate}>إعادة إلى الافتراضي (−2)</button>
+        {msg && <div className="mz-note" style={{ color: POS }}>{msg}</div>}
+      </Panel>
+      <Panel title="مفاتيح الضبط (env · قياس فقط · قابلة للعكس)">
+        <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">المفتاح</th><th className="tl">الوصف</th><th>القيمة</th></tr></thead>
+          <tbody>{knobs.map((k, i) => (<tr key={i}><td className="tl mz-fn" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{k[0]}</td><td className="tl mz-dim2">{k[1]}</td><td>{k[2]}</td></tr>))}</tbody></table>
+        <div className="mz-note ql-dim">التعديل عبر متغيّرات البيئة على الخادم — كلّها آمنة، ورقية، وقابلة للعكس. لا صفقات حقيقية.</div>
+      </Panel>
+    </div>
+  );
+}
+
+function ReportsView() {
+  return (<div className="mz-view"><Panel title="التقارير">
+    <div className="mz-reports">
+      <a className="mz-rep" href="/quant-lab">📊 مختبر الاستراتيجية — تقرير العوامل والباك-تيست</a>
+      <a className="mz-rep" href="/terminal">📈 لوحة الترمينال — الأداء والمراكز</a>
+      <a className="mz-rep" href="/risk-desk-v2">🛡️ مكتب المخاطر</a>
+    </div>
+    <div className="mz-note ql-dim">تصدير PDF المجدوَل قيد الإعداد ضمن الهيكلة الجديدة.</div>
+  </Panel></div>);
+}
+
+function AlertsView() { return <Stub label="التنبيهات" />; }
 
 function Stub({ label }) {
   return <div className="mz-stub"><div className="mz-stub-ic">🧭</div><div className="mz-stub-t">{label}</div>
@@ -437,7 +570,13 @@ function MizanTerminal() {
             : view === "screener" ? <ScreenerView />
               : view === "factors" ? <FactorsView />
                 : view === "portfolio" ? <PortfolioView />
-                  : <Stub label={cur.label} />}
+                  : view === "ledger" ? <LedgerView />
+                    : view === "market" ? <MarketView />
+                      : view === "models" ? <ModelsView />
+                        : view === "reports" ? <ReportsView />
+                          : view === "alerts" ? <AlertsView />
+                            : view === "settings" ? <SettingsView />
+                              : <Stub label={cur.label} />}
         </div>
       </div>
     </div>
