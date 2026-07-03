@@ -225,6 +225,163 @@ def snapshot_attribution(horizon_days: int = 10, sector_neutral: bool = False) -
             "note": "Cross-sectional IC from the daily whole-universe capture — power accrues per day."}
 
 
+def _rsi_series(closes, period: int = 14):
+    """Causal Wilder RSI for every bar (value at i uses only bars ≤ i)."""
+    import numpy as np
+    import pandas as pd
+    c = pd.Series(np.asarray(closes, dtype=float))
+    delta = c.diff()
+    up = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    dn = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
+    rsi = 100.0 - 100.0 / (1.0 + up / dn.replace(0, np.nan))
+    rsi = rsi.where(dn != 0, 100.0)          # no losses → RSI 100 (not NaN)
+    rsi = rsi.where(~((dn == 0) & (up == 0)), 50.0)   # perfectly flat → 50
+    return rsi.values
+
+
+def _pit_regime_labels(spy_closes, win: int = 20):
+    """Point-in-time regime label per bar (calm_bull / choppy / crisis) from SPY only — a
+    cheap look-ahead-safe proxy for the HMM used in the historical backfill: trend sign +
+    realized vol vs its own EXPANDING median up to that bar. No future data."""
+    import numpy as np
+    c = np.asarray(spy_closes, dtype=float)
+    rets = np.diff(np.log(c))
+    out = [None] * len(c)
+    vols = []
+    for i in range(1, len(c)):
+        w = rets[max(0, i - win):i]
+        v = float(np.std(w)) if len(w) >= 5 else float("nan")
+        vols.append(v)
+        if not np.isfinite(v) or i < win + 5:
+            continue
+        med = float(np.median([x for x in vols if np.isfinite(x)]))
+        trend = c[i] / c[max(0, i - win)] - 1.0
+        if v > 1.5 * med:
+            out[i] = "crisis"
+        elif trend > 0 and v <= med:
+            out[i] = "calm_bull"
+        else:
+            out[i] = "choppy"
+    return out
+
+
+def backfill_snapshots(symbols=None, *, period: str = "2y", rebalance_days: int = 5,
+                       horizons=(5, 10, 20), warmup: int = 120, cap: int = 120) -> dict:
+    """① Historical backfill of the capture base — the real multiplier. Reconstruct each
+    name's factors AS OF every rebalance date over ``period`` (look-ahead-safe, price-only:
+    same causal EMA/RSI/RS/momentum as live) and label with the KNOWN forward returns at
+    every horizon (③). Fills IC/attribution/meta with hundreds of dates TODAY instead of
+    waiting months. Idempotent (dedup by snap_date+symbol). Heavy — run in the background."""
+    import numpy as np
+    import pandas as pd
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    from app.services.backtest_engine import _aligned_closes, factor_rs_vs_spy, factor_momentum_12_1
+
+    if not symbols:
+        try:
+            from app.services.universe import build_halal_candidates
+            symbols = list(build_halal_candidates() or [])[:cap]
+        except Exception as e:
+            return {"error": f"no universe: {e}"}
+    symbols = list(dict.fromkeys(symbols))
+    mat = _aligned_closes(list(symbols) + ["SPY"], period)
+    if mat is None or "SPY" not in mat.columns:
+        return {"error": "no data"}
+    dates = mat.index
+    max_h = max(horizons)
+    if len(dates) < warmup + max_h + rebalance_days:
+        return {"error": "insufficient history", "rows": len(dates)}
+
+    reg = _pit_regime_labels(mat["SPY"].values)
+    universe = [s for s in symbols if s in mat.columns and s != "SPY"]
+    rebal = list(range(warmup, len(dates) - max_h, rebalance_days))
+
+    db = SessionLocal()
+    stored = skipped = 0
+    try:
+        # existing (snap_date, symbol) keys to stay idempotent
+        existing = {(d, s) for d, s in db.query(FactorSnapshot.snap_date, FactorSnapshot.symbol).all()}
+        for s in universe:
+            col = mat[s]
+            c = col.values
+            ema20 = col.ewm(span=20, adjust=False).mean().values
+            rsi = _rsi_series(c, 14)
+            logret = np.diff(np.log(np.where(c > 0, c, np.nan)))
+            for i in rebal:
+                # store NAIVE UTC (the column is naive) so the idempotency key round-trips
+                d = dates[i].to_pydatetime().replace(tzinfo=None) if hasattr(dates[i], "to_pydatetime") else dates[i]
+                if (d, s) in existing:
+                    skipped += 1
+                    continue
+                csl = col.iloc[:i + 1].dropna().values
+                if len(csl) < warmup or not np.isfinite(c[i]) or c[i] <= 0:
+                    continue
+                spysl = mat["SPY"].iloc[:i + 1].dropna().values
+                rs = factor_rs_vs_spy(csl, spysl, 63)
+                if rs is None:
+                    continue
+                mom = factor_momentum_12_1(csl)
+                e = float(ema20[i]) if np.isfinite(ema20[i]) else 0.0
+                atr_pct = float(np.std(logret[max(0, i - 14):i]) * 100) if i > 15 else None
+                fwd = {}
+                for h in horizons:
+                    j = i + h
+                    if j < len(c) and np.isfinite(c[j]) and c[i] > 0:
+                        fwd[str(h)] = round(float(c[j] / c[i] - 1.0) * 100, 3)
+                if not fwd:
+                    continue
+                fac = {
+                    "rs": round(float(rs) * 100, 3),
+                    "rsi": round(float(rsi[i]), 1) if np.isfinite(rsi[i]) else None,
+                    "above_ema20": 1 if (e and c[i] > e) else 0,
+                    "dist_ema20_pct": round((c[i] / e - 1) * 100, 2) if e else None,
+                    "mom_12_1": round(float(mom) * 100, 2) if mom is not None else None,
+                    "atr_pct": round(atr_pct, 2) if atr_pct is not None else None,
+                    "regime": reg[i], "price": round(float(c[i]), 2), "backfill": 1,
+                }
+                db.add(FactorSnapshot(snap_date=d, symbol=s, price=fac["price"],
+                                      factors=fac, fwd_ret=fwd))
+                existing.add((d, s))
+                stored += 1
+            if stored and stored % 2000 == 0:
+                db.commit()
+        db.commit()
+        return {"universe": len(universe), "rebalance_dates": len(rebal),
+                "horizons": list(horizons), "stored": stored, "skipped": skipped}
+    except Exception as e:
+        db.rollback()
+        logger.error("backfill_snapshots failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+_BACKFILL = {"running": False, "result": None}
+
+
+def run_backfill_bg() -> dict:
+    """Single-flight background backfill so the request path never blocks on the 2y reconstruction."""
+    import threading
+    if _BACKFILL["running"]:
+        return {"status": "already_running"}
+
+    def _run():
+        _BACKFILL["running"] = True
+        try:
+            _BACKFILL["result"] = backfill_snapshots()
+        except Exception as e:
+            _BACKFILL["result"] = {"error": str(e)}
+        finally:
+            _BACKFILL["running"] = False
+    threading.Thread(target=_run, daemon=True, name="alpha-backfill").start()
+    return {"status": "started"}
+
+
+def backfill_status() -> dict:
+    return {"running": _BACKFILL["running"], "last_result": _BACKFILL["result"]}
+
+
 def regime_conditional_ic(horizon_days: int = 10) -> dict:
     """① × ④ — the sharp one: each factor's IC measured WITHIN each market regime. Momentum
     tends to earn in a calm-bull tape and bleed in a choppy one; this quantifies it from the
@@ -291,4 +448,5 @@ def capture_status() -> dict:
 
 
 __all__ = ["capture_snapshot", "label_snapshots", "snapshot_attribution",
-           "regime_conditional_ic", "capture_status"]
+           "regime_conditional_ic", "capture_status", "backfill_snapshots",
+           "run_backfill_bg", "backfill_status"]

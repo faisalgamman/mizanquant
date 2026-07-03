@@ -263,6 +263,20 @@ async def alpha_capture_ep(horizon_days: int = 10, sector_neutral: bool = False)
             "attribution": snapshot_attribution(horizon_days=horizon_days, sector_neutral=sector_neutral)}
 
 
+@router.post("/api/alpha-capture/backfill")
+async def alpha_capture_backfill_ep():
+    """① Kick the look-ahead-safe HISTORICAL backfill of the capture base (2y) in the
+    background — fills IC/attribution/meta with hundreds of dates today. Single-flight."""
+    from app.services.alpha_capture import run_backfill_bg
+    return run_backfill_bg()
+
+
+@router.get("/api/alpha-capture/backfill/status")
+async def alpha_capture_backfill_status_ep():
+    from app.services.alpha_capture import backfill_status, capture_status
+    return {**backfill_status(), "capture": capture_status()}
+
+
 @router.get("/api/meta-model")
 async def meta_model_ep():
     """② Meta-labeling model status (in-sample AUC, base rate, top features)."""

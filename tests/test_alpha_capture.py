@@ -91,6 +91,51 @@ def test_meta_probability_none_when_untrained(sdb):
     assert meta_probability({"rs": 1.0}) is None       # no model file yet → fall back
 
 
+# ── ① historical backfill (+ ③ multi-horizon) ────────────────────────────────
+
+def test_rsi_series_bounds():
+    from app.services.alpha_capture import _rsi_series
+    up = _rsi_series(np.linspace(100, 200, 60))       # steady uptrend → RSI high
+    dn = _rsi_series(np.linspace(200, 100, 60))       # steady downtrend → RSI low
+    assert up[-1] > 70 and dn[-1] < 30
+
+
+def test_pit_regime_labels_are_causal_and_detect_crisis():
+    rng = np.random.default_rng(6)
+    calm = 100 * np.cumprod(1 + rng.normal(0.0004, 0.004, 240))
+    crash = calm[-1] * np.cumprod(1 + rng.normal(-0.01, 0.03, 60))
+    from app.services.alpha_capture import _pit_regime_labels
+    lab = _pit_regime_labels(np.concatenate([calm, crash]))
+    assert len(lab) == 300
+    assert lab[-1] == "crisis"                         # volatile tail flagged
+    assert "calm_bull" in lab[:240]                    # calm stretch seen
+
+
+def test_backfill_multi_horizon_and_idempotent(sdb, monkeypatch):
+    import pandas as pd
+    idx = pd.bdate_range("2023-01-01", periods=400, tz="UTC")
+    cols = {"SPY": 100 * np.cumprod(1 + np.random.default_rng(1).normal(0.0002, 0.008, 400))}
+    for k in range(8):
+        cols[f"S{k}"] = 100 * np.cumprod(1 + np.random.default_rng(k + 2).normal(0.0004, 0.012, 400))
+    panel = pd.DataFrame(cols, index=idx)
+    monkeypatch.setattr("app.services.backtest_engine._aligned_closes", lambda syms, period: panel)
+
+    from app.services.alpha_capture import backfill_snapshots
+    syms = [c for c in panel.columns if c != "SPY"]
+    r = backfill_snapshots(symbols=syms, warmup=120, rebalance_days=10, horizons=(5, 10, 20))
+    assert "error" not in r and r["stored"] > 100
+    db = sdb()
+    try:
+        row = db.query(FactorSnapshot).first()
+        assert set(row.fwd_ret.keys()) == {"5", "10", "20"}         # ③ multi-horizon labels
+        assert "rs" in row.factors and row.factors.get("backfill") == 1
+        assert "regime" in row.factors
+    finally:
+        db.close()
+    r2 = backfill_snapshots(symbols=syms, warmup=120, rebalance_days=10, horizons=(5, 10, 20))
+    assert r2["stored"] == 0 and r2["skipped"] > 0                  # idempotent
+
+
 def test_unlabelled_rows_counted_and_matured(sdb, monkeypatch):
     """Regression: a fwd_ret=None row must count as UNlabelled and be picked up by
     label_snapshots (a JSON None can round-trip as JSON 'null', so an is_(None) SQL filter
