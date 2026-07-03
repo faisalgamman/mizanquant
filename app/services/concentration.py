@@ -47,14 +47,22 @@ def effective_number_of_bets(cov, weights=None) -> float | None:
 
 
 def _corr_from_returns(rets: dict) -> tuple:
-    """Align per-symbol return series → (symbols, correlation matrix). Drops symbols with
-    too few overlapping points."""
-    import pandas as pd
-    df = pd.DataFrame(rets).dropna()
-    if df.shape[0] < 20 or df.shape[1] < 2:
+    """Align per-symbol return series to a common TRAILING window → (symbols, correlation
+    matrix). Truncating to the shortest series (aligned at the end) keeps a full-rank matrix;
+    a naive pandas dropna over misaligned lengths collapses the rows and degenerates ENB."""
+    series = {s: np.asarray(r, dtype=float) for s, r in rets.items()
+              if r is not None and len(r) >= 20}
+    if len(series) < 2:
         return [], None
-    C = np.corrcoef(df.values, rowvar=False)
-    return list(df.columns), C
+    m = min(len(r) for r in series.values())
+    if m < 20:
+        return [], None
+    syms = list(series)
+    M = np.column_stack([series[s][-m:] for s in syms])   # common length, aligned at the end
+    if M.shape[0] < 20:
+        return [], None
+    C = np.corrcoef(M, rowvar=False)
+    return syms, C
 
 
 def open_positions_enb(symbols=None, lookback: str = "6mo") -> dict:

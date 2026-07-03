@@ -114,3 +114,18 @@ def test_enb_between_for_block_correlation():
     C = np.block([[b, np.zeros((3, 3))], [np.zeros((3, 3)), b]])
     enb = effective_number_of_bets(C)
     assert 1.5 < enb < 3.5
+
+
+def test_corr_alignment_handles_uneven_lengths():
+    """Regression: uneven-length return series must NOT collapse the correlation matrix
+    (a naive dropna over misaligned indices degenerates ENB to ~1)."""
+    from app.services.concentration import _corr_from_returns
+    rng = np.random.default_rng(9)
+    base = rng.normal(0, 1, 200)
+    rets = {"A": base + rng.normal(0, 0.4, 200),
+            "B": (base + rng.normal(0, 0.4, 200))[-150:],   # correlated, shorter
+            "C": rng.normal(0, 1, 180)}                      # independent, shorter
+    syms, C = _corr_from_returns(rets)
+    assert C is not None and C.shape == (3, 3)
+    enb = effective_number_of_bets(C)
+    assert enb is not None and enb > 1.5             # A+B cluster, C apart → ~2, not collapsed
