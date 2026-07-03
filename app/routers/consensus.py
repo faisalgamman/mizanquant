@@ -298,6 +298,20 @@ async def regime_ic_ep(horizon_days: int = 10):
     return regime_conditional_ic(horizon_days=horizon_days)
 
 
+@router.get("/api/risk/var")
+async def risk_var_ep(equity: float | None = None):
+    """Parametric 1-day VaR (95/99%) for the book — equity × SPY vol × z."""
+    from app.services.risk_metrics import portfolio_var
+    return portfolio_var(equity=equity)
+
+
+@router.get("/api/alpha-curve")
+async def alpha_curve_ep(days: int = 365):
+    """Real cumulative selection-alpha curve from the closed paper ledger."""
+    from app.services.risk_metrics import cumulative_alpha_series
+    return cumulative_alpha_series(days=days)
+
+
 @router.get("/api/factor-ic-multi")
 async def factor_ic_multi_ep():
     """Per-factor IC at 5/10/20-day horizons + direction + verdict (for the factor table)."""

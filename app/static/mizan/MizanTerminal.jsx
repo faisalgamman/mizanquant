@@ -46,6 +46,18 @@ function Decay({ points, w = 300, h = 82 }) {
     {points.map((p, i) => <text key={"t" + i} x={px(i)} y={h - 2} fontSize="8" fill="var(--text-muted)" textAnchor="middle">{p.x}</text>)}
   </svg>);
 }
+function LineArea({ data, color = POS, w = 320, h = 96 }) {
+  if (!data || data.length < 2) return <div className="mz-empty">…</div>;
+  const mn = Math.min(...data, 0), mx = Math.max(...data, 0), rg = (mx - mn) || 1;
+  const px = (i) => (i / (data.length - 1)) * w, py = (v) => h - 4 - ((v - mn) / rg) * (h - 8);
+  const line = data.map((v, i) => `${i ? "L" : "M"}${px(i)},${py(v)}`).join(" ");
+  const zero = py(0);
+  return (<svg width={w} height={h} style={{ width: "100%" }} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    <line x1="0" y1={zero} x2={w} y2={zero} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
+    <path d={`${line} L${w},${zero} L0,${zero} Z`} fill={color} opacity="0.12" />
+    <path d={line} fill="none" stroke={color} strokeWidth="1.8" />
+  </svg>);
+}
 function HeatCell({ f, v }) {
   const col = v == null ? "var(--bg-raised)" : v > 0 ? `rgba(74,222,128,${Math.min(0.8, 0.14 + Math.abs(v) * 13)})` : `rgba(248,113,113,${Math.min(0.8, 0.14 + Math.abs(v) * 13)})`;
   return <div className="mz-heat-c" style={{ background: col }}><div className="mz-heat-f">{f}</div><div className="mz-heat-v">{v != null ? num(v, 3) : "—"}</div></div>;
@@ -78,7 +90,7 @@ function Overview() {
     g("/api/selection-quality", "sq"); g("/api/factor-ic-multi", "fic"); g("/api/regime-hmm", "rg");
     g("/api/context/bundle", "mk"); g("/api/v1/overview", "ov");
     g("/api/market/indicators", "ind"); g("/api/screener/deep-picks?limit=8", "dp");
-    g("/paper_validation/status?scanner=weekly", "lw");
+    g("/paper_validation/status?scanner=weekly", "lw"); g("/api/alpha-curve", "ac");
     return () => { alive = false; };
   }, []);
 
@@ -190,11 +202,16 @@ function Overview() {
 
       {/* row: cumulative alpha | heatmap */}
       <div className="mz-r2">
-        <Panel title="الأداء التراكمي للنموذج (الألفا)" right={<span className="mz-dim3">Monthly Composite</span>}>
-          <div className="mz-cum">
-            <div className="mz-cum-v" style={{ color: (est.gate_alpha_uplift_pct || 0) >= 0 ? POS : NEG }}>{est.gate_alpha_uplift_pct != null ? pct(est.gate_alpha_uplift_pct) : pct(weekly.alpha, 1)}</div>
-            <div className="mz-note">رفع البوّابة المتوقّع خارج العيّنة · IR {num(est.rs_ic_ir)}. <span className="mz-dim">المنحنى التاريخي التراكمي قيد الإعداد (يحتاج سلسلة زمنية للدفتر).</span></div>
-          </div>
+        <Panel title="الأداء التراكمي للنموذج (الألفا)" right={<span className="mz-dim3">من الدفتر المُغلق</span>}>
+          {(() => {
+            const s = (d.ac && d.ac.series) || []; const vals = s.map(p => p.cum_alpha); const fin = d.ac && d.ac.final_alpha;
+            return vals.length >= 2 ? (<div>
+              <div className="mz-cum-v" style={{ color: (fin || 0) >= 0 ? POS : NEG }}>{pct(fin, 1)}</div>
+              <LineArea data={vals} color={(fin || 0) >= 0 ? POS : NEG} />
+              <div className="mz-note">ألفا الاختيار التراكمي عبر <b>{s.length}</b> صفقة مغلقة (عائد الصفقة − SPY).</div>
+            </div>) : <div className="mz-cum"><div className="mz-cum-v">{pct(fin, 1)}</div>
+              <div className="mz-note ql-dim">يتراكم — يظهر المنحنى بعد صفقات مغلقة كافية.</div></div>;
+          })()}
         </Panel>
         <Panel title="خريطة العوامل (IC)">
           <div className="mz-heat">{facRows.slice(0, 8).map(r => <HeatCell key={r.f} f={r.name.split(" ")[0]} v={r.ic} />)}</div>
@@ -251,6 +268,11 @@ function RightRail(props) {
   const { sq, rg, fic, ov } = props;
   const ov2 = (sq && sq.overlays) || {}, gate = (sq && sq.gate) || {}, est = (sq && sq.estimate) || {};
   const port = (ov && ov.portfolio) || {};
+  const [risk, setRisk] = useState(null);
+  useEffect(() => {
+    const eq = port.equity || port.portfolio_value;
+    if (eq) fetch("/api/risk/var?equity=" + eq).then(r => r.json()).then(setRisk).catch(() => {});
+  }, [port.equity, port.portfolio_value]);
   const health = [["البنية التحتية", 97, POS], ["الاستراتيجية", ov2.pbo_trust === "high" ? 88 : 60, POS],
   ["الموديلات", ov2.meta_trusted ? 90 : 52, ov2.meta_trusted ? POS : WARN], ["البيانات", dataPct(fic), POS]];
   const sched = [["10:00", "تحديث العوامل", "اليوم"], ["17:00", "نضج الدفتر + تدريب Meta", "اليوم"], ["09:30", "تحقّق أسبوعي", "الاثنين"], ["09:30", "إعادة التوازن الشهري", "1 من الشهر"]];
@@ -265,11 +287,12 @@ function RightRail(props) {
       </Panel>
       <Panel title="التعرّض للمخاطر">
         <div className="mz-risk">
-          <div><span className="mz-rk-l">إجمالي المخاطرة</span><span className="mz-rk-v" style={{ color: WARN }}>متوسط</span></div>
+          <div><span className="mz-rk-l">إجمالي المخاطرة</span><span className="mz-rk-v" style={{ color: risk && risk.posture === "منخفض" ? POS : risk && risk.posture === "مرتفع" ? NEG : WARN }}>{(risk && risk.posture) || "…"}</span></div>
+          <div><span className="mz-rk-l">VaR (95%) يومي</span><span className="mz-rk-v" style={{ color: NEG }}>{risk && risk.var_95 != null ? money(risk.var_95) : "…"}</span></div>
+          <div><span className="mz-rk-l">التقلّب السنوي</span><span className="mz-rk-v">{risk && risk.ann_vol_pct != null ? risk.ann_vol_pct + "%" : "…"}</span></div>
           <div><span className="mz-rk-l">مضاعِف الدفتر</span><span className="mz-rk-v">×{num((rg && rg.book_multiplier || {}).mult, 2)}</span></div>
-          <div><span className="mz-rk-l">قيمة المحفظة</span><span className="mz-rk-v">{money(port.equity)}</span></div>
         </div>
-        <div className="mz-note mz-dim">VaR الكمّي قيد الإعداد (يحتاج تقلّب المراكز).</div>
+        <div className="mz-note mz-dim">VaR بارامتري يومي (القيمة × تقلّب SPY × 1.645).</div>
       </Panel>
       <Panel title="الاستراتيجية الحالية">
         <div className="mz-strat-t">Monthly Composite <span className="mz-badge">نشطة</span></div>
