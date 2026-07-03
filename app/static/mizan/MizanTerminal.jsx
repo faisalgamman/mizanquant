@@ -103,11 +103,11 @@ function Overview() {
   const [d, setD] = useState({});
   useEffect(() => {
     let alive = true;
-    const g = (u) => fetch(u).then(r => r.json()).catch(() => null);
-    Promise.all([
-      g("/api/selection-quality"), g("/api/factor-ic-multi"), g("/api/regime-hmm"),
-      g("/api/context/bundle"), g("/api/v1/overview"), g("/buys"),
-    ]).then(([sq, fic, rg, mk, ov, buys]) => { if (alive) setD({ sq, fic, rg, mk, ov, buys }); });
+    // progressive: each panel appears as its endpoint resolves (don't gate on the slowest)
+    const g = (u, k) => fetch(u).then(r => r.json()).then(v => { if (alive) setD(p => ({ ...p, [k]: v })); }).catch(() => {});
+    g("/api/selection-quality", "sq"); g("/api/factor-ic-multi", "fic"); g("/api/regime-hmm", "rg");
+    g("/api/context/bundle", "mk"); g("/api/v1/overview", "ov");
+    g("/api/market/indicators", "ind"); g("/api/screener/deep-picks?limit=8", "dp");
     return () => { alive = false; };
   }, []);
 
@@ -117,9 +117,10 @@ function Overview() {
   const regime = d.rg && d.rg.regime, bm = (d.rg && d.rg.book_multiplier) || {};
   const mk = d.mk || {}, port = (d.ov && d.ov.portfolio) || {};
   const attr = d.fic && d.fic.attribution && d.fic.attribution.factors;
-  const buys = Array.isArray(d.buys) ? d.buys : (d.buys && d.buys.buys) || [];
-  const top = buys[0] || null;
-  const regState = (mk.spy_regime || "").toUpperCase();
+  const picks = (d.dp && Array.isArray(d.dp.results)) ? d.dp.results : [];
+  const top = picks[0] || null;
+  const indicators = (d.ind && Array.isArray(d.ind.indicators)) ? d.ind.indicators : [];
+  const regState = (mk.regime || "").toUpperCase();
   const bull = regState.includes("BULL");
   const conf = regime ? Math.round((1 - (regime.crisis || 0)) * 100) : null;
 
@@ -137,7 +138,9 @@ function Overview() {
   }
   const HS = ["10", "20", "5"];
   const secColors = ["#4ade80", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa", "#94a3b8"];
-  const posSecs = (port.sectors || []);
+  const _bySec = {};
+  (port.positions || []).forEach(p => { const s = p.sector || "أخرى"; _bySec[s] = (_bySec[s] || 0) + Math.abs(p.market_value || p.value || p.qty || 1); });
+  const posSecs = Object.entries(_bySec).sort((a, b) => b[1] - a[1]).map(([s, v]) => ({ v, sec: s }));
 
   return (
     <div className="mz-ov">
@@ -162,13 +165,11 @@ function Overview() {
       {/* market strip */}
       <Panel title="نظرة على السوق" cls="mz-strip-p">
         <div className="mz-strip">
-          {[["SPY", mk.spy_price, mk.spy_chg_pct], ["VIX", mk.vix, null], ["Breadth", mk.breadth != null ? mk.breadth + "%" : null, null],
-          ["Liquidity", mk.liquidity, null], ["Credit", mk.credit, null], ["Dollar", mk.dxy, null],
-          ["Gold", mk.gold_price, mk.gold_chg_pct], ["Oil", mk.oil_price, null]].map(([k, v, ch], i) => (
+          {(indicators.length ? indicators : [{ label: "…" }]).map((it, i) => (
             <div className="mz-strip-i" key={i}>
-              <div className="mz-strip-k">{k}</div>
-              <div className="mz-strip-v">{v == null ? "—" : (typeof v === "number" ? num(v) : v)}</div>
-              {ch != null && <div className="mz-strip-c" style={{ color: ch >= 0 ? POS : NEG }}>{pct(ch, 2)}</div>}
+              <div className="mz-strip-k">{it.label || it.symbol}</div>
+              <div className="mz-strip-v">{it.price == null ? "—" : num(it.price)}</div>
+              {it.change_pct != null && <div className="mz-strip-c" style={{ color: it.change_pct >= 0 ? POS : NEG }}>{pct(it.change_pct, 2)}</div>}
             </div>
           ))}
         </div>
@@ -180,12 +181,12 @@ function Overview() {
           {top ? (
             <div className="mz-tp">
               <div className="mz-tp-head">
-                <div><div className="mz-tp-sym">{top.symbol}</div><div className="mz-tp-co">{top.company || top.name || ""}</div>
-                  <div className="mz-tp-px">{money(top.price)} <span style={{ color: (top.chg_pct || 0) >= 0 ? POS : NEG }}>{pct(top.chg_pct || top.day_change_pct, 2)}</span></div></div>
-                <Ring value={Math.round(top.swing_score || top.score || 0)} color={POS} size={64} />
+                <div><div className="mz-tp-sym">{top.symbol}</div><div className="mz-tp-co">{top.company || ""}</div>
+                  <div className="mz-tp-px">{money(top.price)}</div></div>
+                <Ring value={Math.round(top.composite_score || 0)} color={POS} size={64} />
               </div>
-              <div className="mz-tp-chips">{[top.market_cap_tier || "Large Cap", top.sector || "—", "USA", top.is_halal ? "AAOIFI ✓" : "—"].map((c, i) => <span key={i} className="mz-chip">{c}</span>)}</div>
-              <div className="mz-tp-rec">⭐ {top.reason || top.recommendation || (top.verdict || "شراء") + " — توافق فني وأساسي في ظرف سوق داعم"}</div>
+              <div className="mz-tp-chips">{[top.sector || "—", "USA", top.is_halal ? "AAOIFI ✓" : "—", "زخم " + num(top.score_mom121, 0)].map((c, i) => <span key={i} className="mz-chip">{c}</span>)}</div>
+              <div className="mz-tp-rec">⭐ درجة مركّبة {Math.round(top.composite_score || 0)}/100 — أقوى مرشّح اليوم (زخم 12-1 {num(top.score_mom121, 1)}، تقني {num(top.score_tech, 0)}).</div>
               <div className="mz-tp-btns"><a href="/terminal" className="mz-btn">فتح التفاصيل</a><a href="/terminal" className="mz-btn">صفقة ورقية</a><a href="/quant-lab" className="mz-btn gold">تحليل متقدّم</a></div>
             </div>
           ) : <div className="mz-empty">لا فرص مؤكّدة الآن</div>}
@@ -229,22 +230,24 @@ function Overview() {
       {/* bottom: signals table | portfolio donut */}
       <div className="mz-bottom">
         <Panel title="آخر الإشارات القوية" right={<a className="mz-more" href="/terminal">الكل ←</a>}>
-          {buys.length ? (
+          {picks.length ? (
             <table className="mz-tbl">
-              <thead><tr><th className="tl">الرمز</th><th>الإشارة</th><th>الدرجة</th><th>حلال</th></tr></thead>
-              <tbody>{buys.slice(0, 6).map((b, i) => (
-                <tr key={i}><td className="tl mz-fn">{b.symbol}</td><td style={{ color: POS }}>{b.verdict || b.signal || "شراء"}</td>
-                  <td>{Math.round(b.swing_score || b.score || 0)}</td><td>{b.is_halal ? "✓" : "—"}</td></tr>))}</tbody>
+              <thead><tr><th className="tl">الرمز</th><th>القطاع</th><th>الدرجة</th><th>زخم</th><th>حلال</th></tr></thead>
+              <tbody>{picks.slice(0, 6).map((b, i) => (
+                <tr key={i}><td className="tl mz-fn">{b.symbol}</td><td className="mz-dim2">{b.sector || "—"}</td>
+                  <td style={{ color: (b.composite_score || 0) >= 72 ? POS : "inherit" }}>{Math.round(b.composite_score || 0)}</td>
+                  <td>{num(b.score_mom121, 0)}</td><td>{b.is_halal ? "✓" : "—"}</td></tr>))}</tbody>
             </table>
           ) : <div className="mz-empty">…يحمّل</div>}
         </Panel>
         <Panel title="ملخّص المحفظة الورقية">
           <div className="mz-port">
-            <div className="mz-port-donut"><Donut segs={posSecs.length ? posSecs.map((s, i) => ({ v: s.pct || s.weight || 1, c: secColors[i % 6] })) : [{ v: 1, c: "var(--bg-raised)" }]} />
-              <div className="mz-donut-c"><b>{port.openPos != null ? port.openPos : (port.positions || []).length || "—"}</b><span>مفتوحة</span></div></div>
+            <div className="mz-port-donut"><Donut segs={posSecs.length ? posSecs.map((s, i) => ({ v: s.v, c: secColors[i % 6] })) : [{ v: 1, c: "var(--bg-raised)" }]} />
+              <div className="mz-donut-c"><b>{port.open_positions != null ? port.open_positions : (port.positions || []).length || "—"}</b><span>مفتوحة</span></div></div>
             <div className="mz-port-stats">
-              <div><div className="mz-ps-l">إجمالي القيمة</div><div className="mz-ps-v">{money(port.equity)}</div></div>
-              <div><div className="mz-ps-l">العائد اليومي</div><div className="mz-ps-v" style={{ color: (port.dayPnlPct || 0) >= 0 ? POS : NEG }}>{pct(port.dayPnlPct, 2)}</div></div>
+              <div><div className="mz-ps-l">إجمالي القيمة</div><div className="mz-ps-v">{money(port.equity || port.portfolio_value)}</div></div>
+              <div><div className="mz-ps-l">العائد اليومي</div><div className="mz-ps-v" style={{ color: (port.daily_pnl_pct || 0) >= 0 ? POS : NEG }}>{pct(port.daily_pnl_pct, 2)}</div></div>
+              {posSecs.slice(0, 4).map((s, i) => <div key={i} className="mz-leg"><span className="mz-leg-d" style={{ background: secColors[i % 6] }} />{s.sec}</div>)}
               <a href="/terminal" className="mz-btn" style={{ marginTop: 6 }}>عرض المحفظة الكاملة</a>
             </div>
           </div>

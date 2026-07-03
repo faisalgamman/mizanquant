@@ -82,6 +82,9 @@
 .mz-tbl td { padding: 6px 5px; border-bottom: 1px solid var(--border-subtle); text-align: center; }
 .mz-tbl tr:last-child td { border-bottom: none; }
 .mz-fn { font-weight: 700; color: var(--text-primary); }
+.mz-dim2 { color: var(--text-muted); font-size: 10px; }
+.mz-leg { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-secondary); margin-top: 3px; }
+.mz-leg-d { width: 8px; height: 8px; border-radius: 2px; }
 
 /* top pick */
 .mz-tp-head { display: flex; justify-content: space-between; align-items: center; }
