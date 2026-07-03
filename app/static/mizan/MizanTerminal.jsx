@@ -73,7 +73,7 @@ function HeatCell({ f, v }) {
 const NAV = [
   { key: "overview", label: "نظرة عامة", icon: "🏠" },
   { key: "screener", label: "المسح", icon: "🔍" },
-  { key: "analysis", label: "تحليل الأسهم", icon: "📊", href: "/terminal" },
+  { key: "analysis", label: "تحليل الأسهم", icon: "📊" },
   { key: "portfolio", label: "المحفظة", icon: "💼" },
   { key: "ledger", label: "الدفتر الورقي", icon: "📒" },
   { key: "lab", label: "مختبر الاستراتيجية", icon: "🧪", href: "/quant-lab" },
@@ -548,7 +548,61 @@ function ReportsView() {
   </Panel></div>);
 }
 
-function AlertsView() { return <Stub label="التنبيهات" />; }
+function StockAnalysisView() {
+  const dp = useGet("/api/screener/deep-picks?limit=200");
+  const rows = (dp && dp.results) || [];
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(null);
+  const filt = q ? rows.filter(r => (r.symbol || "").toUpperCase().includes(q.toUpperCase()) || (r.company || "").toUpperCase().includes(q.toUpperCase())) : rows;
+  const pick = sel || filt[0] || null;
+  const bars = pick ? [["تقني", pick.score_tech, 30], ["أساسي", pick.score_fund, 25], ["زخم 12-1", pick.score_mom121, 12], ["RS", pick.score_momentum, 10], ["المشاعر", pick.score_sentiment, 8], ["الحلال", pick.score_halal, 10]] : [];
+  const [vd, vc] = pick ? verdictOf(pick.composite_score || 0) : ["", MUT];
+  return (
+    <div className="mz-view">
+      <div className="mz-mid">
+        <Panel title={"الكون الحلال (" + rows.length + ")"} right={<input className="mz-inp" placeholder="ابحث…" value={q} onChange={e => setQ(e.target.value)} />}>
+          <div className="mz-alist">{filt.slice(0, 40).map((r, i) => (
+            <button className={"mz-al" + (pick && pick.symbol === r.symbol ? " on" : "")} key={i} onClick={() => setSel(r)}>
+              <span className="mz-al-s">{r.symbol}</span><span className="mz-al-c">{r.sector || ""}</span>
+              <span className="mz-al-v" style={{ color: (r.composite_score || 0) >= 55 ? POS : "inherit" }}>{Math.round(r.composite_score || 0)}</span></button>))}
+            {!filt.length && <div className="mz-empty">لا نتائج</div>}</div>
+        </Panel>
+        <Panel title={pick ? "تحليل " + pick.symbol : "اختر سهماً"}>
+          {pick ? (<div>
+            <div className="mz-tp-head"><div><div className="mz-tp-sym">{pick.symbol}</div><div className="mz-tp-co">{pick.company || ""}</div><div className="mz-tp-px">{money(pick.price)}</div></div>
+              <Ring value={Math.round(pick.composite_score || 0)} color={vc} size={64} sub="/100" /></div>
+            <div className="mz-tp-chips"><span className="mz-chip" style={{ color: vc, borderColor: vc, border: "1px solid" }}>{vd}</span>
+              {[pick.sector || "—", pick.is_halal ? "AAOIFI ✓" : "غير متوافق"].map((c, i) => <span key={i} className="mz-chip">{c}</span>)}</div>
+            <div className="mz-abars">{bars.map(([l, v, mx], i) => (<div className="mz-ab" key={i}>
+              <div className="mz-ab-l"><span>{l}</span><b>{num(v, 0)}/{mx}</b></div>
+              <div className="mz-bar"><div className="mz-bar-f" style={{ width: Math.min(100, (v || 0) / mx * 100) + "%", background: ACC }} /></div></div>))}</div>
+            <div className="mz-tp-btns"><a href={"/terminal"} className="mz-btn gold">التحليل الكامل والصفقة ←</a></div>
+          </div>) : <div className="mz-empty">…يحمّل الكون</div>}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function AlertsView() {
+  const ov = useGet("/api/v1/overview");
+  const port = (ov && ov.portfolio) || {};
+  const items = [
+    ["التداول الآلي", port.auto_trade_enabled ? "مُفعّل" : "متوقّف", port.auto_trade_enabled ? WARN : POS],
+    ["نوع الحساب", port.account_type || "—", MUT],
+    ["الوسيط", port.broker_type || "—", MUT],
+  ];
+  return (
+    <div className="mz-view">
+      <Panel title="حالة النظام">
+        <div className="mz-risk">{items.map(([l, v, c], i) => (<div key={i}><span className="mz-rk-l">{l}</span><span className="mz-rk-v" style={{ color: c }}>{v}</span></div>))}</div>
+      </Panel>
+      <Panel title="التنبيهات النشطة">
+        <div className="mz-empty">لا تنبيهات حرجة الآن. تظهر هنا تنبيهات الخروج الذكي، انكسار الأزواج، وتغيّر النظام حين تقع — قياس فقط.</div>
+      </Panel>
+    </div>
+  );
+}
 
 function Stub({ label }) {
   return <div className="mz-stub"><div className="mz-stub-ic">🧭</div><div className="mz-stub-t">{label}</div>
@@ -601,6 +655,7 @@ function MizanTerminal() {
         <div className="mz-body">
           {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div>
             : view === "screener" ? <ScreenerView />
+              : view === "analysis" ? <StockAnalysisView />
               : view === "factors" ? <FactorsView />
                 : view === "portfolio" ? <PortfolioView />
                   : view === "ledger" ? <LedgerView />

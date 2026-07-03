@@ -218,9 +218,9 @@ def _make_session_token() -> str:
 # ---------------------------------------------------------------------------
 
 @app.get("/login", include_in_schema=False)
-async def login_page(next: str = "/terminal"):
-    """Show the login form. Default post-login destination = the single terminal."""
-    safe_next = next if next.startswith("/") else "/terminal"
+async def login_page(next: str = "/mizan"):
+    """Show the login form. Default post-login destination = the unified MIZAN terminal."""
+    safe_next = next if next.startswith("/") else "/mizan"
     html = LOGIN_HTML.replace('action="/login"', f'action="/login"').replace(
         '<input type="text" name="username"',
         f'<input type="hidden" name="next" value="{safe_next}"><input type="text" name="username"'
@@ -235,9 +235,9 @@ async def login_post(request: Request):
         form = await request.form()
         username = str(form.get("username") or "")
         password = str(form.get("password") or "")
-        next_url = str(form.get("next") or "/terminal")
+        next_url = str(form.get("next") or "/mizan")
         if not next_url.startswith("/"):
-            next_url = "/terminal"
+            next_url = "/mizan"
 
         # Compute sha256 of entered password (lowercase hex)
         pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
