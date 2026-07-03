@@ -136,6 +136,32 @@ def test_backfill_multi_horizon_and_idempotent(sdb, monkeypatch):
     assert r2["stored"] == 0 and r2["skipped"] > 0                  # idempotent
 
 
+def test_snapshot_attribution_multi_horizons(sdb):
+    rng = np.random.default_rng(21)
+    db = sdb()
+    try:
+        for d in range(8):
+            sd = datetime(2026, 1, 1) + timedelta(days=d)
+            for k in range(24):
+                rs = float(rng.normal(0, 5))
+                db.add(FactorSnapshot(
+                    snap_date=sd, symbol=f"S{k}", price=100.0,
+                    factors={"rs": rs, "rsi": 50.0, "above_ema20": 1, "atr_pct": 2.0,
+                             "dist_ema20_pct": 0.0, "mom_12_1": 0.0},
+                    fwd_ret={"5": 0.4 * rs + float(rng.normal(0, 3)),
+                             "10": 0.6 * rs + float(rng.normal(0, 3)),
+                             "20": 0.7 * rs + float(rng.normal(0, 3))}))
+        db.commit()
+    finally:
+        db.close()
+    from app.services.alpha_capture import snapshot_attribution_multi
+    rep = snapshot_attribution_multi()
+    assert rep["horizons"] == [5, 10, 20]
+    rs = rep["factors"]["rs"]
+    assert rs["h"]["10"]["mean_ic"] > 0.2 and rs["h"]["20"]["mean_ic"] is not None
+    assert rs["direction"].startswith("↑") and "موجب" in rs["verdict"] or "الأقوى" in rs["verdict"]
+
+
 def test_gate_ema20_ab_detects_hurting_requirement(sdb, monkeypatch):
     """Panel where counter-trend (above==0) names out-return with-trend ones → the A/B must
     flag that requiring above-EMA20 hurts."""

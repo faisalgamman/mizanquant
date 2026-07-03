@@ -499,6 +499,81 @@ def gate_ema20_ab(horizon_days: int = 20, min_rs=None) -> dict:
     }
 
 
+_VERDICTS = {
+    "mom_12_1": {"pos_strong": "الأقوى — ثابت في كل الأنظمة"},
+    "above_ema20": {"neg_strong": "سلبي — شراء الممتدّ يضعف قريباً"},
+}
+
+
+def _factor_verdict(factor: str, ir):
+    """Direction arrow + plain-language verdict from the primary-horizon IR."""
+    sp = _VERDICTS.get(factor, {})
+    if ir is None:
+        return "—", "يتراكم"
+    if ir >= 1.5:
+        return "↑↑↑", sp.get("pos_strong", "قويّ موجب")
+    if ir >= 0.3:
+        return "↑", "موجب ضعيف"
+    if ir > -0.3:
+        return "→", "محايد"
+    if ir > -1.5:
+        return "↓", "ميل ارتدادي (ضعيف)"
+    return "↓↓", sp.get("neg_strong", "سلبي قويّ")
+
+
+def snapshot_attribution_multi(horizons=(5, 10, 20)) -> dict:
+    """Per-factor Information Coefficient at MULTIPLE horizons in ONE pass (for the factor
+    table) + a direction arrow and plain-language verdict from the primary (10d) horizon."""
+    import numpy as np
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    from app.services.signal_calibration import _spearman
+
+    hs = [str(int(h)) for h in horizons]
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors,
+                        FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if isinstance(fac, dict) and isinstance(fwd, dict):
+            by_date.setdefault(sd, []).append((fac, fwd))
+
+    out = {}
+    max_dates = 0
+    for f in _FACTORS:
+        per_h = {}
+        for h in hs:
+            ics = []
+            for _sd, items in by_date.items():
+                pairs = [(fa.get(f), float(fw[h])) for fa, fw in items
+                         if isinstance(fa.get(f), (int, float)) and isinstance(fw.get(h), (int, float))]
+                if len(pairs) >= 5:
+                    ic = _spearman([p[0] for p in pairs], [p[1] for p in pairs])
+                    if ic is not None:
+                        ics.append(ic)
+            if ics:
+                a = np.asarray(ics, dtype=float)
+                n = len(a)
+                sd_ = float(a.std(ddof=1)) if n > 1 else 0.0
+                per_h[h] = {"mean_ic": round(float(a.mean()), 4),
+                            "ir": round(float(a.mean() / (sd_ / np.sqrt(n))), 2) if sd_ > 0 else None,
+                            "n_dates": n}
+                max_dates = max(max_dates, n)
+            else:
+                per_h[h] = {"mean_ic": None, "ir": None, "n_dates": 0}
+        prim = per_h.get("10") or per_h.get(hs[0], {})
+        direction, verdict = _factor_verdict(f, prim.get("ir"))
+        out[f] = {"h": per_h, "direction": direction, "verdict": verdict}
+
+    return {"horizons": [int(h) for h in horizons], "labelled_dates": max_dates,
+            "factors": out,
+            "note": "Cross-sectional IC per factor at 5/10/20-day horizons — power accrues per day."}
+
+
 def capture_status() -> dict:
     """Row/label counts for the capture base (for the dashboard)."""
     from app.db.database import SessionLocal
@@ -515,5 +590,5 @@ def capture_status() -> dict:
 
 
 __all__ = ["capture_snapshot", "label_snapshots", "snapshot_attribution",
-           "regime_conditional_ic", "gate_ema20_ab", "capture_status",
-           "backfill_snapshots", "run_backfill_bg", "backfill_status"]
+           "regime_conditional_ic", "gate_ema20_ab", "snapshot_attribution_multi",
+           "capture_status", "backfill_snapshots", "run_backfill_bg", "backfill_status"]
