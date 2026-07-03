@@ -103,11 +103,22 @@ def open_positions_enb(symbols=None, lookback: str = "6mo") -> dict:
     enb = effective_number_of_bets(C)
     n = len(syms)
     ratio = round(enb / n, 2) if (enb and n) else None
-    conc = "high" if (ratio is not None and ratio < 0.5) else ("medium" if (ratio is not None and ratio < 0.75) else "low")
     avg_corr = round(float((C.sum() - n) / (n * (n - 1))), 3) if n > 1 else None
+    # share of variance from the dominant (market) factor — always high for a long-only book
+    try:
+        market_share = round(float(np.linalg.eigvalsh(C).max()) / n, 3)
+    except Exception:
+        market_share = None
+    # The VERDICT keys off the average PAIRWISE correlation, not the raw ENB: a long-only
+    # equity book is always ~1-2 Meucci bets (all long the market), so enb_ratio never
+    # discriminates. avg_corr does — 0.14 = well spread, 0.9 = "five NVDA clones".
+    conc = ("high" if (avg_corr is not None and avg_corr >= 0.6)
+            else "medium" if (avg_corr is not None and avg_corr >= 0.4) else "low")
     return {"n": n, "enb": enb, "enb_ratio": ratio, "avg_pairwise_corr": avg_corr,
-            "concentration": conc, "symbols": syms,
-            "note": "ENB = effective independent bets (Meucci). enb_ratio<0.5 ⇒ crowded book."}
+            "market_share": market_share, "concentration": conc, "symbols": syms,
+            "note": ("Verdict from avg pairwise correlation (the discriminating signal for a "
+                     "long-only book). ENB (Meucci) is ~1-2 for any long book — market beta "
+                     "dominates; market_share = variance from the common factor.")}
 
 
 __all__ = ["effective_number_of_bets", "open_positions_enb"]

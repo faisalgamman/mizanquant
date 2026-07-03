@@ -150,10 +150,11 @@ function SelectionQuality() {
                   style={{ color: o.meta_trusted ? "var(--positive)" : "inherit" }}>
               Meta <b>{o.meta_status === "trained" ? (o.meta_oos_auc != null ? _sqNum(o.meta_oos_auc) : "…OOS") : "…يتراكم"}</b>
             </span>
-            {o.enb != null && (
-              <span title="عدد الرهانات الفعّال (Meucci) للمحفظة المفتوحة — نسبة<0.5 = تركّز عالٍ"
+            {o.avg_corr != null && (
+              <span title="تركّز المحفظة المفتوحة = متوسّط الارتباط بين المراكز (المُميِّز لمحفظة الشراء) · ENB(Meucci) يبقى ~1-2 لأي محفظة طويلة"
                     style={{ color: o.concentration === "high" ? "var(--negative)" : (o.concentration === "low" ? "var(--positive)" : "inherit") }}>
-                رهانات <b>{_sqNum(o.enb, 1)}</b><span className="selq-dim">/{o.enb_n}</span>
+                تركّز <b>{o.concentration === "high" ? "عالٍ" : (o.concentration === "medium" ? "متوسط" : "منخفض")}</b>
+                <span className="selq-dim"> (ترابط {Math.round(o.avg_corr * 100)}% · {o.enb_n} مركز)</span>
               </span>
             )}
             {o.regime && (

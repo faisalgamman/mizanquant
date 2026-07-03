@@ -145,6 +145,7 @@ def _read_overlays():
             "crisis_prob": regime.get("crisis_prob") if isinstance(regime, dict) else None,
             "pbo": pbo.get("pbo"), "pbo_trust": pbo.get("trust"),
             "enb": enb.get("enb"), "enb_ratio": enb.get("enb_ratio"),
+            "avg_corr": enb.get("avg_pairwise_corr"),
             "concentration": enb.get("concentration"), "enb_n": enb.get("n"),
         }
     except Exception as e:

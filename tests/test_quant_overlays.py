@@ -10,7 +10,7 @@ from app.services.overfitting import pbo_cscv
 from app.services.position_sizing import vol_target_multiplier, fractional_kelly
 from app.services.sector_neutral import sector_neutral_zscores
 from app.services.regime_hmm import regime_probabilities
-from app.services.concentration import effective_number_of_bets
+from app.services.concentration import effective_number_of_bets, open_positions_enb
 
 
 # ── ⑤ PBO / CSCV ──────────────────────────────────────────────────────────────
@@ -129,3 +129,22 @@ def test_corr_alignment_handles_uneven_lengths():
     assert C is not None and C.shape == (3, 3)
     enb = effective_number_of_bets(C)
     assert enb is not None and enb > 1.5             # A+B cluster, C apart → ~2, not collapsed
+
+
+def test_open_positions_enb_verdict_from_avg_corr(monkeypatch):
+    """Verdict keys off avg pairwise correlation: near-clones → high, independent → low."""
+    import pandas as pd
+    rng = np.random.default_rng(4)
+    market = np.cumprod(1 + rng.normal(0, 0.01, 200)) * 100
+
+    def clones(sym, period=None):
+        return pd.DataFrame({"close": market * np.cumprod(1 + rng.normal(0, 0.0005, 200))})
+    monkeypatch.setattr("app.services.market_data.fetch", clones)
+    hi = open_positions_enb(symbols=["A", "B", "C", "D"])
+    assert hi["concentration"] == "high" and hi["avg_pairwise_corr"] > 0.6
+
+    def independents(sym, period=None):
+        return pd.DataFrame({"close": np.cumprod(1 + rng.normal(0, 0.01, 200)) * 100})
+    monkeypatch.setattr("app.services.market_data.fetch", independents)
+    lo = open_positions_enb(symbols=["A", "B", "C", "D"])
+    assert lo["concentration"] == "low"
