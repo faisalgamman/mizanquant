@@ -34,7 +34,7 @@ _BANDS: dict[str, list[tuple[int, int, str]]] = {
 
 # Composite component fields the monthly ledger stores (after the recording enrichment).
 _MONTHLY_PARTS = ("score_tech", "score_fund", "score_sentiment", "score_halal",
-                  "conviction_score", "score_momentum")
+                  "conviction_score", "score_momentum", "score_mom121")
 # Weekly swing entry-time factor signals (stored on each PV trade by
 # paper_validation._weekly_signal_parts) — lets us measure the weekly per-factor edge.
 _WEEKLY_PARTS = ("wk_rs", "wk_rsi", "wk_above_ema20", "wk_atr_pct", "wk_dist_ema20_pct")

@@ -363,6 +363,13 @@ def test_normalize_picks_preserves_existing_parts():
     assert twice[0]["parts"] == once[0]["parts"]   # preserved through re-normalization
 
 
+def test_normalize_picks_carries_mom121():
+    # the evidence-based 12-1 momentum sub-score must reach the ledger for attribution
+    p = pv._normalize_picks([{"symbol": "AAA", "price": 100, "composite_score": 80,
+                              "score_momentum": 6.0, "score_mom121": 8.5}])
+    assert p[0]["parts"]["score_mom121"] == 8.5 and p[0]["parts"]["score_momentum"] == 6.0
+
+
 def test_monthly_row_stores_parts_in_signal_details():
     pick = {"symbol": "AAA", "price": 100, "score": 80,
             "parts": {"score_tech": 70, "score_fund": 60}}

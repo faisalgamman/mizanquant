@@ -3945,25 +3945,38 @@ async def screener_deep_picks(
         # economically sound. MODEST weight (COMPOSITE_MOMENTUM_WEIGHT, default 10)
         # until the forward ledger + attribution earn it more. Fail-open.
         _mom_w = int(os.environ.get("COMPOSITE_MOMENTUM_WEIGHT", "10"))
+        # 12-1 momentum — the STRONGEST factor in the historical capture backfill
+        # (IC +0.040, IR 1.71, positive across ALL regimes calm/choppy/crisis), vs the
+        # 63d-RS factor's weak +0.010. Evidence-based addition. MODEST weight
+        # (COMPOSITE_MOM121_WEIGHT, default 12) — forward attribution earns it more/less.
+        _mom121_w = int(os.environ.get("COMPOSITE_MOM121_WEIGHT", "12"))
         mom_component = None
-        if _mom_w > 0:
+        mom121_component = None
+        if _mom_w > 0 or _mom121_w > 0:
             try:
-                from app.services.backtest_engine import factor_rs_vs_spy
-                _, _sdf = _fetch_data(symbol, period="1y")
-                _, _spydf = _fetch_data("SPY", period="1y")
-                if (_sdf is not None and _spydf is not None
-                        and len(_sdf) > 65 and len(_spydf) > 65):
-                    rs = factor_rs_vs_spy(_sdf["close"].astype(float).values,
-                                          _spydf["close"].astype(float).values, lookback=63)
-                    if rs is not None:
-                        # 3-mo relative return (~[-0.10,+0.10]) → 0.._mom_w; parity = mid
-                        mom_component = max(0.0, min(1.0, (rs + 0.10) / 0.20)) * _mom_w
+                from app.services.backtest_engine import factor_rs_vs_spy, factor_momentum_12_1
+                _, _sdf = _fetch_data(symbol, period="2y")   # 2y covers both 63d-RS and 12-1
+                _, _spydf = _fetch_data("SPY", period="2y")
+                if _sdf is not None and len(_sdf) > 65:
+                    _c = _sdf["close"].astype(float).values
+                    if _mom_w > 0 and _spydf is not None and len(_spydf) > 65:
+                        rs = factor_rs_vs_spy(_c, _spydf["close"].astype(float).values, lookback=63)
+                        if rs is not None:
+                            # 3-mo relative return (~[-0.10,+0.10]) → 0.._mom_w; parity = mid
+                            mom_component = max(0.0, min(1.0, (rs + 0.10) / 0.20)) * _mom_w
+                    if _mom121_w > 0 and len(_c) >= 252:
+                        m121 = factor_momentum_12_1(_c)      # 12-mo return excluding last month
+                        if m121 is not None:
+                            # ~[-0.20,+0.40] typical → 0.._mom121_w; 0% 12-1 → lower-mid
+                            mom121_component = max(0.0, min(1.0, (m121 + 0.20) / 0.60)) * _mom121_w
             except Exception:
-                mom_component = None
+                mom_component = mom121_component = None
 
         parts = [(tech, 30), (fund, 25), (halal_s, 10)]
         if mom_component is not None:
             parts.append((mom_component, _mom_w))
+        if mom121_component is not None:
+            parts.append((mom121_component, _mom121_w))
         if sent_available and _sent_w > 0 and sent_s is not None:
             # sent_s is on a 0-20 scale → rescale to the (reduced) weight.
             parts.append((float(sent_s) * _sent_w / 20.0, _sent_w))
@@ -4000,6 +4013,7 @@ async def screener_deep_picks(
             # Composite breakdown
             "composite_score":    composite,
             "score_momentum":     round(float(mom_component), 2) if mom_component is not None else None,
+            "score_mom121":       round(float(mom121_component), 2) if mom121_component is not None else None,
             "score_tech":         tech,
             "tech_version":       tech_version,  # Phase 3: v1 or tech-v2-date
             "score_fund":         fund,
