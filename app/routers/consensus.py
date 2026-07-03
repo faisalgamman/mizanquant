@@ -298,6 +298,31 @@ async def regime_ic_ep(horizon_days: int = 10):
     return regime_conditional_ic(horizon_days=horizon_days)
 
 
+_SPARK_CACHE = {"at": 0.0, "data": None}
+
+
+@router.get("/api/market/spark")
+def market_spark_ep():
+    """Recent close series (last ~24) for the strip's index/commodity ETF proxies — for the
+    market-strip sparklines. Cached 15 min. Sync (runs in FastAPI's threadpool)."""
+    import time
+    now = time.time()
+    if _SPARK_CACHE["data"] is not None and (now - _SPARK_CACHE["at"]) < 900:
+        return _SPARK_CACHE["data"]
+    from app.services.market_data import fetch
+    out = {}
+    for sym in ("SPY", "QQQ", "DIA", "IWM", "GLD", "BNO"):
+        try:
+            df = fetch(sym, period="1mo")
+            if df is not None and len(df) > 3:
+                out[sym] = [round(float(x), 2) for x in df["close"].astype(float).values[-24:]]
+        except Exception:
+            pass
+    res = {"spark": out}
+    _SPARK_CACHE.update(at=now, data=res)
+    return res
+
+
 @router.get("/api/risk/var")
 async def risk_var_ep(equity: float | None = None):
     """Parametric 1-day VaR (95/99%) for the book — equity × SPY vol × z."""

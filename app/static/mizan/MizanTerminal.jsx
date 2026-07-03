@@ -58,6 +58,13 @@ function LineArea({ data, color = POS, w = 320, h = 96 }) {
     <path d={line} fill="none" stroke={color} strokeWidth="1.8" />
   </svg>);
 }
+function Spark({ data, color = POS, w = 58, h = 16 }) {
+  if (!data || data.length < 2) return null;
+  const mn = Math.min(...data), mx = Math.max(...data), rg = (mx - mn) || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - mn) / rg) * (h - 2) - 1}`).join(" ");
+  return <svg width={w} height={h} className="mz-spark"><polyline points={pts} fill="none" stroke={color} strokeWidth="1.3" /></svg>;
+}
+const SPARK_MAP = { "S&P 500": "SPY", "Nasdaq": "QQQ", "Dow": "DIA", "Russell": "IWM", "Gold": "GLD", "Brent": "BNO" };
 function HeatCell({ f, v }) {
   const col = v == null ? "var(--bg-raised)" : v > 0 ? `rgba(74,222,128,${Math.min(0.8, 0.14 + Math.abs(v) * 13)})` : `rgba(248,113,113,${Math.min(0.8, 0.14 + Math.abs(v) * 13)})`;
   return <div className="mz-heat-c" style={{ background: col }}><div className="mz-heat-f">{f}</div><div className="mz-heat-v">{v != null ? num(v, 3) : "—"}</div></div>;
@@ -91,6 +98,7 @@ function Overview() {
     g("/api/context/bundle", "mk"); g("/api/v1/overview", "ov");
     g("/api/market/indicators", "ind"); g("/api/screener/deep-picks?limit=8", "dp");
     g("/paper_validation/status?scanner=weekly", "lw"); g("/api/alpha-curve", "ac");
+    g("/api/market/spark", "sp");
     return () => { alive = false; };
   }, []);
 
@@ -144,13 +152,15 @@ function Overview() {
       {/* market strip */}
       <Panel title="نظرة على السوق" right={<span className="mz-dim3">مؤشّرات حيّة</span>}>
         <div className="mz-strip">
-          {(indicators.length ? indicators : [{ label: "…" }]).map((it, i) => (
-            <div className="mz-strip-i" key={i}>
+          {(indicators.length ? indicators : [{ label: "…" }]).map((it, i) => {
+            const sk = (d.sp && d.sp.spark || {})[SPARK_MAP[it.label]];
+            return (<div className="mz-strip-i" key={i}>
               <div className="mz-strip-k">{it.label || it.symbol}</div>
               <div className="mz-strip-v">{it.price == null ? "—" : num(it.price)}</div>
               {it.change_pct != null && <div className="mz-strip-c" style={{ color: it.change_pct >= 0 ? POS : NEG }}>{pct(it.change_pct, 2)}</div>}
-            </div>
-          ))}
+              {sk && <Spark data={sk} color={it.change_pct >= 0 ? POS : NEG} />}
+            </div>);
+          })}
         </div>
       </Panel>
 

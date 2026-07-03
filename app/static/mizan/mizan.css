@@ -76,6 +76,7 @@
 .mz-strip-k { font-size: 10px; color: var(--text-muted); }
 .mz-strip-v { font-size: 15px; font-weight: 700; font-family: var(--font-mono); }
 .mz-strip-c { font-size: 10px; font-family: var(--font-mono); }
+.mz-spark { display: block; margin-top: 3px; opacity: 0.85; }
 
 /* rows */
 .mz-r2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
