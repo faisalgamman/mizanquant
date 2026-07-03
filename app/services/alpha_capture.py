@@ -432,6 +432,73 @@ def regime_conditional_ic(horizon_days: int = 10) -> dict:
                     "negative in another ⇒ make the factor regime-conditional."}
 
 
+def gate_ema20_ab(horizon_days: int = 20, min_rs=None) -> dict:
+    """SHADOW test of the standing hypothesis that the weekly gate's 'above EMA20'
+    REQUIREMENT may hurt (backfill IC of above_ema20 was −0.024 at 10d, −0.033 at 20d).
+
+    On the capture panel, hold the RS gate fixed and, per date, compare the mean forward
+    return of the with-trend set (above_ema20==1) vs the counter-trend set (above_ema20==0).
+    Paired across dates. If counter-trend ≥ with-trend, requiring above-EMA20 adds no value
+    (confirms the hypothesis). Rich immediate answer from the backfill; the live PVSH shadow
+    (weekly_gate_forward_eval require_ema20=False) confirms it forward as it accrues."""
+    import numpy as np
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+
+    if min_rs is None:
+        try:
+            from app.services.gate_config import get_min_rs
+            min_rs = get_min_rs()
+        except Exception:
+            min_rs = -2.0
+    h = str(int(horizon_days))
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors,
+                        FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if not (isinstance(fac, dict) and isinstance(fwd, dict) and h in fwd):
+            continue
+        rs, ab = fac.get("rs"), fac.get("above_ema20")
+        if not isinstance(rs, (int, float)) or ab not in (0, 1) or float(rs) < min_rs:
+            continue
+        by_date.setdefault(sd, []).append((int(ab), float(fwd[h])))
+
+    with_m, counter_m, diffs = [], [], []
+    for _sd, items in by_date.items():
+        w = [r for a, r in items if a == 1]
+        c = [r for a, r in items if a == 0]
+        if len(w) >= 3 and len(c) >= 3:
+            mw, mc = float(np.mean(w)), float(np.mean(c))
+            with_m.append(mw)
+            counter_m.append(mc)
+            diffs.append(mc - mw)
+
+    n = len(diffs)
+    if n < 10:
+        return {"status": "insufficient", "n_dates": n, "min_rs": min_rs}
+    a = np.asarray(diffs, dtype=float)
+    md = float(a.mean())
+    sd_ = float(a.std(ddof=1)) if n > 1 else 0.0
+    t = round(float(md / (sd_ / np.sqrt(n))), 2) if sd_ > 0 else None   # plain float (JSON-safe)
+    confirms = bool(md > 0 and t is not None and t >= 1.5)              # plain bool (np.bool_ isn't JSON-serializable)
+    return {
+        "horizon_days": int(horizon_days), "min_rs": min_rs, "n_dates": n,
+        "with_ema20_mean_ret": round(float(np.mean(with_m)), 3),
+        "counter_trend_mean_ret": round(float(np.mean(counter_m)), 3),
+        "delta_counter_minus_with": round(md, 3), "paired_t": t,
+        "hypothesis_confirmed": confirms,
+        "verdict": ("requiring above-EMA20 HURTS — counter-trend names do as well or better"
+                    if confirms else
+                    "above-EMA20 requirement helps or is neutral — keep it"),
+        "note": "Paired A/B on the capture panel (with-trend vs counter-trend), RS gate held fixed.",
+    }
+
+
 def capture_status() -> dict:
     """Row/label counts for the capture base (for the dashboard)."""
     from app.db.database import SessionLocal
@@ -448,5 +515,5 @@ def capture_status() -> dict:
 
 
 __all__ = ["capture_snapshot", "label_snapshots", "snapshot_attribution",
-           "regime_conditional_ic", "capture_status", "backfill_snapshots",
-           "run_backfill_bg", "backfill_status"]
+           "regime_conditional_ic", "gate_ema20_ab", "capture_status",
+           "backfill_snapshots", "run_backfill_bg", "backfill_status"]

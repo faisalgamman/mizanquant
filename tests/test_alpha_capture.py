@@ -136,6 +136,31 @@ def test_backfill_multi_horizon_and_idempotent(sdb, monkeypatch):
     assert r2["stored"] == 0 and r2["skipped"] > 0                  # idempotent
 
 
+def test_gate_ema20_ab_detects_hurting_requirement(sdb, monkeypatch):
+    """Panel where counter-trend (above==0) names out-return with-trend ones → the A/B must
+    flag that requiring above-EMA20 hurts."""
+    monkeypatch.setenv("WEEKLY_MIN_RS", "-99")           # don't filter on rs
+    rng = np.random.default_rng(11)
+    db = sdb()
+    try:
+        for d in range(20):
+            sd = datetime(2026, 1, 1) + timedelta(days=d)
+            for k in range(10):
+                for ab, mu in ((1, 0.0), (0, 2.0)):       # counter-trend earns more
+                    db.add(FactorSnapshot(
+                        snap_date=sd, symbol=f"{'U' if ab else 'D'}{k}", price=100.0,
+                        factors={"rs": 1.0, "above_ema20": ab},
+                        fwd_ret={"20": float(rng.normal(mu, 1.5))}))
+        db.commit()
+    finally:
+        db.close()
+    from app.services.alpha_capture import gate_ema20_ab
+    r = gate_ema20_ab(horizon_days=20)
+    assert r["n_dates"] >= 10
+    assert r["counter_trend_mean_ret"] > r["with_ema20_mean_ret"]
+    assert r["hypothesis_confirmed"] is True and r["paired_t"] > 1.5
+
+
 def test_unlabelled_rows_counted_and_matured(sdb, monkeypatch):
     """Regression: a fwd_ret=None row must count as UNlabelled and be picked up by
     label_snapshots (a JSON None can round-trip as JSON 'null', so an is_(None) SQL filter

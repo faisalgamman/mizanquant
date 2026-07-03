@@ -298,6 +298,14 @@ async def regime_ic_ep(horizon_days: int = 10):
     return regime_conditional_ic(horizon_days=horizon_days)
 
 
+@router.get("/api/gate-ema20-ab")
+async def gate_ema20_ab_ep(horizon_days: int = 20, min_rs: float | None = None):
+    """Shadow A/B of the weekly gate's 'above EMA20' requirement (with-trend vs counter-trend
+    forward returns on the capture panel) — tests whether requiring above-EMA20 hurts."""
+    from app.services.alpha_capture import gate_ema20_ab
+    return gate_ema20_ab(horizon_days=horizon_days, min_rs=min_rs)
+
+
 @router.get("/api/regime-hmm")
 async def regime_hmm_ep():
     """④ HMM regime probabilities on SPY (calm_bull / choppy / crisis) + book multiplier."""
