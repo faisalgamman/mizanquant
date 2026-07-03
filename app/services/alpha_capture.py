@@ -521,9 +521,19 @@ def _factor_verdict(factor: str, ir):
     return "↓↓", sp.get("neg_strong", "سلبي قويّ")
 
 
+_MULTI_CACHE = {"at": 0.0, "key": None, "data": None}
+
+
 def snapshot_attribution_multi(horizons=(5, 10, 20)) -> dict:
     """Per-factor Information Coefficient at MULTIPLE horizons in ONE pass (for the factor
-    table) + a direction arrow and plain-language verdict from the primary (10d) horizon."""
+    table) + a direction arrow and plain-language verdict from the primary (10d) horizon.
+    Cached ~10 min — it scans the whole snapshot panel (thousands of rows) and only changes
+    when the daily capture/backfill adds data."""
+    import time as _t
+    key = tuple(int(h) for h in horizons)
+    now = _t.time()
+    if _MULTI_CACHE["data"] is not None and _MULTI_CACHE["key"] == key and (now - _MULTI_CACHE["at"]) < 600:
+        return _MULTI_CACHE["data"]
     import numpy as np
     from app.db.database import SessionLocal
     from app.db.models import FactorSnapshot
@@ -569,9 +579,11 @@ def snapshot_attribution_multi(horizons=(5, 10, 20)) -> dict:
         direction, verdict = _factor_verdict(f, prim.get("ir"))
         out[f] = {"h": per_h, "direction": direction, "verdict": verdict}
 
-    return {"horizons": [int(h) for h in horizons], "labelled_dates": max_dates,
-            "factors": out,
-            "note": "Cross-sectional IC per factor at 5/10/20-day horizons — power accrues per day."}
+    res = {"horizons": [int(h) for h in horizons], "labelled_dates": max_dates,
+           "factors": out,
+           "note": "Cross-sectional IC per factor at 5/10/20-day horizons — power accrues per day."}
+    _MULTI_CACHE.update(at=now, key=key, data=res)
+    return res
 
 
 def capture_status() -> dict:
