@@ -390,10 +390,16 @@ function Stub({ label }) {
 }
 
 function MizanTerminal() {
-  const [view, setView] = useState(() => (location.hash || "#overview").slice(1) || "overview");
+  const [view, setView] = useState((location.hash || "").replace(/^#/, "") || "overview");
   const [clock, setClock] = useState("--:--:--");
   const [broker, setBroker] = useState(null);
   const [shared, setShared] = useState({});
+  useEffect(() => {  // hash drives the view — robust to direct load, back/forward, and clicks
+    const read = () => setView((location.hash || "").replace(/^#/, "") || "overview");
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
   useEffect(() => {
     const t = setInterval(() => setClock(new Date().toUTCString().slice(17, 25)), 1000);
     fetch("/api/v1/broker/health").then(r => r.json()).then(setBroker).catch(() => {});
@@ -401,7 +407,6 @@ function MizanTerminal() {
     g("/api/selection-quality", "sq"); g("/api/factor-ic-multi", "fic"); g("/api/regime-hmm", "rg"); g("/api/v1/overview", "ov");
     return () => clearInterval(t);
   }, []);
-  useEffect(() => { location.hash = view; }, [view]);
   const cur = NAV.find(n => n.key === view) || NAV[0];
   const today = new Date();
   return (
@@ -411,7 +416,7 @@ function MizanTerminal() {
         <nav className="mz-nav">{NAV.map(n => {
           const a = view === n.key;
           return n.href ? <a className={"mz-ni" + (a ? " on" : "")} href={n.href} key={n.key}><span className="mz-ni-i">{n.icon}</span>{n.label}</a>
-            : <button className={"mz-ni" + (a ? " on" : "")} onClick={() => setView(n.key)} key={n.key}><span className="mz-ni-i">{n.icon}</span>{n.label}</button>;
+            : <button className={"mz-ni" + (a ? " on" : "")} onClick={() => { location.hash = n.key; }} key={n.key}><span className="mz-ni-i">{n.icon}</span>{n.label}</button>;
         })}</nav>
         <div className="mz-side-f"><span className={"mz-dot " + (broker && broker.connected ? "on" : "off")} />
           <div><div className="mz-bk-t">{broker && broker.connected ? "IBKR" : "البروكر"}</div><div className="mz-bk-s">{broker && broker.connected ? "متّصل · LIVE" : "غير متّصل"}</div></div></div>
