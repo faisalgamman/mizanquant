@@ -199,6 +199,7 @@ const mockNavForecast = [
   { i: "fa-history",       l: "Backtest",        href: "/backtest" },
 ];
 const mockNavAnalytics = [
+  { i: "fa-flask",         l: "Quant Lab",       badge: "New", href: "/quant-lab" },
   { i: "fa-shield-alt",    l: "Risk Desk",       badge: "2", href: "/risk-desk-v2" },
   { i: "fa-chart-bar",     l: "Strategies",      href: "/strategy-dashboard" },
 ];

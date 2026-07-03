@@ -313,11 +313,19 @@ def _gate_recommendation(best_oos, current: float, min_delta: float = 0.5, pbo=N
 _GATE_CAL_CACHE: dict = {"at": 0.0, "data": None}
 
 
-def gate_calibration(symbols=None, *, grid=None, min_t: float = 2.0,
+def gate_calibration(symbols=None, *, grid=None, min_t: float | None = None,
                      period: str = "2y", force: bool = False, _mat=None, _cache: bool = True) -> dict:
     """② OOS judge. Split the records train(first half)/test(second half); a threshold is
     ROBUST only if uplift>0 AND t≥min_t in BOTH halves (no overfit). Recommend the robust
-    threshold with the best OOS uplift vs the current live gate. Cached 6h."""
+    threshold with the best OOS uplift vs the current live gate. Cached 6h.
+
+    ``min_t`` is the significance sensitivity — env GATE_MIN_T (default 2.0). Lower it (e.g.
+    1.5) to surface less-certain recommendations sooner; raise it to be stricter."""
+    if min_t is None:
+        try:
+            min_t = float(os.environ.get("GATE_MIN_T", "2.0"))
+        except (TypeError, ValueError):
+            min_t = 2.0
     now = time.time()
     if _cache and not force and _GATE_CAL_CACHE["data"] is not None and (now - _GATE_CAL_CACHE["at"]) < _TTL:
         return _GATE_CAL_CACHE["data"]

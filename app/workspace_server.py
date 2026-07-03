@@ -7603,6 +7603,13 @@ async def get_terminal():
     """Terminal Overview kit — served directly so auth gate works correctly."""
     return _html("terminal/index.html")
 
+@app.get("/quant-lab", include_in_schema=False)
+@app.get("/quant-lab/", include_in_schema=False)
+async def get_quant_lab():
+    """Strategy Lab — one screen for the whole learning loop (collect → analyze → correct),
+    the quant overlays, and the self-calibrating gate. For daily monitoring."""
+    return _html("quant-lab/index.html")
+
 @app.get("/halal-screener-v2", include_in_schema=False)
 @app.get("/halal-screener-v2/", include_in_schema=False)
 async def get_halal_screener_v2():
