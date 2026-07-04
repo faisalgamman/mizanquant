@@ -321,10 +321,17 @@ function dataPct(fic) { const s = fic && fic.status; if (!s || !s.rows) return 6
 
 function useGet(url) {
   const [v, setV] = useState(null);
-  useEffect(() => { let a = true; fetch(url).then(r => r.json()).then(x => a && setV(x)).catch(() => a && setV({})); return () => { a = false; }; }, [url]);
+  useEffect(() => { if (!url) { setV(null); return; } let a = true; fetch(url).then(r => r.json()).then(x => a && setV(x)).catch(() => a && setV({})); return () => { a = false; }; }, [url]);
   return v;
 }
 const verdictOf = (s) => s >= 72 ? ["STRONG BUY", POS] : s >= 55 ? ["BUY", POS] : s >= 38 ? ["WATCH", WARN] : ["AVOID", MUT];
+
+const SCR_PRESETS = [
+  { name: "درجة عالية", desc: "الدرجة ≥ 70 · فرز بالدرجة", cfg: { tab: "all", sortK: "composite_score", secF: "all", pxMin: 0, scMin: 70 } },
+  { name: "زخم قويّ", desc: "الدرجة ≥ 55 · فرز بالزخم", cfg: { tab: "all", sortK: "score_mom121", secF: "all", pxMin: 0, scMin: 55 } },
+  { name: "قوّة أساسية", desc: "فرز بالأساسي", cfg: { tab: "all", sortK: "score_fund", secF: "all", pxMin: 0, scMin: 0 } },
+  { name: "متوافقة شرعاً", desc: "حلال فقط · درجة ≥ 55", cfg: { tab: "halal", sortK: "composite_score", secF: "all", pxMin: 0, scMin: 55 } },
+];
 
 function ScreenerView() {
   const dp = useGet("/api/screener/deep-picks?limit=200");
@@ -332,10 +339,26 @@ function ScreenerView() {
   const [tab, setTab] = useState("all");
   const [q, setQ] = useState("");
   const [sortK, setSortK] = useState("composite_score");
+  const [secF, setSecF] = useState("all");
+  const [pxMin, setPxMin] = useState(0);
+  const [scMin, setScMin] = useState(0);
+  const [saved, setSaved] = useState(() => { try { return JSON.parse(localStorage.getItem("mz_screens") || "[]"); } catch (e) { return []; } });
   const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"]];
+  const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
+
+  const applyCfg = (c) => { if (c.tab != null) setTab(c.tab); if (c.sortK) setSortK(c.sortK); if (c.secF != null) setSecF(c.secF); if (c.pxMin != null) setPxMin(c.pxMin); if (c.scMin != null) setScMin(c.scMin); };
+  const saveCurrent = () => { const name = (prompt("اسم الماسح المحفوظ:") || "").trim(); if (!name) return; const s = saved.filter(x => x.name !== name).concat([{ name, cfg: { tab, sortK, secF, pxMin, scMin } }]); setSaved(s); localStorage.setItem("mz_screens", JSON.stringify(s)); };
+  const delSaved = (name) => { const s = saved.filter(x => x.name !== name); setSaved(s); localStorage.setItem("mz_screens", JSON.stringify(s)); };
+  const resetF = () => { setTab("all"); setSecF("all"); setPxMin(0); setScMin(0); setQ(""); };
+
   let shown = rows.filter(r => (tab === "all" || (tab === "halal" && r.is_halal) || (tab === "buy" && (r.composite_score || 0) >= 55))
+    && (secF === "all" || r.sector === secF)
+    && (r.price || 0) >= pxMin
+    && (r.composite_score || 0) >= scMin
     && (!q || (r.symbol || "").toUpperCase().includes(q.toUpperCase()) || (r.company || "").toUpperCase().includes(q.toUpperCase())));
   shown = [...shown].sort((a, b) => (b[sortK] || 0) - (a[sortK] || 0));
+  const activeF = (secF !== "all" ? 1 : 0) + (pxMin > 0 ? 1 : 0) + (scMin > 0 ? 1 : 0) + (tab !== "all" ? 1 : 0);
+  const cnt = (cfg) => rows.filter(r => (cfg.tab === "all" || (cfg.tab === "halal" && r.is_halal) || (cfg.tab === "buy" && (r.composite_score || 0) >= 55)) && (cfg.secF === "all" || r.sector === cfg.secF) && (r.price || 0) >= (cfg.pxMin || 0) && (r.composite_score || 0) >= (cfg.scMin || 0)).length;
 
   const dist = [0, 0, 0, 0, 0]; rows.forEach(r => dist[Math.min(4, Math.floor((r.composite_score || 0) / 20))]++);
   const distMax = Math.max(...dist, 1);
@@ -357,9 +380,17 @@ function ScreenerView() {
         <div className="mz-tabs">{TABS.map(([k, l]) => <button key={k} className={"mz-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</button>)}</div>
         <div className="mz-dim3">إجمالي النتائج <b style={{ color: "var(--text-primary)" }}>{shown.length}</b></div>
       </div>
+      <div className="mz-filters">
+        <label className="mz-fl">القطاع<select className="mz-sel" value={secF} onChange={e => setSecF(e.target.value)}><option value="all">كل القطاعات</option>{sectors.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
+        <label className="mz-fl">السعر ≥<select className="mz-sel" value={pxMin} onChange={e => setPxMin(+e.target.value)}>{[0, 5, 10, 50, 100, 200].map(v => <option key={v} value={v}>{v ? "$" + v : "الكل"}</option>)}</select></label>
+        <label className="mz-fl">الدرجة ≥<select className="mz-sel" value={scMin} onChange={e => setScMin(+e.target.value)}>{[0, 40, 55, 70, 80].map(v => <option key={v} value={v}>{v || "الكل"}</option>)}</select></label>
+        <label className="mz-fl">فرز<select className="mz-sel" value={sortK} onChange={e => setSortK(e.target.value)}><option value="composite_score">الدرجة</option><option value="score_mom121">الزخم</option><option value="score_fund">الأساسي</option><option value="score_tech">التقني</option><option value="price">السعر</option></select></label>
+        {activeF > 0 && <button className="mz-rg" onClick={resetF}>مسح الفلاتر ({activeF})</button>}
+        <button className="mz-rg on" onClick={saveCurrent}>★ حفظ الماسح</button>
+      </div>
       <div className="mz-ana-wrap">
         <div className="mz-ana-main">
-          <Panel right={<div className="mz-sort">فرز: {[["composite_score", "الدرجة"], ["score_mom121", "الزخم"], ["score_fund", "الأساسي"]].map(([k, l]) => <button key={k} className={"mz-rg" + (sortK === k ? " on" : "")} onClick={() => setSortK(k)}>{l}</button>)}</div>} title={<input className="mz-inp" style={{ width: 200 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />}>
+          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />}>
             {rows.length ? (
               <table className="mz-tbl mz-tbl-wide">
                 <thead><tr><th className="tl">الرمز</th><th className="tl">القطاع</th><th>السعر</th><th>التوصية</th><th>الدرجة</th><th>زخم</th><th>تقني</th><th>أساسي</th><th>حلال</th></tr></thead>
@@ -380,18 +411,40 @@ function ScreenerView() {
             </Panel>
             <Panel title="خريطة القطاعات (متوسط الدرجة)">
               <div className="mz-secmap">{secAvg.slice(0, 8).map((s, i) => (
-                <div className="mz-sm" key={i} style={{ background: secCol(s.avg) }}><div className="mz-sm-n">{s.sec}</div><div className="mz-sm-v">{Math.round(s.avg)}</div></div>))}</div>
+                <div className="mz-sm" key={i} style={{ background: secCol(s.avg), cursor: "pointer" }} onClick={() => setSecF(s.sec)}><div className="mz-sm-n">{s.sec}</div><div className="mz-sm-v">{Math.round(s.avg)}</div></div>))}</div>
             </Panel>
           </div>
+          <Panel title="الماسحات المحفوظة">
+            <table className="mz-tbl">
+              <thead><tr><th className="tl">الاسم</th><th className="tl">الوصف</th><th>النتائج</th><th></th></tr></thead>
+              <tbody>
+                {SCR_PRESETS.map((p, i) => (
+                  <tr key={"p" + i}><td className="tl mz-fn">{p.name}</td><td className="tl mz-dim2">{p.desc}</td><td>{cnt(p.cfg)}</td>
+                    <td><button className="mz-rg" onClick={() => applyCfg(p.cfg)}>▷ تطبيق</button></td></tr>))}
+                {saved.map((p, i) => (
+                  <tr key={"s" + i}><td className="tl mz-fn">★ {p.name}</td><td className="tl mz-dim2">ماسح محفوظ</td><td>{cnt(p.cfg)}</td>
+                    <td><button className="mz-rg" onClick={() => applyCfg(p.cfg)}>▷ تطبيق</button> <button className="mz-rg" onClick={() => delSaved(p.name)}>✕</button></td></tr>))}
+              </tbody>
+            </table>
+          </Panel>
         </div>
         <aside className="mz-ana-rail">
+          <Panel title="الفلاتر النشطة">
+            <div className="mz-tags">
+              <span className="mz-tag2">{tab === "all" ? "كل الأسهم" : tab === "halal" ? "متوافقة شرعاً" : "توصية شراء"}</span>
+              {secF !== "all" && <span className="mz-tag2 on" onClick={() => setSecF("all")}>{secF} ✕</span>}
+              {pxMin > 0 && <span className="mz-tag2 on" onClick={() => setPxMin(0)}>السعر ≥ ${pxMin} ✕</span>}
+              {scMin > 0 && <span className="mz-tag2 on" onClick={() => setScMin(0)}>الدرجة ≥ {scMin} ✕</span>}
+              {activeF === 0 && <span className="mz-dim2">لا فلاتر — الكون كامل</span>}
+            </div>
+          </Panel>
           <Panel title="تصنيفات سريعة">
             <div className="mz-tags">{[["composite_score", "الأعلى درجة"], ["score_mom121", "الأعلى زخم"], ["score_fund", "الأقوى أساساً"], ["score_tech", "الأقوى تقنياً"]].map(([k, l]) => (
               <button key={k} className={"mz-tag2" + (sortK === k ? " on" : "")} onClick={() => setSortK(k)}>{l}</button>))}</div>
           </Panel>
           <Panel title="إحصائيات الماسح">
             <div className="mz-dl">
-              {[["إجمالي النتائج", rows.length], ["متوسّط الدرجة", num(avg, 0)], ["متوسّط الزخم", num(avgMom, 1)],
+              {[["إجمالي النتائج", rows.length], ["الظاهرة بعد الفلترة", shown.length], ["متوسّط الدرجة", num(avg, 0)], ["متوسّط الزخم", num(avgMom, 1)],
               ["أفضل قطاع", secAvg[0] ? secAvg[0].sec : "—"], ["متوافقة شرعاً", rows.filter(r => r.is_halal).length]].map(([l, v], i) => (
                 <div className="mz-dl-r" key={i}><span className="mz-dl-l">{l}</span><span className="mz-dl-v">{v}</span></div>))}
             </div>
@@ -622,6 +675,27 @@ function Candles({ bars, w = 660, h = 300 }) {
   </svg>);
 }
 
+function ForecastCone({ stats, p0, w = 660, h = 240 }) {
+  if (!stats || stats.length < 2 || p0 == null) return <div className="mz-empty">…يحسب مسار التوقّع (مونت-كارلو)</div>;
+  const lo = Math.min(...stats.map(s => s.percentile_5), p0), hi = Math.max(...stats.map(s => s.percentile_95), p0), rg = (hi - lo) || 1;
+  const n = stats.length, pad = 34;
+  const X = (i) => pad + (i / n) * (w - pad - 6);
+  const Y = (v) => 10 + (1 - (v - lo) / rg) * (h - 34);
+  const pts = [{ x: X(0), med: p0, p5: p0, p95: p0, p25: p0, p75: p0 }].concat(stats.map((s, i) => ({ x: X(i + 1), med: s.median_price, p5: s.percentile_5, p95: s.percentile_95, p25: s.percentile_25, p75: s.percentile_75 })));
+  const band = (a, b) => pts.map(p => `${p.x},${Y(p[a])}`).join(" ") + " " + pts.slice().reverse().map(p => `${p.x},${Y(p[b])}`).join(" ");
+  const medLine = pts.map((p, i) => `${i ? "L" : "M"}${p.x},${Y(p.med)}`).join(" ");
+  const gl = [hi, (hi + lo) / 2, lo];
+  return (<svg width={w} height={h} style={{ width: "100%" }} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    {gl.map((v, i) => <g key={i}><line x1={pad} y1={Y(v)} x2={w - 6} y2={Y(v)} stroke="var(--border-subtle)" strokeWidth="0.6" strokeDasharray="2 3" /><text x="2" y={Y(v) + 3} fontSize="9" fill="var(--text-muted)">{Math.round(v)}</text></g>)}
+    <polygon points={band("p95", "p5")} fill={ACC} opacity="0.10" />
+    <polygon points={band("p75", "p25")} fill={ACC} opacity="0.20" />
+    <path d={medLine} fill="none" stroke={ACC} strokeWidth="2" />
+    <line x1={X(0)} y1={10} x2={X(0)} y2={h - 24} stroke="var(--text-muted)" strokeWidth="0.6" strokeDasharray="2 2" />
+    <text x={X(0) + 3} y={h - 12} fontSize="9" fill="var(--text-muted)">اليوم</text>
+    <text x={w - 6} y={h - 12} fontSize="9" fill="var(--text-muted)" textAnchor="end">+{n} يوم</text>
+  </svg>);
+}
+
 const RANGES = [["1D", "5d"], ["1W", "5d"], ["1M", "1mo"], ["3M", "3mo"], ["6M", "6mo"], ["1Y", "1y"], ["2Y", "2y"], ["5Y", "5y"]];
 
 function StockAnalysisView() {
@@ -630,8 +704,11 @@ function StockAnalysisView() {
   const [sym, setSym] = useState("AAPL");
   const [inp, setInp] = useState("AAPL");
   const [range, setRange] = useState("6mo");
+  const [atab, setAtab] = useState("overview");
   const plan = useGet("/api/v1/trade/plan?symbol=" + sym);
   const chart = useGet("/api/stock/chart?symbol=" + sym + "&range=" + range);
+  const mc = useGet((atab === "forecast" || atab === "risk") ? "/api/monte-carlo?symbol=" + sym + "&forecast_days=30&n_simulations=300" : null);
+  const mcStats = (mc && mc.day_stats) || [], mcSum = (mc && mc.summary) || {};
   const pick = rows.find(r => r.symbol === sym) || {};
   const bars = (chart && chart.bars) || [];
   const det = (plan && plan.details) || {}, an = (plan && plan.analyst) || {}, fu = (plan && plan.fundamentals) || {}, pm = (plan && plan.premortem) || {}, ea = (plan && plan.earnings) || {};
@@ -678,6 +755,9 @@ function StockAnalysisView() {
             </div>
           </Panel>
 
+          <div className="mz-tabs" style={{ marginBottom: 12 }}>{[["overview", "نظرة عامة"], ["forecast", "التوقّعات"], ["risk", "المخاطر"]].map(([k, l]) => <button key={k} className={"mz-tab" + (atab === k ? " on" : "")} onClick={() => setAtab(k)}>{l}</button>)}</div>
+
+          {atab === "overview" && <React.Fragment>
           <Panel title="السعر" right={<div className="mz-ranges">{RANGES.slice(2).map(([lab, r]) => <button key={lab} className={"mz-rg" + (range === r ? " on" : "")} onClick={() => setRange(r)}>{lab}</button>)}</div>}>
             <Candles bars={bars} />
             <div className="mz-ind">
@@ -705,6 +785,41 @@ function StockAnalysisView() {
               </div>
             </Panel>
           </div>
+          </React.Fragment>}
+
+          {atab === "forecast" && <React.Fragment>
+          <Panel title="مسار التوقّع — مونت-كارلو (٣٠ يوم · ٣٠٠ محاكاة · GBM)">
+            <ForecastCone stats={mcStats} p0={mcSum.initial_price != null ? mcSum.initial_price : px} />
+            <div className="mz-fc-leg"><span><i style={{ background: ACC, opacity: 0.2 }} />النطاق ٢٥–٧٥٪</span><span><i style={{ background: ACC, opacity: 0.1 }} />النطاق ٥–٩٥٪</span><span><i style={{ background: ACC }} />الوسيط</span></div>
+          </Panel>
+          <div className="mz-ana-metrics">
+            {[["السعر المتوقّع (٣٠ي)", mcSum.expected_terminal_price != null ? money(mcSum.expected_terminal_price) : "…", POS],
+            ["احتمال الربح", mcSum.prob_profit != null ? Math.round(mcSum.prob_profit * 100) + "%" : "…", (mcSum.prob_profit || 0) >= 0.5 ? POS : NEG],
+            ["الانجراف السنوي", mcSum.annualized_drift != null ? pct(mcSum.annualized_drift * 100, 1) : "…", (mcSum.annualized_drift || 0) >= 0 ? POS : NEG],
+            ["التقلّب السنوي", mcSum.annualized_volatility != null ? pct(mcSum.annualized_volatility * 100, 1) : "…", WARN],
+            ["VaR ٩٥٪ (طرفي)", mcSum.terminal_var_95 != null ? "-" + num(mcSum.terminal_var_95 * 100, 1) + "%" : "…", NEG]].map(([l, v, c], i) => (
+              <div className="mz-am" key={i}><div className="mz-am-l">{l}</div><div className="mz-am-v" style={{ color: c }}>{v}</div></div>))}
+          </div>
+          <div className="mz-note" style={{ marginTop: 10 }}>نموذج GBM ثابت (انجراف/تقلّب مقدّران من التاريخ) — تصوّر للمخاطر لا توصية. الانجراف قد يُقلَّص عبر MC_DRIFT_SHRINK للمعايرة.</div>
+          </React.Fragment>}
+
+          {atab === "risk" && <React.Fragment>
+          <div className="mz-ana-metrics">
+            {[["مستوى المخاطرة", pm.risk === "high" ? "مرتفع" : pm.risk === "low" ? "منخفض" : "متوسط", pm.risk === "high" ? NEG : pm.risk === "low" ? POS : WARN],
+            ["عائد:مخاطرة", plan && plan.rr_ratio != null ? num(plan.rr_ratio, 1) : "—", "inherit"],
+            ["وقف كارثي", plan && plan.catastrophe_stop_pct != null ? "-" + num(plan.catastrophe_stop_pct, 0) + "%" : "—", NEG],
+            ["VaR ٩٥٪ (٣٠ي)", mcSum.terminal_var_95 != null ? "-" + num(mcSum.terminal_var_95 * 100, 1) + "%" : "…", NEG],
+            ["CVaR ٩٥٪ (٣٠ي)", mcSum.terminal_cvar_95 != null ? "-" + num(mcSum.terminal_cvar_95 * 100, 1) + "%" : "…", NEG]].map(([l, v, c], i) => (
+              <div className="mz-am" key={i}><div className="mz-am-l">{l}</div><div className="mz-am-v" style={{ color: c }}>{v}</div></div>))}
+          </div>
+          <Panel title="تحليل ما بعد الوفاة (Pre-mortem) — لماذا قد تفشل الصفقة">
+            <div className="mz-keys">
+              {(pm.flags || []).map((f, i) => <div className="mz-key risk" key={i}>⚠ {f}</div>)}
+              {!(pm.flags || []).length && <div className="mz-empty">لا مخاطر بارزة مُحدّدة</div>}
+            </div>
+            {pm.method && <div className="mz-note" style={{ marginTop: 8 }}>المصدر: {pm.method === "llm" ? "نموذج لغوي" : pm.method}</div>}
+          </Panel>
+          </React.Fragment>}
         </div>
 
         <aside className="mz-ana-rail">
