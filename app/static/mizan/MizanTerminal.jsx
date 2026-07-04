@@ -548,37 +548,131 @@ function ReportsView() {
   </Panel></div>);
 }
 
+function Candles({ bars, w = 660, h = 300 }) {
+  if (!bars || bars.length < 2) return <div className="mz-empty">…يحمّل المخطّط</div>;
+  const n = bars.length, hi = Math.max(...bars.map(b => b.high)), lo = Math.min(...bars.map(b => b.low)), rg = (hi - lo) || 1;
+  const vmax = Math.max(...bars.map(b => b.volume || 0)) || 1;
+  const padB = 30, volH = 34, plotH = h - padB - volH, cw = w / n, bw = Math.max(1.2, cw * 0.62);
+  const y = (p) => 4 + (1 - (p - lo) / rg) * (plotH - 8);
+  const last = bars[n - 1];
+  return (<svg width={w} height={h} style={{ width: "100%" }} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+    {bars.map((b, i) => {
+      const x = i * cw + cw / 2, up = b.close >= b.open, col = up ? "var(--positive)" : "var(--negative)";
+      const vh = ((b.volume || 0) / vmax) * volH;
+      return (<g key={i}>
+        <rect x={x - bw / 2} y={h - vh} width={bw} height={vh} fill={col} opacity="0.28" />
+        <line x1={x} y1={y(b.high)} x2={x} y2={y(b.low)} stroke={col} strokeWidth="1" />
+        <rect x={x - bw / 2} y={Math.min(y(b.open), y(b.close))} width={bw} height={Math.max(1, Math.abs(y(b.open) - y(b.close)))} fill={col} />
+      </g>);
+    })}
+    <line x1="0" y1={y(last.close)} x2={w} y2={y(last.close)} stroke={ACC} strokeWidth="0.7" strokeDasharray="2 2" opacity="0.6" />
+  </svg>);
+}
+
+const RANGES = [["1D", "5d"], ["1W", "5d"], ["1M", "1mo"], ["3M", "3mo"], ["6M", "6mo"], ["1Y", "1y"], ["2Y", "2y"], ["5Y", "5y"]];
+
 function StockAnalysisView() {
   const dp = useGet("/api/screener/deep-picks?limit=200");
   const rows = (dp && dp.results) || [];
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState(null);
-  const filt = q ? rows.filter(r => (r.symbol || "").toUpperCase().includes(q.toUpperCase()) || (r.company || "").toUpperCase().includes(q.toUpperCase())) : rows;
-  const pick = sel || filt[0] || null;
-  const bars = pick ? [["تقني", pick.score_tech, 30], ["أساسي", pick.score_fund, 25], ["زخم 12-1", pick.score_mom121, 12], ["RS", pick.score_momentum, 10], ["المشاعر", pick.score_sentiment, 8], ["الحلال", pick.score_halal, 10]] : [];
-  const [vd, vc] = pick ? verdictOf(pick.composite_score || 0) : ["", MUT];
+  const [sym, setSym] = useState("AAPL");
+  const [inp, setInp] = useState("AAPL");
+  const [range, setRange] = useState("6mo");
+  const plan = useGet("/api/v1/trade/plan?symbol=" + sym);
+  const chart = useGet("/api/stock/chart?symbol=" + sym + "&range=" + range);
+  const pick = rows.find(r => r.symbol === sym) || {};
+  const bars = (chart && chart.bars) || [];
+  const det = (plan && plan.details) || {}, an = (plan && plan.analyst) || {}, fu = (plan && plan.fundamentals) || {}, pm = (plan && plan.premortem) || {}, ea = (plan && plan.earnings) || {};
+  const score = pick.composite_score != null ? Math.round(pick.composite_score) : (plan && plan.strategy_score != null ? Math.round(plan.strategy_score) : null);
+  const [vd, vc] = score != null ? verdictOf(score) : ["…", MUT];
+  const px = pick.price || (plan && plan.price) || (bars.length ? bars[bars.length - 1].close : null);
+  const chg = det.day_change_pct;
+  const anTotal = (an.buy || 0) + (an.hold || 0) + (an.sell || 0) || 1;
+  const expRet = plan && plan.reward_per_share && px ? (plan.reward_per_share / px) * 100 : null;
+  const go = () => setSym((inp || "").trim().toUpperCase() || sym);
+  const wkHi = bars.length ? Math.max(...bars.map(b => b.high)) : null, wkLo = bars.length ? Math.min(...bars.map(b => b.low)) : null;
+  const avgVol = bars.length ? bars.reduce((a, b) => a + (b.volume || 0), 0) / bars.length : null;
+  const tags = [];
+  if (fu.revenue_growth > 8) tags.push("نمو قوي");
+  if (fu.roe > 30) tags.push("ربحية عالية");
+  if (pick.is_halal || plan && plan.halal === "halal") tags.push("حلال");
+  if ((det.adx || 0) > 25) tags.push("اتجاه قويّ");
+  if (pm.risk === "medium" || pm.risk === "high") tags.push("مخاطرة " + (pm.risk === "high" ? "عالية" : "متوسطة"));
+
   return (
     <div className="mz-view">
-      <div className="mz-mid">
-        <Panel title={"الكون الحلال (" + rows.length + ")"} right={<input className="mz-inp" placeholder="ابحث…" value={q} onChange={e => setQ(e.target.value)} />}>
-          <div className="mz-alist">{filt.slice(0, 40).map((r, i) => (
-            <button className={"mz-al" + (pick && pick.symbol === r.symbol ? " on" : "")} key={i} onClick={() => setSel(r)}>
-              <span className="mz-al-s">{r.symbol}</span><span className="mz-al-c">{r.sector || ""}</span>
-              <span className="mz-al-v" style={{ color: (r.composite_score || 0) >= 55 ? POS : "inherit" }}>{Math.round(r.composite_score || 0)}</span></button>))}
-            {!filt.length && <div className="mz-empty">لا نتائج</div>}</div>
-        </Panel>
-        <Panel title={pick ? "تحليل " + pick.symbol : "اختر سهماً"}>
-          {pick ? (<div>
-            <div className="mz-tp-head"><div><div className="mz-tp-sym">{pick.symbol}</div><div className="mz-tp-co">{pick.company || ""}</div><div className="mz-tp-px">{money(pick.price)}</div></div>
-              <Ring value={Math.round(pick.composite_score || 0)} color={vc} size={64} sub="/100" /></div>
-            <div className="mz-tp-chips"><span className="mz-chip" style={{ color: vc, borderColor: vc, border: "1px solid" }}>{vd}</span>
-              {[pick.sector || "—", pick.is_halal ? "AAOIFI ✓" : "غير متوافق"].map((c, i) => <span key={i} className="mz-chip">{c}</span>)}</div>
-            <div className="mz-abars">{bars.map(([l, v, mx], i) => (<div className="mz-ab" key={i}>
-              <div className="mz-ab-l"><span>{l}</span><b>{num(v, 0)}/{mx}</b></div>
-              <div className="mz-bar"><div className="mz-bar-f" style={{ width: Math.min(100, (v || 0) / mx * 100) + "%", background: ACC }} /></div></div>))}</div>
-            <div className="mz-tp-btns"><a href={"/terminal"} className="mz-btn gold">التحليل الكامل والصفقة ←</a></div>
-          </div>) : <div className="mz-empty">…يحمّل الكون</div>}
-        </Panel>
+      <div className="mz-ana-top">
+        <div className="mz-crumb">الرئيسية / تحليل الأسهم / <b>{sym}</b></div>
+        <div className="mz-sym-pick"><input className="mz-inp" value={inp} onChange={e => setInp(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="رمز السهم…" /><button className="mz-btn gold" style={{ maxWidth: 60 }} onClick={go}>تحليل</button></div>
+      </div>
+
+      <div className="mz-ana-wrap">
+        <div className="mz-ana-main">
+          <Panel>
+            <div className="mz-ana-hero">
+              <div className="mz-ana-id">
+                <div className="mz-tp-row"><div className="mz-tp-sym">{sym}</div><span className="mz-buy" style={{ color: an.rating === "sell" ? NEG : POS, borderColor: an.rating === "sell" ? NEG : POS }}>{an.rating === "sell" ? "SELL" : an.rating === "hold" ? "HOLD" : "BUY"}</span></div>
+                <div className="mz-tp-co">{pick.company || ""}</div>
+                <div className="mz-tp-chips">{[pick.sector || "—", "USA", (pick.is_halal || (plan && plan.halal) === "halal") ? "شرعية متوافقة · AAOIFI ✓" : "غير متوافق"].map((c, i) => <span key={i} className="mz-chip">{c}</span>)}</div>
+                <div className="mz-ana-px">{money(px)} {chg != null && <span style={{ color: chg >= 0 ? POS : NEG }}>{pct(chg, 2)}</span>}</div>
+              </div>
+              <Ring value={score || 0} color={vc} size={78} sub="درجة شاملة" />
+            </div>
+            <div className="mz-ana-metrics">
+              {[["العائد المتوقّع", expRet != null ? pct(expRet) : "—", expRet >= 0 ? POS : "inherit"], ["مدّة الاحتفاظ", (plan && plan.hold_days_max || plan && plan.hold_days_min || 18) + " يوم", "inherit"],
+              ["مستوى المخاطرة", pm.risk === "high" ? "مرتفع" : pm.risk === "low" ? "منخفض" : "متوسط", pm.risk === "high" ? NEG : pm.risk === "low" ? POS : WARN], ["عائد:مخاطرة", (plan && plan.rr_ratio != null ? num(plan.rr_ratio, 1) : "—"), "inherit"],
+              ["وقف كارثي", plan && plan.catastrophe_stop_pct != null ? "-" + num(plan.catastrophe_stop_pct, 0) + "%" : "—", NEG]].map(([l, v, c], i) => (
+                <div className="mz-am" key={i}><div className="mz-am-l">{l}</div><div className="mz-am-v" style={{ color: c }}>{v}</div></div>))}
+            </div>
+          </Panel>
+
+          <Panel title="السعر" right={<div className="mz-ranges">{RANGES.slice(2).map(([lab, r]) => <button key={lab} className={"mz-rg" + (range === r ? " on" : "")} onClick={() => setRange(r)}>{lab}</button>)}</div>}>
+            <Candles bars={bars} />
+            <div className="mz-ind">
+              {[["RSI", num(det.rsi, 1), (det.rsi || 50) > 55 ? "صاعد" : (det.rsi || 50) < 45 ? "هابط" : "محايد"], ["ADX", num(det.adx, 1), (det.adx || 0) > 25 ? "قويّ" : "ضعيف"],
+              ["ATR", num(det.atr, 2), "—"], ["EMA50", det.above_ema50 ? "فوق" : "تحت", det.above_ema50 ? "صاعد" : "هابط"], ["نطاق القمّة", num((det.close_position || 0) * 100, 0) + "%", "—"]].map(([l, v, s], i) => (
+                <div className="mz-in" key={i}><div className="mz-in-l">{l}</div><div className="mz-in-v">{v}</div><div className="mz-in-s" style={{ color: s === "صاعد" || s === "قويّ" ? POS : s === "هابط" ? NEG : MUT }}>{s}</div></div>))}
+            </div>
+          </Panel>
+
+          <div className="mz-r2">
+            <Panel title="تقييم المحلّلين">
+              {an.known ? (<div className="mz-port"><div className="mz-port-donut"><Donut segs={[{ v: an.buy, c: POS }, { v: an.hold, c: WARN }, { v: an.sell, c: NEG }]} size={104} /><div className="mz-donut-c"><b>{an.n_analysts}</b><span>محلّل</span></div></div>
+                <div className="mz-port-r"><div className="mz-leg"><span className="mz-leg-d" style={{ background: POS }} />شراء <b>{Math.round(an.buy / anTotal * 100)}%</b></div>
+                  <div className="mz-leg"><span className="mz-leg-d" style={{ background: WARN }} />احتفاظ <b>{Math.round(an.hold / anTotal * 100)}%</b></div>
+                  <div className="mz-leg"><span className="mz-leg-d" style={{ background: NEG }} />بيع <b>{Math.round(an.sell / anTotal * 100)}%</b></div>
+                  <div className="mz-note">التقييم: <b style={{ color: an.rating === "sell" ? NEG : POS }}>{an.rating === "sell" ? "بيع" : an.rating === "hold" ? "احتفاظ" : "شراء"}</b></div></div></div>) : <div className="mz-empty">لا تغطية تحليلية</div>}
+            </Panel>
+            <Panel title="النقاط الرئيسية">
+              <div className="mz-keys">
+                {fu.revenue_growth > 5 && <div className="mz-key ok">✓ نمو الإيرادات {num(fu.revenue_growth, 1)}%</div>}
+                {fu.roe > 20 && <div className="mz-key ok">✓ عائد على حقوق الملكية {num(fu.roe, 0)}%</div>}
+                {fu.gross_margin > 30 && <div className="mz-key ok">✓ هامش إجمالي {num(fu.gross_margin, 1)}%</div>}
+                {(pm.flags || []).slice(0, 3).map((f, i) => <div className="mz-key risk" key={i}>⚠ {f}</div>)}
+                {!fu.known && !(pm.flags || []).length && <div className="mz-empty">…يحمّل</div>}
+              </div>
+            </Panel>
+          </div>
+        </div>
+
+        <aside className="mz-ana-rail">
+          <Panel title="تفاصيل السهم">
+            <div className="mz-dl">
+              {[["السعر الحالي", money(px)], ["التغيّر اليومي", pct(chg, 2)], ["أعلى (النطاق)", money(wkHi)], ["أدنى (النطاق)", money(wkLo)],
+              ["متوسّط الحجم", avgVol ? (avgVol / 1e6).toFixed(1) + "M" : "—"], ["نمو الإيرادات", fu.revenue_growth != null ? num(fu.revenue_growth, 1) + "%" : "—"],
+              ["ROE", fu.roe != null ? num(fu.roe, 0) + "%" : "—"], ["الأرباح القادمة", ea.date || "—"]].map(([l, v], i) => (
+                <div className="mz-dl-r" key={i}><span className="mz-dl-l">{l}</span><span className="mz-dl-v">{v}</span></div>))}
+            </div>
+          </Panel>
+          <Panel title="التقييم الأساسي">
+            <div className="mz-dl">
+              {[["هامش إجمالي", fu.gross_margin != null ? num(fu.gross_margin, 1) + "%" : "—"], ["دين/حقوق", fu.debt_equity != null ? num(fu.debt_equity, 2) : "—"],
+              ["FCF/سهم", fu.fcf_per_share != null ? "$" + num(fu.fcf_per_share, 2) : "—"], ["درجة الأساسيات", fu.score != null ? num(fu.score, 0) + "/100" : "—"],
+              ["الحلال", (pick.is_halal || (plan && plan.halal) === "halal") ? "✓ متوافق" : "—"]].map(([l, v], i) => (
+                <div className="mz-dl-r" key={i}><span className="mz-dl-l">{l}</span><span className="mz-dl-v">{v}</span></div>))}
+            </div>
+          </Panel>
+          {tags.length > 0 && <Panel title="الوسوم"><div className="mz-tags">{tags.map((t, i) => <span className="mz-tag2" key={i}>{t}</span>)}</div></Panel>}
+        </aside>
       </div>
     </div>
   );
