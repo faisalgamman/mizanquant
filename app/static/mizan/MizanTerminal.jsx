@@ -339,6 +339,50 @@ const SCR_PRESETS = [
   { name: "متوافقة شرعاً", desc: "حلال فقط · درجة ≥ 55", cfg: { tab: "halal", sortK: "composite_score", secF: "all", pxMin: 0, scMin: 55 } },
 ];
 
+// Squarified treemap (Bruls et al.) — lays each item along the shorter side of the free
+// rectangle for good aspect ratios. Returns [{...item, x, y, w, h}] that exactly tile w×h.
+function squarify(data, W, H) {
+  const items = (data || []).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
+  const totalVal = items.reduce((s, d) => s + d.value, 0) || 1;
+  const scaled = items.map(d => ({ d, area: d.value / totalVal * (W * H) }));
+  const out = [];
+  let X = 0, Y = 0, w = W, h = H, i = 0;
+  const worst = (row, len) => {
+    if (!row.length) return Infinity;
+    const s = row.reduce((a, r) => a + r.area, 0);
+    const rmax = Math.max(...row.map(r => r.area)), rmin = Math.min(...row.map(r => r.area));
+    return Math.max((len * len * rmax) / (s * s), (s * s) / (len * len * rmin));
+  };
+  while (i < scaled.length) {
+    const len = Math.min(w, h);
+    const row = [scaled[i]]; let j = i + 1;
+    while (j < scaled.length && worst([...row, scaled[j]], len) <= worst(row, len)) { row.push(scaled[j]); j++; }
+    const rowArea = row.reduce((a, r) => a + r.area, 0), thickness = rowArea / len;
+    const vertical = (w >= h); let pos = 0;
+    for (const r of row) {
+      const tileLen = r.area / (thickness || 1);
+      if (vertical) out.push({ ...r.d, x: X, y: Y + pos, w: thickness, h: tileLen });
+      else out.push({ ...r.d, x: X + pos, y: Y, w: tileLen, h: thickness });
+      pos += tileLen;
+    }
+    if (vertical) { X += thickness; w -= thickness; } else { Y += thickness; h -= thickness; }
+    i = j;
+  }
+  return out;
+}
+function Treemap({ items, w = 680, h = 300 }) {
+  if (!items || !items.length) return <div className="mz-empty">…لا بيانات للخريطة</div>;
+  const cells = squarify(items, w, h);
+  const col = (s) => s >= 72 ? "rgba(74,222,128,0.9)" : s >= 55 ? "rgba(74,222,128,0.55)" : s >= 38 ? "rgba(251,191,36,0.6)" : "rgba(248,113,113,0.55)";
+  return (<svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block", borderRadius: 8 }}>
+    {cells.map((c, i) => (<g key={i} style={{ cursor: "pointer" }} onClick={() => goAnalyze(c.symbol, "")}>
+      <rect x={c.x + 1} y={c.y + 1} width={Math.max(0, c.w - 2)} height={Math.max(0, c.h - 2)} fill={col(c.score)} rx="2" />
+      {c.w > 42 && c.h > 22 && <text x={c.x + 6} y={c.y + 16} fontSize="11" fontWeight="800" fill="#0b1220">{c.symbol}</text>}
+      {c.w > 42 && c.h > 36 && <text x={c.x + 6} y={c.y + 29} fontSize="10" fill="#0b1220" opacity="0.75">{Math.round(c.score)}</text>}
+    </g>))}
+  </svg>);
+}
+
 function ScreenerView() {
   const dp = useGet("/api/screener/deep-picks?limit=200");
   const rows = (dp && dp.results) || [];
@@ -614,6 +658,10 @@ function ScreenerView() {
                 <div className="mz-sm" key={i} style={{ background: secCol(s.avg), cursor: "pointer" }} onClick={() => setSecF(s.sec)}><div className="mz-sm-n">{s.sec}</div><div className="mz-sm-v">{Math.round(s.avg)}</div></div>))}</div>
             </Panel>
           </div>
+          <Panel title="خريطة الكون — المساحة = القيمة السوقيّة · اللون = الدرجة">
+            <Treemap items={shown.filter(r => r.market_cap > 0).slice(0, 40).map(r => ({ symbol: r.symbol, value: r.market_cap, score: r.composite_score || 0 }))} />
+            <div className="mz-note ql-dim">كل مستطيل سهم — مساحته ∝ قيمته السوقيّة، لونه = درجته المركّبة (أخضر عالٍ · أصفر متوسّط · أحمر منخفض). انقر أيّ مستطيل للتحليل.</div>
+          </Panel>
           <Panel title="الماسحات المحفوظة">
             <table className="mz-tbl">
               <thead><tr><th className="tl">الاسم</th><th className="tl">الوصف</th><th>النتائج</th><th></th></tr></thead>
