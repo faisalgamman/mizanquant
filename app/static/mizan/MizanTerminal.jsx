@@ -413,7 +413,7 @@ function ScreenerView() {
       <div className="mz-ana-wrap">
         <div className="mz-ana-main">
           <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">انقر رأس العمود للفرز · الصفّ للتوسيع</span>}>
-            {regimeTxt && <div className="mz-regime-bar">🧭 النظام الآن: <b>{regimeTxt}</b>{bookMult != null ? " · مضاعف الدفتر " + num(bookMult, 2) + "×" : ""} — الترتيب يتكيّف تلقائياً مع النظام.</div>}
+            {regimeTxt && <div className="mz-regime-bar">🧭 النظام الآن: <b>{regimeTxt}</b>{Number.isFinite(bookMult) ? " · مضاعف الدفتر " + num(bookMult, 2) + "×" : ""} — الترتيب يتكيّف تلقائياً مع النظام.</div>}
             {rows.length ? (
               <table className="mz-tbl mz-tbl-wide mz-tbl-pro">
                 <thead><tr>
@@ -457,12 +457,12 @@ function ScreenerView() {
                       <div className="mz-exp-plan">
                         <div className="mz-exp-h">خطة الصفقة</div>
                         <div className="mz-exp-grid">
-                          <div><span>دخول</span><b>{money(tp.entry || r.price)}</b></div>
-                          <div><span>وقف</span><b style={{ color: NEG }}>{money(tp.stop_loss)}</b></div>
-                          <div><span>هدف</span><b style={{ color: POS }}>{money(tp.tp1)}</b></div>
+                          <div><span>دخول تقديري</span><b>{money(r.price)}</b></div>
+                          <div><span>وقف</span><b style={{ color: NEG }}>{money(tp.stop_price)}</b></div>
+                          <div><span>هدف</span><b style={{ color: POS }}>{money(tp.tp_price)}</b></div>
                           <div><span>عائد:مخاطرة</span><b>{tp.rr_ratio != null ? num(tp.rr_ratio, 1) : "—"}</b></div>
-                          <div><span>كمية مقترحة</span><b>{r.suggested_size || tp.shares || "—"}</b></div>
-                          <div><span>ATR</span><b>{num(r.atr_pct, 1)}%</b></div>
+                          <div><span>مدّة الاحتفاظ</span><b>{tp.hold_days != null ? tp.hold_days + " يوم" : "—"}</b></div>
+                          <div><span>وقف كارثي</span><b>{tp.stop_pct != null ? "-" + num(tp.stop_pct, 0) + "%" : "—"}</b></div>
                         </div>
                       </div>
                       <div className="mz-exp-side">
