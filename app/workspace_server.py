@@ -2221,7 +2221,7 @@ async def stock_chart(
 
 @app.get("/api/screener/results-performance")
 async def screener_results_performance(
-    range: str = Query("6mo", description="1mo | 3mo | 6mo | 1y"),
+    rng: str = Query("6mo", alias="range", description="1mo | 3mo | 6mo | 1y"),
     limit: int = Query(20, description="Top-N current picks in the equal-weight basket"),
 ):
     """Equal-weight historical index of the CURRENT screener picks vs SPY.
@@ -2232,7 +2232,7 @@ async def screener_results_performance(
     reusing the per-symbol OHLCV cache); SPY is the benchmark.
     """
     period_map = {"1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y"}
-    period = period_map.get(range, "6mo")
+    period = period_map.get(rng, "6mo")
     n_want = max(1, min(int(limit), 30))
 
     async def compute():
@@ -2246,7 +2246,7 @@ async def screener_results_performance(
             if len(syms) >= n_want:
                 break
         if not syms:
-            return {"range": range, "status": "no_picks", "series": [], "spy": [], "n": 0}
+            return {"range": rng, "status": "no_picks", "series": [], "spy": [], "n": 0}
 
         def _closes(sym):
             try:
@@ -2267,7 +2267,7 @@ async def screener_results_performance(
                 series_map[s] = cl
         spy = await asyncio.to_thread(_closes, "SPY")
         if not series_map:
-            return {"range": range, "status": "no_data", "series": [], "spy": [], "n": 0}
+            return {"range": rng, "status": "no_data", "series": [], "spy": [], "n": 0}
 
         mat = pd.DataFrame(series_map).sort_index().ffill()
         norm = mat / mat.bfill().iloc[0]          # each column starts at 1.0 on its first valid day
@@ -2293,7 +2293,7 @@ async def screener_results_performance(
             return out
 
         return {
-            "range": range,
+            "range": rng,
             "n": len(series_map),
             "symbols": list(series_map.keys()),
             "series": _points(idx),
@@ -2303,7 +2303,7 @@ async def screener_results_performance(
             "status": "ok",
         }
 
-    return await cached_or_compute(f"screener:results-perf:{range}:{n_want}", 3600, compute, compute_timeout=45)
+    return await cached_or_compute(f"screener:results-perf:{rng}:{n_want}", 3600, compute, compute_timeout=45)
 
 
 @app.get("/api/stock/peers")
