@@ -5238,19 +5238,27 @@ async def market_indicators():
     try:
         from app.services.market_data import get_alpaca_snapshots
 
-        # (label, Alpaca ETF proxy) — the ETF price IS the honest, reliable stand-in
+        # (label, Alpaca ETF, spot multiplier | None).  No free feed gives cash-index/spot
+        # levels here (FMP dead, Finnhub/OANDA indices are premium, Alpaca has no cash index,
+        # yfinance IP-blocked) — verified. So we show the TRUE index level only where the ETF
+        # ratio is EXACT BY DESIGN (SPY = S&P/10, DIA = Dow/100); the rest are the real
+        # tradeable ETF, labelled with the ticker so nothing is mislabelled. A % change is
+        # scale-invariant, so it stays valid after the multiply.
         rows_def = [
-            ("S&P 500", "SPY"), ("Nasdaq", "QQQ"), ("Dow", "DIA"),
-            ("Russell", "IWM"), ("Gold", "GLD"), ("Brent", "BNO"),
+            ("S&P 500", "SPY", 10.0), ("Nasdaq (QQQ)", "QQQ", None), ("Dow", "DIA", 100.0),
+            ("Russell (IWM)", "IWM", None), ("Gold (GLD)", "GLD", None), ("Brent (BNO)", "BNO", None),
         ]
         etfs = [r[1] for r in rows_def]
         snaps = await asyncio.to_thread(get_alpaca_snapshots, etfs + ["BTC/USD"])
 
         indicators = []
-        for label, etf in rows_def:
+        for label, etf, mult in rows_def:
             s = snaps.get(etf, {})
-            indicators.append({"label": label, "symbol": etf, "proxy": etf,  # honest ETF stand-in
-                               "price": s.get("price"), "change_pct": s.get("change_pct")})
+            p = s.get("price")
+            if p is not None and mult:
+                p = round(float(p) * mult, 2)          # exact-by-design → true index level
+            indicators.append({"label": label, "symbol": etf, "proxy": (None if mult else etf),
+                               "price": p, "change_pct": s.get("change_pct")})
 
         # VIX — market_status (Alpaca has no cash VIX index); honest "—" if unknown, never faked
         vprice = None

@@ -159,7 +159,7 @@ function Overview() {
       <Panel title="نظرة على السوق" right={<span className="mz-dim3">مؤشّرات حيّة</span>}>
         <div className="mz-strip">
           {(indicators.length ? indicators : [{ label: "…" }]).map((it, i) => {
-            const sk = (d.sp && d.sp.spark || {})[SPARK_MAP[it.label]];
+            const sk = (d.sp && d.sp.spark || {})[it.symbol] || (d.sp && d.sp.spark || {})[SPARK_MAP[it.label]];
             return (<div className="mz-strip-i" key={i}>
               <div className="mz-strip-k">{it.label || it.symbol}</div>
               <div className="mz-strip-v">{it.price == null ? "—" : num(it.price)}</div>
