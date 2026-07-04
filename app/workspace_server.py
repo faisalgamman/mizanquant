@@ -4039,17 +4039,29 @@ async def screener_deep_picks(
         # a NEGATIVE rank-corr with realized pnl (−0.09) — it was hurting the score,
         # so its weight is cut (env COMPOSITE_SENT_WEIGHT, default 8 vs the old 20).
         # It earns weight back only if the new DeepSeek sentiment proves out forward.
-        _sent_w = int(os.environ.get("COMPOSITE_SENT_WEIGHT", "8"))
+        # Weights below are read through factor_weights (a persisted, user-approved,
+        # fully-reversible override in CACHE_DIR); each falls back to its COMPOSITE_*_WEIGHT
+        # env value, else the coded default. Fail-safe — never raises.
+        try:
+            from app.services.factor_weights import get_weight as _fw
+        except Exception:
+            def _fw(name):  # fail-open to env/default if the module is unavailable
+                _d = {"COMPOSITE_SENT_WEIGHT": "8", "COMPOSITE_MOMENTUM_WEIGHT": "10", "COMPOSITE_MOM121_WEIGHT": "12"}
+                try:
+                    return int(os.environ.get(name, _d.get(name, "0")))
+                except (TypeError, ValueError):
+                    return int(_d.get(name, "0"))
+        _sent_w = _fw("COMPOSITE_SENT_WEIGHT")
         # Relative-strength / momentum — the factor the price-only backtest favoured
         # (beats the random baseline, and the hard-gate already uses RS) and that is
         # economically sound. MODEST weight (COMPOSITE_MOMENTUM_WEIGHT, default 10)
         # until the forward ledger + attribution earn it more. Fail-open.
-        _mom_w = int(os.environ.get("COMPOSITE_MOMENTUM_WEIGHT", "10"))
+        _mom_w = _fw("COMPOSITE_MOMENTUM_WEIGHT")
         # 12-1 momentum — the STRONGEST factor in the historical capture backfill
         # (IC +0.040, IR 1.71, positive across ALL regimes calm/choppy/crisis), vs the
         # 63d-RS factor's weak +0.010. Evidence-based addition. MODEST weight
         # (COMPOSITE_MOM121_WEIGHT, default 12) — forward attribution earns it more/less.
-        _mom121_w = int(os.environ.get("COMPOSITE_MOM121_WEIGHT", "12"))
+        _mom121_w = _fw("COMPOSITE_MOM121_WEIGHT")
         mom_component = None
         mom121_component = None
         if _mom_w > 0 or _mom121_w > 0:

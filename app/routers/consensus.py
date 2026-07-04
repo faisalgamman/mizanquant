@@ -1,6 +1,6 @@
 """Consensus, Pipeline, Ready-to-Trade endpoints"""
 from __future__ import annotations
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 
 from app.core.security import OperatorAPIKey
 
@@ -251,6 +251,32 @@ async def gate_config_reset_ep():
     """Revert the gate threshold to the env/default (delete the approved override)."""
     from app.services.gate_config import reset_min_rs
     return reset_min_rs()
+
+
+@router.get("/api/factor-weights")
+async def factor_weights_ep():
+    """Current composite-score factor weights + defaults/bounds/provenance (for the sliders)."""
+    from app.services.factor_weights import factor_weights_state
+    return factor_weights_state()
+
+
+@router.post("/api/factor-weights/apply")
+async def factor_weights_apply_ep(payload: dict = Body(...)):
+    """Approve new composite factor weights (PAPER scoring only; never a real order).
+    Persisted, audited, reversible. The user's explicit action from the settings sliders.
+    Body: {"weights": {"COMPOSITE_MOM121_WEIGHT": 12, ...}}."""
+    from app.services.factor_weights import set_weights
+    weights = (payload or {}).get("weights") if isinstance(payload, dict) else None
+    if not isinstance(weights, dict):
+        weights = payload if isinstance(payload, dict) else {}
+    return set_weights(weights)
+
+
+@router.post("/api/factor-weights/reset")
+async def factor_weights_reset_ep():
+    """Revert every factor weight to its env/coded default (delete the override)."""
+    from app.services.factor_weights import reset_weights
+    return reset_weights()
 
 
 # ── quant-fund overlays: alpha capture, meta-model, HMM regime ────────────────

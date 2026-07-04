@@ -76,7 +76,7 @@ const NAV = [
   { key: "analysis", label: "تحليل الأسهم", icon: "📊" },
   { key: "portfolio", label: "المحفظة", icon: "💼" },
   { key: "ledger", label: "الدفتر الورقي", icon: "📒" },
-  { key: "lab", label: "مختبر الاستراتيجية", icon: "🧪", href: "/quant-lab" },
+  { key: "lab", label: "مختبر الاستراتيجية", icon: "🧪" },
   { key: "factors", label: "العوامل", icon: "🧬" },
   { key: "models", label: "الموديلات", icon: "📈" },
   { key: "market", label: "السوق", icon: "🌍" },
@@ -624,20 +624,44 @@ function ModelsView() {
   );
 }
 
+const WEIGHT_LABELS = {
+  COMPOSITE_MOM121_WEIGHT: "وزن الزخم 12-1 (الأقوى تاريخياً)",
+  COMPOSITE_MOMENTUM_WEIGHT: "وزن القوّة النسبية RS",
+  COMPOSITE_SENT_WEIGHT: "وزن المشاعر/التحليلات",
+};
+
 function SettingsView() {
   const gc = useGet("/api/gate-config");
   const [msg, setMsg] = useState("");
+  const [fw, setFw] = useState(null);          // factor-weights state
+  const [draft, setDraft] = useState(null);    // slider working copy
+  const [wmsg, setWmsg] = useState("");
+  const loadFw = () => fetch("/api/factor-weights").then(r => r.json()).then(s => { setFw(s); setDraft({ ...s.weights }); }).catch(() => {});
+  useEffect(() => { loadFw(); }, []);
+  const dirty = fw && draft && Object.keys(draft).some(k => draft[k] !== fw.weights[k]);
+
   const knobs = [
     ["GATE_MIN_T", "حسّاسية دلالة توصية البوّابة", "2.0"],
     ["WEEKLY_MIN_RS", "عتبة الدخول الأسبوعي", gc ? num(gc.min_rs, 1) : "-2"],
-    ["COMPOSITE_MOM121_WEIGHT", "وزن الزخم 12-1", "12"],
-    ["COMPOSITE_MOMENTUM_WEIGHT", "وزن RS", "10"],
     ["VOL_TARGET", "تقلّب المحفظة المستهدف", "0.14"],
     ["META_MIN_OOS_AUC", "عتبة ثقة نموذج Meta", "0.53"],
   ];
   const resetGate = async () => {
     if (!window.confirm("إعادة عتبة الدخول إلى الافتراضي (−2)؟ ورقي فقط · قابل للعكس.")) return;
     try { const r = await fetch("/api/gate-config/reset", { method: "POST" }).then(x => x.json()); setMsg("تمّت الإعادة → MIN_RS " + r.now); } catch (e) { setMsg("تعذّر"); }
+  };
+  const applyWeights = async () => {
+    if (!window.confirm("تطبيق أوزان العوامل الجديدة على تسجيل الماسح؟ يؤثّر في ترتيب الأسهم — ورقي فقط · قابل للعكس بالكامل.")) return;
+    setWmsg("…يطبّق");
+    try { const r = await fetch("/api/factor-weights/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ weights: draft }) }).then(x => x.json());
+      if (r.error) { setWmsg("خطأ: " + r.error); return; }
+      setFw(r); setDraft({ ...r.weights }); setWmsg("تمّ التطبيق ✓ — يظهر الأثر في المسح التالي."); } catch (e) { setWmsg("تعذّر"); }
+  };
+  const resetWeights = async () => {
+    if (!window.confirm("إعادة كل الأوزان إلى الافتراضي؟")) return;
+    setWmsg("…يعيد");
+    try { const r = await fetch("/api/factor-weights/reset", { method: "POST" }).then(x => x.json());
+      const s = r.state || r; setFw(s); setDraft({ ...s.weights }); setWmsg("أُعيدت إلى الافتراضي ✓"); } catch (e) { setWmsg("تعذّر"); }
   };
   return (
     <div className="mz-view">
@@ -646,6 +670,23 @@ function SettingsView() {
         <button className="mz-btn" style={{ maxWidth: 220 }} onClick={resetGate}>إعادة إلى الافتراضي (−2)</button>
         {msg && <div className="mz-note" style={{ color: POS }}>{msg}</div>}
       </Panel>
+
+      <Panel title="أوزان العوامل — المركّب (ورقي · قابل للعكس)" right={fw && <span className="mz-dim3">{fw.source === "approved" ? "معدّلة" : "افتراضية"}</span>}>
+        {fw && draft ? (<div>
+          {Object.keys(fw.weights).map(k => { const b = (fw.bounds || {})[k] || { min: 0, max: 40 }; const def = (fw.defaults || {})[k];
+            return (<div className="mz-wt" key={k}>
+              <div className="mz-wt-h"><span className="mz-wt-l">{WEIGHT_LABELS[k] || k}</span><span className="mz-wt-v">{draft[k]}{def != null && draft[k] !== def && <span className="mz-dim3"> (افتراضي {def})</span>}</span></div>
+              <input type="range" className="mz-range" min={b.min} max={b.max} step="1" value={draft[k]} onChange={e => setDraft(d => ({ ...d, [k]: +e.target.value }))} />
+            </div>); })}
+          <div className="mz-wt-act">
+            <button className="mz-btn gold" style={{ maxWidth: 150, opacity: dirty ? 1 : 0.5 }} disabled={!dirty} onClick={applyWeights}>تطبيق</button>
+            <button className="mz-btn" style={{ maxWidth: 150 }} onClick={resetWeights}>إعادة للافتراضي</button>
+          </div>
+          {wmsg && <div className="mz-note" style={{ color: wmsg.startsWith("خطأ") || wmsg === "تعذّر" ? NEG : POS }}>{wmsg}</div>}
+          <div className="mz-note ql-dim">تُغيّر هذه الأوزان ترتيب المركّب في الماسح فقط (لا صفقات حقيقية). محفوظة على القرص وتُعاد بالكامل بزرّ الإعادة.</div>
+        </div>) : <div className="mz-empty">…يحمّل الأوزان</div>}
+      </Panel>
+
       <Panel title="مفاتيح الضبط (env · قياس فقط · قابلة للعكس)">
         <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">المفتاح</th><th className="tl">الوصف</th><th>القيمة</th></tr></thead>
           <tbody>{knobs.map((k, i) => (<tr key={i}><td className="tl mz-fn" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{k[0]}</td><td className="tl mz-dim2">{k[1]}</td><td>{k[2]}</td></tr>))}</tbody></table>
@@ -655,15 +696,47 @@ function SettingsView() {
   );
 }
 
+function LabView() {
+  return <div className="mz-view"><iframe src="/quant-lab" className="mz-iframe" title="مختبر الاستراتيجية" /></div>;
+}
+
 function ReportsView() {
-  return (<div className="mz-view"><Panel title="التقارير">
-    <div className="mz-reports">
-      <a className="mz-rep" href="/quant-lab">📊 مختبر الاستراتيجية — تقرير العوامل والباك-تيست</a>
-      <a className="mz-rep" href="/terminal">📈 لوحة الترمينال — الأداء والمراكز</a>
-      <a className="mz-rep" href="/risk-desk-v2">🛡️ مكتب المخاطر</a>
+  const ov = useGet("/api/v1/overview");
+  const sq = useGet("/api/selection-quality");
+  const alpha = useGet("/api/alpha-curve");
+  const port = (ov && ov.portfolio) || {};
+  const now = new Date();
+  const rows = [
+    ["قيمة المحفظة", port.equity != null ? money(port.equity) : (port.portfolio_value != null ? money(port.portfolio_value) : "—")],
+    ["ربح/خسارة اليوم", port.daily_pnl_pct != null ? pct(port.daily_pnl_pct, 2) : "—"],
+    ["المراكز المفتوحة", port.open_positions != null ? port.open_positions : "—"],
+    ["نوع الحساب", (port.account_type || "ورقي") + " · " + (port.broker_type || "—")],
+    ["ألفا أسبوعي (t)", sq && sq.alpha ? num(sq.alpha.t_stat != null ? sq.alpha.t_stat : sq.alpha.weekly_alpha, 2) : "—"],
+    ["ألفا تراكمي", alpha && alpha.cumulative_alpha_pct != null ? pct(alpha.cumulative_alpha_pct, 1) : "—"],
+    ["حارس فرط التخصيص (PBO)", sq && sq.pbo && sq.pbo.pbo != null ? num(sq.pbo.pbo, 2) : "—"],
+    ["عتبة الدخول MIN_RS", sq && sq.gate && sq.gate.min_rs != null ? num(sq.gate.min_rs, 1) : "—"],
+  ];
+  return (<div className="mz-view">
+    <div className="mz-ana-top">
+      <div className="mz-crumb">الرئيسية / <b>التقارير</b></div>
+      <button className="mz-btn gold" style={{ maxWidth: 190 }} onClick={() => window.print()}>🖨️ تصدير PDF (طباعة)</button>
     </div>
-    <div className="mz-note ql-dim">تصدير PDF المجدوَل قيد الإعداد ضمن الهيكلة الجديدة.</div>
-  </Panel></div>);
+    <div id="mz-print">
+      <Panel title={"ملخّص أداء MIZAN — " + now.toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}>
+        <table className="mz-tbl mz-tbl-wide"><tbody>
+          {rows.map(([l, v], i) => (<tr key={i}><td className="tl mz-dim2">{l}</td><td className="tl mz-fn">{v}</td></tr>))}
+        </tbody></table>
+        <div className="mz-note ql-dim">تقرير ورقي/قياسي — لا صفقات حقيقية. زرّ التصدير يفتح حوار الطباعة (احفظ كـ PDF).</div>
+      </Panel>
+    </div>
+    <Panel title="تقارير تفصيلية">
+      <div className="mz-reports">
+        <button className="mz-rep" onClick={() => location.hash = "lab"}>📊 مختبر الاستراتيجية — العوامل والباك-تيست</button>
+        <button className="mz-rep" onClick={() => location.hash = "portfolio"}>📈 المحفظة — الأداء والمراكز</button>
+        <button className="mz-rep" onClick={() => location.hash = "factors"}>🧮 العوامل — IC متعدّد الآفاق</button>
+      </div>
+    </Panel>
+  </div>);
 }
 
 function Candles({ bars, w = 660, h = 300 }) {
@@ -930,6 +1003,7 @@ function MizanTerminal() {
           {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div>
             : view === "screener" ? <ScreenerView />
               : view === "analysis" ? <StockAnalysisView />
+              : view === "lab" ? <LabView />
               : view === "factors" ? <FactorsView />
                 : view === "portfolio" ? <PortfolioView />
                   : view === "ledger" ? <LedgerView />

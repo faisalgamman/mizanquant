@@ -265,6 +265,25 @@
 .mz-perf-v { font-size: 22px; font-weight: 800; font-family: var(--font-mono); }
 .mz-perf-bench { font-size: 10.5px; color: var(--text-muted); }
 
+/* lab iframe + settings sliders */
+.mz-iframe { width: 100%; height: calc(100vh - 108px); border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-panel); }
+.mz-wt { margin-bottom: 14px; }
+.mz-wt-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+.mz-wt-l { font-size: 12px; color: var(--text-secondary); }
+.mz-wt-v { font-size: 15px; font-weight: 800; font-family: var(--font-mono); color: var(--accent); }
+.mz-range { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.mz-wt-act { display: flex; gap: 8px; margin-top: 6px; }
+.mz-rep { cursor: pointer; text-align: right; font-family: var(--font-body); }
+
+/* print → PDF: show only the summary card */
+@media print {
+  .mz-side, .mz-top, .mz-ana-top, .mz-reports, .mz-p-h .mz-btn { display: none !important; }
+  .mz, .mz-main, .mz-body { display: block !important; }
+  #mz-print { width: 100%; }
+  #mz-print .mz-p { border: none; box-shadow: none; }
+  body { background: #fff !important; }
+}
+
 /* stub */
 .mz-stub { text-align: center; padding: 80px 20px; }
 .mz-stub-ic { font-size: 40px; opacity: 0.5; }
