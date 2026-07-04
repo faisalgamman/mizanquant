@@ -8,6 +8,12 @@ const num = (v, d = 2) => (v == null || isNaN(v)) ? "—" : Number(v).toFixed(d)
 const money = (v) => v == null ? "—" : "$" + Math.round(v).toLocaleString("en");
 const POS = "var(--positive)", NEG = "var(--negative)", WARN = "var(--warning)", ACC = "var(--accent)", MUT = "var(--text-muted)";
 const icCol = (v) => v == null ? "var(--text-secondary)" : v > 0.015 ? POS : v < -0.015 ? NEG : "var(--text-secondary)";
+// jump to the in-shell Stock Analysis view for a symbol (carries symbol + intent via sessionStorage)
+function goAnalyze(sym, intent) {
+  try { sessionStorage.setItem("mz_analyze_sym", (sym || "").toUpperCase()); sessionStorage.setItem("mz_analyze_intent", intent || ""); } catch (e) { }
+  if (((location.hash || "").replace(/^#/, "")) === "analysis") window.dispatchEvent(new HashChangeEvent("hashchange"));
+  else location.hash = "analysis";
+}
 
 function Ring({ value, max = 100, color = POS, size = 58, label, sub }) {
   const r = size / 2 - 5, c = 2 * Math.PI * r, p = Math.max(0, Math.min(1, (value || 0) / max));
@@ -177,7 +183,7 @@ function Overview() {
               </div>
               <div className="mz-tp-chips">{[top.sector || "—", "USA", top.is_halal ? "AAOIFI ✓" : "—"].map((c, i) => <span key={i} className="mz-chip">{c}</span>)}</div>
               <div className="mz-tp-rec">⭐ أقوى مرشّح اليوم — زخم 12-1 {num(top.score_mom121, 1)} · تقني {num(top.score_tech, 0)} · أساسي {num(top.score_fund, 0)}</div>
-              <div className="mz-tp-btns"><a href="/terminal" className="mz-btn">فتح التفاصيل</a><a href="/terminal" className="mz-btn">صفقة ورقية</a><a href="/quant-lab" className="mz-btn gold">تحليل متقدّم</a></div>
+              <div className="mz-tp-btns"><button className="mz-btn" onClick={() => goAnalyze(top.symbol, "")}>فتح التفاصيل</button><button className="mz-btn" onClick={() => goAnalyze(top.symbol, "trade")}>صفقة ورقية</button><button className="mz-btn gold" onClick={() => goAnalyze(top.symbol, "forecast")}>تحليل متقدّم</button></div>
             </div>
             <div className="mz-tp-r">
               <div className="mz-tp-rt">الخصائص المتوقّعة</div>
@@ -786,10 +792,14 @@ const RANGES = [["1D", "5d"], ["1W", "5d"], ["1M", "1mo"], ["3M", "3mo"], ["6M",
 function StockAnalysisView() {
   const dp = useGet("/api/screener/deep-picks?limit=200");
   const rows = (dp && dp.results) || [];
-  const [sym, setSym] = useState("AAPL");
-  const [inp, setInp] = useState("AAPL");
+  const sym0 = (() => { try { return sessionStorage.getItem("mz_analyze_sym") || "AAPL"; } catch (e) { return "AAPL"; } })();
+  const intent0 = (() => { try { return sessionStorage.getItem("mz_analyze_intent") || ""; } catch (e) { return ""; } })();
+  const [sym, setSym] = useState(sym0);
+  const [inp, setInp] = useState(sym0);
   const [range, setRange] = useState("6mo");
-  const [atab, setAtab] = useState("overview");
+  const [atab, setAtab] = useState(intent0 === "forecast" ? "forecast" : "overview");
+  const [tradeMsg, setTradeMsg] = useState(intent0 === "trade" ? "راجع الخطّة أدناه ثم اضغط «صفقة ورقية»." : "");
+  useEffect(() => { try { sessionStorage.removeItem("mz_analyze_intent"); } catch (e) { } }, []);
   const plan = useGet("/api/v1/trade/plan?symbol=" + sym);
   const chart = useGet("/api/stock/chart?symbol=" + sym + "&range=" + range);
   const mc = useGet((atab === "forecast" || atab === "risk") ? "/api/monte-carlo?symbol=" + sym + "&forecast_days=30&n_simulations=300" : null);
@@ -804,6 +814,22 @@ function StockAnalysisView() {
   const anTotal = (an.buy || 0) + (an.hold || 0) + (an.sell || 0) || 1;
   const expRet = plan && plan.reward_per_share && px ? (plan.reward_per_share / px) * 100 : null;
   const go = () => setSym((inp || "").trim().toUpperCase() || sym);
+  const entry = plan && (plan.entry || plan.strategy_entry || plan.price) || px;
+  const stop = plan && (plan.stop_loss || plan.strategy_stop);
+  const tp = plan && (plan.tp1 || plan.strategy_tp1);
+  const shares = plan && plan.shares;
+  const canTrade = entry > 0 && stop > 0 && tp > 0 && shares > 0 && (pick.is_halal || (plan && plan.halal === "halal"));
+  const sendPaper = async () => {
+    if (!canTrade) { setTradeMsg("الخطّة غير مكتملة أو غير متوافقة شرعاً — لا يمكن الإرسال."); return; }
+    if (!window.confirm("إرسال صفقة ورقيّة إلى IBKR paper؟\n" + sym + " · شراء " + shares + " سهم\nدخول " + money(entry) + " · وقف " + money(stop) + " · هدف " + money(tp) + "\n(حساب ورقيّ — لا أموال حقيقيّة · لن يُنفَّذ إلا بموافقتك الآن)")) return;
+    setTradeMsg("…يُرسل الأمر إلى الوسيط الورقي");
+    try {
+      const r = await fetch("/api/v1/broker/execute", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: sym, side: "buy", entry_price: entry, stop_loss: stop, take_profit: tp, shares, confidence: (plan && plan.strategy_confidence) || 0 }) }).then(x => x.json());
+      if (r.success) setTradeMsg("✓ أُرسلت الصفقة الورقيّة — رقم الأمر " + (r.order_id || r.broker_id || "—"));
+      else setTradeMsg("لم تُرسَل: " + ({ halal_blocked: "محجوبة شرعاً", broker_offline: "الوسيط الورقي غير متّصل", broker_error: "خطأ لدى الوسيط" }[r.reason] || r.reason || "سبب غير معروف"));
+    } catch (e) { setTradeMsg("تعذّر الإرسال — تحقّق من اتّصال الوسيط الورقي."); }
+  };
   const wkHi = bars.length ? Math.max(...bars.map(b => b.high)) : null, wkLo = bars.length ? Math.min(...bars.map(b => b.low)) : null;
   const avgVol = bars.length ? bars.reduce((a, b) => a + (b.volume || 0), 0) / bars.length : null;
   const tags = [];
@@ -817,8 +843,13 @@ function StockAnalysisView() {
     <div className="mz-view">
       <div className="mz-ana-top">
         <div className="mz-crumb">الرئيسية / تحليل الأسهم / <b>{sym}</b></div>
-        <div className="mz-sym-pick"><input className="mz-inp" value={inp} onChange={e => setInp(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="رمز السهم…" /><button className="mz-btn gold" style={{ maxWidth: 60 }} onClick={go}>تحليل</button></div>
+        <div className="mz-sym-pick">
+          <input className="mz-inp" value={inp} onChange={e => setInp(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} placeholder="رمز السهم…" />
+          <button className="mz-btn gold" style={{ maxWidth: 60 }} onClick={go}>تحليل</button>
+          <button className="mz-btn" style={{ maxWidth: 120, opacity: canTrade ? 1 : 0.5 }} disabled={!canTrade} title={canTrade ? "أمر ورقي على IBKR paper — بتأكيدك" : "غير متاح: الخطّة ناقصة أو غير متوافقة شرعاً"} onClick={sendPaper}>💼 صفقة ورقيّة</button>
+        </div>
       </div>
+      {tradeMsg && <div className="mz-note" style={{ color: tradeMsg.startsWith("✓") ? POS : tradeMsg.startsWith("لم") || tradeMsg.startsWith("تعذّر") || tradeMsg.startsWith("الخطّة") ? NEG : MUT, marginBottom: 8 }}>{tradeMsg}</div>}
 
       <div className="mz-ana-wrap">
         <div className="mz-ana-main">
