@@ -2248,9 +2248,12 @@ async def screener_results_performance(
         if not syms:
             return {"range": rng, "status": "no_picks", "series": [], "spy": [], "n": 0}
 
+        # Always fetch a 1y base (market_data.fetch honours "1y" but silently
+        # ignores "1mo"/"6mo" → returns ~2y), then slice the requested window
+        # server-side. One OHLCV cache per symbol (ohlcv_SYM_1y) serves every range.
         def _closes(sym):
             try:
-                _recs, df = _fetch_data(sym, period=period)
+                _recs, df = _fetch_data(sym, period="1y")
                 if df is None or df.empty or "close" not in df.columns or "date" not in df.columns:
                     return None
                 d = df[["date", "close"]].dropna()
@@ -2269,13 +2272,23 @@ async def screener_results_performance(
         if not series_map:
             return {"range": rng, "status": "no_data", "series": [], "spy": [], "n": 0}
 
-        mat = pd.DataFrame(series_map).sort_index().ffill()
-        norm = mat / mat.bfill().iloc[0]          # each column starts at 1.0 on its first valid day
+        cutoff_days = {"1mo": 31, "3mo": 93, "6mo": 186, "1y": 400}.get(rng, 186)
+
+        def _window(sr):
+            if sr is None or len(sr) < 2:
+                return None
+            cut = sr.index.max() - pd.Timedelta(days=cutoff_days)
+            w = sr[sr.index >= cut]
+            return w if len(w) >= 2 else sr
+
+        mat = pd.DataFrame({s: _window(cl) for s, cl in series_map.items()}).sort_index().ffill()
+        norm = mat / mat.bfill().iloc[0]          # each column starts at 1.0 on the window's first day
         idx = norm.mean(axis=1) * 100.0            # equal-weight index, mean skips not-yet-started names
 
         spy_idx = None
-        if spy is not None and len(spy) > 2:
-            sp = spy.sort_index().ffill()
+        spw = _window(spy)
+        if spw is not None:
+            sp = spw.ffill()
             spy_idx = (sp / sp.iloc[0] * 100.0).reindex(idx.index, method="ffill")
 
         def _points(sr):
