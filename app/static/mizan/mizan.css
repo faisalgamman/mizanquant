@@ -261,6 +261,9 @@
 .mz-fc-leg { display: flex; gap: 16px; margin-top: 10px; font-size: 11px; color: var(--text-muted); justify-content: center; }
 .mz-fc-leg span { display: flex; align-items: center; gap: 5px; }
 .mz-fc-leg i { width: 14px; height: 9px; border-radius: 2px; display: inline-block; }
+.mz-perf-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.mz-perf-v { font-size: 22px; font-weight: 800; font-family: var(--font-mono); }
+.mz-perf-bench { font-size: 10.5px; color: var(--text-muted); }
 
 /* stub */
 .mz-stub { text-align: center; padding: 80px 20px; }

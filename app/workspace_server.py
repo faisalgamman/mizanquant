@@ -2219,6 +2219,93 @@ async def stock_chart(
     return await cached_or_compute(f"stock:chart:{symbol.upper()}:{range}", 300, compute, compute_timeout=15)
 
 
+@app.get("/api/screener/results-performance")
+async def screener_results_performance(
+    range: str = Query("6mo", description="1mo | 3mo | 6mo | 1y"),
+    limit: int = Query(20, description="Top-N current picks in the equal-weight basket"),
+):
+    """Equal-weight historical index of the CURRENT screener picks vs SPY.
+
+    Backward-looking: "if you had held today's top-N halal picks, equal-weight,
+    over this window". Illustrative of *selection quality* — NOT a live traded
+    track record (the picks change every scan). Prices are real (Alpaca/yfinance,
+    reusing the per-symbol OHLCV cache); SPY is the benchmark.
+    """
+    period_map = {"1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y"}
+    period = period_map.get(range, "6mo")
+    n_want = max(1, min(int(limit), 30))
+
+    async def compute():
+        sd = _cache_get("smart_screener", max_age=86400) or {}
+        results = sd.get("results") or []
+        syms = []
+        for r in results:
+            s = str(r.get("symbol") or r.get("ticker") or "").upper()
+            if s and s not in syms:
+                syms.append(s)
+            if len(syms) >= n_want:
+                break
+        if not syms:
+            return {"range": range, "status": "no_picks", "series": [], "spy": [], "n": 0}
+
+        def _closes(sym):
+            try:
+                _recs, df = _fetch_data(sym, period=period)
+                if df is None or df.empty or "close" not in df.columns or "date" not in df.columns:
+                    return None
+                d = df[["date", "close"]].dropna()
+                if d.empty:
+                    return None
+                return d.set_index("date")["close"].astype(float).sort_index()
+            except Exception:
+                return None
+
+        series_map = {}
+        for s in syms:
+            cl = await asyncio.to_thread(_closes, s)
+            if cl is not None and len(cl) > 2:
+                series_map[s] = cl
+        spy = await asyncio.to_thread(_closes, "SPY")
+        if not series_map:
+            return {"range": range, "status": "no_data", "series": [], "spy": [], "n": 0}
+
+        mat = pd.DataFrame(series_map).sort_index().ffill()
+        norm = mat / mat.bfill().iloc[0]          # each column starts at 1.0 on its first valid day
+        idx = norm.mean(axis=1) * 100.0            # equal-weight index, mean skips not-yet-started names
+
+        spy_idx = None
+        if spy is not None and len(spy) > 2:
+            sp = spy.sort_index().ffill()
+            spy_idx = (sp / sp.iloc[0] * 100.0).reindex(idx.index, method="ffill")
+
+        def _points(sr):
+            if sr is None or len(sr) == 0:
+                return []
+            step = max(1, len(sr) // 60)
+            out, seen = [], set()
+            for i in list(range(0, len(sr), step)) + [len(sr) - 1]:
+                dt = sr.index[i]
+                ds = str(dt.date()) if hasattr(dt, "date") else str(dt)[:10]
+                if ds in seen or pd.isna(sr.iloc[i]):
+                    continue
+                seen.add(ds)
+                out.append({"date": ds, "value": round(float(sr.iloc[i]), 2)})
+            return out
+
+        return {
+            "range": range,
+            "n": len(series_map),
+            "symbols": list(series_map.keys()),
+            "series": _points(idx),
+            "spy": _points(spy_idx) if spy_idx is not None else [],
+            "total_return_pct": round(float(idx.iloc[-1] - 100.0), 2),
+            "spy_return_pct": (round(float(spy_idx.iloc[-1] - 100.0), 2) if spy_idx is not None else None),
+            "status": "ok",
+        }
+
+    return await cached_or_compute(f"screener:results-perf:{range}:{n_want}", 3600, compute, compute_timeout=45)
+
+
 @app.get("/api/stock/peers")
 async def stock_peers(
     symbol: str = Query("AAPL", description="Stock symbol"),

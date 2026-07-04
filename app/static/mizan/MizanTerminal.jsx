@@ -343,6 +343,8 @@ function ScreenerView() {
   const [pxMin, setPxMin] = useState(0);
   const [scMin, setScMin] = useState(0);
   const [saved, setSaved] = useState(() => { try { return JSON.parse(localStorage.getItem("mz_screens") || "[]"); } catch (e) { return []; } });
+  const [perfRange, setPerfRange] = useState("6mo");
+  const perf = useGet("/api/screener/results-performance?range=" + perfRange + "&limit=20");
   const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"]];
   const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
 
@@ -441,6 +443,16 @@ function ScreenerView() {
           <Panel title="تصنيفات سريعة">
             <div className="mz-tags">{[["composite_score", "الأعلى درجة"], ["score_mom121", "الأعلى زخم"], ["score_fund", "الأقوى أساساً"], ["score_tech", "الأقوى تقنياً"]].map(([k, l]) => (
               <button key={k} className={"mz-tag2" + (sortK === k ? " on" : "")} onClick={() => setSortK(k)}>{l}</button>))}</div>
+          </Panel>
+          <Panel title="أداء النتائج" right={<div className="mz-ranges">{[["1M", "1mo"], ["3M", "3mo"], ["6M", "6mo"], ["1Y", "1y"]].map(([l, r]) => <button key={r} className={"mz-rg" + (perfRange === r ? " on" : "")} onClick={() => setPerfRange(r)}>{l}</button>)}</div>}>
+            {perf && perf.series && perf.series.length > 1 ? (<div>
+              <div className="mz-perf-head">
+                <span className="mz-perf-v" style={{ color: (perf.total_return_pct || 0) >= 0 ? POS : NEG }}>{pct(perf.total_return_pct, 2)}</span>
+                {perf.spy_return_pct != null && <span className="mz-perf-bench">مقابل SPY <b style={{ color: (perf.spy_return_pct || 0) >= 0 ? POS : NEG }}>{pct(perf.spy_return_pct, 2)}</b></span>}
+              </div>
+              <LineArea data={perf.series.map(p => p.value - 100)} color={(perf.total_return_pct || 0) >= 0 ? POS : NEG} />
+              <div className="mz-note">سلّة أعلى {perf.n} أسهم بالتساوي · تاريخي — تصوّر لجودة الاختيار لا سجلّ تداول.</div>
+            </div>) : <div className="mz-empty">{perf && perf.status && perf.status !== "ok" ? "لا نتائج بعد للحساب" : "…يحسب أداء السلّة"}</div>}
           </Panel>
           <Panel title="إحصائيات الماسح">
             <div className="mz-dl">
