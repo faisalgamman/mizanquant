@@ -360,6 +360,9 @@ function ScreenerView() {
   const _rgKey = (_rgo && typeof _rgo === "object") ? _rgo.dominant : (typeof _rgo === "string" ? _rgo : (rg && (rg.state || rg.label)));
   const regimeTxt = _rgKey ? (RGMAP[_rgKey] || _rgKey) : null;
   const bookMult = rg && (rg.book_multiplier != null ? rg.book_multiplier : (rg.book_mult != null ? rg.book_mult : (_rgo && typeof _rgo === "object" ? _rgo.book_mult : null)));
+  const [cmp, setCmp] = useState([]);      // symbols picked for side-by-side compare (max 4)
+  const [cmpOpen, setCmpOpen] = useState(false);
+  const toggleCmp = (sym) => setCmp(c => c.includes(sym) ? c.filter(s => s !== sym) : (c.length >= 4 ? c : [...c, sym]));
   const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"], ["explosion", "⚡ انفجار يومي"], ["pairs", "🔗 الأزواج"]];
   const isExpl = tab === "explosion";
   const isPairs = tab === "pairs";
@@ -371,6 +374,26 @@ function ScreenerView() {
   let prs = ((prRes && prRes.results) || []).filter(r => !q || (r.pair || "").toUpperCase().includes(q.toUpperCase()));
   const prKey = ["zscore", "pvalue", "half_life_bars", "hedge_ratio"].includes(sortK) ? sortK : "zscore";
   prs = [...prs].sort((a, b) => { const va = prKey === "zscore" ? Math.abs(a[prKey] || 0) : (a[prKey] || 0); const vb = prKey === "zscore" ? Math.abs(b[prKey] || 0) : (b[prKey] || 0); return sortDir === "asc" ? va - vb : vb - va; });
+  const cmpRows = cmp.map(s => rows.find(r => r.symbol === s)).filter(Boolean);
+  const CMP_METRICS = [
+    ["الدرجة الشاملة", r => Math.round(r.composite_score || 0), "hi"],
+    ["التوصية", r => verdictOf(r.composite_score || 0)[0], "vd"],
+    ["السعر", r => money(r.price)],
+    ["التغيّر اليومي", r => r.change_pct == null ? "—" : pct(r.change_pct, 2), "chg"],
+    ["القيمة السوقية", r => fmtCap(r.market_cap)],
+    ["السيولة ($م)", r => r.adv_dollar_m != null ? "$" + num(r.adv_dollar_m, 0) : "—"],
+    ["تقني /30", r => num(r.score_tech, 0), "hi"],
+    ["أساسي /25", r => num(r.score_fund, 0), "hi"],
+    ["ذكاء AI /15", r => num(r.score_ai, 0), "hi"],
+    ["مشاعر /8", r => num(r.score_sentiment, 0), "hi"],
+    ["حلال /10", r => num(r.score_halal, 0), "hi"],
+    ["زخم 12-1", r => num(r.score_mom121, 1), "hi"],
+    ["ATR % (مخاطرة)", r => num(r.atr_pct, 1) + "%", "lo"],
+    ["محلّلون", r => r.analyst_rating || "—"],
+    ["نمو الإيرادات", r => r.revenue_growth_yoy != null ? pct(r.revenue_growth_yoy, 0) : "—"],
+    ["عائد:مخاطرة", r => (r.trade_plan && r.trade_plan.rr_ratio != null) ? num(r.trade_plan.rr_ratio, 1) : "—", "hi"],
+    ["حلال", r => r.is_halal ? "✓" : "—"],
+  ];
   const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
 
   const applyCfg = (c) => { if (c.tab != null) setTab(c.tab); if (c.sortK) setSortK(c.sortK); if (c.secF != null) setSecF(c.secF); if (c.pxMin != null) setPxMin(c.pxMin); if (c.scMin != null) setScMin(c.scMin); };
@@ -509,12 +532,13 @@ function ScreenerView() {
             ) : <div className="mz-empty">لا انفجارات مؤكّدة الآن</div>}
           </Panel>
           ) : (<React.Fragment>
-          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">انقر رأس العمود للفرز · الصفّ للتوسيع</span>}>
+          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />} right={<div className="mz-tbl-actions">{cmp.length >= 2 && <button className="mz-btn gold" style={{ maxWidth: 130 }} onClick={() => setCmpOpen(true)}>⚖ قارن ({cmp.length})</button>}{cmp.length > 0 && <button className="mz-rg" onClick={() => setCmp([])}>مسح المقارنة</button>}<span className="mz-dim3">☑ للمقارنة · الصفّ للتوسيع</span></div>}>
             {regimeTxt && <div className="mz-regime-bar">🧭 النظام الآن: <b>{regimeTxt}</b>{Number.isFinite(bookMult) ? " · مضاعف الدفتر " + num(bookMult, 2) + "×" : ""} — الترتيب يتكيّف تلقائياً مع النظام.</div>}
             {rows.length ? (
               <table className="mz-tbl mz-tbl-wide mz-tbl-pro">
                 <thead><tr>
                   <th></th>
+                  <th className="mz-cmp-h" title="اختر 2–4 للمقارنة">⚖</th>
                   <th className="tl mz-sh" onClick={() => sortByCol("symbol")}>الرمز</th>
                   <th className="tl">القطاع</th>
                   <th className="mz-sh" onClick={() => sortByCol("price")}>السعر{arrow("price")}</th>
@@ -529,8 +553,9 @@ function ScreenerView() {
                 </tr></thead>
                 <tbody>{shown.slice(0, 80).map((r) => { const [vd, vc] = verdictOf(r.composite_score || 0); const isExp = exp === r.symbol; const cp = r.change_pct; const tp = r.trade_plan || {};
                   return (<React.Fragment key={r.symbol}>
-                    <tr className="mz-prow" onClick={() => setExp(isExp ? null : r.symbol)}>
+                    <tr className={"mz-prow" + (cmp.includes(r.symbol) ? " mz-picked" : "")} onClick={() => setExp(isExp ? null : r.symbol)}>
                       <td className="mz-chev">{isExp ? "▾" : "▸"}</td>
+                      <td className="mz-cmp-c" onClick={e => { e.stopPropagation(); toggleCmp(r.symbol); }}>{cmp.includes(r.symbol) ? "☑" : "☐"}</td>
                       <td className="tl mz-fn">{r.symbol}<div className="mz-dim2">{(r.company || "").slice(0, 20)}</div></td>
                       <td className="tl mz-dim2">{r.sector || "—"}</td>
                       <td>{money(r.price)}</td>
@@ -550,7 +575,7 @@ function ScreenerView() {
                       <td><span className="mz-why">{whyOf(r)}</span></td>
                       <td className="mz-star" onClick={e => e.stopPropagation()}>{r.in_watchlist ? "★" : "☆"}</td>
                     </tr>
-                    {isExp && <tr className="mz-exp"><td colSpan="12"><div className="mz-exp-in">
+                    {isExp && <tr className="mz-exp"><td colSpan="13"><div className="mz-exp-in">
                       <div className="mz-exp-plan">
                         <div className="mz-exp-h">خطة الصفقة</div>
                         <div className="mz-exp-grid">
@@ -638,6 +663,22 @@ function ScreenerView() {
           </Panel>
         </aside>}
       </div>
+      {cmpOpen && cmpRows.length >= 2 && <div className="mz-cmp-ov" onClick={() => setCmpOpen(false)}>
+        <div className="mz-cmp-box" onClick={e => e.stopPropagation()}>
+          <div className="mz-cmp-top"><b>⚖ مقارنة {cmpRows.length} أسهم</b><button className="mz-rg" onClick={() => setCmpOpen(false)}>✕ إغلاق</button></div>
+          <table className="mz-tbl mz-cmp-tbl">
+            <thead><tr><th className="tl">المقياس</th>{cmpRows.map(r => <th key={r.symbol}>{r.symbol}</th>)}</tr></thead>
+            <tbody>{CMP_METRICS.map(([label, fn, kind], i) => (
+              <tr key={i}><td className="tl mz-dim2">{label}</td>
+              {cmpRows.map(r => {
+                if (kind === "vd") { const [vd, vc] = verdictOf(r.composite_score || 0); return <td key={r.symbol}><span className="mz-vd" style={{ color: vc, borderColor: vc }}>{vd}</span></td>; }
+                if (kind === "chg") { const c = r.change_pct; return <td key={r.symbol} style={{ color: c == null ? MUT : c >= 0 ? POS : NEG }}>{fn(r)}</td>; }
+                return <td key={r.symbol}>{fn(r)}</td>;
+              })}</tr>))}</tbody>
+          </table>
+          <div className="mz-note" style={{ marginTop: 8 }}>بيانات حيّة من الماسح — للمقارنة والبحث، لا توصية.</div>
+        </div>
+      </div>}
     </div>
   );
 }

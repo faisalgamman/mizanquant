@@ -267,6 +267,18 @@
 
 /* professional screener table */
 .mz-wrap-full { grid-template-columns: 1fr !important; }
+.mz-tbl-actions { display: flex; gap: 8px; align-items: center; }
+.mz-cmp-h { width: 26px; color: var(--text-muted); }
+.mz-cmp-c { cursor: pointer; text-align: center; font-size: 14px; color: var(--accent); user-select: none; }
+.mz-tbl-pro tbody tr.mz-picked { background: var(--accent-dim); }
+.mz-cmp-ov { position: fixed; inset: 0; background: rgba(0,0,0,.62); z-index: 120; display: flex; align-items: center; justify-content: center; padding: 30px; }
+.mz-cmp-box { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 14px; max-width: 780px; width: 100%; max-height: 86vh; overflow: auto; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.mz-cmp-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.mz-cmp-top b { font-size: 15px; }
+.mz-cmp-tbl { width: 100%; }
+.mz-cmp-tbl th, .mz-cmp-tbl td { text-align: center; padding: 7px 12px; border-bottom: 1px solid var(--border-subtle); }
+.mz-cmp-tbl thead th { color: var(--accent); font-family: var(--font-mono); font-size: 14px; font-weight: 800; }
+.mz-cmp-tbl td.tl, .mz-cmp-tbl th.tl { text-align: right; }
 .mz-regime-bar { font-size: 11.5px; color: var(--text-secondary); background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 7px 11px; margin-bottom: 10px; }
 .mz-regime-bar b { color: var(--accent); }
 .mz-sh { cursor: pointer; user-select: none; white-space: nowrap; }
