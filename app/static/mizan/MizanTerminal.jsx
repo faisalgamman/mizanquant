@@ -355,8 +355,11 @@ function ScreenerView() {
   const [exp, setExp] = useState(null);   // expanded row symbol
   const [pop, setPop] = useState(null);   // score-breakdown popover symbol
   const rg = useGet("/api/regime-hmm");
-  const regimeTxt = rg && (rg.state || rg.regime || (rg.current && rg.current.label) || rg.label);
-  const bookMult = rg && (rg.book_multiplier != null ? rg.book_multiplier : rg.book_mult);
+  const RGMAP = { crisis: "أزمة", choppy: "تقليدي", calm_bull: "هادئ صاعد", calm: "هادئ", bull: "صاعد", neutral: "محايد", risk_on: "مُخاطِر", risk_off: "دفاعي" };
+  const _rgo = rg && rg.regime;
+  const _rgKey = (_rgo && typeof _rgo === "object") ? _rgo.dominant : (typeof _rgo === "string" ? _rgo : (rg && (rg.state || rg.label)));
+  const regimeTxt = _rgKey ? (RGMAP[_rgKey] || _rgKey) : null;
+  const bookMult = rg && (rg.book_multiplier != null ? rg.book_multiplier : (rg.book_mult != null ? rg.book_mult : (_rgo && typeof _rgo === "object" ? _rgo.book_mult : null)));
   const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"]];
   const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
 
