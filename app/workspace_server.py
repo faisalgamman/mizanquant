@@ -5227,50 +5227,42 @@ async def market_news(limit: int = Query(8, ge=1, le=20)):
 
 @app.get("/api/market/indicators")
 async def market_indicators():
-    """Main market indicators — REAL index/commodity levels (FMP), ETF proxy as honest fallback."""
+    """Main market strip — REAL ETF levels from Alpaca (reliable), VIX + BTC as-is.
+
+    The FMP index/commodity path (^GSPC/^IXIC/GCUSD…) was DROPPED: the FMP key is dead and
+    returned stale/garbage quotes with a non-None price, which shadowed the good ETF fallback
+    (S&P showing 744, Gold 378, etc.). Alpaca daily-bar ETF snapshots are the honest source —
+    the same working source behind the BTC tile and the sparklines. Labels/proxies kept
+    identical so SPARK_MAP and /api/market/spark keep matching.
+    """
     try:
         from app.services.market_data import get_alpaca_snapshots
-        from app.services import fmp_client
 
-        # (label, real FMP symbol, ETF proxy fallback)
+        # (label, Alpaca ETF proxy) — the ETF price IS the honest, reliable stand-in
         rows_def = [
-            ("S&P 500", "^GSPC", "SPY"), ("Nasdaq", "^IXIC", "QQQ"),
-            ("Dow", "^DJI", "DIA"), ("Russell", "^RUT", "IWM"),
-            ("Gold", "GCUSD", "GLD"), ("Brent", "BZUSD", "BNO"),
+            ("S&P 500", "SPY"), ("Nasdaq", "QQQ"), ("Dow", "DIA"),
+            ("Russell", "IWM"), ("Gold", "GLD"), ("Brent", "BNO"),
         ]
-        real = {}
-        try:
-            real = await asyncio.to_thread(fmp_client.get_quotes,
-                                           [r[1] for r in rows_def] + ["^VIX"])
-        except Exception:
-            real = {}
-
-        etfs = [r[2] for r in rows_def]
+        etfs = [r[1] for r in rows_def]
         snaps = await asyncio.to_thread(get_alpaca_snapshots, etfs + ["BTC/USD"])
 
         indicators = []
-        for label, fsym, etf in rows_def:
-            q = real.get(fsym) or {}
-            if q.get("price") is not None:
-                indicators.append({"label": label, "symbol": fsym, "proxy": None,
-                                   "price": q.get("price"), "change_pct": q.get("change_pct")})
-            else:
-                s = snaps.get(etf, {})
-                indicators.append({"label": label, "symbol": etf, "proxy": etf,  # honest ETF stand-in
-                                   "price": s.get("price"), "change_pct": s.get("change_pct")})
+        for label, etf in rows_def:
+            s = snaps.get(etf, {})
+            indicators.append({"label": label, "symbol": etf, "proxy": etf,  # honest ETF stand-in
+                               "price": s.get("price"), "change_pct": s.get("change_pct")})
 
-        # VIX — FMP ^VIX, else market_status (no change% if unknown → "—", never faked)
-        v = real.get("^VIX") or {}
-        if v.get("price") is None:
-            try:
-                from app.services.market_context import get_market_status
-                v = {"price": (get_market_status() or {}).get("vix"), "change_pct": None}
-            except Exception:
-                v = {}
+        # VIX — market_status (Alpaca has no cash VIX index); honest "—" if unknown, never faked
+        vprice = None
+        try:
+            from app.services.market_context import get_market_status
+            vprice = (get_market_status() or {}).get("vix")
+        except Exception:
+            vprice = None
         indicators.append({"label": "VIX", "symbol": "^VIX", "proxy": None,
-                           "price": v.get("price"), "change_pct": v.get("change_pct")})
+                           "price": vprice, "change_pct": None})
 
-        # Bitcoin — crypto snapshot
+        # Bitcoin — Alpaca crypto snapshot
         btc = snaps.get("BTC/USD", {})
         indicators.append({"label": "Bitcoin", "symbol": "BTC/USD", "proxy": None,
                            "price": btc.get("price"), "change_pct": btc.get("change_pct")})
