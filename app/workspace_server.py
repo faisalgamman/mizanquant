@@ -5135,16 +5135,15 @@ async def screener_pairs(limit: int = Query(20, ge=4, le=40)):
     returns {status:"scanning"} immediately. Halal long-only: this is informational relative-
     value context; no short is ever emitted, and it never touches the ledgers or trade path.
     """
-    try:
-        from app.services.pairs_scanner import cached_pairs, last_scan_stats, find_cointegrated_pairs
-    except Exception as e:
-        return {"research_only": True, "error": str(e), "results": []}
-
-    pairs = await asyncio.to_thread(cached_pairs, limit)
-    if pairs is not None:
-        rows = [p.as_dict() for p in pairs]
+    # Persistent /data-backed cache (same mechanism as daytrade) — survives restarts and is
+    # shared across workers, unlike pairs_scanner's per-process memory + relative-path file.
+    # The bg job ALWAYS writes a result (even {results: []}) so a legit "0 pairs" outcome ends
+    # the scanning state instead of re-scanning forever.
+    cached = _cache_get("pairs_scan", max_age=86400)  # 1 day
+    if cached is not None and "results" in cached:
+        rows = (cached.get("results") or [])[:limit]
         return {"research_only": True, "source": "cache", "count": len(rows),
-                "results": rows, "diagnostics": last_scan_stats()}
+                "results": rows, "diagnostics": cached.get("diagnostics"), "scan_error": cached.get("error")}
 
     global _pairs_scanning
     if not _pairs_scanning:
@@ -5153,9 +5152,13 @@ async def screener_pairs(limit: int = Query(20, ge=4, le=40)):
         def _run():
             global _pairs_scanning
             try:
-                find_cointegrated_pairs(force_refresh=True)   # populates memory + disk cache
+                from app.services.pairs_scanner import find_cointegrated_pairs, last_scan_stats
+                pairs = find_cointegrated_pairs(force_refresh=True)
+                _cache_set("pairs_scan", {"results": [p.as_dict() for p in pairs],
+                                          "diagnostics": last_scan_stats()})
             except Exception as e:
                 logger.warning("pairs scan failed: %s", e)
+                _cache_set("pairs_scan", {"results": [], "error": str(e)[:200]})
             finally:
                 _pairs_scanning = False
 

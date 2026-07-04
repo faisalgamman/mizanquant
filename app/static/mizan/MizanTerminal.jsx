@@ -449,7 +449,13 @@ function ScreenerView() {
                     <td>{r.oos_pvalue != null ? (r.oos_pvalue <= 0.05 ? "✓" : "—") : "·"}</td>
                   </tr>); })}</tbody>
               </table>
-            ) : <div className="mz-empty">لا أزواج متكاملة الآن — {(prRes.diagnostics && prRes.diagnostics.n_candidate_pairs) ? "المرشّحات لم تجتز البوّابات" : "قد يكون محرّك الإحصاء غير متاح"}</div>}
+            ) : (() => { const dg = prRes.diagnostics || {}; return <div className="mz-empty" style={{ lineHeight: 1.7 }}>
+              لا أزواج متكاملة تجتاز البوّابات الآن.{dg.statsmodels_available === false ? " ⚠ محرّك الإحصاء (statsmodels) غير متاح." : ""}
+              {dg.candidate_pairs != null && <div className="mz-dim2" style={{ marginTop: 6, fontSize: 11 }}>
+                فُحِص {Number(dg.candidate_pairs).toLocaleString("en")} مرشّح · اجتاز الارتباط {dg.passed_correlation} · رُفض خارج العيّنة {dg.rejected_oos} (حارس التكامل الزائف) · أفضل p = {num(dg.best_pvalue, 3)}
+              </div>}
+              <div className="mz-dim2" style={{ marginTop: 4, fontSize: 11 }}>النتيجة صارمة بحقّ — الماسح لا يُظهر إلا أزواجاً تصمد خارج العيّنة.</div>
+            </div>; })()}
           </Panel>
           ) : isExpl ? (
           <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">⚡ ماسح انفجار لحظي · بحثيّ فقط · مستقلّ عن الحلال</span>}>
