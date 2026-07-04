@@ -385,8 +385,8 @@ function ScreenerView() {
     ["تقني /30", r => num(r.score_tech, 0), "hi"],
     ["أساسي /25", r => num(r.score_fund, 0), "hi"],
     ["ذكاء AI /15", r => num(r.score_ai, 0), "hi"],
-    ["مشاعر /8", r => num(r.score_sentiment, 0), "hi"],
-    ["حلال /10", r => num(r.score_halal, 0), "hi"],
+    ["مشاعر /20", r => num(r.score_sentiment, 0), "hi"],
+    ["حلال /12", r => num(r.score_halal, 0), "hi"],
     ["زخم 12-1", r => num(r.score_mom121, 1), "hi"],
     ["ATR % (مخاطرة)", r => num(r.atr_pct, 1) + "%", "lo"],
     ["محلّلون", r => r.analyst_rating || "—"],
@@ -565,7 +565,7 @@ function ScreenerView() {
                         <span className="mz-score" style={{ color: (r.composite_score || 0) >= 55 ? POS : (r.composite_score || 0) >= 38 ? WARN : NEG }}>{Math.round(r.composite_score || 0)}</span>
                         {pop === r.symbol && <div className="mz-pop" onClick={e => e.stopPropagation()}>
                           <div className="mz-pop-t">تفصيل الدرجة — {r.symbol}</div>
-                          {[["تقني", r.score_tech, 30], ["أساسي", r.score_fund, 25], ["ذكاء AI", r.score_ai, 15], ["مشاعر", r.score_sentiment, 8], ["حلال", r.score_halal, 10], ["زخم 12-1", r.score_mom121, 12]].map(([l, v, mx], j) => (
+                          {[["تقني", r.score_tech, 30], ["أساسي", r.score_fund, 25], ["ذكاء AI", r.score_ai, 15], ["مشاعر", r.score_sentiment, 20], ["حلال", r.score_halal, 12], ["زخم 12-1", r.score_mom121, 12]].map(([l, v, mx], j) => (
                             <div className="mz-pop-r" key={j}><span>{l}</span><div className="mz-pop-bar"><div style={{ width: Math.min(100, (v || 0) / mx * 100) + "%" }} /></div><b>{num(v, 0)}</b></div>))}
                         </div>}
                       </td>
