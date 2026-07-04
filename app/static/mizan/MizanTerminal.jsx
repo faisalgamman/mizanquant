@@ -351,7 +351,13 @@ function ScreenerView() {
   const [saved, setSaved] = useState(() => { try { return JSON.parse(localStorage.getItem("mz_screens") || "[]"); } catch (e) { return []; } });
   const [perfRange, setPerfRange] = useState("6mo");
   const perf = useGet("/api/screener/results-performance?range=" + perfRange + "&limit=20");
-  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"]];
+  const [sortDir, setSortDir] = useState("desc");
+  const [exp, setExp] = useState(null);   // expanded row symbol
+  const [pop, setPop] = useState(null);   // score-breakdown popover symbol
+  const rg = useGet("/api/regime-hmm");
+  const regimeTxt = rg && (rg.state || rg.regime || (rg.current && rg.current.label) || rg.label);
+  const bookMult = rg && (rg.book_multiplier != null ? rg.book_multiplier : rg.book_mult);
+  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"]];
   const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
 
   const applyCfg = (c) => { if (c.tab != null) setTab(c.tab); if (c.sortK) setSortK(c.sortK); if (c.secF != null) setSecF(c.secF); if (c.pxMin != null) setPxMin(c.pxMin); if (c.scMin != null) setScMin(c.scMin); };
@@ -359,12 +365,14 @@ function ScreenerView() {
   const delSaved = (name) => { const s = saved.filter(x => x.name !== name); setSaved(s); localStorage.setItem("mz_screens", JSON.stringify(s)); };
   const resetF = () => { setTab("all"); setSecF("all"); setPxMin(0); setScMin(0); setQ(""); };
 
-  let shown = rows.filter(r => (tab === "all" || (tab === "halal" && r.is_halal) || (tab === "buy" && (r.composite_score || 0) >= 55))
+  let shown = rows.filter(r => (tab === "all" || (tab === "halal" && r.is_halal) || (tab === "buy" && (r.composite_score || 0) >= 55) || (tab === "fav" && r.in_watchlist))
     && (secF === "all" || r.sector === secF)
     && (r.price || 0) >= pxMin
     && (r.composite_score || 0) >= scMin
     && (!q || (r.symbol || "").toUpperCase().includes(q.toUpperCase()) || (r.company || "").toUpperCase().includes(q.toUpperCase())));
-  shown = [...shown].sort((a, b) => (b[sortK] || 0) - (a[sortK] || 0));
+  shown = [...shown].sort((a, b) => { const d = (b[sortK] || 0) - (a[sortK] || 0); return sortDir === "asc" ? -d : d; });
+  const sortByCol = (k) => { if (sortK === k) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortK(k); setSortDir("desc"); } };
+  const arrow = (k) => sortK === k ? (sortDir === "asc" ? " ▲" : " ▼") : "";
   const activeF = (secF !== "all" ? 1 : 0) + (pxMin > 0 ? 1 : 0) + (scMin > 0 ? 1 : 0) + (tab !== "all" ? 1 : 0);
   const cnt = (cfg) => rows.filter(r => (cfg.tab === "all" || (cfg.tab === "halal" && r.is_halal) || (cfg.tab === "buy" && (r.composite_score || 0) >= 55)) && (cfg.secF === "all" || r.sector === cfg.secF) && (r.price || 0) >= (cfg.pxMin || 0) && (r.composite_score || 0) >= (cfg.scMin || 0)).length;
 
@@ -381,6 +389,9 @@ function ScreenerView() {
     const a = document.createElement("a"); a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(lines.join("\n")); a.download = "mizan_screener.csv"; a.click();
   };
   const secCol = (v) => v >= 75 ? "rgba(74,222,128,0.22)" : v >= 65 ? "rgba(251,191,36,0.18)" : "rgba(248,113,113,0.18)";
+  const fmtCap = (v) => v == null ? "—" : v >= 1e12 ? "$" + (v / 1e12).toFixed(2) + "T" : v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? "$" + (v / 1e6).toFixed(0) + "M" : "$" + Math.round(v);
+  const WHYF = [["score_tech", "تقني", 30], ["score_fund", "أساسي", 25], ["score_ai", "ذكاء", 15], ["score_sentiment", "مشاعر", 8], ["score_mom121", "زخم", 12], ["score_halal", "حلال", 10]];
+  const whyOf = (r) => { let bl = "—", bf = -1; for (const [k, l, mx] of WHYF) { const f = (r[k] || 0) / mx; if (f > bf) { bf = f; bl = l; } } return bl; };
 
   return (
     <div className="mz-view">
@@ -398,16 +409,72 @@ function ScreenerView() {
       </div>
       <div className="mz-ana-wrap">
         <div className="mz-ana-main">
-          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />}>
+          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">انقر رأس العمود للفرز · الصفّ للتوسيع</span>}>
+            {regimeTxt && <div className="mz-regime-bar">🧭 النظام الآن: <b>{regimeTxt}</b>{bookMult != null ? " · مضاعف الدفتر " + num(bookMult, 2) + "×" : ""} — الترتيب يتكيّف تلقائياً مع النظام.</div>}
             {rows.length ? (
-              <table className="mz-tbl mz-tbl-wide">
-                <thead><tr><th className="tl">الرمز</th><th className="tl">القطاع</th><th>السعر</th><th>التوصية</th><th>الدرجة</th><th>زخم</th><th>تقني</th><th>أساسي</th><th>حلال</th></tr></thead>
-                <tbody>{shown.slice(0, 60).map((r, i) => { const [vd, vc] = verdictOf(r.composite_score || 0); return (
-                  <tr key={i}><td className="tl mz-fn">{r.symbol}<div className="mz-dim2">{r.company || ""}</div></td>
-                    <td className="tl mz-dim2">{r.sector || "—"}</td><td>{money(r.price)}</td>
-                    <td><span className="mz-vd" style={{ color: vc, borderColor: vc }}>{vd}</span></td>
-                    <td><span className="mz-score" style={{ color: (r.composite_score || 0) >= 55 ? POS : (r.composite_score || 0) >= 38 ? WARN : NEG }}>{Math.round(r.composite_score || 0)}</span></td>
-                    <td>{num(r.score_mom121, 0)}</td><td>{num(r.score_tech, 0)}</td><td>{num(r.score_fund, 0)}</td><td>{r.is_halal ? "✓" : "—"}</td></tr>); })}</tbody>
+              <table className="mz-tbl mz-tbl-wide mz-tbl-pro">
+                <thead><tr>
+                  <th></th>
+                  <th className="tl mz-sh" onClick={() => sortByCol("symbol")}>الرمز</th>
+                  <th className="tl">القطاع</th>
+                  <th className="mz-sh" onClick={() => sortByCol("price")}>السعر{arrow("price")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("change_pct")}>التغيّر{arrow("change_pct")}</th>
+                  <th>التوصية</th>
+                  <th className="mz-sh" onClick={() => sortByCol("composite_score")}>الدرجة{arrow("composite_score")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("market_cap")}>القيمة{arrow("market_cap")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("adv_dollar_m")}>السيولة{arrow("adv_dollar_m")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("score_mom121")}>زخم{arrow("score_mom121")}</th>
+                  <th>لماذا؟</th>
+                  <th>⭐</th>
+                </tr></thead>
+                <tbody>{shown.slice(0, 80).map((r) => { const [vd, vc] = verdictOf(r.composite_score || 0); const isExp = exp === r.symbol; const cp = r.change_pct; const tp = r.trade_plan || {};
+                  return (<React.Fragment key={r.symbol}>
+                    <tr className="mz-prow" onClick={() => setExp(isExp ? null : r.symbol)}>
+                      <td className="mz-chev">{isExp ? "▾" : "▸"}</td>
+                      <td className="tl mz-fn">{r.symbol}<div className="mz-dim2">{(r.company || "").slice(0, 20)}</div></td>
+                      <td className="tl mz-dim2">{r.sector || "—"}</td>
+                      <td>{money(r.price)}</td>
+                      <td style={{ color: cp == null ? MUT : cp >= 0 ? POS : NEG }}>{cp == null ? "—" : pct(cp, 2)}</td>
+                      <td><span className="mz-vd" style={{ color: vc, borderColor: vc }}>{vd}</span></td>
+                      <td className="mz-score-cell" onMouseEnter={() => setPop(r.symbol)} onMouseLeave={() => setPop(null)}>
+                        <span className="mz-score" style={{ color: (r.composite_score || 0) >= 55 ? POS : (r.composite_score || 0) >= 38 ? WARN : NEG }}>{Math.round(r.composite_score || 0)}</span>
+                        {pop === r.symbol && <div className="mz-pop" onClick={e => e.stopPropagation()}>
+                          <div className="mz-pop-t">تفصيل الدرجة — {r.symbol}</div>
+                          {[["تقني", r.score_tech, 30], ["أساسي", r.score_fund, 25], ["ذكاء AI", r.score_ai, 15], ["مشاعر", r.score_sentiment, 8], ["حلال", r.score_halal, 10], ["زخم 12-1", r.score_mom121, 12]].map(([l, v, mx], j) => (
+                            <div className="mz-pop-r" key={j}><span>{l}</span><div className="mz-pop-bar"><div style={{ width: Math.min(100, (v || 0) / mx * 100) + "%" }} /></div><b>{num(v, 0)}</b></div>))}
+                        </div>}
+                      </td>
+                      <td className="mz-dim2">{fmtCap(r.market_cap)}</td>
+                      <td className="mz-dim2">{r.adv_dollar_m != null ? "$" + num(r.adv_dollar_m, 0) + "م" : "—"}</td>
+                      <td>{num(r.score_mom121, 1)}</td>
+                      <td><span className="mz-why">{whyOf(r)}</span></td>
+                      <td className="mz-star" onClick={e => e.stopPropagation()}>{r.in_watchlist ? "★" : "☆"}</td>
+                    </tr>
+                    {isExp && <tr className="mz-exp"><td colSpan="12"><div className="mz-exp-in">
+                      <div className="mz-exp-plan">
+                        <div className="mz-exp-h">خطة الصفقة</div>
+                        <div className="mz-exp-grid">
+                          <div><span>دخول</span><b>{money(tp.entry || r.price)}</b></div>
+                          <div><span>وقف</span><b style={{ color: NEG }}>{money(tp.stop_loss)}</b></div>
+                          <div><span>هدف</span><b style={{ color: POS }}>{money(tp.tp1)}</b></div>
+                          <div><span>عائد:مخاطرة</span><b>{tp.rr_ratio != null ? num(tp.rr_ratio, 1) : "—"}</b></div>
+                          <div><span>كمية مقترحة</span><b>{r.suggested_size || tp.shares || "—"}</b></div>
+                          <div><span>ATR</span><b>{num(r.atr_pct, 1)}%</b></div>
+                        </div>
+                      </div>
+                      <div className="mz-exp-side">
+                        {r.analyst_rating && <div className="mz-exp-chip">محلّلون: <b>{r.analyst_rating}</b>{r.analyst_upside != null ? " · صعود " + pct(r.analyst_upside, 0) : ""}</div>}
+                        {r.insider_flag && <div className="mz-exp-chip">مطّلعون: <b>{r.insider_flag}</b></div>}
+                        {r.revenue_growth_yoy != null && <div className="mz-exp-chip">نمو الإيرادات {pct(r.revenue_growth_yoy, 0)}</div>}
+                        {r.strategy_reason && <div className="mz-dim2" style={{ fontSize: 11, lineHeight: 1.5 }}>{r.strategy_reason}</div>}
+                        <div className="mz-tp-btns" style={{ marginTop: 6 }}>
+                          <button className="mz-btn" onClick={e => { e.stopPropagation(); goAnalyze(r.symbol, ""); }}>فتح التفاصيل</button>
+                          <button className="mz-btn gold" onClick={e => { e.stopPropagation(); goAnalyze(r.symbol, "forecast"); }}>تحليل متقدّم</button>
+                          <button className="mz-btn" onClick={e => { e.stopPropagation(); goAnalyze(r.symbol, "trade"); }}>صفقة ورقيّة</button>
+                        </div>
+                      </div>
+                    </div></td></tr>}
+                  </React.Fragment>); })}</tbody>
               </table>
             ) : <div className="mz-empty">…يمسح الكون</div>}
           </Panel>
