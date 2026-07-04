@@ -1219,21 +1219,50 @@ function StockAnalysisView() {
   );
 }
 
+function timeAgo(ts) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - (ts || 0)));
+  if (s < 60) return "الآن";
+  if (s < 3600) return "قبل " + Math.floor(s / 60) + " د";
+  if (s < 86400) return "قبل " + Math.floor(s / 3600) + " س";
+  return "قبل " + Math.floor(s / 86400) + " ي";
+}
+
 function AlertsView() {
-  const ov = useGet("/api/v1/overview");
-  const port = (ov && ov.portfolio) || {};
-  const items = [
-    ["التداول الآلي", port.auto_trade_enabled ? "مُفعّل" : "متوقّف", port.auto_trade_enabled ? WARN : POS],
-    ["نوع الحساب", port.account_type || "—", MUT],
-    ["الوسيط", port.broker_type || "—", MUT],
-  ];
+  const [st, setSt] = useState(null);
+  const [thr, setThr] = useState(80);
+  const load = () => fetch("/api/scan-alerts").then(r => r.json()).then(setSt).catch(() => {});
+  useEffect(() => { load(); }, []);
+  useEffect(() => { fetch("/api/scan-alerts/seen", { method: "POST" }).catch(() => {}); }, []); // opening the tab = read
+  const rules = (st && st.rules) || [], events = (st && st.events) || [];
+  const addRule = async (rule) => { try { const r = await fetch("/api/scan-alerts/rule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rule) }).then(x => x.json()); setSt(s => ({ ...(s || {}), rules: r.rules })); } catch (e) { } };
+  const delRule = async (id) => { try { const r = await fetch("/api/scan-alerts/remove", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(x => x.json()); setSt(s => ({ ...(s || {}), rules: r.rules })); } catch (e) { } };
+  const hasSB = rules.some(r => r.type === "new_strong_buy");
   return (
     <div className="mz-view">
-      <Panel title="حالة النظام">
-        <div className="mz-risk">{items.map(([l, v, c], i) => (<div key={i}><span className="mz-rk-l">{l}</span><span className="mz-rk-v" style={{ color: c }}>{v}</span></div>))}</div>
+      <Panel title="قواعد التنبيه" right={<span className="mz-dim3">تُقيَّم مع كل مسح · قياسيّة فقط</span>}>
+        <div className="mz-al-rules">
+          {rules.map(r => (<div className="mz-al-rule" key={r.id}>
+            <span>🔔 {r.label}</span><button className="mz-rg" onClick={() => delRule(r.id)}>✕</button>
+          </div>))}
+          {!rules.length && <div className="mz-empty">لا قواعد — أضِف قاعدة أدناه.</div>}
+        </div>
+        <div className="mz-al-add">
+          {!hasSB && <button className="mz-rg on" onClick={() => addRule({ type: "new_strong_buy" })}>+ سهم جديد «شراء قوي»</button>}
+          <span className="mz-al-thr">درجة ≥ <input type="number" className="mz-inp" style={{ width: 66 }} min="0" max="100" value={thr} onChange={e => setThr(+e.target.value)} />
+            <button className="mz-rg on" onClick={() => addRule({ type: "score_above", threshold: thr })}>+ أضِف</button></span>
+        </div>
+        <div className="mz-note ql-dim">ينطلق التنبيه مرّة حين يَدخل سهم الشرط (لا يتكرّر كل مسح). لا صفقات — إشعار فقط.</div>
       </Panel>
-      <Panel title="التنبيهات النشطة">
-        <div className="mz-empty">لا تنبيهات حرجة الآن. تظهر هنا تنبيهات الخروج الذكي، انكسار الأزواج، وتغيّر النظام حين تقع — قياس فقط.</div>
+      <Panel title="التنبيهات الأخيرة" right={<button className="mz-rg" onClick={load}>↻ تحديث</button>}>
+        {events.length ? (<div className="mz-al-events">
+          {events.map((e, i) => (<div className="mz-al-ev" key={i}>
+            <span className="mz-al-sym" onClick={() => goAnalyze(e.symbol, "")}>{e.symbol}</span>
+            <span className="mz-score" style={{ color: (e.score || 0) >= 72 ? POS : WARN }}>{e.score}</span>
+            <span className="mz-al-txt">{e.rule}</span>
+            <span className="mz-al-sec mz-dim2">{e.sector || ""}</span>
+            <span className="mz-al-t mz-dim2">{timeAgo(e.ts)}</span>
+          </div>))}
+        </div>) : <div className="mz-empty">لا تنبيهات بعد. تظهر هنا حين يَدخل سهمٌ أحد شروطك في المسح التالي.</div>}
       </Panel>
     </div>
   );
@@ -1249,6 +1278,7 @@ function MizanTerminal() {
   const [clock, setClock] = useState("--:--:--");
   const [broker, setBroker] = useState(null);
   const [shared, setShared] = useState({});
+  const [unread, setUnread] = useState(0);
   useEffect(() => {  // hash drives the view — robust to direct load, back/forward, and clicks
     const read = () => setView((location.hash || "").replace(/^#/, "") || "overview");
     read();
@@ -1260,7 +1290,10 @@ function MizanTerminal() {
     fetch("/api/v1/broker/health").then(r => r.json()).then(setBroker).catch(() => {});
     const g = (u, k) => fetch(u).then(r => r.json()).then(v => setShared(p => ({ ...p, [k]: v }))).catch(() => {});
     g("/api/selection-quality", "sq"); g("/api/factor-ic-multi", "fic"); g("/api/regime-hmm", "rg"); g("/api/v1/overview", "ov");
-    return () => clearInterval(t);
+    const pollAlerts = () => fetch("/api/scan-alerts").then(r => r.json()).then(a => setUnread(a && a.unread || 0)).catch(() => {});
+    pollAlerts();
+    const at = setInterval(pollAlerts, 60000);
+    return () => { clearInterval(t); clearInterval(at); };
   }, []);
   const cur = NAV.find(n => n.key === view) || NAV[0];
   const today = new Date();
@@ -1283,7 +1316,7 @@ function MizanTerminal() {
           <div className="mz-top-r">
             <span className="mz-sys"><span className="mz-dot on" /> النظام يعمل</span>
             <span className="mz-clock">{clock} · {today.toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })} · UTC</span>
-            <span className="mz-bell">🔔<span className="mz-bell-b">3</span></span>
+            <span className="mz-bell" style={{ cursor: "pointer" }} title="تنبيهات المسح" onClick={() => { location.hash = "alerts"; }}>🔔{unread > 0 && <span className="mz-bell-b">{unread > 9 ? "9+" : unread}</span>}</span>
             <span className="mz-theme">🌙</span>
           </div>
         </header>

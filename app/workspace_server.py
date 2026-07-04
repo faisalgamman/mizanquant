@@ -28,7 +28,7 @@ if str(_app_root) not in sys.path:
 import pandas as pd
 import uvicorn
 import yfinance as yf
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Request, Body
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -5120,6 +5120,42 @@ async def screener_daytrade(limit: int = Query(30, ge=5, le=60)):
         threading.Thread(target=_run, daemon=True, name="daytrade-scan").start()
 
     return {"research_only": True, "status": "scanning", "results": []}
+
+
+def _latest_picks_for_alerts():
+    """Latest deep-picks results (with composite_score) from cache — cheap, no scan."""
+    for k in ("deep_picks_200_composite", "deep_picks_40_composite", "deep_picks_15_composite"):
+        c = _cache_get(k, max_age=86400)
+        if c and c.get("results"):
+            return c["results"]
+    return None
+
+
+@app.get("/api/scan-alerts")
+async def scan_alerts():
+    """Scan-alert state: user rules + recent fired events + unread count. Evaluates the rules
+    against the latest cached scan on read (diff vs last-seen per rule). Informational only."""
+    from app.services.alerts_store import get_state
+    return get_state(_latest_picks_for_alerts())
+
+
+@app.post("/api/scan-alerts/rule")
+async def scan_alerts_add_rule(payload: dict = Body(...)):
+    """Add/replace an alert rule. {type:'new_strong_buy'} or {type:'score_above',threshold:N}."""
+    from app.services.alerts_store import add_rule
+    return {"rules": add_rule(payload or {})}
+
+
+@app.post("/api/scan-alerts/remove")
+async def scan_alerts_remove_rule(payload: dict = Body(...)):
+    from app.services.alerts_store import remove_rule
+    return {"rules": remove_rule((payload or {}).get("id"))}
+
+
+@app.post("/api/scan-alerts/seen")
+async def scan_alerts_mark_seen():
+    from app.services.alerts_store import mark_seen
+    return mark_seen()
 
 
 _pairs_scanning = False
