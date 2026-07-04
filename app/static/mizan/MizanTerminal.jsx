@@ -360,7 +360,12 @@ function ScreenerView() {
   const _rgKey = (_rgo && typeof _rgo === "object") ? _rgo.dominant : (typeof _rgo === "string" ? _rgo : (rg && (rg.state || rg.label)));
   const regimeTxt = _rgKey ? (RGMAP[_rgKey] || _rgKey) : null;
   const bookMult = rg && (rg.book_multiplier != null ? rg.book_multiplier : (rg.book_mult != null ? rg.book_mult : (_rgo && typeof _rgo === "object" ? _rgo.book_mult : null)));
-  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"]];
+  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"], ["explosion", "⚡ انفجار يومي"]];
+  const isExpl = tab === "explosion";
+  const dtRes = useGet(isExpl ? "/api/screener/daytrade?limit=40" : null);
+  let exl = ((dtRes && dtRes.results) || []).filter(r => !q || (r.symbol || "").toUpperCase().includes(q.toUpperCase()));
+  const exlKey = ["explosion_score", "rvol", "momentum_pct", "change_pct", "gap_pct", "price", "vol_expansion"].includes(sortK) ? sortK : "explosion_score";
+  exl = [...exl].sort((a, b) => { const d = (b[exlKey] || 0) - (a[exlKey] || 0); return sortDir === "asc" ? -d : d; });
   const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
 
   const applyCfg = (c) => { if (c.tab != null) setTab(c.tab); if (c.sortK) setSortK(c.sortK); if (c.secF != null) setSecF(c.secF); if (c.pxMin != null) setPxMin(c.pxMin); if (c.scMin != null) setScMin(c.scMin); };
@@ -400,18 +405,70 @@ function ScreenerView() {
     <div className="mz-view">
       <div className="mz-ana-top">
         <div className="mz-tabs">{TABS.map(([k, l]) => <button key={k} className={"mz-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</button>)}</div>
-        <div className="mz-dim3">إجمالي النتائج <b style={{ color: "var(--text-primary)" }}>{shown.length}</b></div>
+        <div className="mz-dim3">إجمالي النتائج <b style={{ color: "var(--text-primary)" }}>{isExpl ? exl.length : shown.length}</b></div>
       </div>
-      <div className="mz-filters">
+      {!isExpl && <div className="mz-filters">
         <label className="mz-fl">القطاع<select className="mz-sel" value={secF} onChange={e => setSecF(e.target.value)}><option value="all">كل القطاعات</option>{sectors.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
         <label className="mz-fl">السعر ≥<select className="mz-sel" value={pxMin} onChange={e => setPxMin(+e.target.value)}>{[0, 5, 10, 50, 100, 200].map(v => <option key={v} value={v}>{v ? "$" + v : "الكل"}</option>)}</select></label>
         <label className="mz-fl">الدرجة ≥<select className="mz-sel" value={scMin} onChange={e => setScMin(+e.target.value)}>{[0, 40, 55, 70, 80].map(v => <option key={v} value={v}>{v || "الكل"}</option>)}</select></label>
         <label className="mz-fl">فرز<select className="mz-sel" value={sortK} onChange={e => setSortK(e.target.value)}><option value="composite_score">الدرجة</option><option value="score_mom121">الزخم</option><option value="score_fund">الأساسي</option><option value="score_tech">التقني</option><option value="price">السعر</option></select></label>
         {activeF > 0 && <button className="mz-rg" onClick={resetF}>مسح الفلاتر ({activeF})</button>}
         <button className="mz-rg on" onClick={saveCurrent}>★ حفظ الماسح</button>
-      </div>
-      <div className="mz-ana-wrap">
+      </div>}
+      <div className={"mz-ana-wrap" + (isExpl ? " mz-wrap-full" : "")}>
         <div className="mz-ana-main">
+          {isExpl ? (
+          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">⚡ ماسح انفجار لحظي · بحثيّ فقط · مستقلّ عن الحلال</span>}>
+            {!dtRes ? <div className="mz-empty">…يمسح الانفجارات</div> : exl.length ? (
+              <table className="mz-tbl mz-tbl-wide mz-tbl-pro">
+                <thead><tr>
+                  <th></th>
+                  <th className="tl mz-sh" onClick={() => sortByCol("symbol")}>الرمز</th>
+                  <th className="mz-sh" onClick={() => sortByCol("price")}>السعر{arrow("price")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("change_pct")}>التغيّر{arrow("change_pct")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("explosion_score")}>💥 الانفجار{arrow("explosion_score")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("rvol")}>حجم نسبي{arrow("rvol")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("momentum_pct")}>زخم{arrow("momentum_pct")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("gap_pct")}>فجوة{arrow("gap_pct")}</th>
+                  <th>حلال</th>
+                </tr></thead>
+                <tbody>{exl.slice(0, 60).map((r) => { const isE = exp === r.symbol; const c = r.components || {}; const cp = r.change_pct;
+                  return (<React.Fragment key={r.symbol}>
+                    <tr className="mz-prow" onClick={() => setExp(isE ? null : r.symbol)}>
+                      <td className="mz-chev">{isE ? "▾" : "▸"}</td>
+                      <td className="tl mz-fn">{r.symbol}</td>
+                      <td>{money(r.price)}</td>
+                      <td style={{ color: cp == null ? MUT : cp >= 0 ? POS : NEG }}>{cp == null ? "—" : pct(cp, 2)}</td>
+                      <td><span className="mz-score" style={{ color: (r.explosion_score || 0) >= 70 ? POS : (r.explosion_score || 0) >= 50 ? WARN : MUT }}>{Math.round(r.explosion_score || 0)}</span></td>
+                      <td>{num(r.rvol, 1)}×</td>
+                      <td style={{ color: (r.momentum_pct || 0) >= 0 ? POS : NEG }}>{pct(r.momentum_pct, 1)}</td>
+                      <td>{pct(r.gap_pct, 1)}</td>
+                      <td>{r.halal_verdict === "halal" ? "✓" : r.halal_verdict === "uncertain" ? "؟" : "—"}</td>
+                    </tr>
+                    {isE && <tr className="mz-exp"><td colSpan="9"><div className="mz-exp-in">
+                      <div className="mz-exp-plan">
+                        <div className="mz-exp-h">مكوّنات درجة الانفجار</div>
+                        <div className="mz-exp-grid">
+                          <div><span>حجم نسبي</span><b>{num(c.rvol, 0)}</b></div>
+                          <div><span>زخم</span><b>{num(c.momentum, 0)}</b></div>
+                          <div><span>تذبذب</span><b>{num(c.volatility, 0)}</b></div>
+                          <div><span>فجوة</span><b>{num(c.gap, 0)}</b></div>
+                          <div><span>توسّع الحجم</span><b>{num(r.vol_expansion, 1)}×</b></div>
+                        </div>
+                      </div>
+                      <div className="mz-exp-side">
+                        <div className="mz-dim2" style={{ fontSize: 11, lineHeight: 1.5 }}>ماسح تقنيّ للانفجار اللحظي (بحثيّ فقط) — ليس توصية ولا دخول دفتر ورقي.</div>
+                        <div className="mz-tp-btns" style={{ marginTop: 6 }}>
+                          <button className="mz-btn" onClick={e => { e.stopPropagation(); goAnalyze(r.symbol, ""); }}>فتح التفاصيل</button>
+                          <button className="mz-btn gold" onClick={e => { e.stopPropagation(); goAnalyze(r.symbol, "forecast"); }}>تحليل متقدّم</button>
+                        </div>
+                      </div>
+                    </div></td></tr>}
+                  </React.Fragment>); })}</tbody>
+              </table>
+            ) : <div className="mz-empty">لا انفجارات مؤكّدة الآن</div>}
+          </Panel>
+          ) : (<React.Fragment>
           <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">انقر رأس العمود للفرز · الصفّ للتوسيع</span>}>
             {regimeTxt && <div className="mz-regime-bar">🧭 النظام الآن: <b>{regimeTxt}</b>{Number.isFinite(bookMult) ? " · مضاعف الدفتر " + num(bookMult, 2) + "×" : ""} — الترتيب يتكيّف تلقائياً مع النظام.</div>}
             {rows.length ? (
@@ -505,8 +562,9 @@ function ScreenerView() {
               </tbody>
             </table>
           </Panel>
+          </React.Fragment>)}
         </div>
-        <aside className="mz-ana-rail">
+        {!isExpl && <aside className="mz-ana-rail">
           <Panel title="الفلاتر النشطة">
             <div className="mz-tags">
               <span className="mz-tag2">{tab === "all" ? "كل الأسهم" : tab === "halal" ? "متوافقة شرعاً" : "توصية شراء"}</span>
@@ -538,7 +596,7 @@ function ScreenerView() {
             </div>
             <button className="mz-btn gold" style={{ marginTop: 10 }} onClick={exportCsv}>⬇ تصدير النتائج (CSV)</button>
           </Panel>
-        </aside>
+        </aside>}
       </div>
     </div>
   );

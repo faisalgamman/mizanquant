@@ -266,6 +266,7 @@
 .mz-perf-bench { font-size: 10.5px; color: var(--text-muted); }
 
 /* professional screener table */
+.mz-wrap-full { grid-template-columns: 1fr !important; }
 .mz-regime-bar { font-size: 11.5px; color: var(--text-secondary); background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 7px 11px; margin-bottom: 10px; }
 .mz-regime-bar b { color: var(--accent); }
 .mz-sh { cursor: pointer; user-select: none; white-space: nowrap; }
