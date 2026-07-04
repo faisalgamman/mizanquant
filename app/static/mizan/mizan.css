@@ -234,7 +234,27 @@
 .mz-dl-l { color: var(--text-muted); }
 .mz-dl-v { font-family: var(--font-mono); font-weight: 600; }
 .mz-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.mz-tag2 { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; background: var(--bg-raised); border: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.mz-tag2 { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; background: var(--bg-raised); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
+.mz-tag2.on { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+/* screener page */
+.mz-tabs { display: flex; gap: 4px; }
+.mz-tab { font-size: 12px; padding: 6px 14px; border-radius: 7px; border: 1px solid var(--border-subtle); background: var(--bg-raised); color: var(--text-muted); cursor: pointer; }
+.mz-tab.on { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); font-weight: 700; }
+.mz-vd { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 5px; border: 1px solid; }
+.mz-score { font-weight: 800; font-family: var(--font-mono); }
+.mz-sort { display: flex; gap: 3px; align-items: center; }
+.mz-r2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+@media (max-width: 900px) { .mz-r2 { grid-template-columns: 1fr; } }
+.mz-distr { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding-top: 14px; }
+.mz-dcol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.mz-dbar { width: 100%; border-radius: 5px 5px 0 0; min-height: 3px; display: flex; align-items: flex-start; justify-content: center; position: relative; transition: height .3s; }
+.mz-dbar span { position: absolute; top: -17px; font-size: 11px; font-weight: 700; font-family: var(--font-mono); color: var(--text-secondary); }
+.mz-dlab { font-size: 10px; color: var(--text-muted); margin-top: 6px; font-family: var(--font-mono); }
+.mz-secmap { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.mz-sm { padding: 12px; border-radius: 8px; text-align: center; }
+.mz-sm-n { font-size: 11.5px; color: var(--text-primary); }
+.mz-sm-v { font-size: 18px; font-weight: 800; font-family: var(--font-mono); margin-top: 3px; }
 
 /* stub */
 .mz-stub { text-align: center; padding: 80px 20px; }

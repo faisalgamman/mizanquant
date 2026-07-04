@@ -327,25 +327,78 @@ function useGet(url) {
 const verdictOf = (s) => s >= 72 ? ["STRONG BUY", POS] : s >= 55 ? ["BUY", POS] : s >= 38 ? ["WATCH", WARN] : ["AVOID", MUT];
 
 function ScreenerView() {
-  const dp = useGet("/api/screener/deep-picks?limit=40");
+  const dp = useGet("/api/screener/deep-picks?limit=200");
   const rows = (dp && dp.results) || [];
-  const [halalOnly, setHO] = useState(false);
-  const shown = halalOnly ? rows.filter(r => r.is_halal) : rows;
+  const [tab, setTab] = useState("all");
+  const [q, setQ] = useState("");
+  const [sortK, setSortK] = useState("composite_score");
+  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"]];
+  let shown = rows.filter(r => (tab === "all" || (tab === "halal" && r.is_halal) || (tab === "buy" && (r.composite_score || 0) >= 55))
+    && (!q || (r.symbol || "").toUpperCase().includes(q.toUpperCase()) || (r.company || "").toUpperCase().includes(q.toUpperCase())));
+  shown = [...shown].sort((a, b) => (b[sortK] || 0) - (a[sortK] || 0));
+
+  const dist = [0, 0, 0, 0, 0]; rows.forEach(r => dist[Math.min(4, Math.floor((r.composite_score || 0) / 20))]++);
+  const distMax = Math.max(...dist, 1);
+  const sec = {}; rows.forEach(r => { const k = r.sector || "أخرى"; (sec[k] = sec[k] || []).push(r.composite_score || 0); });
+  const secAvg = Object.entries(sec).map(([k, v]) => ({ sec: k, avg: v.reduce((a, x) => a + x, 0) / v.length, n: v.length })).sort((a, b) => b.avg - a.avg);
+  const avg = rows.length ? rows.reduce((a, r) => a + (r.composite_score || 0), 0) / rows.length : 0;
+  const avgMom = rows.length ? rows.reduce((a, r) => a + (r.score_mom121 || 0), 0) / rows.length : 0;
+
+  const exportCsv = () => {
+    const hdr = ["symbol", "company", "sector", "price", "composite", "mom121", "tech", "fund", "halal"];
+    const lines = [hdr.join(",")].concat(shown.map(r => [r.symbol, '"' + (r.company || "") + '"', r.sector, r.price, r.composite_score, r.score_mom121, r.score_tech, r.score_fund, r.is_halal].join(",")));
+    const a = document.createElement("a"); a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(lines.join("\n")); a.download = "mizan_screener.csv"; a.click();
+  };
+  const secCol = (v) => v >= 75 ? "rgba(74,222,128,0.22)" : v >= 65 ? "rgba(251,191,36,0.18)" : "rgba(248,113,113,0.18)";
+
   return (
     <div className="mz-view">
-      <Panel title={"المسح الحلال — " + rows.length + " سهم"} right={<label className="mz-toggle"><input type="checkbox" checked={halalOnly} onChange={e => setHO(e.target.checked)} /> حلال فقط</label>}>
-        {rows.length ? (
-          <table className="mz-tbl mz-tbl-wide">
-            <thead><tr><th className="tl">الرمز</th><th className="tl">القطاع</th><th>السعر</th><th>المركّب</th><th>الإشارة</th><th>زخم 12-1</th><th>تقني</th><th>أساسي</th><th>حلال</th></tr></thead>
-            <tbody>{shown.map((r, i) => { const [vd, vc] = verdictOf(r.composite_score || 0); return (
-              <tr key={i}><td className="tl mz-fn">{r.symbol}<div className="mz-dim2">{r.company || ""}</div></td>
-                <td className="tl mz-dim2">{r.sector || "—"}</td><td>{money(r.price)}</td>
-                <td style={{ color: (r.composite_score || 0) >= 55 ? POS : "inherit", fontWeight: 700 }}>{Math.round(r.composite_score || 0)}</td>
-                <td style={{ color: vc }}>{vd}</td><td>{num(r.score_mom121, 0)}</td><td>{num(r.score_tech, 0)}</td><td>{num(r.score_fund, 0)}</td>
-                <td>{r.is_halal ? "✓" : "—"}</td></tr>); })}</tbody>
-          </table>
-        ) : <div className="mz-empty">…يمسح الكون الحلال</div>}
-      </Panel>
+      <div className="mz-ana-top">
+        <div className="mz-tabs">{TABS.map(([k, l]) => <button key={k} className={"mz-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</button>)}</div>
+        <div className="mz-dim3">إجمالي النتائج <b style={{ color: "var(--text-primary)" }}>{shown.length}</b></div>
+      </div>
+      <div className="mz-ana-wrap">
+        <div className="mz-ana-main">
+          <Panel right={<div className="mz-sort">فرز: {[["composite_score", "الدرجة"], ["score_mom121", "الزخم"], ["score_fund", "الأساسي"]].map(([k, l]) => <button key={k} className={"mz-rg" + (sortK === k ? " on" : "")} onClick={() => setSortK(k)}>{l}</button>)}</div>} title={<input className="mz-inp" style={{ width: 200 }} placeholder="بحث رمز أو اسم…" value={q} onChange={e => setQ(e.target.value)} />}>
+            {rows.length ? (
+              <table className="mz-tbl mz-tbl-wide">
+                <thead><tr><th className="tl">الرمز</th><th className="tl">القطاع</th><th>السعر</th><th>التوصية</th><th>الدرجة</th><th>زخم</th><th>تقني</th><th>أساسي</th><th>حلال</th></tr></thead>
+                <tbody>{shown.slice(0, 60).map((r, i) => { const [vd, vc] = verdictOf(r.composite_score || 0); return (
+                  <tr key={i}><td className="tl mz-fn">{r.symbol}<div className="mz-dim2">{r.company || ""}</div></td>
+                    <td className="tl mz-dim2">{r.sector || "—"}</td><td>{money(r.price)}</td>
+                    <td><span className="mz-vd" style={{ color: vc, borderColor: vc }}>{vd}</span></td>
+                    <td><span className="mz-score" style={{ color: (r.composite_score || 0) >= 55 ? POS : (r.composite_score || 0) >= 38 ? WARN : NEG }}>{Math.round(r.composite_score || 0)}</span></td>
+                    <td>{num(r.score_mom121, 0)}</td><td>{num(r.score_tech, 0)}</td><td>{num(r.score_fund, 0)}</td><td>{r.is_halal ? "✓" : "—"}</td></tr>); })}</tbody>
+              </table>
+            ) : <div className="mz-empty">…يمسح الكون</div>}
+          </Panel>
+          <div className="mz-r2">
+            <Panel title="توزيع الدرجات">
+              <div className="mz-distr">{dist.map((v, i) => { const cols = [NEG, NEG, WARN, POS, POS]; return (
+                <div className="mz-dcol" key={i}><div className="mz-dbar" style={{ height: (v / distMax * 100) + "%", background: cols[i] }}><span>{v}</span></div>
+                  <div className="mz-dlab">{i * 20}-{i * 20 + 20}</div></div>); })}</div>
+            </Panel>
+            <Panel title="خريطة القطاعات (متوسط الدرجة)">
+              <div className="mz-secmap">{secAvg.slice(0, 8).map((s, i) => (
+                <div className="mz-sm" key={i} style={{ background: secCol(s.avg) }}><div className="mz-sm-n">{s.sec}</div><div className="mz-sm-v">{Math.round(s.avg)}</div></div>))}</div>
+            </Panel>
+          </div>
+        </div>
+        <aside className="mz-ana-rail">
+          <Panel title="تصنيفات سريعة">
+            <div className="mz-tags">{[["composite_score", "الأعلى درجة"], ["score_mom121", "الأعلى زخم"], ["score_fund", "الأقوى أساساً"], ["score_tech", "الأقوى تقنياً"]].map(([k, l]) => (
+              <button key={k} className={"mz-tag2" + (sortK === k ? " on" : "")} onClick={() => setSortK(k)}>{l}</button>))}</div>
+          </Panel>
+          <Panel title="إحصائيات الماسح">
+            <div className="mz-dl">
+              {[["إجمالي النتائج", rows.length], ["متوسّط الدرجة", num(avg, 0)], ["متوسّط الزخم", num(avgMom, 1)],
+              ["أفضل قطاع", secAvg[0] ? secAvg[0].sec : "—"], ["متوافقة شرعاً", rows.filter(r => r.is_halal).length]].map(([l, v], i) => (
+                <div className="mz-dl-r" key={i}><span className="mz-dl-l">{l}</span><span className="mz-dl-v">{v}</span></div>))}
+            </div>
+            <button className="mz-btn gold" style={{ marginTop: 10 }} onClick={exportCsv}>⬇ تصدير النتائج (CSV)</button>
+          </Panel>
+        </aside>
+      </div>
     </div>
   );
 }
