@@ -5122,6 +5122,49 @@ async def screener_daytrade(limit: int = Query(30, ge=5, le=60)):
     return {"research_only": True, "status": "scanning", "results": []}
 
 
+_pairs_scanning = False
+
+
+@app.get("/api/screener/pairs")
+async def screener_pairs(limit: int = Query(20, ge=4, le=40)):
+    """RESEARCH ONLY — currently cointegrated within-sector pairs (relative-value view).
+
+    FAST read: returns the pairs_scanner's CACHED result (memory → disk) without scanning —
+    a cold cointegration scan is >2 min, so it must never run on the request path. If no cache
+    exists yet, kicks a single-flight background scan (lives in the web process, not SSH) and
+    returns {status:"scanning"} immediately. Halal long-only: this is informational relative-
+    value context; no short is ever emitted, and it never touches the ledgers or trade path.
+    """
+    try:
+        from app.services.pairs_scanner import cached_pairs, last_scan_stats, find_cointegrated_pairs
+    except Exception as e:
+        return {"research_only": True, "error": str(e), "results": []}
+
+    pairs = await asyncio.to_thread(cached_pairs, limit)
+    if pairs is not None:
+        rows = [p.as_dict() for p in pairs]
+        return {"research_only": True, "source": "cache", "count": len(rows),
+                "results": rows, "diagnostics": last_scan_stats()}
+
+    global _pairs_scanning
+    if not _pairs_scanning:
+        _pairs_scanning = True
+
+        def _run():
+            global _pairs_scanning
+            try:
+                find_cointegrated_pairs(force_refresh=True)   # populates memory + disk cache
+            except Exception as e:
+                logger.warning("pairs scan failed: %s", e)
+            finally:
+                _pairs_scanning = False
+
+        import threading
+        threading.Thread(target=_run, daemon=True, name="pairs-scan").start()
+
+    return {"research_only": True, "status": "scanning", "results": []}
+
+
 # ---------------------------------------------------------------------------
 # Monte-Carlo forecast risers — top stocks by expected upside (probabilistic)
 # ---------------------------------------------------------------------------

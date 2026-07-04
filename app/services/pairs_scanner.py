@@ -103,6 +103,24 @@ def last_scan_stats() -> dict:
     return dict(_last_scan_stats)
 
 
+def cached_pairs(max_pairs: int | None = None) -> list["PairReport"] | None:
+    """Return the cached cointegrated pairs (memory → disk) WITHOUT ever scanning.
+
+    Returns None when no cache exists (caller should kick a background scan and show a
+    'scanning' state). This is the fast, UI-safe read — the full scan is >2 min cold, so
+    the live endpoint must never call find_cointegrated_pairs() on the request path."""
+    global _cache_pairs, _cache_ts
+    max_pairs = max_pairs if max_pairs is not None else PAIRS_MAX_PAIRS
+    if _cache_pairs is not None and (time.time() - _cache_ts) < PAIRS_SCAN_TTL:
+        return _cache_pairs[:max_pairs]
+    disk = _load_disk_cache()
+    if disk is not None:
+        _cache_pairs = disk
+        _cache_ts = time.time()
+        return disk[:max_pairs]
+    return None
+
+
 # ── Data object ───────────────────────────────────────────────────────────────
 
 @dataclass

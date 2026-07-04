@@ -360,12 +360,17 @@ function ScreenerView() {
   const _rgKey = (_rgo && typeof _rgo === "object") ? _rgo.dominant : (typeof _rgo === "string" ? _rgo : (rg && (rg.state || rg.label)));
   const regimeTxt = _rgKey ? (RGMAP[_rgKey] || _rgKey) : null;
   const bookMult = rg && (rg.book_multiplier != null ? rg.book_multiplier : (rg.book_mult != null ? rg.book_mult : (_rgo && typeof _rgo === "object" ? _rgo.book_mult : null)));
-  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"], ["explosion", "⚡ انفجار يومي"]];
+  const TABS = [["all", "كل الأسهم"], ["halal", "متوافقة شرعاً"], ["buy", "توصية شراء"], ["fav", "⭐ المفضلة"], ["explosion", "⚡ انفجار يومي"], ["pairs", "🔗 الأزواج"]];
   const isExpl = tab === "explosion";
+  const isPairs = tab === "pairs";
   const dtRes = useGet(isExpl ? "/api/screener/daytrade?limit=40" : null);
   let exl = ((dtRes && dtRes.results) || []).filter(r => !q || (r.symbol || "").toUpperCase().includes(q.toUpperCase()));
   const exlKey = ["explosion_score", "rvol", "momentum_pct", "change_pct", "gap_pct", "price", "vol_expansion"].includes(sortK) ? sortK : "explosion_score";
   exl = [...exl].sort((a, b) => { const d = (b[exlKey] || 0) - (a[exlKey] || 0); return sortDir === "asc" ? -d : d; });
+  const prRes = useGet(isPairs ? "/api/screener/pairs?limit=30" : null);
+  let prs = ((prRes && prRes.results) || []).filter(r => !q || (r.pair || "").toUpperCase().includes(q.toUpperCase()));
+  const prKey = ["zscore", "pvalue", "half_life_bars", "hedge_ratio"].includes(sortK) ? sortK : "zscore";
+  prs = [...prs].sort((a, b) => { const va = prKey === "zscore" ? Math.abs(a[prKey] || 0) : (a[prKey] || 0); const vb = prKey === "zscore" ? Math.abs(b[prKey] || 0) : (b[prKey] || 0); return sortDir === "asc" ? va - vb : vb - va; });
   const sectors = Array.from(new Set(rows.map(r => r.sector).filter(Boolean))).sort();
 
   const applyCfg = (c) => { if (c.tab != null) setTab(c.tab); if (c.sortK) setSortK(c.sortK); if (c.secF != null) setSecF(c.secF); if (c.pxMin != null) setPxMin(c.pxMin); if (c.scMin != null) setScMin(c.scMin); };
@@ -415,9 +420,38 @@ function ScreenerView() {
         {activeF > 0 && <button className="mz-rg" onClick={resetF}>مسح الفلاتر ({activeF})</button>}
         <button className="mz-rg on" onClick={saveCurrent}>★ حفظ الماسح</button>
       </div>}
-      <div className={"mz-ana-wrap" + (isExpl ? " mz-wrap-full" : "")}>
+      <div className={"mz-ana-wrap" + ((isExpl || isPairs) ? " mz-wrap-full" : "")}>
         <div className="mz-ana-main">
-          {isExpl ? (
+          {isPairs ? (
+          <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث زوج…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">🔗 أزواج متكاملة (تكامل مشترك داخل القطاع) · بحثيّ · طويل فقط</span>}>
+            {!prRes ? <div className="mz-empty">…يقرأ الأزواج المُخزّنة</div> : (prRes.status === "scanning") ? <div className="mz-empty">…يمسح الأزواج في الخلفية (قد يستغرق ~دقيقتين — عُد بعد قليل)</div> : prs.length ? (
+              <table className="mz-tbl mz-tbl-wide mz-tbl-pro">
+                <thead><tr>
+                  <th className="tl">الزوج (Y / X)</th>
+                  <th className="tl">القطاع</th>
+                  <th className="mz-sh" onClick={() => sortByCol("zscore")}>|z| الانحراف{arrow("zscore")}</th>
+                  <th>الإشارة</th>
+                  <th className="mz-sh" onClick={() => sortByCol("pvalue")}>p-value{arrow("pvalue")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("half_life_bars")}>نصف العمر{arrow("half_life_bars")}</th>
+                  <th className="mz-sh" onClick={() => sortByCol("hedge_ratio")}>نسبة التحوّط{arrow("hedge_ratio")}</th>
+                  <th>OOS</th>
+                </tr></thead>
+                <tbody>{prs.slice(0, 40).map((r) => { const z = r.zscore || 0; const az = Math.abs(z); const hot = az >= 2;
+                  const sig = az < 1 ? ["محايد", MUT] : z >= 2 ? ["اشترِ X", POS] : z <= -2 ? ["اشترِ Y", POS] : ["راقب", WARN];
+                  return (<tr key={r.pair}>
+                    <td className="tl mz-fn">{r.y_symbol} / {r.x_symbol}</td>
+                    <td className="tl mz-dim2">{r.sector || "—"}</td>
+                    <td><span className="mz-score" style={{ color: hot ? POS : az >= 1 ? WARN : MUT }}>{num(z, 2)}</span></td>
+                    <td><span className="mz-vd" style={{ color: sig[1], borderColor: sig[1] }}>{sig[0]}</span></td>
+                    <td className="mz-dim2">{num(r.pvalue, 3)}</td>
+                    <td className="mz-dim2">{num(r.half_life_bars, 0)} شمعة</td>
+                    <td className="mz-dim2">{num(r.hedge_ratio, 2)}</td>
+                    <td>{r.oos_pvalue != null ? (r.oos_pvalue <= 0.05 ? "✓" : "—") : "·"}</td>
+                  </tr>); })}</tbody>
+              </table>
+            ) : <div className="mz-empty">لا أزواج متكاملة الآن — {(prRes.diagnostics && prRes.diagnostics.n_candidate_pairs) ? "المرشّحات لم تجتز البوّابات" : "قد يكون محرّك الإحصاء غير متاح"}</div>}
+          </Panel>
+          ) : isExpl ? (
           <Panel title={<input className="mz-inp" style={{ width: 220 }} placeholder="بحث رمز…" value={q} onChange={e => setQ(e.target.value)} />} right={<span className="mz-dim3">⚡ ماسح انفجار لحظي · بحثيّ فقط · مستقلّ عن الحلال</span>}>
             {!dtRes ? <div className="mz-empty">…يمسح الانفجارات</div> : exl.length ? (
               <table className="mz-tbl mz-tbl-wide mz-tbl-pro">
@@ -564,7 +598,7 @@ function ScreenerView() {
           </Panel>
           </React.Fragment>)}
         </div>
-        {!isExpl && <aside className="mz-ana-rail">
+        {!isExpl && !isPairs && <aside className="mz-ana-rail">
           <Panel title="الفلاتر النشطة">
             <div className="mz-tags">
               <span className="mz-tag2">{tab === "all" ? "كل الأسهم" : tab === "halal" ? "متوافقة شرعاً" : "توصية شراء"}</span>
