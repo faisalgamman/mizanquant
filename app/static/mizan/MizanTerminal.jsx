@@ -735,6 +735,8 @@ function FactorsView() {
   const fic = useGet("/api/factor-ic-multi");
   const ricd = useGet("/api/regime-ic?horizon_days=10");
   const sq = useGet("/api/selection-quality");
+  const cc = useGet("/api/candidate-composites");
+  const ccands = cc && cc.candidates ? Object.entries(cc.candidates) : [];
   const attr = fic && fic.attribution && fic.attribution.factors;
   const gate = (sq && sq.gate) || {}; const rec = gate.recommendation;
   const facMap = { mom_12_1: "Momentum 12-1", rs: "RS vs SPY", above_ema20: "EMA20 Filter", rsi: "RSI (14)", atr_pct: "Volatility", dist_ema20_pct: "Dist EMA20" };
@@ -771,6 +773,22 @@ function FactorsView() {
           <div className="mz-note">{rec ? rec.reason : "…يُعاير"}</div>
         </Panel>
       </div>
+      <Panel title={"سباق المركّبات المرشّحة — ظلّي/بحثيّ" + (cc && cc.labelled_dates ? " · " + cc.labelled_dates + " يوم" : "")} right={<span className="mz-dim3">IC أماميّ مقابل الزخم · لا يمسّ التسجيل الحيّ</span>}>
+        {ccands.length ? (<div>
+          <table className="mz-tbl mz-tbl-wide">
+            <thead><tr><th className="tl">المركّب المرشّح</th><th>IC 5ي</th><th>IC 10ي</th><th>IC 20ي</th><th>t (5ي)</th><th>الأيام</th></tr></thead>
+            <tbody>{ccands.map(([k, v]) => { const base = k === "mom"; return (
+              <tr key={k} style={base ? { background: "var(--accent-dim)" } : null}>
+                <td className="tl mz-fn">{v.label}{base && <span style={{ color: ACC }}> ★</span>}</td>
+                <td style={{ color: icCol((v.h["5"] || {}).mean_ic) }}>{num((v.h["5"] || {}).mean_ic, 3)}</td>
+                <td style={{ color: icCol((v.h["10"] || {}).mean_ic) }}>{num((v.h["10"] || {}).mean_ic, 3)}</td>
+                <td style={{ color: icCol((v.h["20"] || {}).mean_ic) }}>{num((v.h["20"] || {}).mean_ic, 3)}</td>
+                <td>{num((v.h["5"] || {}).t, 2)}</td>
+                <td className="mz-dim2">{(v.h["10"] || {}).n_dates || 0}</td></tr>); })}</tbody>
+          </table>
+          <div className="mz-note ql-dim">الأساس (الزخم الخام ★) هو الأقوى والأثبت عبر كل الآفاق؛ المرشّحات الارتداديّة تساعد قصيراً فقط ثم تنهار. لا يترقّى أيّ مركّب للتسجيل الحيّ إلا بقرارك، وبعد أن يُثبت تفوّقاً أماميّاً مستقرّاً — قياس أوّلاً دائماً.</div>
+        </div>) : <div className="mz-empty">…يحسب سباق المركّبات الظلّي</div>}
+      </Panel>
     </div>
   );
 }

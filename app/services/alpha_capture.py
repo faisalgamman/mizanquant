@@ -522,6 +522,90 @@ def _factor_verdict(factor: str, ir):
 
 
 _MULTI_CACHE = {"at": 0.0, "key": None, "data": None}
+_CAND_CACHE = {"at": 0.0, "key": None, "data": None}
+
+
+def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
+    """Forward IC of CANDIDATE technical composites vs the plain-momentum baseline, measured on
+    the snapshot panel (per-date cross-sectional z-score → Spearman IC vs forward return). This
+    is a SHADOW factor race — research/measurement only, it NEVER touches the live composite or
+    any order. Cached ~10 min; only changes as the daily capture/labeling adds data.
+
+    Candidates come from the on-panel measurement: plain 12-1 momentum is the robust anchor; the
+    mean-reversion tweaks help short-horizon at best. Surfacing them lets the edge earn its way
+    in by evidence over time before any weighting decision (which stays the user's call)."""
+    import time as _t
+    key = tuple(int(h) for h in horizons)
+    now = _t.time()
+    if _CAND_CACHE["data"] is not None and _CAND_CACHE["key"] == key and (now - _CAND_CACHE["at"]) < 600:
+        return _CAND_CACHE["data"]
+    import numpy as np
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    from app.services.signal_calibration import _spearman
+
+    hs = [str(int(h)) for h in horizons]
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if isinstance(fac, dict) and isinstance(fwd, dict):
+            by_date.setdefault(sd, []).append((fac, fwd))
+
+    def _z(vals):
+        a = np.asarray(vals, dtype=float)
+        s = a.std()
+        return (a - a.mean()) / s if s > 1e-9 else a * 0.0
+
+    NEED = ("mom_12_1", "above_ema20", "rsi", "dist_ema20_pct")
+    CANDS = {
+        "mom": lambda Z: Z["mom_12_1"],
+        "fresh_ema": lambda Z: Z["mom_12_1"] - Z["above_ema20"],
+        "combo": lambda Z: Z["mom_12_1"] - Z["above_ema20"] - 0.5 * Z["rsi"],
+        "dip": lambda Z: Z["mom_12_1"] - Z["rsi"],
+        "fresh_dist": lambda Z: Z["mom_12_1"] - Z["dist_ema20_pct"],
+    }
+    LABELS = {"mom": "الزخم الخام (أساس)", "fresh_ema": "زخم − فوق EMA20",
+              "combo": "مركّب (زخم − EMA20 − ½·RSI)", "dip": "زخم − RSI", "fresh_dist": "زخم − امتداد"}
+    acc = {c: {h: [] for h in hs} for c in CANDS}
+    for _sd, items in by_date.items():
+        good = [(fa, fw) for fa, fw in items if all(isinstance(fa.get(k), (int, float)) for k in NEED)]
+        if len(good) < 6:
+            continue
+        Z = {k: _z([fa.get(k) for fa, fw in good]) for k in NEED}
+        for cname, fn in CANDS.items():
+            score = fn(Z)
+            for h in hs:
+                ys = [(float(score[i]), float(good[i][1].get(h)))
+                      for i in range(len(good)) if isinstance(good[i][1].get(h), (int, float))]
+                if len(ys) >= 6:
+                    ic = _spearman([p[0] for p in ys], [p[1] for p in ys])
+                    if ic is not None:
+                        acc[cname][h].append(ic)
+
+    out = {}
+    max_dates = 0
+    for cname in CANDS:
+        per_h = {}
+        for h in hs:
+            a = np.asarray(acc[cname][h], dtype=float)
+            n = len(a)
+            if n:
+                sd_ = float(a.std(ddof=1)) if n > 1 else 0.0
+                per_h[h] = {"mean_ic": round(float(a.mean()), 4),
+                            "t": round(float(a.mean() / (sd_ / np.sqrt(n))), 2) if sd_ > 0 else None,
+                            "n_dates": n}
+                max_dates = max(max_dates, n)
+            else:
+                per_h[h] = {"mean_ic": None, "t": None, "n_dates": 0}
+        out[cname] = {"label": LABELS[cname], "h": per_h}
+    res = {"horizons": [int(h) for h in horizons], "labelled_dates": max_dates, "candidates": out,
+           "note": "Shadow candidate composites — forward IC vs plain-momentum. Research only; never live scoring."}
+    _CAND_CACHE.update(at=now, key=key, data=res)
+    return res
 
 
 def snapshot_attribution_multi(horizons=(5, 10, 20)) -> dict:

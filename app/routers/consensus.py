@@ -370,6 +370,14 @@ async def factor_ic_multi_ep():
     return {"status": capture_status(), "attribution": snapshot_attribution_multi()}
 
 
+@router.get("/api/candidate-composites")
+async def candidate_composites_ep():
+    """Shadow factor race — forward IC of candidate technical composites vs plain momentum,
+    measured on the snapshot panel. Research/measurement only; never touches live scoring."""
+    from app.services.alpha_capture import candidate_composites_ic
+    return candidate_composites_ic()
+
+
 @router.get("/api/gate-ema20-ab")
 async def gate_ema20_ab_ep(horizon_days: int = 20, min_rs: float | None = None):
     """Shadow A/B of the weekly gate's 'above EMA20' requirement (with-trend vs counter-trend
