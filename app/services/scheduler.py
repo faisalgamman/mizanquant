@@ -210,6 +210,38 @@ def run_full_precompute(triggered_by: str = "scheduler", technical_only: bool = 
             _ws._run_screener_bg(list(_ws._SMART_UNIVERSE))   # monthly composite (technical-fresh)
         except Exception as _re:
             logger.warning("precompute (%s): composite/universe refresh failed: %s", mode, _re)
+
+        # Off-session only (full mode) — keep the manual technical-only rescan fast.
+        if not technical_only:
+            # Pre-warm the pairs cache so the 🔗 tab is never cold (a cold cointegration scan is
+            # ~4 min; off-session there's plenty of time). Best-effort — never breaks the cycle.
+            try:
+                from app.services.pairs_scanner import find_cointegrated_pairs, last_scan_stats
+                _pairs = find_cointegrated_pairs(force_refresh=True)
+                _ws._cache_set("pairs_scan", {"results": [p.as_dict() for p in _pairs],
+                                              "diagnostics": last_scan_stats()})
+                logger.info("Precompute: warmed pairs_scan (%d pairs)", len(_pairs))
+            except Exception as _pe:
+                logger.warning("precompute (%s): pairs warm failed: %s", mode, _pe)
+
+            # Evaluate scan alerts against the freshest cached picks so entries fire in the
+            # background too (the header bell also polls every 60s for anyone viewing). Read-only
+            # + diff vs baseline — safe and idempotent. Never breaks the cycle.
+            try:
+                from app.services.alerts_store import evaluate as _eval_alerts
+                _picks = None
+                for _k in ("deep_picks_200_composite", "deep_picks_40_composite", "deep_picks_15_composite"):
+                    _c = _ws._cache_get(_k, max_age=86400)
+                    if _c and _c.get("results"):
+                        _picks = _c["results"]
+                        break
+                if _picks:
+                    _fired = _eval_alerts(_picks)
+                    if _fired:
+                        logger.info("Precompute: scan alerts fired %d event(s)", len(_fired))
+            except Exception as _ae:
+                logger.warning("precompute (%s): alerts eval failed: %s", mode, _ae)
+
         scheduler_metrics.record_cycle_end("full_precompute", success=True)
         logger.info("Precompute done (%s · %s): %s; active_halal=%s", mode, triggered_by, out, active)
         _FULL_PRECOMPUTE_STATE.update(status="done", phase="done")
