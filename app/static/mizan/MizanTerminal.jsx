@@ -384,8 +384,12 @@ function Treemap({ items, w = 680, h = 300 }) {
 }
 
 function ScreenerView() {
-  const dp = useGet("/api/screener/deep-picks?limit=200");
+  const [tick, setTick] = useState(0);
+  const [lastUp, setLastUp] = useState(null);
+  const dp = useGet("/api/screener/deep-picks?limit=200&_t=" + tick);
   const rows = (dp && dp.results) || [];
+  useEffect(() => { if (dp && dp.results) setLastUp(new Date()); }, [dp]);
+  useEffect(() => { const iv = setInterval(() => setTick(t => t + 1), 300000); return () => clearInterval(iv); }, []);  // auto-refresh every 5 min
   const [tab, setTab] = useState("all");
   const [q, setQ] = useState("");
   const [sortK, setSortK] = useState("composite_score");
@@ -477,7 +481,11 @@ function ScreenerView() {
     <div className="mz-view">
       <div className="mz-ana-top">
         <div className="mz-tabs">{TABS.map(([k, l]) => <button key={k} className={"mz-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</button>)}</div>
-        <div className="mz-dim3">إجمالي النتائج <b style={{ color: "var(--text-primary)" }}>{isExpl ? exl.length : shown.length}</b></div>
+        <div className="mz-tbl-actions">
+          <button className="mz-rg" onClick={() => setTick(t => t + 1)} title="إعادة جلب أحدث نتائج المسح">↻ تحديث</button>
+          {lastUp && <span className="mz-dim3">آخر تحديث {lastUp.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>}
+          <span className="mz-dim3">النتائج <b style={{ color: "var(--text-primary)" }}>{isExpl ? exl.length : shown.length}</b></span>
+        </div>
       </div>
       {!isExpl && <div className="mz-filters">
         <label className="mz-fl">القطاع<select className="mz-sel" value={secF} onChange={e => setSecF(e.target.value)}><option value="all">كل القطاعات</option>{sectors.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
@@ -699,6 +707,10 @@ function ScreenerView() {
               </div>
               <LineArea data={perf.series.map(p => p.value - 100)} color={(perf.total_return_pct || 0) >= 0 ? POS : NEG} />
               <div className="mz-note">سلّة أعلى {perf.n} أسهم بالتساوي · تاريخي — تصوّر لجودة الاختيار لا سجلّ تداول.</div>
+              {(perf.symbols || []).length ? (<div className="mz-basket">
+                <div className="mz-basket-h">مكوّنات السلّة ({(perf.symbols || []).length} سهم)</div>
+                <div className="mz-basket-tags">{(perf.symbols || []).map(s => <span key={s} className="mz-basket-t" onClick={() => goAnalyze(s, "")} title="افتح التحليل">{s}</span>)}</div>
+              </div>) : null}
             </div>) : <div className="mz-empty">{perf && perf.status && perf.status !== "ok" ? "لا نتائج بعد للحساب" : "…يحسب أداء السلّة"}</div>}
           </Panel>
           <Panel title="إحصائيات الماسح">

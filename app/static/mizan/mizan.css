@@ -264,6 +264,11 @@
 .mz-perf-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .mz-perf-v { font-size: 22px; font-weight: 800; font-family: var(--font-mono); }
 .mz-perf-bench { font-size: 10.5px; color: var(--text-muted); }
+.mz-basket { margin-top: 10px; border-top: 1px solid var(--border-subtle); padding-top: 9px; }
+.mz-basket-h { font-size: 10.5px; color: var(--text-muted); margin-bottom: 6px; }
+.mz-basket-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.mz-basket-t { font-size: 10.5px; font-family: var(--font-mono); padding: 2px 7px; border-radius: 5px; background: var(--bg-raised); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
+.mz-basket-t:hover { color: var(--accent); border-color: var(--accent); }
 
 /* professional screener table */
 .mz-wrap-full { grid-template-columns: 1fr !important; }
