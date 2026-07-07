@@ -988,6 +988,7 @@ function LabView() {
   const sq = useGet("/api/selection-quality");
   const fic = useGet("/api/factor-ic-multi");
   const cc = useGet("/api/candidate-composites");
+  const gc = useGet("/api/gate-config");
   const scanners = (sq && sq.scanners) || [];
   const ov = (sq && sq.overlays) || {};
   const gate = (sq && sq.gate) || {};
@@ -1063,6 +1064,57 @@ function LabView() {
           </div>); }) : <div className="mz-empty">…يقيس أداء الاستراتيجيات</div>}
       </div>
       <div className="mz-note ql-dim">«مقابل السوق» = الفرق بين أداء الاستراتيجية وأداء شراء SPY والانتظار. موجب أخضر = تتفوّق · سالب أحمر = تخسر أمام السوق. «ثقة القياس» تعني كم نحن متأكّدون (ليست ربحاً) — تكبر كلّما زادت الصفقات. أرقام ورقيّة، لا صفقات حقيقيّة.</div>
+
+      {/* Section 3 — what did it learn? */}
+      <div className="mz-sec-h" style={{ marginTop: 26 }}>ماذا تعلّم النظام؟ — اكتشافاته بلغة بسيطة</div>
+      <div className="mz-learn">
+        {(() => { const cards = [];
+          if (bestF && bestF.ic != null) { const c = confidenceOf((facs[bestF.k].h["10"] || {}).ir);
+            cards.push({ ic: "✅", t: "«" + bestF.l + "» أفضل إشارة", d: "الأسهم القويّة بهذه الإشارة تميل للاستمرار في الربح.", conf: c, col: POS }); }
+          if (worstF && worstF.ic != null && worstF.ic < 0) { const c = confidenceOf((facs[worstF.k].h["10"] || {}).ir);
+            cards.push({ ic: "⚠️", t: "«" + worstF.l + "» تؤذي", d: "الاعتماد عليها يجعل النظام يشتري في الوقت الخطأ (سعر ممتدّ).", conf: c, col: WARN }); }
+          // best shadow experiment by top-bucket excess (10d)
+          if (cc && cc.candidates) { const cand = Object.entries(cc.candidates).filter(([k]) => k !== "mom")
+              .map(([k, v]) => ({ k, l: v.label, e: (v.h["10"] || {}).top_excess, tt: (v.h["10"] || {}).top_t })).filter(x => x.e != null).sort((a, b) => b.e - a.e)[0];
+            if (cand) { const strong = Math.abs(cand.tt || 0) >= 2;
+              cards.push({ ic: "🔬", t: "نجرّب وصفات جديدة", d: "أفضلها للشراء: «" + cand.l + "» (فائض " + (cand.e >= 0 ? "+" : "") + num(cand.e, 2) + "% للقمّة). " + (strong ? "أثبتت تفوّقاً — جاهزة لمراجعتك." : "لكن الدلالة لم تنضج بعد — القياس مستمرّ."), conf: confidenceOf(cand.tt), col: ACC }); } }
+          return cards.length ? cards.map((c, i) => (
+            <div className="mz-learn-c" key={i}>
+              <div className="mz-learn-t"><span className="mz-learn-ic">{c.ic}</span> {c.t}</div>
+              <div className="mz-learn-d">{c.d}</div>
+              <div className="mz-sc-conf-l">مدى التأكّد: <b>{c.conf.label}</b></div>
+              <div className="mz-sc-conf-bar"><div style={{ width: c.conf.pct + "%", background: c.conf.strong ? c.col : MUT }} /></div>
+            </div>)) : <div className="mz-empty">…يستخلص الاكتشافات</div>;
+        })()}
+      </div>
+
+      {/* Section 4 — how does it fix itself? */}
+      <div className="mz-sec-h" style={{ marginTop: 26 }}>كيف يصلّح نفسه؟ — قرارات تنتظرك + سجلّ التصحيح</div>
+      <div className="mz-r2">
+        <Panel title="📥 قرارات تنتظرك">
+          <div className="mz-inbox">
+            <div className="mz-inbox-c">
+              <div className="mz-inbox-t">عتبة الدخول — MIN_RS {gc ? num(gc.min_rs, 1) : num(gate.current_min_rs, 1)} ({(gc && gc.source) === "approved" || gate.source === "approved" ? "معتمَدة" : "افتراضية"})</div>
+              <div className="mz-inbox-d">{gate.recommendation ? ("القياس يقترح: " + (gate.recommendation.reason || "مراجعة العتبة")) : "القياس لا يقترح تغييراً الآن."}</div>
+              <button className="mz-btn" style={{ maxWidth: 150, marginTop: 6 }} onClick={() => { location.hash = "settings"; }}>مراجعة في الإعدادات ←</button>
+            </div>
+            <div className="mz-inbox-c">
+              <div className="mz-inbox-t">وصفات المركّب (الظلّ)</div>
+              <div className="mz-inbox-d">لا وصفة أثبتت تفوّقاً بثقة كافية بعد — لن يُطلب قرارك إلا حين تنضج الدلالة. راقبها في «العوامل».</div>
+              <button className="mz-btn" style={{ maxWidth: 150, marginTop: 6 }} onClick={() => { location.hash = "factors"; }}>سباق الوصفات ←</button>
+            </div>
+          </div>
+        </Panel>
+        <Panel title="📖 دفتر التصحيح — ماذا غيّر النظام ولماذا">
+          {gc && (gc.history || []).length ? (
+            <div className="mz-ledger">{(gc.history || []).slice(-6).reverse().map((h, i) => (
+              <div className="mz-ledger-r" key={i}>
+                <span className="mz-ledger-d">{(h.at || "").slice(0, 10)}</span>
+                <span>عتبة الدخول: <b>{h.from != null ? num(h.from, 1) : "—"} → {num(h.to, 1)}</b> <span className="mz-dim2">({h.approved_by || "—"})</span></span>
+              </div>))}</div>
+          ) : <div className="mz-empty">لم يُجرِ النظام تغييراً معتمَداً بعد — كل تعديل ينتظر قرارك. هذا مقصود: القياس يقترح، وأنت تقرّر.</div>}
+        </Panel>
+      </div>
     </div>
   );
 }
