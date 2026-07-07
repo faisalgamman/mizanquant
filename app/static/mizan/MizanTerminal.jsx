@@ -977,8 +977,94 @@ function SettingsView() {
   );
 }
 
+// t-stat → a beginner "confidence" meter: fill % + plain word (certainty, not good/bad).
+function confidenceOf(t) {
+  const a = Math.abs(t || 0);
+  return { pct: Math.min(100, a / 3 * 100), label: a >= 2 ? "مؤكَّد" : a >= 1 ? "يحتاج وقتاً أطول" : "غير مؤكَّد بعد", strong: a >= 2 };
+}
+const TL = { bad: NEG, warn: WARN, good: POS, neutral: MUT };  // traffic-light colors
+
 function LabView() {
-  return <div className="mz-view"><iframe src="/quant-lab" className="mz-iframe" title="مختبر الاستراتيجية" /></div>;
+  const sq = useGet("/api/selection-quality");
+  const fic = useGet("/api/factor-ic-multi");
+  const cc = useGet("/api/candidate-composites");
+  const scanners = (sq && sq.scanners) || [];
+  const ov = (sq && sq.overlays) || {};
+  const gate = (sq && sq.gate) || {};
+  const rg = ov.regime || (sq && sq.regime);
+  const facs = fic && fic.attribution && fic.attribution.factors;
+  // best + worst factor for the LEARN card (by 10d IC)
+  let bestF = null, worstF = null;
+  if (facs) { const fl = { mom_12_1: "الزخم", rs: "القوّة النسبية", above_ema20: "شرط فوق EMA20", rsi: "RSI", dist_ema20_pct: "الامتداد", atr_pct: "التذبذب" };
+    const arr = Object.entries(facs).map(([k, v]) => ({ k, l: fl[k] || k, ic: (v.h && v.h["10"] || {}).mean_ic })).filter(x => x.ic != null);
+    arr.sort((a, b) => b.ic - a.ic); bestF = arr[0]; worstF = arr[arr.length - 1]; }
+  const nCands = cc && cc.candidates ? Object.keys(cc.candidates).length : 0;
+  const capRows = ov.capture_rows, capLab = ov.capture_labelled;
+
+  const LOOP = [
+    { n: "1", tag: "COLLECT", t: "يَجمع", ic: "🔵", desc: "يلتقط صورة للسوق كل يوم ويخزّنها ليتعلّم منها لاحقاً.",
+      big: capRows != null ? Number(capRows).toLocaleString("en") : "…", unit: "لقطة مُجمَّعة · تنمو يوميّاً" },
+    { n: "2", tag: "ANALYZE", t: "يُحلّل", ic: "🟣", desc: "يقيس أيّ إشارة تنبّأت فعلاً بالربح — لا بالرأي، بل بالأرقام.",
+      big: capLab != null ? Number(capLab).toLocaleString("en") : "…", unit: "لقطة مُقاسة بنتيجتها" },
+    { n: "3", tag: "LEARN", t: "يتعلّم", ic: "🟡", desc: bestF ? ("اكتشف أن «" + bestF.l + "» أفضل إشارة، و«" + (worstF ? worstF.l : "") + "» تؤذي.") : "يستخلص أيّ الإشارات تنفع وأيّها تضرّ.",
+      big: bestF ? bestF.l : "…", unit: "أقوى إشارة مُكتشَفة" },
+    { n: "4", tag: "CORRECT", t: "يُصلّح", ic: "🟢", desc: "يجرّب وصفات أفضل في الظلّ، ولا يغيّر شيئاً حيّاً إلا بموافقتك.",
+      big: nCands ? nCands : "…", unit: "وصفات تُختبَر الآن" },
+  ];
+
+  return (
+    <div className="mz-view">
+      <div className="mz-ana-top">
+        <div className="mz-crumb">🧪 <b>مختبر الفهم</b> — كيف يعمل نظامك ونتائجه، بلغة بسيطة</div>
+        <a className="mz-btn" style={{ maxWidth: 170 }} href="/quant-lab" target="_blank" rel="noopener">🔬 المختبر المتقدّم ←</a>
+      </div>
+
+      {/* daily one-liner */}
+      <div className="mz-day-line">
+        📋 <b>حالة اليوم:</b> النظام {rg && typeof rg === "object" ? "" : ""}
+        {rg ? <span> — السوق <b style={{ color: ACC }}>{(rg && rg.dominant) === "crisis" ? "أزمة" : (rg && rg.dominant) === "calm_bull" ? "هادئ صاعد" : "هادئ/محايد"}</b></span> : ""}
+        {capRows != null && <span> · <b>{Number(capRows).toLocaleString("en")}</b> لقطة في الذاكرة</span>}
+        {gate.current_min_rs != null && <span> · عتبة الدخول <b>MIN_RS {num(gate.current_min_rs, 1)}</b></span>}
+        {gate.recommendation ? <span style={{ color: WARN }}> · ⚠ قرار ينتظرك (اطّلع أدناه)</span> : <span style={{ color: POS }}> · لا قرارات عاجلة</span>}
+      </div>
+
+      {/* Section 1 — the living loop */}
+      <div className="mz-sec-h">كيف يعمل النظام؟ — حلقة تتكرّر كل يوم</div>
+      <div className="mz-loop">
+        {LOOP.map((c, i) => (<React.Fragment key={c.n}>
+          <div className="mz-loop-c">
+            <div className="mz-loop-tag">{c.ic} {c.tag}</div>
+            <div className="mz-loop-t">{c.t}</div>
+            <div className="mz-loop-big">{c.big}</div>
+            <div className="mz-loop-u">{c.unit}</div>
+            <div className="mz-loop-d">{c.desc}</div>
+          </div>
+          {i < LOOP.length - 1 && <div className="mz-loop-arrow">←</div>}
+        </React.Fragment>))}
+      </div>
+
+      {/* Section 2 — does it win? */}
+      <div className="mz-sec-h">هل النظام يربح؟ — مقارنةً بشراء السوق فقط (SPY)</div>
+      <div className="mz-score2">
+        {scanners.length ? scanners.map((s, i) => { const conf = confidenceOf(s.alpha_t); const col = TL[s.color] || MUT;
+          const beat = s.pct_beat_spy; return (
+          <div className="mz-sc-card" key={i} style={{ borderColor: col }}>
+            <div className="mz-sc-top"><div className="mz-sc-name">الماسح {s.name}</div><span className="mz-sc-grade" style={{ background: col }}>{s.grade}</span></div>
+            <div className="mz-sc-label">{s.label}</div>
+            <div className="mz-sc-alpha" style={{ color: (s.alpha || 0) >= 0 ? POS : NEG }}>{(s.alpha || 0) >= 0 ? "+" : ""}{num(s.alpha, 2)}%<span className="mz-sc-vs">مقابل السوق</span></div>
+            <div className="mz-sc-facts">
+              <span>من <b>{s.n}</b> صفقة</span>
+              {beat != null && <span>· <b>{num(beat, 0)}%</b> تفوّقت على السوق</span>}
+            </div>
+            <div className="mz-sc-conf">
+              <div className="mz-sc-conf-l">ثقة القياس: <b>{conf.label}</b></div>
+              <div className="mz-sc-conf-bar"><div style={{ width: conf.pct + "%", background: conf.strong ? col : MUT }} /></div>
+            </div>
+          </div>); }) : <div className="mz-empty">…يقيس أداء الاستراتيجيات</div>}
+      </div>
+      <div className="mz-note ql-dim">«مقابل السوق» = الفرق بين أداء الاستراتيجية وأداء شراء SPY والانتظار. موجب أخضر = تتفوّق · سالب أحمر = تخسر أمام السوق. «ثقة القياس» تعني كم نحن متأكّدون (ليست ربحاً) — تكبر كلّما زادت الصفقات. أرقام ورقيّة، لا صفقات حقيقيّة.</div>
+    </div>
+  );
 }
 
 function ReportsView() {
