@@ -242,6 +242,23 @@ def run_full_precompute(triggered_by: str = "scheduler", technical_only: bool = 
             except Exception as _ae:
                 logger.warning("precompute (%s): alerts eval failed: %s", mode, _ae)
 
+            # Grow the factor panel off-session (the statistical-power lever, DATA_ENGINE_PLAN.md):
+            # a MODERATE, idempotent historical backfill so the new close-only factors gain history
+            # + t-stats rise, WITHOUT pegging shared-cpu-1x during market hours. Capped via env
+            # (BACKFILL_CAP default 150, BACKFILL_PERIOD 2y, warmup 252). Best-effort. Disable with
+            # BACKFILL_OFFSESSION=0. Idempotent (dedup by date+symbol) so repeat runs are cheap.
+            try:
+                import os as _os2
+                if _os2.environ.get("BACKFILL_OFFSESSION", "1").strip().lower() not in ("0", "false", "no"):
+                    from app.services.alpha_capture import backfill_snapshots
+                    _bcap = int(_os2.environ.get("BACKFILL_CAP", "150"))
+                    _bper = _os2.environ.get("BACKFILL_PERIOD", "2y")
+                    _bwu = int(_os2.environ.get("BACKFILL_WARMUP", "252"))
+                    _br = backfill_snapshots(cap=_bcap, period=_bper, warmup=_bwu)
+                    logger.info("Precompute: factor backfill %s", _br)
+            except Exception as _be:
+                logger.warning("precompute (%s): factor backfill failed: %s", mode, _be)
+
         scheduler_metrics.record_cycle_end("full_precompute", success=True)
         logger.info("Precompute done (%s · %s): %s; active_halal=%s", mode, triggered_by, out, active)
         _FULL_PRECOMPUTE_STATE.update(status="done", phase="done")
