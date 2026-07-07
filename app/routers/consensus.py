@@ -290,11 +290,14 @@ async def alpha_capture_ep(horizon_days: int = 10, sector_neutral: bool = False)
 
 
 @router.post("/api/alpha-capture/backfill")
-async def alpha_capture_backfill_ep():
-    """① Kick the look-ahead-safe HISTORICAL backfill of the capture base (2y) in the
-    background — fills IC/attribution/meta with hundreds of dates today. Single-flight."""
+async def alpha_capture_backfill_ep(period: str | None = None, cap: int | None = None,
+                                    warmup: int | None = None):
+    """① Kick the look-ahead-safe HISTORICAL backfill of the capture base in the background —
+    fills IC/attribution/meta with hundreds of dates today. Single-flight. Optional query params
+    (or env BACKFILL_PERIOD/CAP/WARMUP) size a BIG run, e.g. ?period=3y&cap=350&warmup=252 to
+    multiply the panel (the statistical-power lever). Heavy but off the request path."""
     from app.services.alpha_capture import run_backfill_bg
-    return run_backfill_bg()
+    return run_backfill_bg(period=period, cap=cap, warmup=warmup)
 
 
 @router.get("/api/alpha-capture/backfill/status")

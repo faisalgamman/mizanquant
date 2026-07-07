@@ -15,6 +15,75 @@ from datetime import datetime, timezone
 logger = logging.getLogger("screener")
 
 
+def _price_factors(closes, spy_closes=None) -> dict:
+    """Extra CLOSE-ONLY factors (so both the live capture AND the historical backfill compute
+    the SAME set → one measurable panel). Each factor is guarded independently; a short window
+    just omits that factor. Price/volume-derivable-from-closes only — no fundamentals/lookahead.
+    Factor factory (DATA_ENGINE_PLAN.md ph2): 52w-high proximity, residual & risk-adjusted
+    momentum, momentum consistency, downside vol, beta, max-drawdown, range position, 5d reversal."""
+    import numpy as np
+    out: dict = {}
+    try:
+        c = np.asarray(closes, dtype=float)
+        c = c[np.isfinite(c) & (c > 0)]
+        if len(c) < 40:
+            return out
+        px = float(c[-1])
+        # 52-week-high proximity (Grinblatt-Han) — c / trailing-252 max
+        win = c[-252:] if len(c) >= 252 else c
+        hi = float(win.max())
+        if hi > 0:
+            out["hi52_prox"] = round(px / hi, 3)
+        # 6-month max drawdown %
+        w6 = c[-126:] if len(c) >= 126 else c
+        peak = np.maximum.accumulate(w6)
+        out["maxdd_6m"] = round(float((w6 / peak - 1.0).min()) * 100, 2)
+        # position within the last 20-day range (0..1)
+        if len(c) >= 20:
+            w20 = c[-20:]; lo, hh = float(w20.min()), float(w20.max())
+            out["range_pos_20"] = round((px - lo) / (hh - lo), 3) if hh > lo else 0.5
+        # 5-day short-term reversal (negative of recent return — reversal is a known effect)
+        if len(c) >= 6 and c[-6] > 0:
+            out["rev_5d"] = round(-(px / float(c[-6]) - 1.0) * 100, 2)
+        # daily returns → vol / downside vol / risk-adjusted & consistency of momentum
+        r = np.diff(c) / c[:-1]
+        r = r[np.isfinite(r)]
+        if len(r) >= 60:
+            vol = float(r.std() * np.sqrt(252))
+            neg = r[r < 0]
+            if len(neg) > 5:
+                out["downside_vol"] = round(float(neg.std() * np.sqrt(252)) * 100, 2)
+            if len(c) >= 253 and vol > 1e-6:
+                mom121 = float(c[-21] / c[-252] - 1.0)
+                out["sharpe_mom"] = round(mom121 / vol, 3)
+            if len(c) >= 252:
+                seq = c[-252:]
+                blocks = [seq[k + 21] / seq[k] - 1.0 for k in range(0, 231, 21)]
+                if blocks:
+                    out["mom_consistency"] = round(sum(1 for x in blocks if x > 0) / len(blocks), 2)
+        # beta + residual (idiosyncratic) 12-1 momentum vs SPY
+        if spy_closes is not None:
+            s = np.asarray(spy_closes, dtype=float); s = s[np.isfinite(s) & (s > 0)]
+            n = min(len(c), len(s), 120)
+            if n >= 60:
+                rc = np.diff(c[-n:]) / c[-n:][:-1]; rsp = np.diff(s[-n:]) / s[-n:][:-1]
+                m = min(len(rc), len(rsp)); rc, rsp = rc[-m:], rsp[-m:]
+                var = float(rsp.var())
+                if var > 1e-12:
+                    beta = float(np.cov(rc, rsp)[0, 1] / var)
+                    out["beta"] = round(beta, 2)
+                    if len(c) >= 253 and len(s) >= 253:
+                        ms = float(c[-21] / c[-252] - 1.0); mspy = float(s[-21] / s[-252] - 1.0)
+                        out["resid_mom"] = round((ms - beta * mspy) * 100, 2)
+    except Exception:
+        pass
+    return out
+
+
+# factor labels for the factor table (extends _FACTORS below)
+_NEW_FACTORS = ("hi52_prox", "resid_mom", "sharpe_mom", "mom_consistency", "downside_vol", "beta", "maxdd_6m", "range_pos_20", "rev_5d")
+
+
 def _symbol_factors(df, spy_closes) -> dict | None:
     """Point-in-time factors from a price frame's LAST bar (same math as the live weekly
     signals) + 12-1 momentum. None if too short."""
@@ -29,7 +98,7 @@ def _symbol_factors(df, spy_closes) -> dict | None:
         ema20 = float(last.get("_ema20") or 0)
         rs = factor_rs_vs_spy(closes, spy_closes, 63) if spy_closes is not None else None
         mom = factor_momentum_12_1(closes)
-        return {
+        base = {
             "rs": round(float(rs) * 100, 3) if rs is not None else None,
             "rsi": round(float(last.get("_rsi") or 0), 1),
             "above_ema20": 1 if (ema20 and c > ema20) else 0,
@@ -38,6 +107,8 @@ def _symbol_factors(df, spy_closes) -> dict | None:
             "mom_12_1": round(float(mom) * 100, 2) if mom is not None else None,
             "price": round(c, 2),
         }
+        base.update(_price_factors(closes, spy_closes))   # + the factor-factory (close-only) factors
+        return base
     except Exception:
         return None
 
@@ -162,7 +233,7 @@ def label_snapshots(horizon_days: int = 10) -> dict:
         db.close()
 
 
-_FACTORS = ("rs", "rsi", "above_ema20", "atr_pct", "dist_ema20_pct", "mom_12_1")
+_FACTORS = ("rs", "rsi", "above_ema20", "atr_pct", "dist_ema20_pct", "mom_12_1") + _NEW_FACTORS
 
 
 def snapshot_attribution(horizon_days: int = 10, sector_neutral: bool = False) -> dict:
@@ -340,6 +411,7 @@ def backfill_snapshots(symbols=None, *, period: str = "2y", rebalance_days: int 
                     "atr_pct": round(atr_pct, 2) if atr_pct is not None else None,
                     "regime": reg[i], "price": round(float(c[i]), 2), "backfill": 1,
                 }
+                fac.update(_price_factors(csl, spysl))   # + factor-factory (close-only), AS-OF date i
                 db.add(FactorSnapshot(snap_date=d, symbol=s, price=fac["price"],
                                       factors=fac, fwd_ret=fwd))
                 existing.add((d, s))
@@ -360,22 +432,34 @@ def backfill_snapshots(symbols=None, *, period: str = "2y", rebalance_days: int 
 _BACKFILL = {"running": False, "result": None}
 
 
-def run_backfill_bg() -> dict:
-    """Single-flight background backfill so the request path never blocks on the 2y reconstruction."""
-    import threading
+def run_backfill_bg(period=None, cap=None, warmup=None, rebalance_days=5) -> dict:
+    """Single-flight background backfill so the request path never blocks on the reconstruction.
+    Params (or env BACKFILL_PERIOD / BACKFILL_CAP / BACKFILL_WARMUP) let a BIG run (e.g. 3y ×
+    the whole halal universe, weekly) multiply the panel — the real lever for statistical power.
+    Heavy on shared-cpu-1x → single-flight bg thread, chunked commits, idempotent."""
+    import os as _os, threading
     if _BACKFILL["running"]:
         return {"status": "already_running"}
+    per = str(period or _os.environ.get("BACKFILL_PERIOD", "2y"))
+    try:
+        cp = int(cap if cap is not None else _os.environ.get("BACKFILL_CAP", "120"))
+    except (TypeError, ValueError):
+        cp = 120
+    try:
+        wu = int(warmup if warmup is not None else _os.environ.get("BACKFILL_WARMUP", "120"))
+    except (TypeError, ValueError):
+        wu = 120
 
     def _run():
         _BACKFILL["running"] = True
         try:
-            _BACKFILL["result"] = backfill_snapshots()
+            _BACKFILL["result"] = backfill_snapshots(period=per, cap=cp, warmup=wu, rebalance_days=rebalance_days)
         except Exception as e:
             _BACKFILL["result"] = {"error": str(e)}
         finally:
             _BACKFILL["running"] = False
     threading.Thread(target=_run, daemon=True, name="alpha-backfill").start()
-    return {"status": "started"}
+    return {"status": "started", "period": per, "cap": cp, "warmup": wu}
 
 
 def backfill_status() -> dict:
