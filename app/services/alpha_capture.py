@@ -653,14 +653,28 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
         return (a - a.mean()) / s if s > 1e-9 else a * 0.0
 
     NEED = ("mom_12_1", "above_ema20", "rsi", "dist_ema20_pct")
+
+    def _adaptive(Z, rg):
+        # HAND-SPECIFIED regime weights (direction-only, from the regime-conditional IC finding —
+        # NOT magnitudes fit to this panel, so it stays honest/OOS-style): in a calm uptrend lean
+        # on the trend filter + light momentum; in choppy/crisis lean on momentum and PENALISE
+        # being over-extended above EMA20 (falling-knife / stretched). This is the whole thesis:
+        # the composite should ADAPT to the HMM regime instead of using fixed weights.
+        if rg == "calm_bull":
+            return Z["above_ema20"] + 0.5 * Z["mom_12_1"]
+        if rg == "crisis":
+            return Z["mom_12_1"] - Z["above_ema20"]
+        return Z["mom_12_1"] - 0.5 * Z["above_ema20"]     # choppy / unknown
+
     CANDS = {
-        "mom": lambda Z: Z["mom_12_1"],
-        "fresh_ema": lambda Z: Z["mom_12_1"] - Z["above_ema20"],
-        "combo": lambda Z: Z["mom_12_1"] - Z["above_ema20"] - 0.5 * Z["rsi"],
-        "dip": lambda Z: Z["mom_12_1"] - Z["rsi"],
-        "fresh_dist": lambda Z: Z["mom_12_1"] - Z["dist_ema20_pct"],
+        "mom": lambda Z, rg: Z["mom_12_1"],
+        "adaptive": _adaptive,
+        "fresh_ema": lambda Z, rg: Z["mom_12_1"] - Z["above_ema20"],
+        "combo": lambda Z, rg: Z["mom_12_1"] - Z["above_ema20"] - 0.5 * Z["rsi"],
+        "dip": lambda Z, rg: Z["mom_12_1"] - Z["rsi"],
+        "fresh_dist": lambda Z, rg: Z["mom_12_1"] - Z["dist_ema20_pct"],
     }
-    LABELS = {"mom": "الزخم الخام (أساس)", "fresh_ema": "زخم − فوق EMA20",
+    LABELS = {"mom": "الزخم الخام (أساس)", "adaptive": "★ مشروط بالنظام (HMM)", "fresh_ema": "زخم − فوق EMA20",
               "combo": "مركّب (زخم − EMA20 − ½·RSI)", "dip": "زخم − RSI", "fresh_dist": "زخم − امتداد"}
     acc = {c: {h: [] for h in hs} for c in CANDS}
     exc = {c: {h: [] for h in hs} for c in CANDS}   # top-quintile forward EXCESS (long-only alpha proxy)
@@ -669,8 +683,9 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
         if len(good) < 6:
             continue
         Z = {k: _z([fa.get(k) for fa, fw in good]) for k in NEED}
+        rg = good[0][0].get("regime")   # market regime is a per-date stamp (same for all names)
         for cname, fn in CANDS.items():
-            score = fn(Z)
+            score = fn(Z, rg)
             for h in hs:
                 ys = [(float(score[i]), float(good[i][1].get(h)))
                       for i in range(len(good)) if isinstance(good[i][1].get(h), (int, float))]
