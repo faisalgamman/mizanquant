@@ -381,6 +381,14 @@ async def candidate_composites_ep():
     return candidate_composites_ic()
 
 
+@router.get("/api/candidate-validation")
+async def candidate_validation_ep(recent_n: int = 60):
+    """Graduation gate — each shadow candidate's recent-window vs full-panel top-bucket t, with a
+    'ready/watching/weak' verdict. Powers the auto-PROPOSE decision inbox. Never auto-applies."""
+    from app.services.alpha_capture import candidate_forward_validation
+    return candidate_forward_validation(recent_n=recent_n)
+
+
 @router.get("/api/gate-ema20-ab")
 async def gate_ema20_ab_ep(horizon_days: int = 20, min_rs: float | None = None):
     """Shadow A/B of the weekly gate's 'above EMA20' requirement (with-trend vs counter-trend

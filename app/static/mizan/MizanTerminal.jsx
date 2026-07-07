@@ -1003,6 +1003,7 @@ function LabView() {
   const fic = useGet("/api/factor-ic-multi");
   const cc = useGet("/api/candidate-composites");
   const gc = useGet("/api/gate-config");
+  const cv = useGet("/api/candidate-validation");
   const scanners = (sq && sq.scanners) || [];
   const ov = (sq && sq.overlays) || {};
   const gate = (sq && sq.gate) || {};
@@ -1112,11 +1113,21 @@ function LabView() {
               <div className="mz-inbox-d">{gate.recommendation ? ("القياس يقترح: " + (gate.recommendation.reason || "مراجعة العتبة")) : "القياس لا يقترح تغييراً الآن."}</div>
               <button className="mz-btn" style={{ maxWidth: 150, marginTop: 6 }} onClick={() => { location.hash = "settings"; }}>مراجعة في الإعدادات ←</button>
             </div>
-            <div className="mz-inbox-c">
-              <div className="mz-inbox-t">وصفات المركّب (الظلّ)</div>
-              <div className="mz-inbox-d">لا وصفة أثبتت تفوّقاً بثقة كافية بعد — لن يُطلب قرارك إلا حين تنضج الدلالة. راقبها في «العوامل».</div>
-              <button className="mz-btn" style={{ maxWidth: 150, marginTop: 6 }} onClick={() => { location.hash = "factors"; }}>سباق الوصفات ←</button>
-            </div>
+            {(() => { const cands = (cv && cv.candidates) || {};
+              const ready = Object.entries(cands).filter(([k, v]) => v.ready);
+              const watch = Object.entries(cands).filter(([k, v]) => !v.ready && v.status === "watching" && k !== "mom");
+              if (ready.length) return ready.map(([k, v]) => (
+                <div className="mz-inbox-c" key={k} style={{ borderColor: POS, borderWidth: 2 }}>
+                  <div className="mz-inbox-t" style={{ color: POS }}>★ وصفة جاهزة للمراجعة: {v.label}</div>
+                  <div className="mz-inbox-d">أثبتت جودتها <b>أماميّاً</b> (t={v.recent_t} على آخر {v.recent_dates} تاريخاً · فائض {pct(v.recent_excess, 2)}) <b>و</b> على اللوحة الكاملة (t={v.full_t}). النظام يقترح ترجيح المركّب نحوها — والقرار قرارك وحدك.</div>
+                  <button className="mz-btn gold" style={{ maxWidth: 160, marginTop: 6 }} onClick={() => { location.hash = "settings"; }}>راجع الأوزان ←</button>
+                </div>));
+              return (<div className="mz-inbox-c">
+                <div className="mz-inbox-t">وصفات المركّب (الظلّ){cv && cv.recent_dates_used ? " · نافذة أخيرة " + cv.recent_dates_used + " يوم" : ""}</div>
+                <div className="mz-inbox-d">{watch.length ? ("قيد المراقبة: " + watch.map(([k, v]) => v.label + (v.recent_t != null ? " (t=" + v.recent_t + ")" : "")).join(" · ") + " — واعدة لكن لم تُثبت أماميّاً بعد (t<2 على النافذة الأخيرة). لن يُطلب قرارك إلا حين تنضج.") : "لا وصفة ناضجة بعد — القياس مستمرّ. النظام يحلّل ويقترح تلقائيّاً، لكنه لا يطبّق شيئاً على التسجيل الحيّ إلا بموافقتك."}</div>
+                <button className="mz-btn" style={{ maxWidth: 150, marginTop: 6 }} onClick={() => { location.hash = "factors"; }}>سباق الوصفات ←</button>
+              </div>);
+            })()}
           </div>
         </Panel>
         <Panel title="📖 دفتر التصحيح — ماذا غيّر النظام ولماذا">

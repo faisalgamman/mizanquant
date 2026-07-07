@@ -732,6 +732,90 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
     return res
 
 
+_VALID_CACHE = {"at": 0.0, "n": None, "data": None}
+
+
+def candidate_forward_validation(recent_n: int = 60) -> dict:
+    """GRADUATION GATE (auto-propose, NEVER auto-apply). Measures each shadow composite on the
+    MOST-RECENT `recent_n` snapshot dates — a rolling window that becomes genuinely out-of-sample
+    as new snapshots accrue — and compares to the full panel. A candidate is 'ready' only if it
+    ALSO holds up recently (t≥2 recent AND t≥1.5 full, same sign) — the guard against in-sample
+    luck (we watched beta look significant then evaporate). Cached 10 min."""
+    import time as _t
+    now = _t.time()
+    if _VALID_CACHE["data"] is not None and _VALID_CACHE["n"] == recent_n and (now - _VALID_CACHE["at"]) < 600:
+        return _VALID_CACHE["data"]
+    import numpy as np, math
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    full = candidate_composites_ic()
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if isinstance(fac, dict) and isinstance(fwd, dict):
+            by_date.setdefault(sd, []).append((fac, fwd))
+    recent = sorted(by_date.keys())[-recent_n:]
+
+    def _z(v):
+        a = np.asarray(v, float); s = a.std()
+        return (a - a.mean()) / s if s > 1e-9 else a * 0.0
+
+    def _adaptive(Z, rg):
+        if rg == "calm_bull":
+            return Z["above_ema20"] + 0.5 * Z["mom_12_1"]
+        if rg == "crisis":
+            return Z["mom_12_1"] - Z["above_ema20"]
+        return Z["mom_12_1"] - 0.5 * Z["above_ema20"]
+    NEED = ("mom_12_1", "above_ema20", "rsi", "dist_ema20_pct")
+    CANDS = {"mom": lambda Z, rg: Z["mom_12_1"], "adaptive": _adaptive,
+             "fresh_ema": lambda Z, rg: Z["mom_12_1"] - Z["above_ema20"],
+             "combo": lambda Z, rg: Z["mom_12_1"] - Z["above_ema20"] - 0.5 * Z["rsi"],
+             "dip": lambda Z, rg: Z["mom_12_1"] - Z["rsi"],
+             "fresh_dist": lambda Z, rg: Z["mom_12_1"] - Z["dist_ema20_pct"]}
+    H = "10"
+    exc = {c: [] for c in CANDS}
+    used = 0
+    for dt in recent:
+        good = [(fa, fw) for fa, fw in by_date[dt]
+                if all(isinstance(fa.get(k), (int, float)) for k in NEED) and isinstance(fw.get(H), (int, float))]
+        if len(good) < 8:
+            continue
+        used += 1
+        Z = {k: _z([fa.get(k) for fa, fw in good]) for k in NEED}
+        rg = good[0][0].get("regime")
+        y = [float(fw.get(H)) for fa, fw in good]
+        um = sum(y) / len(y)
+        ktop = max(3, int(round(len(good) * 0.2)))
+        for c, fn in CANDS.items():
+            s = fn(Z, rg)
+            order = sorted(range(len(good)), key=lambda i: -float(s[i]))
+            exc[c].append(sum(y[i] for i in order[:ktop]) / ktop - um)
+
+    fullc = full.get("candidates", {})
+    out = {}
+    for c in CANDS:
+        e = np.asarray(exc[c], float); n = len(e)
+        re = rt = None
+        if n >= 5:
+            se = float(e.std(ddof=1)) if n > 1 else 0.0
+            re = round(float(e.mean()), 3)
+            rt = round(float(e.mean() / (se / math.sqrt(n))), 2) if se > 0 else None
+        ft = ((fullc.get(c) or {}).get("h", {}).get("10") or {}).get("top_t")
+        ready = (rt is not None and ft is not None and rt >= 2.0 and ft >= 1.5)
+        status = "ready" if ready else ("watching" if (rt is not None and rt > 0.5) else "weak")
+        out[c] = {"label": (fullc.get(c) or {}).get("label", c), "full_t": ft, "recent_t": rt,
+                  "recent_excess": re, "recent_dates": n, "ready": bool(ready), "status": status}
+    res = {"recent_n": recent_n, "recent_dates_used": used, "candidates": out,
+           "any_ready": any(v["ready"] for v in out.values()),
+           "note": "Graduation gate — 'ready' only if the candidate holds on the recent window too. Auto-PROPOSE only; never auto-applies to live scoring."}
+    _VALID_CACHE.update(at=now, n=recent_n, data=res)
+    return res
+
+
 def snapshot_attribution_multi(horizons=(5, 10, 20)) -> dict:
     """Per-factor Information Coefficient at MULTIPLE horizons in ONE pass (for the factor
     table) + a direction arrow and plain-language verdict from the primary (10d) horizon.
