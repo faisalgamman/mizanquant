@@ -773,20 +773,20 @@ function FactorsView() {
           <div className="mz-note">{rec ? rec.reason : "…يُعاير"}</div>
         </Panel>
       </div>
-      <Panel title={"سباق المركّبات المرشّحة — ظلّي/بحثيّ" + (cc && cc.labelled_dates ? " · " + cc.labelled_dates + " يوم" : "")} right={<span className="mz-dim3">IC أماميّ مقابل الزخم · لا يمسّ التسجيل الحيّ</span>}>
+      <Panel title={"سباق المركّبات المرشّحة — ظلّي/بحثيّ" + (cc && cc.labelled_dates ? " · " + cc.labelled_dates + " يوم" : "")} right={<span className="mz-dim3">فائض السلّة العليا (المهمّ للطويل) + IC · لا يمسّ التسجيل الحيّ</span>}>
         {ccands.length ? (<div>
           <table className="mz-tbl mz-tbl-wide">
-            <thead><tr><th className="tl">المركّب المرشّح</th><th>IC 5ي</th><th>IC 10ي</th><th>IC 20ي</th><th>t (5ي)</th><th>الأيام</th></tr></thead>
-            <tbody>{ccands.map(([k, v]) => { const base = k === "mom"; return (
+            <thead><tr><th className="tl">المركّب المرشّح</th><th>فائض القمّة 5ي</th><th>فائض 10ي</th><th>فوز٪</th><th>IC 5ي</th><th>IC 20ي</th></tr></thead>
+            <tbody>{ccands.map(([k, v]) => { const base = k === "mom"; const e5 = (v.h["5"] || {}).top_excess, e10 = (v.h["10"] || {}).top_excess; return (
               <tr key={k} style={base ? { background: "var(--accent-dim)" } : null}>
                 <td className="tl mz-fn">{v.label}{base && <span style={{ color: ACC }}> ★</span>}</td>
+                <td style={{ color: e5 == null ? MUT : e5 >= 0 ? POS : NEG, fontWeight: 700 }}>{e5 == null ? "—" : (e5 >= 0 ? "+" : "") + num(e5, 2) + "%"}</td>
+                <td style={{ color: e10 == null ? MUT : e10 >= 0 ? POS : NEG }}>{e10 == null ? "—" : (e10 >= 0 ? "+" : "") + num(e10, 2) + "%"}</td>
+                <td className="mz-dim2">{(v.h["10"] || {}).top_win != null ? (v.h["10"]).top_win + "%" : "—"}</td>
                 <td style={{ color: icCol((v.h["5"] || {}).mean_ic) }}>{num((v.h["5"] || {}).mean_ic, 3)}</td>
-                <td style={{ color: icCol((v.h["10"] || {}).mean_ic) }}>{num((v.h["10"] || {}).mean_ic, 3)}</td>
-                <td style={{ color: icCol((v.h["20"] || {}).mean_ic) }}>{num((v.h["20"] || {}).mean_ic, 3)}</td>
-                <td>{num((v.h["5"] || {}).t, 2)}</td>
-                <td className="mz-dim2">{(v.h["10"] || {}).n_dates || 0}</td></tr>); })}</tbody>
+                <td style={{ color: icCol((v.h["20"] || {}).mean_ic) }}>{num((v.h["20"] || {}).mean_ic, 3)}</td></tr>); })}</tbody>
           </table>
-          <div className="mz-note ql-dim">الأساس (الزخم الخام ★) هو الأقوى والأثبت عبر كل الآفاق؛ المرشّحات الارتداديّة تساعد قصيراً فقط ثم تنهار. لا يترقّى أيّ مركّب للتسجيل الحيّ إلا بقرارك، وبعد أن يُثبت تفوّقاً أماميّاً مستقرّاً — قياس أوّلاً دائماً.</div>
+          <div className="mz-note ql-dim">⚠ درس مقاس: النظام طويل فقط — <b>يشتري القمّة</b>، فالمقياس الصحيح هو <b>فائض السلّة العليا</b> لا IP. المرشّح الأفضل بالـIC (زخم−EMA20) هو الأسوأ في القمّة. حاليّاً الزخم الخام و«زخم−امتداد» أفضل السلّة العليا — <b>لكن لا شيء دالّ إحصائيّاً بعد</b> (t&lt;1.3، n={cc && cc.labelled_dates}). لا ترقية للتسجيل الحيّ إلا بقرارك بعد ثبات الدلالة — قياس أوّلاً دائماً.</div>
         </div>) : <div className="mz-empty">…يحسب سباق المركّبات الظلّي</div>}
       </Panel>
     </div>

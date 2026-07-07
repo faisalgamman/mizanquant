@@ -571,6 +571,7 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
     LABELS = {"mom": "الزخم الخام (أساس)", "fresh_ema": "زخم − فوق EMA20",
               "combo": "مركّب (زخم − EMA20 − ½·RSI)", "dip": "زخم − RSI", "fresh_dist": "زخم − امتداد"}
     acc = {c: {h: [] for h in hs} for c in CANDS}
+    exc = {c: {h: [] for h in hs} for c in CANDS}   # top-quintile forward EXCESS (long-only alpha proxy)
     for _sd, items in by_date.items():
         good = [(fa, fw) for fa, fw in items if all(isinstance(fa.get(k), (int, float)) for k in NEED)]
         if len(good) < 6:
@@ -585,6 +586,15 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
                     ic = _spearman([p[0] for p in ys], [p[1] for p in ys])
                     if ic is not None:
                         acc[cname][h].append(ic)
+                # Long-only reality: only the TOP picks are bought — measure their excess vs the
+                # equal-weight universe (IC ranks the whole cross-section; a long-only picker cares
+                # only about the top bucket, and the two can DISAGREE).
+                if len(ys) >= 8:
+                    ss = sorted(ys, key=lambda p: -p[0])
+                    ktop = max(3, int(round(len(ys) * 0.2)))
+                    um = sum(p[1] for p in ys) / len(ys)
+                    tm = sum(p[1] for p in ss[:ktop]) / ktop
+                    exc[cname][h].append(tm - um)
 
     out = {}
     max_dates = 0
@@ -592,12 +602,19 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
         per_h = {}
         for h in hs:
             a = np.asarray(acc[cname][h], dtype=float)
+            e = np.asarray(exc[cname][h], dtype=float)
             n = len(a)
             if n:
                 sd_ = float(a.std(ddof=1)) if n > 1 else 0.0
-                per_h[h] = {"mean_ic": round(float(a.mean()), 4),
-                            "t": round(float(a.mean() / (sd_ / np.sqrt(n))), 2) if sd_ > 0 else None,
-                            "n_dates": n}
+                cell = {"mean_ic": round(float(a.mean()), 4),
+                        "t": round(float(a.mean() / (sd_ / np.sqrt(n))), 2) if sd_ > 0 else None,
+                        "n_dates": n}
+                if len(e):
+                    se = float(e.std(ddof=1)) if len(e) > 1 else 0.0
+                    cell["top_excess"] = round(float(e.mean()), 3)     # % excess of top-20% vs universe
+                    cell["top_t"] = round(float(e.mean() / (se / np.sqrt(len(e)))), 2) if se > 0 else None
+                    cell["top_win"] = int((e > 0).mean() * 100)
+                per_h[h] = cell
                 max_dates = max(max_dates, n)
             else:
                 per_h[h] = {"mean_ic": None, "t": None, "n_dates": 0}
