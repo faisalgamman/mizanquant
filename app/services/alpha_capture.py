@@ -15,6 +15,14 @@ from datetime import datetime, timezone
 logger = logging.getLogger("screener")
 
 
+def _clean_factors(d: dict) -> dict:
+    """Replace non-finite floats (NaN/inf) with None — a stored NaN serialises to the literal
+    `NaN`, which the Postgres JSON type rejects ("Token NaN is invalid"). Deeper history (older
+    bars / gappy symbols) occasionally yields NaN in a factor, so sanitise every value on write."""
+    import math
+    return {k: (None if (isinstance(v, float) and not math.isfinite(v)) else v) for k, v in (d or {}).items()}
+
+
 def _price_factors(closes, spy_closes=None) -> dict:
     """Extra CLOSE-ONLY factors (so both the live capture AND the historical backfill compute
     the SAME set → one measurable panel). Each factor is guarded independently; a short window
@@ -167,7 +175,7 @@ def capture_snapshot(symbols=None, cap: int | None = None) -> dict:
                     continue
                 fac["regime"] = regime          # market regime stamp (① regime-conditional IC)
                 db.add(FactorSnapshot(snap_date=snap_date, symbol=sym,
-                                      price=fac.get("price"), factors=fac, fwd_ret=None))
+                                      price=fac.get("price"), factors=_clean_factors(fac), fwd_ret=None))
                 stored += 1
             except Exception as e:
                 logger.debug("snapshot %s failed: %s", sym, e)
@@ -413,7 +421,7 @@ def backfill_snapshots(symbols=None, *, period: str = "2y", rebalance_days: int 
                 }
                 fac.update(_price_factors(csl, spysl))   # + factor-factory (close-only), AS-OF date i
                 db.add(FactorSnapshot(snap_date=d, symbol=s, price=fac["price"],
-                                      factors=fac, fwd_ret=fwd))
+                                      factors=_clean_factors(fac), fwd_ret=_clean_factors(fwd)))
                 existing.add((d, s))
                 stored += 1
             if stored and stored % 2000 == 0:
