@@ -252,7 +252,7 @@ def run_full_precompute(triggered_by: str = "scheduler", technical_only: bool = 
                 if _os2.environ.get("BACKFILL_OFFSESSION", "1").strip().lower() not in ("0", "false", "no"):
                     from app.services.alpha_capture import backfill_snapshots
                     _bcap = int(_os2.environ.get("BACKFILL_CAP", "150"))
-                    _bper = _os2.environ.get("BACKFILL_PERIOD", "2y")
+                    _bper = _os2.environ.get("BACKFILL_PERIOD", "5y")   # 5y reaches 2021 (incl. the 2022 bear) — "3y" only returns ~2y from the data source
                     _bwu = int(_os2.environ.get("BACKFILL_WARMUP", "252"))
                     _br = backfill_snapshots(cap=_bcap, period=_bper, warmup=_bwu)
                     logger.info("Precompute: factor backfill %s", _br)

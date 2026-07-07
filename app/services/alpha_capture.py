@@ -440,7 +440,7 @@ def run_backfill_bg(period=None, cap=None, warmup=None, rebalance_days=5) -> dic
     import os as _os, threading
     if _BACKFILL["running"]:
         return {"status": "already_running"}
-    per = str(period or _os.environ.get("BACKFILL_PERIOD", "2y"))
+    per = str(period or _os.environ.get("BACKFILL_PERIOD", "5y"))   # 5y reaches 2021 (incl. 2022 bear); "3y" returns only ~2y from the source
     try:
         cp = int(cap if cap is not None else _os.environ.get("BACKFILL_CAP", "120"))
     except (TypeError, ValueError):
