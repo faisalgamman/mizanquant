@@ -389,6 +389,14 @@ async def candidate_validation_ep(recent_n: int = 60):
     return candidate_forward_validation(recent_n=recent_n)
 
 
+@router.get("/api/walk-forward-sim")
+async def walk_forward_sim_ep(top_k: int = 5, hold: str = "5", cost_bps: float = 15.0):
+    """⏱️ Time-machine backtest of the shadow composites on the 4-year panel (equity/CAGR/maxDD/
+    2022 slice vs the equal-weight halal universe). Research/measurement only; never trades."""
+    from app.services.alpha_capture import walk_forward_sim
+    return walk_forward_sim(top_k=top_k, hold=hold, cost_bps=cost_bps)
+
+
 @router.get("/api/gate-ema20-ab")
 async def gate_ema20_ab_ep(horizon_days: int = 20, min_rs: float | None = None):
     """Shadow A/B of the weekly gate's 'above EMA20' requirement (with-trend vs counter-trend

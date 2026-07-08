@@ -732,6 +732,113 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
     return res
 
 
+_SIM_CACHE = {"at": 0.0, "key": None, "data": None}
+
+
+def walk_forward_sim(top_k: int = 5, hold: str = "5", cost_bps: float = 15.0) -> dict:
+    """⏱️ 'Time machine' — walk-forward simulation of each shadow composite on the 4-year snapshot
+    panel: each ~weekly rebalance date, rank cross-sectionally, BUY the top_k equal-weight, realise
+    the fwd_ret[hold] minus round-trip costs; chain into an equity curve vs the equal-weight halal
+    universe (the honest 'did selection add value' benchmark — NOT literally SPY). Reports total/
+    CAGR/max-drawdown/win/PF + a 2022-only slice (the adverse test). Research only; never trades.
+
+    HONEST caveats baked in: survivorship (today's halal set) inflates ABSOLUTE returns, so read the
+    strategy-vs-universe SPREAD and the 2022 slice, not the headline number; costs are applied to the
+    strategy only (conservative)."""
+    import time as _t
+    key = (int(top_k), str(hold), float(cost_bps))
+    now = _t.time()
+    if _SIM_CACHE["data"] is not None and _SIM_CACHE["key"] == key and (now - _SIM_CACHE["at"]) < 900:
+        return _SIM_CACHE["data"]
+    import numpy as np, math
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if isinstance(fac, dict) and isinstance(fwd, dict) and isinstance(fwd.get(hold), (int, float)):
+            by_date.setdefault(sd, []).append((fac, fwd))
+    all_dates = sorted(by_date.keys())
+    # non-overlapping ~weekly rebalance dates (hold=5 trading days ≈ 7 calendar) to avoid double-count
+    gap = max(1, int(hold)) + 1
+    rebal, last = [], None
+    for d in all_dates:
+        if last is None or (d - last).days >= gap:
+            rebal.append(d); last = d
+
+    def _z(v):
+        a = np.asarray(v, float); s = a.std()
+        return (a - a.mean()) / s if s > 1e-9 else a * 0.0
+
+    def _adaptive(Z, rg):
+        if rg == "calm_bull":
+            return Z["above_ema20"] + 0.5 * Z["mom_12_1"]
+        if rg == "crisis":
+            return Z["mom_12_1"] - Z["above_ema20"]
+        return Z["mom_12_1"] - 0.5 * Z["above_ema20"]
+    NEED = ("mom_12_1", "above_ema20", "rsi", "dist_ema20_pct")
+    CANDS = {"adaptive": _adaptive, "mom": lambda Z, rg: Z["mom_12_1"],
+             "fresh_dist": lambda Z, rg: Z["mom_12_1"] - Z["dist_ema20_pct"]}
+    LABELS = {"adaptive": "★ مشروط بالنظام (HMM)", "mom": "الزخم الخام", "fresh_dist": "زخم − امتداد"}
+    cost = cost_bps / 1e4
+
+    series = {c: [] for c in CANDS}      # (date, period_ret) for the strategy
+    uni = []                              # equal-weight universe period returns (benchmark)
+    for d in rebal:
+        good = [(fa, fw) for fa, fw in by_date[d] if all(isinstance(fa.get(k), (int, float)) for k in NEED)]
+        if len(good) < 10:
+            continue
+        y = np.array([float(fw.get(hold)) / 100.0 for fa, fw in good])
+        uni.append((d, float(y.mean())))
+        Z = {k: _z([fa.get(k) for fa, fw in good]) for k in NEED}
+        rg = good[0][0].get("regime")
+        kk = min(top_k, max(1, len(good) // 3))
+        for c, fn in CANDS.items():
+            s = np.asarray(fn(Z, rg), float)
+            top = np.argsort(-s)[:kk]
+            series[c].append((d, float(y[top].mean()) - cost))
+
+    def _metrics(pairs):
+        if len(pairs) < 4:
+            return None
+        rets = np.array([r for _, r in pairs])
+        eq = np.cumprod(1.0 + rets)
+        yrs = max(0.1, len(rets) / 52.0)
+        cagr = float(eq[-1] ** (1.0 / yrs) - 1.0)
+        peak = np.maximum.accumulate(eq); mdd = float((eq / peak - 1.0).min())
+        gains = rets[rets > 0].sum(); losses = -rets[rets < 0].sum()
+        pf = float(gains / losses) if losses > 1e-9 else None
+        r22 = np.array([r for d, r in pairs if d.year == 2022])
+        ret22 = float(np.prod(1.0 + r22) - 1.0) if len(r22) else None
+        curve = [{"date": str(pairs[i][0])[:10], "eq": round(float(eq[i]), 3)}
+                 for i in range(0, len(eq), max(1, len(eq) // 80))]
+        return {"total_return": round(float(eq[-1] - 1.0) * 100, 1), "cagr": round(cagr * 100, 1),
+                "max_drawdown": round(mdd * 100, 1), "win_rate": int((rets > 0).mean() * 100),
+                "pf": round(pf, 2) if pf else None, "periods": len(rets),
+                "ret_2022": round(ret22 * 100, 1) if ret22 is not None else None, "curve": curve}
+
+    umet = _metrics(uni)
+    out = {}
+    for c in CANDS:
+        m = _metrics(series[c])
+        if m and umet:
+            m["label"] = LABELS[c]
+            m["alpha_cagr"] = round(m["cagr"] - umet["cagr"], 1)                       # vs universe
+            m["alpha_2022"] = (round(m["ret_2022"] - umet["ret_2022"], 1)
+                               if (m["ret_2022"] is not None and umet["ret_2022"] is not None) else None)
+        out[c] = m
+    res = {"top_k": top_k, "hold_days": int(hold), "cost_bps": cost_bps,
+           "rebalances": len(uni), "span": [str(all_dates[0])[:10], str(all_dates[-1])[:10]] if all_dates else None,
+           "benchmark": umet, "strategies": out,
+           "note": "Walk-forward on the snapshot panel vs the equal-weight halal universe. Survivorship inflates ABSOLUTE returns — read the SPREAD vs benchmark + the 2022 slice. Costs on the strategy only. Research only; never trades."}
+    _SIM_CACHE.update(at=now, key=key, data=res)
+    return res
+
+
 _VALID_CACHE = {"at": 0.0, "n": None, "data": None}
 
 
