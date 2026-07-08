@@ -397,6 +397,14 @@ async def walk_forward_sim_ep(top_k: int = 5, hold: str = "5", cost_bps: float =
     return walk_forward_sim(top_k=top_k, hold=hold, cost_bps=cost_bps)
 
 
+@router.get("/api/core-overlay-sim")
+async def core_overlay_sim_ep(hold: str = "5", target_vol: float = 0.15, cost_bps: float = 15.0):
+    """⏱️ Core+Overlay A/B — own the halal universe (core) vs core×HMM-regime-dial vs core×vol-target
+    vs both, on the 4-year panel (CAGR/maxDD/CAGR-DD ratio/2022). Research only; never trades."""
+    from app.services.alpha_capture import core_overlay_sim
+    return core_overlay_sim(hold=hold, target_vol=target_vol, cost_bps=cost_bps)
+
+
 @router.get("/api/gate-ema20-ab")
 async def gate_ema20_ab_ep(horizon_days: int = 20, min_rs: float | None = None):
     """Shadow A/B of the weekly gate's 'above EMA20' requirement (with-trend vs counter-trend

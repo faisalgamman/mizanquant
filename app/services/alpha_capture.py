@@ -839,6 +839,105 @@ def walk_forward_sim(top_k: int = 5, hold: str = "5", cost_bps: float = 15.0) ->
     return res
 
 
+_CORE_CACHE = {"at": 0.0, "key": None, "data": None}
+
+
+def core_overlay_sim(hold: str = "5", target_vol: float = 0.15, cost_bps: float = 15.0) -> dict:
+    """⏱️ Core+Overlay A/B (CORE_OVERLAY_PLAN.md) — the data said selection LOSES but the signals
+    are DEFENSIVE, so test the professional inversion: OWN the equal-weight halal universe (the
+    'core'), then let the HMM regime + vol-target manage EXPOSURE (the overlay). Compares, on the
+    4y panel: core (100% always) vs core×regime-dial vs core×vol-target vs both. Look-ahead-safe
+    (regime/vol are point-in-time). The thesis wins if an overlay keeps most of the CAGR while
+    cutting drawdown a lot ⇒ a better CAGR/DD ratio (a risk-tolerant sizer can then lever up).
+    Research only; never trades."""
+    import time as _t
+    key = (str(hold), float(target_vol), float(cost_bps))
+    now = _t.time()
+    if _CORE_CACHE["data"] is not None and _CORE_CACHE["key"] == key and (now - _CORE_CACHE["at"]) < 900:
+        return _CORE_CACHE["data"]
+    import numpy as np
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
+    finally:
+        db.close()
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if isinstance(fac, dict) and isinstance(fwd, dict) and isinstance(fwd.get(hold), (int, float)):
+            by_date.setdefault(sd, []).append((fac, fwd))
+    all_dates = sorted(by_date.keys())
+    gap = max(1, int(hold)) + 1
+    seq, last = [], None
+    for d in all_dates:
+        if last is not None and (d - last).days < gap:
+            continue
+        items = by_date[d]
+        if len(items) < 10:
+            continue
+        ur = float(np.mean([float(fw.get(hold)) / 100.0 for fa, fw in items]))
+        rg = items[0][0].get("regime")
+        seq.append((d, ur, rg)); last = d
+
+    urs = [x[1] for x in seq]
+    EXP = {"calm_bull": 1.0, "choppy": 0.75, "crisis": 0.45}
+    cost = cost_bps / 1e4
+
+    def _vt(i):
+        if i < 12:
+            return 1.0
+        v = float(np.std(urs[i - 12:i]) * np.sqrt(52))
+        return float(min(1.5, target_vol / v)) if v > 1e-6 else 1.0
+
+    def _run(exp_fn):
+        rets = []; prev = 1.0
+        for i, (d, ur, rg) in enumerate(seq):
+            e = exp_fn(i, rg)
+            c = cost if abs(e - prev) > 0.05 else 0.0
+            rets.append((d, e * ur - c)); prev = e
+        return rets
+
+    strategies = {
+        "core": _run(lambda i, rg: 1.0),
+        "dial": _run(lambda i, rg: EXP.get(rg, 0.75)),
+        "voltarget": _run(lambda i, rg: _vt(i)),
+        "both": _run(lambda i, rg: min(1.5, EXP.get(rg, 0.75) * _vt(i))),
+    }
+    LABELS = {"core": "النواة (الكون بالتساوي)", "dial": "النواة + قرص النظام (HMM)",
+              "voltarget": "النواة + استهداف التقلّب", "both": "النواة + الاثنان معاً"}
+
+    def _metrics(pairs):
+        rets = np.array([r for _, r in pairs]); n = len(rets)
+        if n < 4:
+            return None
+        eq = np.cumprod(1.0 + rets); yrs = max(0.1, n / 52.0)
+        cagr = float(eq[-1] ** (1.0 / yrs) - 1.0)
+        peak = np.maximum.accumulate(eq); mdd = float((eq / peak - 1.0).min())
+        r22 = np.array([r for d, r in pairs if d.year == 2022])
+        curve = [{"date": str(pairs[i][0])[:10], "eq": round(float(eq[i]), 3)} for i in range(0, n, max(1, n // 80))]
+        return {"total_return": round(float(eq[-1] - 1.0) * 100, 1), "cagr": round(cagr * 100, 1),
+                "max_drawdown": round(mdd * 100, 1), "cagr_dd": round(cagr / abs(mdd), 2) if mdd < -1e-6 else None,
+                "win_rate": int((rets > 0).mean() * 100), "ret_2022": round(float(np.prod(1.0 + r22) - 1.0) * 100, 1) if len(r22) else None,
+                "curve": curve}
+
+    core_m = _metrics(strategies["core"])
+    out = {}
+    for k, pairs in strategies.items():
+        m = _metrics(pairs)
+        if m:
+            m["label"] = LABELS[k]
+            if core_m:
+                m["dd_improve_pct"] = round((abs(core_m["max_drawdown"]) - abs(m["max_drawdown"])) / abs(core_m["max_drawdown"]) * 100, 0) if core_m["max_drawdown"] else None
+                m["cagr_dd_improve_pct"] = round((m["cagr_dd"] - core_m["cagr_dd"]) / abs(core_m["cagr_dd"]) * 100, 0) if (m.get("cagr_dd") and core_m.get("cagr_dd")) else None
+        out[k] = m
+    res = {"hold_days": int(hold), "target_vol": target_vol, "cost_bps": cost_bps, "rebalances": len(seq),
+           "span": [str(all_dates[0])[:10], str(all_dates[-1])[:10]] if all_dates else None, "strategies": out,
+           "note": "Core+Overlay on the panel (regime/vol are point-in-time, look-ahead-safe). The overlay wins if it cuts drawdown a lot while keeping most CAGR → higher CAGR/DD ratio. Survivorship inflates absolute returns — read the CAGR/DD ratio + 2022. Research only; never trades."}
+    _CORE_CACHE.update(at=now, key=key, data=res)
+    return res
+
+
 _VALID_CACHE = {"at": 0.0, "n": None, "data": None}
 
 
