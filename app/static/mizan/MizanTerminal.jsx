@@ -78,6 +78,7 @@ function HeatCell({ f, v }) {
 
 const NAV = [
   { key: "overview", label: "نظرة عامة", icon: "🏠" },
+  { key: "core", label: "محفظة النواة", icon: "🎯" },
   { key: "screener", label: "المسح", icon: "🔍" },
   { key: "analysis", label: "تحليل الأسهم", icon: "📊" },
   { key: "portfolio", label: "المحفظة", icon: "💼" },
@@ -991,6 +992,70 @@ function SettingsView() {
   );
 }
 
+function CorePortfolioView() {
+  const dp = useGet("/api/screener/deep-picks?limit=200");
+  const co = useGet("/api/core-overlay-sim");
+  const [capital, setCapital] = useState(10000);
+  const [maxLoss, setMaxLoss] = useState(15);
+  const rows = (dp && dp.results) || [];
+  const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
+  const core = co && co.strategies && co.strategies.core;
+  const maxDD = core ? Math.abs(core.max_drawdown) : 25;
+  const exposure = Math.max(0, Math.min(100, Math.round((maxLoss / maxDD) * 100)));
+  const deploy = capital * exposure / 100;
+  const N = halal.length || 1;
+  const perName = deploy / N;
+  const orders = halal.map(r => { const sh = Math.floor(perName / r.price); return { sym: r.symbol, co: r.company, sector: r.sector, price: r.price, shares: sh, value: sh * r.price }; }).filter(o => o.shares > 0);
+  const invested = orders.reduce((a, o) => a + o.value, 0);
+  const worst = Math.round(deploy * maxDD / 100);
+  const exportCsv = () => {
+    const lines = [["symbol", "shares", "price", "value"].join(",")].concat(orders.map(o => [o.sym, o.shares, o.price, o.value.toFixed(2)].join(",")));
+    const a = document.createElement("a"); a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(lines.join("\n")); a.download = "core_basket_orders.csv"; a.click();
+  };
+  return (
+    <div className="mz-view">
+      <div className="mz-crumb" style={{ marginBottom: 12 }}>🎯 <b>محفظة النواة</b> — الشيء الوحيد الذي نجا من كلّ اختباراتنا: امتلاك الكون الحلال بالتساوي</div>
+      <div className="mz-verdict" style={{ borderColor: WARN, color: "var(--text-secondary)", marginBottom: 16 }}>
+        ⚠️ هذه <b>بيتا حلال</b> (عائد السوق) لا مهارة انتقاء — ومع ذلك هزمت كلّ وصفاتنا الذكيّة بعد التكاليف. الأرقام تاريخيّة (انحياز البقاء يضخّمها) ولا تضمن المستقبل. <b>لا أنفّذ أوامر — أُولّد قائمةً تنفّذها أنت من IBKR.</b>
+      </div>
+
+      <div className="mz-loop" style={{ marginBottom: 20 }}>
+        {[["العائد السنويّ (CAGR)", core ? pct(core.cagr) : "…", POS], ["أقصى تراجع تاريخيّ", core ? pct(core.max_drawdown) : "…", NEG],
+        ["نسبة العائد/التراجع", core ? num(core.cagr_dd, 2) : "…", ACC], ["أداء هبوط 2022", core ? pct(core.ret_2022) : "…", (core && core.ret_2022 >= 0) ? POS : NEG]].map(([l, v, c], i) => (
+          <div className="mz-loop-c" key={i}><div className="mz-loop-big" style={{ color: c }}>{v}</div><div className="mz-loop-u">{l}</div></div>))}
+      </div>
+
+      <div className="mz-r2">
+        <Panel title="🩹 حاسبة ميزانيّة الألم">
+          <div className="mz-pain">
+            <label className="mz-fl">رأس المال ($)<input type="number" className="mz-inp" style={{ width: 120 }} value={capital} onChange={e => setCapital(Math.max(0, +e.target.value))} /></label>
+            <label className="mz-fl">أقصى خسارة تتحمّلها (%)<input type="number" className="mz-inp" style={{ width: 80 }} min="1" max={Math.round(maxDD)} value={maxLoss} onChange={e => setMaxLoss(Math.max(1, +e.target.value))} /></label>
+          </div>
+          <div className="mz-pain-out">
+            <div><span>التعرّض المقترح</span><b style={{ color: ACC }}>{exposure}%</b></div>
+            <div><span>المبلغ المستثمَر</span><b>{money(deploy)}</b></div>
+            <div><span>يبقى نقداً</span><b>{money(capital - deploy)}</b></div>
+            <div><span>أسوأ خسارة متوقّعة تاريخيّاً</span><b style={{ color: NEG }}>−{money(worst)}</b></div>
+          </div>
+          <div className="mz-note ql-dim">ميكانيكيّ من التراجع المقاس ({num(maxDD, 0)}% عند 100%): تعرّض = خسارتك المقبولة ÷ التراجع. أداة أرقام لا نصيحة. ابدأ بمبلغ تستطيع خسارته كاملاً دون ألم.</div>
+        </Panel>
+        <Panel title="📋 مولّد أوامر السلّة" right={orders.length ? <button className="mz-btn gold" style={{ maxWidth: 130 }} onClick={exportCsv}>⬇ تصدير CSV</button> : null}>
+          <div className="mz-pain-out" style={{ marginBottom: 8 }}>
+            <div><span>عدد الأسهم</span><b>{N}</b></div>
+            <div><span>لكل سهم (~)</span><b>{money(perName)}</b></div>
+            <div><span>إجمالي المستثمَر فعليّاً</span><b>{money(invested)}</b></div>
+          </div>
+          {orders.length ? (
+            <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>السعر</th><th>عدد الأسهم</th><th>القيمة</th></tr></thead>
+              <tbody>{orders.slice(0, 60).map((o, i) => (<tr key={i}><td className="tl mz-fn">{o.sym}<div className="mz-dim2">{(o.co || "").slice(0, 18)}</div></td><td>{money(o.price)}</td><td className="mz-fn">{o.shares}</td><td>{money(o.value)}</td></tr>))}</tbody></table>
+          ) : <div className="mz-empty">…يحمّل السلّة الحلال (أدخِل رأس مالاً كافياً)</div>}
+          <div className="mz-note ql-dim">قائمة تنفّذها <b>يدويّاً من IBKR</b> بالتساوي — أنا لا أرسل أوامر. أعِد التوازن فصليّاً (٤ مرّات/سنة) لإبقاء التكاليف منخفضة.</div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
 // t-stat → a beginner "confidence" meter: fill % + plain word (certainty, not good/bad).
 function confidenceOf(t) {
   const a = Math.abs(t || 0);
@@ -1537,6 +1602,7 @@ function MizanTerminal() {
           {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div>
             : view === "screener" ? <ScreenerView />
               : view === "analysis" ? <StockAnalysisView />
+              : view === "core" ? <CorePortfolioView />
               : view === "lab" ? <LabView />
               : view === "factors" ? <FactorsView />
                 : view === "portfolio" ? <PortfolioView />

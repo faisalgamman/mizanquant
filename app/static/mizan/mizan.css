@@ -367,6 +367,11 @@
 .mz-ledger-r { display: flex; gap: 12px; align-items: center; font-size: 12px; padding: 7px 2px; border-bottom: 1px solid var(--border-subtle); }
 .mz-ledger-d { font-family: var(--font-mono); color: var(--text-muted); font-size: 11px; min-width: 78px; }
 .mz-verdict { font-size: 13px; font-weight: 700; line-height: 1.6; background: var(--bg-panel); border: 1px solid; border-right-width: 4px; border-radius: 10px; padding: 11px 14px; }
+.mz-pain { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; }
+.mz-pain-out { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 16px; }
+.mz-pain-out > div { display: flex; flex-direction: column; }
+.mz-pain-out span { font-size: 10.5px; color: var(--text-muted); }
+.mz-pain-out b { font-size: 17px; font-family: var(--font-mono); }
 .mz-wt { margin-bottom: 14px; }
 .mz-wt-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
 .mz-wt-l { font-size: 12px; color: var(--text-secondary); }
