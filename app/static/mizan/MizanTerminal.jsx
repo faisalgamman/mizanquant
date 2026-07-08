@@ -1004,6 +1004,7 @@ function LabView() {
   const cc = useGet("/api/candidate-composites");
   const gc = useGet("/api/gate-config");
   const cv = useGet("/api/candidate-validation");
+  const wf = useGet("/api/walk-forward-sim?top_k=5&hold=5&cost_bps=15");
   const scanners = (sq && sq.scanners) || [];
   const ov = (sq && sq.overlays) || {};
   const gate = (sq && sq.gate) || {};
@@ -1079,6 +1080,37 @@ function LabView() {
           </div>); }) : <div className="mz-empty">…يقيس أداء الاستراتيجيات</div>}
       </div>
       <div className="mz-note ql-dim">«مقابل السوق» = الفرق بين أداء الاستراتيجية وأداء شراء SPY والانتظار. موجب أخضر = تتفوّق · سالب أحمر = تخسر أمام السوق. «ثقة القياس» تعني كم نحن متأكّدون (ليست ربحاً) — تكبر كلّما زادت الصفقات. أرقام ورقيّة، لا صفقات حقيقيّة.</div>
+
+      {/* Section 2.5 — TIME MACHINE walk-forward */}
+      <div className="mz-sec-h" style={{ marginTop: 26 }}>⏱️ آلة الزمن — لو تداولت الوصفة منذ 2022 (أعلى-5 أسبوعيّاً · بعد التكاليف)</div>
+      {wf && wf.strategies ? (() => {
+        const b = wf.benchmark || {}; const strat = Object.entries(wf.strategies).filter(([k, v]) => v);
+        const best = strat.map(([k, v]) => v).sort((a, c) => (c.alpha_cagr || -99) - (a.alpha_cagr || -99))[0];
+        const anyBeat = strat.some(([k, v]) => (v.alpha_cagr || 0) > 0);
+        return (<div>
+          <div className="mz-verdict" style={{ borderColor: anyBeat ? POS : NEG, color: anyBeat ? POS : NEG }}>
+            {anyBeat ? "✅ وصفة تتفوّق على «شراء الكون بالتساوي» بعد التكاليف — راجعها أدناه."
+              : "⚠️ لا وصفة تتفوّق على «شراء الكون الحلال بالتساوي» بعد التكاليف عبر 4 سنوات — ليست جاهزة للمال الحقيقيّ. (لكنها دفاعيّة: تفوّقت في هبوط 2022.)"}
+          </div>
+          <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 10 }}>
+            <thead><tr><th className="tl">الاستراتيجية</th><th>العائد الكلّي</th><th>CAGR</th><th>أقصى تراجع</th><th>مقابل الكون</th><th>2022</th><th>PF</th></tr></thead>
+            <tbody>
+              <tr style={{ background: "var(--bg-raised)" }}><td className="tl mz-fn">📊 الكون بالتساوي (المعيار)</td><td>{pct(b.total_return)}</td><td>{pct(b.cagr)}</td><td style={{ color: NEG }}>{pct(b.max_drawdown)}</td><td className="mz-dim2">—</td><td>{pct(b.ret_2022)}</td><td className="mz-dim2">—</td></tr>
+              {strat.map(([k, v]) => (<tr key={k}>
+                <td className="tl mz-fn">{v.label}</td><td>{pct(v.total_return)}</td><td>{pct(v.cagr)}</td>
+                <td style={{ color: NEG }}>{pct(v.max_drawdown)}</td>
+                <td style={{ color: (v.alpha_cagr || 0) >= 0 ? POS : NEG, fontWeight: 800 }}>{pct(v.alpha_cagr)}</td>
+                <td style={{ color: (v.alpha_2022 || 0) >= 0 ? POS : NEG }}>{pct(v.ret_2022)}</td>
+                <td>{num(v.pf, 2)}</td></tr>))}
+            </tbody>
+          </table>
+          {best && best.curve && best.curve.length > 1 && <div style={{ marginTop: 12 }}>
+            <div className="mz-sc-conf-l">منحنى رأس المال — {best.label} (يبدأ من 0%)</div>
+            <LineArea data={best.curve.map(p => p.eq * 100 - 100)} color={(best.alpha_cagr || 0) >= 0 ? POS : WARN} />
+          </div>}
+          <div className="mz-note ql-dim">محاكاة walk-forward على لوحة اللقطات ({wf.rebalances} إعادة توازن · {wf.span && wf.span[0]}→{wf.span && wf.span[1]}) مقابل شراء كلّ الأسهم الحلال بالتساوي. انحياز البقاء يضخّم الأرقام المطلقة — اقرأ عمود «مقابل الكون» و«2022» لا الرقم الكلّي. التكاليف على الاستراتيجيّة فقط (متحفّظ). بحثيّ — لا تداول حقيقيّ.</div>
+        </div>);
+      })() : <div className="mz-empty">…تُشغّل آلة الزمن (محاكاة 4 سنوات على اللوحة)</div>}
 
       {/* Section 3 — what did it learn? */}
       <div className="mz-sec-h" style={{ marginTop: 26 }}>ماذا تعلّم النظام؟ — اكتشافاته بلغة بسيطة</div>
