@@ -372,6 +372,13 @@
 .mz-pain-out > div { display: flex; flex-direction: column; }
 .mz-pain-out span { font-size: 10.5px; color: var(--text-muted); }
 .mz-pain-out b { font-size: 17px; font-family: var(--font-mono); }
+.mz-cb-panel { margin-top: 14px; border-color: var(--warning); }
+.mz-cb-banner { font-size: 12px; line-height: 1.6; color: var(--text-secondary); background: var(--bg-raised); border-radius: 8px; padding: 9px 12px; margin-bottom: 12px; }
+.mz-cb-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .mz-cb-rows { grid-template-columns: 1fr; } }
+.mz-cb-row { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 9px; padding: 11px 12px; display: flex; flex-direction: column; gap: 7px; }
+.mz-cb-h { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.mz-cb-eff { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 .mz-wt { margin-bottom: 14px; }
 .mz-wt-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
 .mz-wt-l { font-size: 12px; color: var(--text-secondary); }

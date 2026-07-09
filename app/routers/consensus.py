@@ -279,6 +279,35 @@ async def factor_weights_reset_ep():
     return reset_weights()
 
 
+# ── written circuit-breaker card (Core Portfolio discipline contract) ─────────
+
+@router.get("/api/circuit-breaker")
+async def circuit_breaker_ep():
+    """The user's written circuit-breaker card for the Core Portfolio (thresholds + provenance +
+    whether it has been approved). Records a discipline protocol only — changes NO trading."""
+    from app.services.circuit_breaker import circuit_breaker_state
+    return circuit_breaker_state()
+
+
+@router.post("/api/circuit-breaker/approve")
+async def circuit_breaker_approve_ep(payload: dict = Body(...)):
+    """Approve/update the written circuit-breaker card (the user's own protocol before the first
+    real order). Persisted, audited, reversible. Never places or blocks an order.
+    Body: {"max_cumulative_loss_pct": 20, "max_deviation_pct": 10, "capital_experimental": 1000}."""
+    from app.services.circuit_breaker import approve_card
+    vals = (payload or {}).get("values") if isinstance(payload, dict) else None
+    if not isinstance(vals, dict):
+        vals = payload if isinstance(payload, dict) else {}
+    return approve_card(vals)
+
+
+@router.post("/api/circuit-breaker/reset")
+async def circuit_breaker_reset_ep():
+    """Revoke the approved card (delete it, audited) — reverts to 'not yet approved'."""
+    from app.services.circuit_breaker import reset_card
+    return reset_card()
+
+
 # ── quant-fund overlays: alpha capture, meta-model, HMM regime ────────────────
 
 @router.get("/api/alpha-capture")

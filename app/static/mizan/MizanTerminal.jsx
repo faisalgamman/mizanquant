@@ -997,6 +997,27 @@ function CorePortfolioView() {
   const co = useGet("/api/core-overlay-sim");
   const [capital, setCapital] = useState(10000);
   const [maxLoss, setMaxLoss] = useState(15);
+  const [cb, setCb] = useState(null);         // circuit-breaker card state
+  const [cbD, setCbD] = useState({ max_cumulative_loss_pct: 20, max_deviation_pct: 10, capital_experimental: 0 });
+  const [cbMsg, setCbMsg] = useState("");
+  const loadCb = () => fetch("/api/circuit-breaker").then(r => r.json()).then(s => { setCb(s); setCbD({ ...s.values }); }).catch(() => {});
+  useEffect(() => { loadCb(); }, []);
+  const cbDirty = cb && Object.keys(cbD).some(k => +cbD[k] !== +((cb.values || {})[k]));
+  const approveCb = async () => {
+    if (!window.confirm("إقرار بطاقة القواطع؟ هذا بروتوكولك المكتوب — لا يُرسِل ولا يمنع أمراً، يُسجَّل بتاريخه فقط.")) return;
+    setCbMsg("…يحفظ");
+    try { const r = await fetch("/api/circuit-breaker/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values: cbD }) }).then(x => x.json());
+      if (r.error) { setCbMsg("خطأ: " + r.error); return; }
+      setCb(r); setCbD({ ...r.values }); setCbMsg("أُقرّت ✓"); } catch (e) { setCbMsg("تعذّر"); }
+  };
+  const resetCb = async () => {
+    if (!window.confirm("إلغاء إقرار البطاقة؟ ستعود إلى «لم تُقرّ بعد» — تذكيرٌ بإعادة الإقرار قبل أوّل أمر حقيقيّ.")) return;
+    setCbMsg("…يعيد");
+    try { const r = await fetch("/api/circuit-breaker/reset", { method: "POST" }).then(x => x.json());
+      const s = r.state || r; setCb(s); setCbD({ ...s.values }); setCbMsg("أُلغي الإقرار."); } catch (e) { setCbMsg("تعذّر"); }
+  };
+  const cbCap = +(cbD.capital_experimental || 0);
+  const cbStop = Math.round(cbCap * (+cbD.max_cumulative_loss_pct || 0) / 100);
   const rows = (dp && dp.results) || [];
   const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
   const core = co && co.strategies && co.strategies.core;
@@ -1052,6 +1073,40 @@ function CorePortfolioView() {
           <div className="mz-note ql-dim">قائمة تنفّذها <b>يدويّاً من IBKR</b> بالتساوي — أنا لا أرسل أوامر. أعِد التوازن فصليّاً (٤ مرّات/سنة) لإبقاء التكاليف منخفضة.</div>
         </Panel>
       </div>
+
+      <Panel title="🛑 بطاقة القواطع المكتوبة — تُقرّها قبل أوّل أمر حقيقيّ" cls="mz-cb-panel" right={cb && <span className="mz-dim3" style={{ color: cb.approved ? POS : WARN }}>{cb.approved ? "مُقرّة ✓" : "لم تُقرّ بعد"}</span>}>
+        {cb ? (<div>
+          <div className="mz-cb-banner">قواعدك الشخصيّة المكتوبة — تلتزم بها <b>أنت</b>. النظام لا يفرضها على حسابك الحقيقيّ ولا يُرسِل/يمنع أمراً؛ يسجّلها فقط لتراها مكتوبةً بتاريخها قبل الدخول.</div>
+          <div className="mz-cb-rows">
+            <div className="mz-cb-row">
+              <div className="mz-cb-h">① خسارة تراكميّة قصوى ← توقّف ومراجعة</div>
+              <label className="mz-fl">النسبة %<input type="number" className="mz-inp" style={{ width: 80 }} min="1" max="50" value={cbD.max_cumulative_loss_pct} onChange={e => setCbD(d => ({ ...d, max_cumulative_loss_pct: +e.target.value }))} /></label>
+              <div className="mz-cb-eff">خط التوقّف ≈ <b style={{ color: NEG }}>−{money(cbStop)}</b> {cbCap ? "من رأس مالك التجريبيّ" : "(أدخِل رأس المال التجريبيّ في ③)"}</div>
+            </div>
+            <div className="mz-cb-row">
+              <div className="mz-cb-h">② انحرافك عن السلّة ← تنبيه انضباط</div>
+              <label className="mz-fl">الحدّ %<input type="number" className="mz-inp" style={{ width: 80 }} min="2" max="50" value={cbD.max_deviation_pct} onChange={e => setCbD(d => ({ ...d, max_deviation_pct: +e.target.value }))} /></label>
+              <div className="mz-cb-eff">تجاوزُه = أعِد التوازن نحو السلّة (لا تطارد اسماً)</div>
+            </div>
+            <div className="mz-cb-row">
+              <div className="mz-cb-h">③ رأس المال التجريبيّ — ما تستطيع خسارته كاملاً</div>
+              <label className="mz-fl">$<input type="number" className="mz-inp" style={{ width: 120 }} min="0" value={cbD.capital_experimental} onChange={e => setCbD(d => ({ ...d, capital_experimental: Math.max(0, +e.target.value) }))} /></label>
+              <div className="mz-cb-eff">ابدأ صغيراً — مبلغٌ خسارتُه كاملاً لا تؤلمك</div>
+            </div>
+            <div className="mz-cb-row">
+              <div className="mz-cb-h">④ جرس «أزمة» النظام (HMM)</div>
+              <div className="mz-cb-eff">🔔 <b>معلوماتيّ فقط</b> — لا خروج آليّاً. قِسنا أنّ الخروج على الجرس يضرّ؛ تنبيهٌ لتنتبه، لا أمر.</div>
+            </div>
+          </div>
+          <div className="mz-wt-act">
+            <button className="mz-btn gold" style={{ maxWidth: 190, opacity: cbDirty || !cb.approved ? 1 : 0.55 }} onClick={approveCb}>{cb.approved ? "تحديث الإقرار" : "أُقرّ هذه القواطع"}</button>
+            {cb.approved && <button className="mz-btn" style={{ maxWidth: 150 }} onClick={resetCb}>إلغاء الإقرار</button>}
+          </div>
+          {cb.approved_at && <div className="mz-note" style={{ color: POS }}>✓ أقررتَها في {(() => { try { return new Date(cb.approved_at).toLocaleString("ar"); } catch (e) { return cb.approved_at; } })()}</div>}
+          {cbMsg && <div className="mz-note" style={{ color: cbMsg.startsWith("خطأ") || cbMsg === "تعذّر" ? NEG : POS }}>{cbMsg}</div>}
+          <div className="mz-note ql-dim">محفوظة على القرص بسجلّ تدقيق كامل وقابلة للعكس. هذه ليست نصيحةً ولا أمراً — بروتوكول انضباطٍ تكتبه وتقرأه أنت.</div>
+        </div>) : <div className="mz-empty">…يحمّل البطاقة</div>}
+      </Panel>
     </div>
   );
 }
