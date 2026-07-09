@@ -963,6 +963,28 @@ def _days_since_last_core() -> "int | None":
     return _days_since_last(PV_CORE)
 
 
+def _row_age_days(created_at) -> "int | None":
+    """Whole days a trade row has been open (naive-UTC). None when created_at is missing."""
+    if not created_at:
+        return None
+    c = created_at.replace(tzinfo=None) if getattr(created_at, "tzinfo", None) else created_at
+    return max(0, (datetime.now(timezone.utc).replace(tzinfo=None) - c).days)
+
+
+def _get_miss(t) -> int:
+    """Consecutive-absence counter stored on the trade's signal_details (0 when unset)."""
+    sd = t.signal_details if isinstance(t.signal_details, dict) else {}
+    v = sd.get("miss", 0)
+    return int(v) if isinstance(v, (int, float)) else 0
+
+
+def _set_miss(t, n: int) -> None:
+    """Persist the miss counter — reassign the dict so SQLAlchemy flags the JSON column dirty."""
+    sd = dict(t.signal_details) if isinstance(t.signal_details, dict) else {}
+    sd["miss"] = int(n)
+    t.signal_details = sd
+
+
 def rebalance_core(account: float = 100000.0, _picks_fn=None, force: bool = False) -> dict:
     """Rebalance the Core Portfolio paper ledger (PVC) to the current halal universe, equal-
     DOLLAR weight, NO stops. Cadence-guarded to ~quarterly (CORE_REBALANCE_DAYS, default 85):
@@ -994,19 +1016,37 @@ def rebalance_core(account: float = 100000.0, _picks_fn=None, force: bool = Fals
     target_set = set(target)
     per_name = float(account) / max(len(target), 1)
 
+    # Turnover guard (fixes the measured day-one churn): a name absent from ONE scan is data
+    # noise, not an exit. Only close after it has been absent for CORE_MISS_LIMIT consecutive
+    # rebalances (default 2), and never before CORE_MIN_HOLD_DAYS (default 20) — so a transient
+    # gap or a same-day re-run can't churn the low-turnover core.
+    miss_limit = int(os.environ.get("CORE_MISS_LIMIT", "2"))
+    min_hold = int(os.environ.get("CORE_MIN_HOLD_DAYS", "20"))
+
     db = SessionLocal()
     try:
         open_trades = db.query(TradeHistory).filter(
             TradeHistory.strategy_id == PV_CORE, TradeHistory.pnl_pct.is_(None)).all()
         held_syms = {t.symbol for t in open_trades}
 
-        closed = held = 0
+        closed = held = kept_absent = 0
         for t in open_trades:
             if t.symbol in target_set:
+                if _get_miss(t):
+                    _set_miss(t, 0)             # present again → reset the absence streak
                 held += 1                       # still halal → keep (low turnover)
+                continue
+            # absent this scan — decide whether it's a real exit or just noise
+            miss = _get_miss(t) + 1
+            age = _row_age_days(t.created_at)
+            if (age is not None and age < min_hold) or miss < miss_limit:
+                _set_miss(t, miss)              # too young OR not enough consecutive misses → keep
+                kept_absent += 1
+                held += 1
                 continue
             cur = _current_price(t.symbol, price_map)
             if cur is None:
+                _set_miss(t, miss)
                 held += 1                       # can't price honestly → leave open
                 continue
             entry = float(t.entry_price or 0)
@@ -1030,7 +1070,7 @@ def rebalance_core(account: float = 100000.0, _picks_fn=None, force: bool = Fals
 
         db.commit()
         return {"target": len(target), "opened": opened, "closed": closed, "held": held,
-                "account": account}
+                "kept_absent": kept_absent, "account": account}
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("rebalance_core failed: %s", e)

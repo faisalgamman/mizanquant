@@ -316,6 +316,7 @@ def _scheduler_loop():
     last_fund_warm = ""       # YYYY-MM-DD — daily pre-market fundamentals (halal) cache warm
     last_intraday_warm = ""  # YYYY-MM-DD:HH — intraday screener re-warm slots
     last_db_backup = ""      # YYYY-MM-DD — daily DB backup of measurement tables
+    last_nav_record = ""     # YYYY-MM-DD — daily paper-ledger NAV race snapshot
     last_full_rescreen = ""  # YYYY-MM-DD — off-session FULL precompute (exchange-closed days)
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
@@ -459,6 +460,17 @@ def _scheduler_loop():
                 except Exception as e:
                     scheduler_metrics.record_cycle_end("signal_audit", success=False, error=str(e))
                     logger.error(f"Signal audit failed: {e}")
+
+            # --- PAPER-LEDGER NAV RACE: daily ~16:40 ET (after close) ---
+            # One row/day of core (PVC) vs momentum-satellite (PVSA) value → the forward OOS race
+            # curve. Cheap, best-effort, measurement only (never trades).
+            if _is_weekday(now) and now.hour == 16 and now.minute >= 40 and now.minute < 45 and last_nav_record != today_str:
+                last_nav_record = today_str
+                try:
+                    from app.services.ledger_nav import record_nav
+                    logger.info("Ledger NAV race snapshot: %s", record_nav())
+                except Exception as e:
+                    logger.error(f"Ledger NAV snapshot failed: {e}")
 
             # --- MODEL PERFORMANCE BENCHMARK: Sunday 11:00 AM ET (weekly) ---
             if now.weekday() == 6 and now.hour == 11 and last_model_benchmark != today_str:

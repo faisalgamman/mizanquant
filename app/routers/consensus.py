@@ -217,6 +217,24 @@ async def satellite_ledger_rebalance_ep():
                         else "يعيد توازن دفتر القمر الورقيّ — دقيقة تقريباً.")}
 
 
+@router.get("/api/ledger-nav")
+async def ledger_nav_ep():
+    """Daily NAV race series — paper core (PVC) vs momentum satellite (PVSA) — for the forward
+    out-of-sample curve. Read-only measurement; never trades."""
+    from app.services.ledger_nav import nav_history
+    return nav_history()
+
+
+@router.post("/api/ledger-nav/record")
+async def ledger_nav_record_ep():
+    """Record today's NAV row now (background) — normally the scheduler does this ~daily at close.
+    Poll GET /api/ledger-nav. Measurement only."""
+    from threading import Thread
+    from app.services.ledger_nav import record_nav
+    Thread(target=record_nav, daemon=True, name="ledger-nav-record").start()
+    return {"status": "started", "message": "يسجّل قيمة اليوم للدفترين — لحظات."}
+
+
 @router.get("/api/signal-calibration")
 async def signal_calibration(scanner: str = "weekly", view: str = "calibration"):
     """READ-ONLY measurement: does a higher scanner score actually yield a higher forward

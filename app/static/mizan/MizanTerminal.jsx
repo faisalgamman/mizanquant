@@ -992,9 +992,29 @@ function SettingsView() {
   );
 }
 
+function RaceChart({ rows }) {
+  const pts = (rows || []).filter(r => r && (r.core_upl != null || r.sat_upl != null));
+  if (pts.length < 2) return <div className="mz-empty">يبدأ رسم السباق بعد يومين من التسجيل (لقطة تلقائيّة كلّ يوم عند الإغلاق).</div>;
+  const W = 620, H = 170, PAD = 26;
+  const vals = [];
+  pts.forEach(r => { if (r.core_upl != null) vals.push(r.core_upl); if (r.sat_upl != null) vals.push(r.sat_upl); });
+  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  if (hi - lo < 1) { hi += 0.5; lo -= 0.5; }
+  const x = i => PAD + (i / (pts.length - 1)) * (W - 2 * PAD);
+  const y = v => PAD + (1 - (v - lo) / (hi - lo)) * (H - 2 * PAD);
+  const line = key => pts.map((r, i) => r[key] == null ? null : x(i) + "," + y(r[key])).filter(Boolean).join(" ");
+  const zeroY = y(0);
+  return (<svg viewBox={"0 0 " + W + " " + H} className="mz-race-svg">
+    <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="var(--border-subtle)" strokeDasharray="3 3" />
+    <polyline points={line("core_upl")} fill="none" stroke={ACC} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    <polyline points={line("sat_upl")} fill="none" stroke={POS} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+  </svg>);
+}
+
 function CorePortfolioView() {
   const dp = useGet("/api/screener/deep-picks?limit=200");
   const co = useGet("/api/core-overlay-sim");
+  const nav = useGet("/api/ledger-nav");
   const [capital, setCapital] = useState(10000);
   const [maxLoss, setMaxLoss] = useState(15);
   const [cb, setCb] = useState(null);         // circuit-breaker card state
@@ -1169,6 +1189,16 @@ function CorePortfolioView() {
           <div className="mz-empty">لم يُفتح دفتر القمر بعد — اضغط «▶ افتح القمر» لبدء السجلّ الأماميّ (أعلى 10 بالزخم، شهريّ). يعمل تلقائيّاً أيضاً كلّ ~{sat.rebalance_days || 28} يوم.</div>
         )) : <div className="mz-empty">…يحمّل القمر</div>}
         {satMsg && <div className="mz-note" style={{ color: satMsg === "تعذّر" ? NEG : POS }}>{satMsg}</div>}
+      </Panel>
+
+      <Panel title="🏁 سباق النواة ضدّ القمر — المنحنى الأماميّ" cls="mz-core-ledger">
+        <div className="mz-race-legend">
+          <span><i style={{ background: ACC }} />النواة {nav && nav.latest ? pct(nav.latest.core_upl) : "…"}</span>
+          <span><i style={{ background: POS }} />القمر (الزخم) {nav && nav.latest ? pct(nav.latest.sat_upl) : "…"}</span>
+          <span className="ql-dim" style={{ marginInlineStart: "auto" }}>{nav ? (nav.days + " يوم مُسجَّل") : "…"}</span>
+        </div>
+        <RaceChart rows={nav && nav.rows} />
+        <div className="mz-note ql-dim">عائد المراكز المفتوحة لكلّ دفتر بأسعار الإغلاق (يستثني المحقَّق). تُسجَّل لقطة آليّاً كلّ يوم عند إغلاق السوق. هذا هو الدليل خارج العيّنة الذي يحسم إن كانت ألفا الزخم حقيقيّة. قياس فقط — لا صفقات.</div>
       </Panel>
     </div>
   );
