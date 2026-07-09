@@ -1028,6 +1028,16 @@ function CorePortfolioView() {
     try { const r = await fetch("/api/core-ledger/rebalance", { method: "POST" }).then(x => x.json());
       setClMsg(r.message || "بدأ"); setTimeout(loadCl, 9000); setTimeout(loadCl, 26000); } catch (e) { setClMsg("تعذّر"); }
   };
+  const [sat, setSat] = useState(null);       // momentum satellite ledger (PVSA) — forward OOS
+  const [satMsg, setSatMsg] = useState("");
+  const loadSat = () => fetch("/api/satellite-ledger").then(r => r.json()).then(setSat).catch(() => {});
+  useEffect(() => { loadSat(); }, []);
+  const startSat = async () => {
+    if (!window.confirm("فتح/تحديث سلّة القمر (الزخم الشهريّ) الورقيّة؟ تتبّع أماميّ ظلّيّ فقط — لا يُنشَر حيّاً ولا يرسل أمراً حقيقيّاً.")) return;
+    setSatMsg("…يبدأ (قد يستغرق دقيقة)");
+    try { const r = await fetch("/api/satellite-ledger/rebalance", { method: "POST" }).then(x => x.json());
+      setSatMsg(r.message || "بدأ"); setTimeout(loadSat, 9000); setTimeout(loadSat, 26000); } catch (e) { setSatMsg("تعذّر"); }
+  };
   const rows = (dp && dp.results) || [];
   const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
   const core = co && co.strategies && co.strategies.core;
@@ -1136,6 +1146,29 @@ function CorePortfolioView() {
           <div className="mz-empty">لم تُفتح السلّة الورقيّة بعد — اضغط «▶ افتح الدفتر» لبدء تتبّع النواة الحلال بالتساوي ورقيّاً. يعمل تلقائيّاً أيضاً كلّ ~{cl.rebalance_days || 85} يوم.</div>
         )) : <div className="mz-empty">…يحمّل الدفتر</div>}
         {clMsg && <div className="mz-note" style={{ color: clMsg === "تعذّر" ? NEG : POS }}>{clMsg}</div>}
+      </Panel>
+
+      <Panel title="🌙 قمر الزخم — تتبّع أماميّ ظلّيّ (غير منشور حيّاً)" cls="mz-core-ledger"
+        right={<button className="mz-btn" style={{ maxWidth: 150 }} onClick={startSat}>{sat && sat.open ? "↻ حدّث القمر" : "▶ افتح القمر"}</button>}>
+        <div className="mz-verdict" style={{ borderColor: ACC, color: "var(--text-secondary)", marginBottom: 12, fontWeight: 600 }}>
+          🔬 <b>الفرضيّة الوحيدة التي عبرت آلة الزمن بعد التكاليف</b>: زخم 12-1، إعادة توازن شهريّة، أعلى 10. في العيّنة: <b style={{ color: POS }}>+4.6%/سنة</b> فوق النواة — لكن بتراجع أسوأ (<b style={{ color: NEG }}>−37%</b> مقابل −21%)، وأرقام 2022 مشبوهة بانحياز البقاء. لذا <b>لا يُنشَر حيّاً</b>؛ هذا الدفتر يجمع دليلاً <b>أماميّاً</b> (خارج العيّنة) ليكشف إن كانت الألفا حقيقيّة. بقرارك وحدك يصبح قمراً ≤10% لاحقاً.
+        </div>
+        {sat ? (sat.open ? (<div>
+          <div className="mz-pain-out" style={{ marginBottom: 10 }}>
+            <div><span>عائد غير محقّق (أماميّ)</span><b style={{ color: (sat.unrealized_pct || 0) >= 0 ? POS : NEG }}>{pct(sat.unrealized_pct)}</b></div>
+            <div><span>عدد المراكز</span><b>{sat.open}</b></div>
+            <div><span>القيمة السوقيّة</span><b>{money(sat.market_value)}</b></div>
+            <div><span>آخر إعادة توازن</span><b style={{ fontSize: 13 }}>{sat.days_since_rebalance != null ? ("منذ " + sat.days_since_rebalance + " يوم") : "—"}</b></div>
+          </div>
+          {(sat.positions || []).length ? (
+            <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>القيمة</th></tr></thead>
+              <tbody>{sat.positions.slice(0, 12).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td>{money(p.value)}</td></tr>))}</tbody></table>
+          ) : null}
+          <div className="mz-note ql-dim">تتبّع أماميّ خالص — كلّ يوم يمرّ هو دليل خارج العيّنة لم يكن متاحاً في الاختبار. أعِد التوازن شهريّاً (~{sat.rebalance_days} يوم). ظلّيّ فقط — لا يغيّر تسجيلك الحيّ ولا يرسل أمراً.</div>
+        </div>) : (
+          <div className="mz-empty">لم يُفتح دفتر القمر بعد — اضغط «▶ افتح القمر» لبدء السجلّ الأماميّ (أعلى 10 بالزخم، شهريّ). يعمل تلقائيّاً أيضاً كلّ ~{sat.rebalance_days || 28} يوم.</div>
+        )) : <div className="mz-empty">…يحمّل القمر</div>}
+        {satMsg && <div className="mz-note" style={{ color: satMsg === "تعذّر" ? NEG : POS }}>{satMsg}</div>}
       </Panel>
     </div>
   );

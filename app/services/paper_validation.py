@@ -48,11 +48,12 @@ PV_MONTHLY = "PVM"   # monthly composite scanner — rebalanced (hold top-N, dro
 PV_PAIRS = "PVP"     # halal long-only relative-value pairs (cointegration) — z-reversion exit
 PV_SHADOW = "PVSH"   # weekly SHADOW ledger — gate-REJECTED picks, inert (measurement only)
 PV_CORE = "PVC"      # Core Portfolio — own the halal universe equal-weight, quarterly rebalance, NO stops
+PV_SATELLITE = "PVSA"  # Momentum SATELLITE — top-K by 12-1 momentum, monthly rebalance; SHADOW/forward-OOS only
 PV_STRATEGY = PV_WEEKLY  # backward-compat alias (older callers / tests use PV_STRATEGY)
 
 
 def _strategy_for(scanner: str | None) -> str:
-    """Map a 'weekly' | 'monthly' | 'pairs' | 'core' scanner label to its ledger strategy id."""
+    """Map a 'weekly'|'monthly'|'pairs'|'core'|'satellite' scanner label to its ledger strategy id."""
     s = str(scanner or "").lower()
     if s.startswith("pair"):
         return PV_PAIRS
@@ -60,6 +61,8 @@ def _strategy_for(scanner: str | None) -> str:
         return PV_MONTHLY
     if s.startswith("core"):
         return PV_CORE
+    if s.startswith("sat") or s.startswith("moon") or s.startswith("mom"):
+        return PV_SATELLITE
     return PV_WEEKLY
 
 
@@ -605,7 +608,8 @@ def paper_ledger_status(strategy_id: str = PV_WEEKLY) -> dict:
     return {
         "scanner": ("pairs" if strategy_id == PV_PAIRS
                     else "monthly" if strategy_id == PV_MONTHLY
-                    else "core" if strategy_id == PV_CORE else "weekly"),
+                    else "core" if strategy_id == PV_CORE
+                    else "satellite" if strategy_id == PV_SATELLITE else "weekly"),
         "strategy_id": strategy_id,
         "open": open_n,
         "closed": closed_n,
@@ -934,13 +938,13 @@ def _default_core_picks(limit: int = 200) -> list[dict]:
     return _normalize_picks(halal)
 
 
-def _days_since_last_core() -> "int | None":
-    """Whole days since the most recent PVC trade was opened (naive-UTC diff to match the
-    created_at column). None when the ledger is empty (→ first basket should be opened)."""
+def _days_since_last(strategy_id: str) -> "int | None":
+    """Whole days since the most recent trade in ``strategy_id`` was opened (naive-UTC diff to
+    match the created_at column). None when that ledger is empty (→ first basket should open)."""
     db = SessionLocal()
     try:
         row = (db.query(TradeHistory.created_at)
-               .filter(TradeHistory.strategy_id == PV_CORE)
+               .filter(TradeHistory.strategy_id == strategy_id)
                .order_by(TradeHistory.created_at.desc()).first())
     except SQLAlchemyError:
         row = None
@@ -952,6 +956,11 @@ def _days_since_last_core() -> "int | None":
     last = last.replace(tzinfo=None) if getattr(last, "tzinfo", None) else last
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return max(0, (now - last).days)
+
+
+def _days_since_last_core() -> "int | None":
+    """Days since the last PVC (core) trade — thin wrapper over :func:`_days_since_last`."""
+    return _days_since_last(PV_CORE)
 
 
 def rebalance_core(account: float = 100000.0, _picks_fn=None, force: bool = False) -> dict:
@@ -1030,18 +1039,11 @@ def rebalance_core(account: float = 100000.0, _picks_fn=None, force: bool = Fals
         db.close()
 
 
-def core_ledger_summary(account: float = 100000.0) -> dict:
-    """The paper Core ledger's live tracker (PVC): open positions with unrealized P/L at the
-    latest scan prices, realized stats from closed rows, and the blended return since inception.
-    Cheap — prices come from the cached deep-picks scan (no per-name live fetch). This is the
-    'paper core' the user compares their real execution against (personal-slippage metric)."""
-    picks = []
-    try:
-        picks = _default_core_picks()
-    except Exception:
-        picks = []
-    price_map = {p["symbol"]: p["price"] for p in picks}
-
+def _equal_ledger_summary(strategy_id: str, price_map: dict, *, rebalance_days: int,
+                          note: str) -> dict:
+    """Shared live-tracker for an equal-weight paper ledger (PVC core / PVSA satellite): open
+    positions with unrealized P/L at the given scan prices + realized stats from closed rows.
+    Cheap — no per-name live fetch. Never raises (degrades to zeros on a DB error)."""
     db = SessionLocal()
     positions: list[dict] = []
     cost = mkt = 0.0
@@ -1050,36 +1052,34 @@ def core_ledger_summary(account: float = 100000.0) -> dict:
     last_open = None
     try:
         open_rows = db.query(TradeHistory).filter(
-            TradeHistory.strategy_id == PV_CORE, TradeHistory.pnl_pct.is_(None)).all()
+            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.is_(None)).all()
         closed_rows = db.query(TradeHistory).filter(
-            TradeHistory.strategy_id == PV_CORE, TradeHistory.pnl_pct.isnot(None)).all()
+            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.isnot(None)).all()
         for t in open_rows:
             entry = float(t.entry_price or 0)
             qty = float(t.qty or 0)
             cur = price_map.get(t.symbol) or entry
-            c = qty * entry
-            m = qty * cur
-            cost += c
-            mkt += m
+            cost += qty * entry
+            mkt += qty * cur
             if t.created_at and (last_open is None or t.created_at > last_open):
                 last_open = t.created_at
             positions.append({"symbol": t.symbol, "qty": round(qty, 4),
                               "entry": round(entry, 2), "current": round(cur, 2),
                               "upl_pct": round((cur / entry - 1.0) * 100, 2) if entry > 0 else None,
-                              "value": round(m, 2)})
+                              "value": round(qty * cur, 2)})
         for t in closed_rows:
             realized_pnl += float(t.pnl or 0)
             if t.pnl_pct is not None:
                 closed_pcts.append(float(t.pnl_pct))
     except SQLAlchemyError as e:
-        logger.debug("core_ledger_summary failed: %s", e)
+        logger.debug("_equal_ledger_summary(%s) failed: %s", strategy_id, e)
     finally:
         db.close()
 
     positions.sort(key=lambda p: p["value"], reverse=True)
     unreal_pct = ((mkt / cost - 1.0) * 100) if cost > 0 else None
     return {
-        "strategy_id": PV_CORE,
+        "strategy_id": strategy_id,
         "open": len(positions),
         "closed": len(closed_pcts),
         "cost_basis": round(cost, 2),
@@ -1088,12 +1088,181 @@ def core_ledger_summary(account: float = 100000.0) -> dict:
         "realized_pnl": round(realized_pnl, 2),
         "avg_closed_pct": round(sum(closed_pcts) / len(closed_pcts), 2) if closed_pcts else None,
         "last_rebalance": (last_open.replace(tzinfo=None).isoformat() if last_open else None),
-        "days_since_rebalance": _days_since_last_core(),
-        "rebalance_days": int(os.environ.get("CORE_REBALANCE_DAYS", "85")),
+        "days_since_rebalance": _days_since_last(strategy_id),
+        "rebalance_days": rebalance_days,
         "positions": positions[:80],
-        "note": "Paper mirror of the equal-weight halal core (unrealized at latest scan prices). "
-                "Compare it to YOUR real book to measure personal execution slippage. Simulated; never trades.",
+        "note": note,
     }
+
+
+def core_ledger_summary(account: float = 100000.0) -> dict:
+    """The paper Core ledger's live tracker (PVC): open positions + unrealized P/L at latest scan
+    prices. The 'paper core' the user compares their real execution against (personal slippage)."""
+    try:
+        picks = _default_core_picks()
+    except Exception:
+        picks = []
+    price_map = {p["symbol"]: p["price"] for p in picks}
+    return _equal_ledger_summary(
+        PV_CORE, price_map, rebalance_days=int(os.environ.get("CORE_REBALANCE_DAYS", "85")),
+        note="Paper mirror of the equal-weight halal core (unrealized at latest scan prices). "
+             "Compare it to YOUR real book to measure personal execution slippage. Simulated; never trades.")
+
+
+# ── Momentum SATELLITE ledger (PVSA) — forward OOS test of the data-found edge ─
+# The ONLY hypothesis that beat the core after costs in the walk-forward: rank halal names by
+# 12-1 momentum, hold the top-K equal-weight, rebalance MONTHLY (weekly cadence's costs killed
+# it). In-sample: ~+5%/yr alpha (top-10) at a MUCH worse drawdown (−37% vs −21%). This ledger
+# tracks it FORWARD (out-of-sample) so we can see if the alpha survives without survivorship
+# inflation — the honest gate before it could ever become a user-chosen ≤10% satellite. SHADOW.
+
+def _satellite_row_from_pick(pick: dict, per_name_budget: float) -> dict:
+    """Map a momentum-ranked halal name → OPEN PVSA trade (equal-dollar, fractional qty). No stops
+    — the exit is leaving the top-K at the next monthly rebalance."""
+    price = float(pick.get("price") or pick.get("current_price") or 0)
+    qty = round(per_name_budget / price, 6) if price > 0 else 0.0
+    return {
+        "strategy_id": PV_SATELLITE,
+        "symbol": pick.get("symbol"),
+        "side": "buy",
+        "qty": qty,
+        "entry_price": round(price, 4) if price else 0.0,
+        "position_value": round(qty * price, 2) if price else 0.0,
+        "confidence": float(pick.get("score") or 0),
+        "status": "open",
+        "signal_details": {"source": "paper_validation_satellite", "rank_by": "mom_12_1",
+                           "weight": "equal_dollar", "asof": _utc_now().isoformat()},
+    }
+
+
+def _momentum_ranked_picks(limit: int = 200) -> list[dict]:
+    """Halal deep-picks ranked by 12-1 momentum (score_mom121; fallback 63d-RS score_momentum),
+    highest first, each with a valid price. Returns the FULL ranked list (caller slices top-K) so
+    a name that just fell out of the top-K still carries a current price to close at. [] on failure."""
+    import asyncio
+
+    def _call():
+        from app.workspace_server import screener_deep_picks
+        res = asyncio.run(screener_deep_picks(limit=limit, use_cache="true"))
+        return res if isinstance(res, dict) else {}
+
+    try:
+        try:
+            res = _call()
+        except RuntimeError:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                res = ex.submit(_call).result()
+    except Exception as e:
+        logger.warning("satellite picks: deep-picks unavailable: %s", e)
+        return []
+    out: list[dict] = []
+    for r in res.get("results", []) or []:
+        if not (r.get("is_halal") or r.get("halal_verdict") == "halal"):
+            continue
+        try:
+            price = float(r.get("price") or r.get("current_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not r.get("symbol") or price <= 0:
+            continue
+        mom = r.get("score_mom121")
+        if not isinstance(mom, (int, float)):
+            mom = r.get("score_momentum")
+        if not isinstance(mom, (int, float)):
+            continue                              # no momentum signal → can't rank; exclude
+        out.append({"symbol": r["symbol"], "price": price, "score": float(mom),
+                    "company": r.get("company"), "sector": r.get("sector")})
+    out.sort(key=lambda p: p["score"], reverse=True)
+    return out
+
+
+def rebalance_satellite(account: float = 100000.0, top_k: int = 10, _picks_fn=None,
+                        force: bool = False) -> dict:
+    """Rebalance the momentum SATELLITE ledger (PVSA) to the current top-K by 12-1 momentum, equal-
+    DOLLAR weight, NO stops. Monthly cadence guard (SAT_REBALANCE_DAYS, default 28); ``force`` opens
+    the first basket / a manual refresh. KEEP held names still in the top-K, CLOSE those that fell
+    out (at current price), OPEN new entrants. SHADOW/forward-OOS — never places a broker order."""
+    min_days = int(os.environ.get("SAT_REBALANCE_DAYS", "28"))
+    top_k = int(os.environ.get("SAT_TOP_K", str(top_k)))
+    days_since = _days_since_last(PV_SATELLITE)
+    if days_since is not None and not force and days_since < min_days:
+        return {"skipped": True, "reason": "within cadence", "days_since": days_since,
+                "min_days": min_days}
+
+    fn = _picks_fn or _momentum_ranked_picks
+    try:
+        ranked = [p for p in (fn() or [])
+                  if p.get("symbol") and float(p.get("price") or 0) > 0]
+    except Exception as e:
+        logger.error("rebalance_satellite: picks fn failed: %s", e)
+        return {"error": f"picks_fn failed: {e}"}
+    if not ranked:
+        return {"target": 0, "opened": 0, "closed": 0, "held": 0, "reason": "no picks"}
+
+    price_map = {p["symbol"]: p["price"] for p in ranked}
+    target = [p["symbol"] for p in ranked][:max(top_k, 1)]
+    target_set = set(target)
+    per_name = float(account) / max(len(target), 1)
+
+    db = SessionLocal()
+    try:
+        open_trades = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == PV_SATELLITE, TradeHistory.pnl_pct.is_(None)).all()
+        held_syms = {t.symbol for t in open_trades}
+
+        closed = held = 0
+        for t in open_trades:
+            if t.symbol in target_set:
+                held += 1                         # still top-K → keep
+                continue
+            cur = _current_price(t.symbol, price_map)
+            if cur is None:
+                held += 1                         # can't price honestly → leave open
+                continue
+            entry = float(t.entry_price or 0)
+            t.exit_price = round(cur, 4)
+            t.pnl_pct = round((cur / entry - 1.0) * 100, 2) if entry > 0 else None
+            t.pnl = round((cur - entry) * float(t.qty or 0), 2)
+            t.closed_at = _utc_now()
+            t.status = "closed"
+            closed += 1
+
+        opened = 0
+        for sym in target:
+            if sym in held_syms:
+                continue
+            price = price_map.get(sym, 0)
+            if not price or price <= 0:
+                continue
+            pick = next((p for p in ranked if p["symbol"] == sym), {"symbol": sym, "price": price})
+            db.add(TradeHistory(created_at=_utc_now(), **_satellite_row_from_pick(pick, per_name)))
+            opened += 1
+
+        db.commit()
+        return {"target": len(target), "opened": opened, "closed": closed, "held": held,
+                "account": account, "top_k": top_k}
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("rebalance_satellite failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+def satellite_ledger_summary(account: float = 100000.0) -> dict:
+    """The momentum satellite ledger's live tracker (PVSA) — the forward OOS record."""
+    try:
+        ranked = _momentum_ranked_picks()
+    except Exception:
+        ranked = []
+    price_map = {p["symbol"]: p["price"] for p in ranked}
+    return _equal_ledger_summary(
+        PV_SATELLITE, price_map, rebalance_days=int(os.environ.get("SAT_REBALANCE_DAYS", "28")),
+        note="Forward (out-of-sample) paper tracker of the MONTHLY 12-1 momentum satellite (top-K, "
+             "equal-weight). In-sample it beat the core after costs (~+5%/yr, top-10) at a MUCH higher "
+             "drawdown (−37% vs −21%); this forward ledger tests whether the alpha survives without "
+             "survivorship bias — the honest gate before any real allocation. Shadow only; never trades.")
 
 
 # ── Pairs ledger (PVP) — halal long-only relative-value, cointegration ─────────

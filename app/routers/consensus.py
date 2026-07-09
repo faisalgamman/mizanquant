@@ -193,6 +193,30 @@ async def core_ledger_rebalance_ep():
                         else "يعيد توازن دفتر النواة الورقيّ — دقيقة تقريباً.")}
 
 
+@router.get("/api/satellite-ledger")
+async def satellite_ledger_ep():
+    """The momentum SATELLITE paper ledger (PVSA) — the FORWARD out-of-sample record of the only
+    strategy that beat the core after costs in the walk-forward (monthly 12-1 momentum, top-K).
+    Shadow measurement; the alpha is unproven forward (survivorship risk). Never trades."""
+    from app.services.paper_validation import satellite_ledger_summary
+    return satellite_ledger_summary()
+
+
+@router.post("/api/satellite-ledger/rebalance")
+async def satellite_ledger_rebalance_ep():
+    """Open / refresh the momentum satellite paper basket now (top-K by 12-1 momentum, force past
+    the monthly cadence). Background; poll GET /api/satellite-ledger. SHADOW — paper only; NEVER a
+    real order. Starting the forward track record does NOT deploy it live."""
+    from threading import Thread
+    from app.services.paper_validation import rebalance_satellite, _days_since_last, PV_SATELLITE
+    Thread(target=rebalance_satellite, kwargs={"force": True}, daemon=True,
+           name="satellite-rebalance").start()
+    first = _days_since_last(PV_SATELLITE) is None
+    return {"status": "started",
+            "message": ("يفتح سلّة القمر (الزخم) الورقيّة الأولى — دقيقة تقريباً." if first
+                        else "يعيد توازن دفتر القمر الورقيّ — دقيقة تقريباً.")}
+
+
 @router.get("/api/signal-calibration")
 async def signal_calibration(scanner: str = "weekly", view: str = "calibration"):
     """READ-ONLY measurement: does a higher scanner score actually yield a higher forward

@@ -771,6 +771,14 @@ def _scheduler_loop():
                     logger.info("Core paper ledger rebalance: %s", rebalance_core())
                 except Exception as e:
                     logger.error(f"Core paper ledger rebalance failed: {e}", exc_info=True)
+                # SATELLITE ledger (PVSA): forward OOS test of the momentum edge. Monthly cadence
+                # (self-guards via SAT_REBALANCE_DAYS). Shadow only — accumulates the out-of-sample
+                # record that decides whether the walk-forward alpha was real or survivorship.
+                try:
+                    from app.services.paper_validation import rebalance_satellite
+                    logger.info("Satellite paper ledger rebalance: %s", rebalance_satellite())
+                except Exception as e:
+                    logger.error(f"Satellite paper ledger rebalance failed: {e}", exc_info=True)
 
             # --- MONTHLY AAOIFI FINANCIAL RE-SCREEN (halal universe hygiene) ---
             # 1st of the month ~02:30 ET (off-hours, heavy): recompute the debt /
