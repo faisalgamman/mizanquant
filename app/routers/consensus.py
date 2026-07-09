@@ -164,9 +164,33 @@ async def paper_validation_rebalance(top_n: int = 15, account: float = 10000.0,
 
 @router.get("/paper_validation/status")
 async def paper_validation_status(scanner: str = "weekly"):
-    """Open/closed ledger counts + graduation for a scanner (weekly PV | monthly PVM)."""
+    """Open/closed ledger counts + graduation for a scanner (weekly PV | monthly PVM | core PVC)."""
     from app.services.paper_validation import paper_ledger_status, _strategy_for
     return paper_ledger_status(strategy_id=_strategy_for(scanner))
+
+
+@router.get("/api/core-ledger")
+async def core_ledger_ep():
+    """The paper Core Portfolio ledger (PVC): open positions with unrealized P/L at latest scan
+    prices, realized stats, blended return since inception, and rebalance cadence. This is the
+    paper mirror the user compares their REAL book against to measure execution slippage."""
+    from app.services.paper_validation import core_ledger_summary
+    return core_ledger_summary()
+
+
+@router.post("/api/core-ledger/rebalance")
+async def core_ledger_rebalance_ep():
+    """Open / refresh the paper Core basket now (equal-weight halal universe, force past the
+    quarterly cadence). Runs in the background; poll GET /api/core-ledger. Simulated — the paper
+    ledger only; NEVER places a real order."""
+    from threading import Thread
+    from app.services.paper_validation import rebalance_core, _days_since_last_core
+    Thread(target=rebalance_core, kwargs={"force": True}, daemon=True,
+           name="core-rebalance").start()
+    first = _days_since_last_core() is None
+    return {"status": "started",
+            "message": ("يفتح سلّة النواة الورقيّة الأولى — دقيقة تقريباً." if first
+                        else "يعيد توازن دفتر النواة الورقيّ — دقيقة تقريباً.")}
 
 
 @router.get("/api/signal-calibration")

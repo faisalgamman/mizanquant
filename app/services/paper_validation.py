@@ -47,16 +47,19 @@ PV_WEEKLY = "PV"     # weekly swing scanner — Option-A exit (15% stop / 20-day
 PV_MONTHLY = "PVM"   # monthly composite scanner — rebalanced (hold top-N, drop the rest)
 PV_PAIRS = "PVP"     # halal long-only relative-value pairs (cointegration) — z-reversion exit
 PV_SHADOW = "PVSH"   # weekly SHADOW ledger — gate-REJECTED picks, inert (measurement only)
+PV_CORE = "PVC"      # Core Portfolio — own the halal universe equal-weight, quarterly rebalance, NO stops
 PV_STRATEGY = PV_WEEKLY  # backward-compat alias (older callers / tests use PV_STRATEGY)
 
 
 def _strategy_for(scanner: str | None) -> str:
-    """Map a 'weekly' | 'monthly' | 'pairs' scanner label to its ledger strategy id."""
+    """Map a 'weekly' | 'monthly' | 'pairs' | 'core' scanner label to its ledger strategy id."""
     s = str(scanner or "").lower()
     if s.startswith("pair"):
         return PV_PAIRS
     if s.startswith("month"):
         return PV_MONTHLY
+    if s.startswith("core"):
+        return PV_CORE
     return PV_WEEKLY
 
 
@@ -601,7 +604,8 @@ def paper_ledger_status(strategy_id: str = PV_WEEKLY) -> dict:
         db.close()
     return {
         "scanner": ("pairs" if strategy_id == PV_PAIRS
-                    else "monthly" if strategy_id == PV_MONTHLY else "weekly"),
+                    else "monthly" if strategy_id == PV_MONTHLY
+                    else "core" if strategy_id == PV_CORE else "weekly"),
         "strategy_id": strategy_id,
         "open": open_n,
         "closed": closed_n,
@@ -878,6 +882,218 @@ def rebalance_monthly(top_n: int = 15, account: float = 10000.0, _picks_fn=None,
         return {"error": str(e)}
     finally:
         db.close()
+
+
+# ── Core Portfolio ledger (PVC) — own the halal universe equal-weight ──────────
+
+def _core_row_from_pick(pick: dict, per_name_budget: float) -> dict:
+    """Map a halal name → TradeHistory kwargs for an OPEN PVC trade. Equal-DOLLAR weight:
+    fractional qty = budget / price (IBKR supports fractional; a paper index mirror is
+    honestly equal-dollar regardless of share price). NO stop / take-profit — the core has
+    no price exit; its only 'exit' is a name leaving the halal universe at the next rebalance.
+    """
+    price = float(pick.get("price") or pick.get("current_price") or 0)
+    qty = round(per_name_budget / price, 6) if price > 0 else 0.0
+    return {
+        "strategy_id": PV_CORE,
+        "symbol": pick.get("symbol"),
+        "side": "buy",
+        "qty": qty,
+        "entry_price": round(price, 4) if price else 0.0,
+        "position_value": round(qty * price, 2) if price else 0.0,
+        "confidence": float(pick.get("score") or pick.get("composite_score") or 0),
+        "status": "open",
+        "signal_details": {"source": "paper_validation_core", "weight": "equal_dollar",
+                           "asof": _utc_now().isoformat()},
+    }
+
+
+def _default_core_picks(limit: int = 200) -> list[dict]:
+    """The live halal universe (deep-picks, halal-only) → [{symbol, price, score}]. This is the
+    EXACT basket the Core Portfolio page's order generator shows, so the paper mirror tracks
+    what the user is told to buy. Returns [] on any failure (rebalance then no-ops)."""
+    import asyncio
+
+    def _call():
+        from app.workspace_server import screener_deep_picks
+        res = asyncio.run(screener_deep_picks(limit=limit, use_cache="true"))
+        return res if isinstance(res, dict) else {}
+
+    try:
+        try:
+            res = _call()
+        except RuntimeError:                     # inside a running loop → worker thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                res = ex.submit(_call).result()
+    except Exception as e:
+        logger.warning("core picks: deep-picks unavailable: %s", e)
+        return []
+    rows = res.get("results", []) or []
+    halal = [r for r in rows if (r.get("is_halal") or r.get("halal_verdict") == "halal")]
+    return _normalize_picks(halal)
+
+
+def _days_since_last_core() -> "int | None":
+    """Whole days since the most recent PVC trade was opened (naive-UTC diff to match the
+    created_at column). None when the ledger is empty (→ first basket should be opened)."""
+    db = SessionLocal()
+    try:
+        row = (db.query(TradeHistory.created_at)
+               .filter(TradeHistory.strategy_id == PV_CORE)
+               .order_by(TradeHistory.created_at.desc()).first())
+    except SQLAlchemyError:
+        row = None
+    finally:
+        db.close()
+    if not row or not row[0]:
+        return None
+    last = row[0]
+    last = last.replace(tzinfo=None) if getattr(last, "tzinfo", None) else last
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return max(0, (now - last).days)
+
+
+def rebalance_core(account: float = 100000.0, _picks_fn=None, force: bool = False) -> dict:
+    """Rebalance the Core Portfolio paper ledger (PVC) to the current halal universe, equal-
+    DOLLAR weight, NO stops. Cadence-guarded to ~quarterly (CORE_REBALANCE_DAYS, default 85):
+    the core's whole measured edge is LOW TURNOVER, so it churns rarely. ``force`` ignores the
+    cadence (first basket / manual trigger).
+
+    Policy: KEEP every held name still in the halal universe (no per-rebalance resize → no
+    churn cost); CLOSE names that left the universe (at current price); OPEN new halal entrants
+    at equal-dollar weight. Returns {target, opened, closed, held, account}. Simulated only —
+    never places a broker order.
+    """
+    min_days = int(os.environ.get("CORE_REBALANCE_DAYS", "85"))
+    days_since = _days_since_last_core()
+    if days_since is not None and not force and days_since < min_days:
+        return {"skipped": True, "reason": "within cadence", "days_since": days_since,
+                "min_days": min_days}
+
+    fn = _picks_fn or _default_core_picks
+    try:
+        picks = _normalize_picks(fn())
+    except Exception as e:
+        logger.error("rebalance_core: picks fn failed: %s", e)
+        return {"error": f"picks_fn failed: {e}"}
+    if not picks:
+        return {"target": 0, "opened": 0, "closed": 0, "held": 0, "reason": "no picks"}
+
+    price_map = {p["symbol"]: p["price"] for p in picks}
+    target = [p["symbol"] for p in picks]
+    target_set = set(target)
+    per_name = float(account) / max(len(target), 1)
+
+    db = SessionLocal()
+    try:
+        open_trades = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == PV_CORE, TradeHistory.pnl_pct.is_(None)).all()
+        held_syms = {t.symbol for t in open_trades}
+
+        closed = held = 0
+        for t in open_trades:
+            if t.symbol in target_set:
+                held += 1                       # still halal → keep (low turnover)
+                continue
+            cur = _current_price(t.symbol, price_map)
+            if cur is None:
+                held += 1                       # can't price honestly → leave open
+                continue
+            entry = float(t.entry_price or 0)
+            t.exit_price = round(cur, 4)
+            t.pnl_pct = round((cur / entry - 1.0) * 100, 2) if entry > 0 else None
+            t.pnl = round((cur - entry) * float(t.qty or 0), 2)
+            t.closed_at = _utc_now()
+            t.status = "closed"
+            closed += 1
+
+        opened = 0
+        for sym in target:
+            if sym in held_syms:
+                continue                        # already held → no double-open
+            price = price_map.get(sym, 0)
+            if not price or price <= 0:
+                continue
+            pick = next((p for p in picks if p["symbol"] == sym), {"symbol": sym, "price": price})
+            db.add(TradeHistory(created_at=_utc_now(), **_core_row_from_pick(pick, per_name)))
+            opened += 1
+
+        db.commit()
+        return {"target": len(target), "opened": opened, "closed": closed, "held": held,
+                "account": account}
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("rebalance_core failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+
+def core_ledger_summary(account: float = 100000.0) -> dict:
+    """The paper Core ledger's live tracker (PVC): open positions with unrealized P/L at the
+    latest scan prices, realized stats from closed rows, and the blended return since inception.
+    Cheap — prices come from the cached deep-picks scan (no per-name live fetch). This is the
+    'paper core' the user compares their real execution against (personal-slippage metric)."""
+    picks = []
+    try:
+        picks = _default_core_picks()
+    except Exception:
+        picks = []
+    price_map = {p["symbol"]: p["price"] for p in picks}
+
+    db = SessionLocal()
+    positions: list[dict] = []
+    cost = mkt = 0.0
+    realized_pnl = 0.0
+    closed_pcts: list[float] = []
+    last_open = None
+    try:
+        open_rows = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == PV_CORE, TradeHistory.pnl_pct.is_(None)).all()
+        closed_rows = db.query(TradeHistory).filter(
+            TradeHistory.strategy_id == PV_CORE, TradeHistory.pnl_pct.isnot(None)).all()
+        for t in open_rows:
+            entry = float(t.entry_price or 0)
+            qty = float(t.qty or 0)
+            cur = price_map.get(t.symbol) or entry
+            c = qty * entry
+            m = qty * cur
+            cost += c
+            mkt += m
+            if t.created_at and (last_open is None or t.created_at > last_open):
+                last_open = t.created_at
+            positions.append({"symbol": t.symbol, "qty": round(qty, 4),
+                              "entry": round(entry, 2), "current": round(cur, 2),
+                              "upl_pct": round((cur / entry - 1.0) * 100, 2) if entry > 0 else None,
+                              "value": round(m, 2)})
+        for t in closed_rows:
+            realized_pnl += float(t.pnl or 0)
+            if t.pnl_pct is not None:
+                closed_pcts.append(float(t.pnl_pct))
+    except SQLAlchemyError as e:
+        logger.debug("core_ledger_summary failed: %s", e)
+    finally:
+        db.close()
+
+    positions.sort(key=lambda p: p["value"], reverse=True)
+    unreal_pct = ((mkt / cost - 1.0) * 100) if cost > 0 else None
+    return {
+        "strategy_id": PV_CORE,
+        "open": len(positions),
+        "closed": len(closed_pcts),
+        "cost_basis": round(cost, 2),
+        "market_value": round(mkt, 2),
+        "unrealized_pct": round(unreal_pct, 2) if unreal_pct is not None else None,
+        "realized_pnl": round(realized_pnl, 2),
+        "avg_closed_pct": round(sum(closed_pcts) / len(closed_pcts), 2) if closed_pcts else None,
+        "last_rebalance": (last_open.replace(tzinfo=None).isoformat() if last_open else None),
+        "days_since_rebalance": _days_since_last_core(),
+        "rebalance_days": int(os.environ.get("CORE_REBALANCE_DAYS", "85")),
+        "positions": positions[:80],
+        "note": "Paper mirror of the equal-weight halal core (unrealized at latest scan prices). "
+                "Compare it to YOUR real book to measure personal execution slippage. Simulated; never trades.",
+    }
 
 
 # ── Pairs ledger (PVP) — halal long-only relative-value, cointegration ─────────

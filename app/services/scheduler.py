@@ -763,6 +763,14 @@ def _scheduler_loop():
                         logger.error("Auto-paper monthly failed: %s", _ap_e)
                 except Exception as e:
                     logger.error(f"Paper validation monthly rebalance failed: {e}", exc_info=True)
+                # CORE ledger (PVC): mirror the equal-weight halal universe. Called on the
+                # monthly trigger but self-guards to ~quarterly (CORE_REBALANCE_DAYS) — opens
+                # the first basket immediately, then churns rarely (low turnover is the edge).
+                try:
+                    from app.services.paper_validation import rebalance_core
+                    logger.info("Core paper ledger rebalance: %s", rebalance_core())
+                except Exception as e:
+                    logger.error(f"Core paper ledger rebalance failed: {e}", exc_info=True)
 
             # --- MONTHLY AAOIFI FINANCIAL RE-SCREEN (halal universe hygiene) ---
             # 1st of the month ~02:30 ET (off-hours, heavy): recompute the debt /

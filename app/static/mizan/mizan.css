@@ -379,6 +379,7 @@
 .mz-cb-row { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: 9px; padding: 11px 12px; display: flex; flex-direction: column; gap: 7px; }
 .mz-cb-h { font-size: 12px; font-weight: 700; color: var(--text-primary); }
 .mz-cb-eff { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+.mz-core-ledger { margin-top: 14px; }
 .mz-wt { margin-bottom: 14px; }
 .mz-wt-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
 .mz-wt-l { font-size: 12px; color: var(--text-secondary); }

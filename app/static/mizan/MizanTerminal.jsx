@@ -1018,6 +1018,16 @@ function CorePortfolioView() {
   };
   const cbCap = +(cbD.capital_experimental || 0);
   const cbStop = Math.round(cbCap * (+cbD.max_cumulative_loss_pct || 0) / 100);
+  const [cl, setCl] = useState(null);         // paper core ledger (PVC) summary
+  const [clMsg, setClMsg] = useState("");
+  const loadCl = () => fetch("/api/core-ledger").then(r => r.json()).then(setCl).catch(() => {});
+  useEffect(() => { loadCl(); }, []);
+  const startCore = async () => {
+    if (!window.confirm("فتح/تحديث سلّة النواة الورقيّة الآن؟ دفتر محاكاة فقط — لا يرسل أيّ أمر حقيقيّ.")) return;
+    setClMsg("…يبدأ (قد يستغرق دقيقة)");
+    try { const r = await fetch("/api/core-ledger/rebalance", { method: "POST" }).then(x => x.json());
+      setClMsg(r.message || "بدأ"); setTimeout(loadCl, 9000); setTimeout(loadCl, 26000); } catch (e) { setClMsg("تعذّر"); }
+  };
   const rows = (dp && dp.results) || [];
   const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
   const core = co && co.strategies && co.strategies.core;
@@ -1106,6 +1116,26 @@ function CorePortfolioView() {
           {cbMsg && <div className="mz-note" style={{ color: cbMsg.startsWith("خطأ") || cbMsg === "تعذّر" ? NEG : POS }}>{cbMsg}</div>}
           <div className="mz-note ql-dim">محفوظة على القرص بسجلّ تدقيق كامل وقابلة للعكس. هذه ليست نصيحةً ولا أمراً — بروتوكول انضباطٍ تكتبه وتقرأه أنت.</div>
         </div>) : <div className="mz-empty">…يحمّل البطاقة</div>}
+      </Panel>
+
+      <Panel title="📓 دفتر النواة الورقيّ — مرآة موازية لقياس انزلاقك" cls="mz-core-ledger"
+        right={<button className="mz-btn gold" style={{ maxWidth: 150 }} onClick={startCore}>{cl && cl.open ? "↻ حدّث الدفتر" : "▶ افتح الدفتر"}</button>}>
+        {cl ? (cl.open ? (<div>
+          <div className="mz-pain-out" style={{ marginBottom: 10 }}>
+            <div><span>عائد غير محقّق (بأسعار آخر مسح)</span><b style={{ color: (cl.unrealized_pct || 0) >= 0 ? POS : NEG }}>{pct(cl.unrealized_pct)}</b></div>
+            <div><span>عدد المراكز</span><b>{cl.open}</b></div>
+            <div><span>القيمة السوقيّة</span><b>{money(cl.market_value)}</b></div>
+            <div><span>آخر إعادة توازن</span><b style={{ fontSize: 13 }}>{cl.days_since_rebalance != null ? ("منذ " + cl.days_since_rebalance + " يوم") : "—"}</b></div>
+          </div>
+          {(cl.positions || []).length ? (
+            <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>القيمة</th></tr></thead>
+              <tbody>{cl.positions.slice(0, 15).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td>{money(p.value)}</td></tr>))}</tbody></table>
+          ) : null}
+          <div className="mz-note ql-dim">النظام يتداول النواة بالتساوي <b>ورقيّاً</b> بالتوازي (إعادة توازن كلّ ~{cl.rebalance_days} يوم). حين تنفّذ سلّتك الحقيقيّة، قارن عائدك بهذا الرقم = <b>انزلاقك الشخصيّ</b>، أهمّ رقم في مرحلة المال الصغير. محاكاة فقط — لا أوامر حقيقيّة.</div>
+        </div>) : (
+          <div className="mz-empty">لم تُفتح السلّة الورقيّة بعد — اضغط «▶ افتح الدفتر» لبدء تتبّع النواة الحلال بالتساوي ورقيّاً. يعمل تلقائيّاً أيضاً كلّ ~{cl.rebalance_days || 85} يوم.</div>
+        )) : <div className="mz-empty">…يحمّل الدفتر</div>}
+        {clMsg && <div className="mz-note" style={{ color: clMsg === "تعذّر" ? NEG : POS }}>{clMsg}</div>}
       </Panel>
     </div>
   );
