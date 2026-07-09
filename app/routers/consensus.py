@@ -217,6 +217,29 @@ async def satellite_ledger_rebalance_ep():
                         else "يعيد توازن دفتر القمر الورقيّ — دقيقة تقريباً.")}
 
 
+@router.get("/api/explorer-ledger")
+async def explorer_ledger_ep():
+    """The EXPLORER paper ledger (PVEX) — forward OOS record of the Winner-Autopsy 'rocket signature'
+    (high volatility + far below 52w high). A lottery basket; the beaten-down leg is survivorship-
+    inflated in-sample. Shadow measurement; never trades."""
+    from app.services.paper_validation import explorer_ledger_summary
+    return explorer_ledger_summary()
+
+
+@router.post("/api/explorer-ledger/rebalance")
+async def explorer_ledger_rebalance_ep():
+    """Open / refresh the explorer paper basket now (top-K by rocket signature, force past the monthly
+    cadence). Background; poll GET /api/explorer-ledger. SHADOW — paper only; NEVER a real order."""
+    from threading import Thread
+    from app.services.paper_validation import rebalance_explorer, _days_since_last, PV_EXPLORER
+    Thread(target=rebalance_explorer, kwargs={"force": True}, daemon=True,
+           name="explorer-rebalance").start()
+    first = _days_since_last(PV_EXPLORER) is None
+    return {"status": "started",
+            "message": ("يفتح سلّة المستكشف الورقيّة الأولى — دقيقة تقريباً." if first
+                        else "يعيد توازن دفتر المستكشف الورقيّ — دقيقة تقريباً.")}
+
+
 @router.get("/api/ledger-nav")
 async def ledger_nav_ep():
     """Daily NAV race series — paper core (PVC) vs momentum satellite (PVSA) — for the forward

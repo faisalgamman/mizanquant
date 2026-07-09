@@ -66,6 +66,15 @@ def record_nav() -> dict:
         row["sat_open"] = s.get("open")
     except Exception as e:
         logger.debug("record_nav satellite failed: %s", e)
+    try:
+        from app.services.paper_validation import explorer_ledger_summary
+        x = explorer_ledger_summary()
+        row["exp_upl"] = x.get("unrealized_pct")
+        row["exp_mv"] = x.get("market_value")
+        row["exp_realized"] = x.get("realized_pnl")
+        row["exp_open"] = x.get("open")
+    except Exception as e:
+        logger.debug("record_nav explorer failed: %s", e)
 
     with _LOCK:
         rows = [r for r in _read() if isinstance(r, dict) and r.get("date") != day]

@@ -993,11 +993,11 @@ function SettingsView() {
 }
 
 function RaceChart({ rows }) {
-  const pts = (rows || []).filter(r => r && (r.core_upl != null || r.sat_upl != null));
+  const pts = (rows || []).filter(r => r && (r.core_upl != null || r.sat_upl != null || r.exp_upl != null));
   if (pts.length < 2) return <div className="mz-empty">يبدأ رسم السباق بعد يومين من التسجيل (لقطة تلقائيّة كلّ يوم عند الإغلاق).</div>;
   const W = 620, H = 170, PAD = 26;
   const vals = [];
-  pts.forEach(r => { if (r.core_upl != null) vals.push(r.core_upl); if (r.sat_upl != null) vals.push(r.sat_upl); });
+  pts.forEach(r => ["core_upl", "sat_upl", "exp_upl"].forEach(k => { if (r[k] != null) vals.push(r[k]); }));
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
   if (hi - lo < 1) { hi += 0.5; lo -= 0.5; }
   const x = i => PAD + (i / (pts.length - 1)) * (W - 2 * PAD);
@@ -1008,6 +1008,7 @@ function RaceChart({ rows }) {
     <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="var(--border-subtle)" strokeDasharray="3 3" />
     <polyline points={line("core_upl")} fill="none" stroke={ACC} strokeWidth="2" vectorEffect="non-scaling-stroke" />
     <polyline points={line("sat_upl")} fill="none" stroke={POS} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    <polyline points={line("exp_upl")} fill="none" stroke={WARN} strokeWidth="2" vectorEffect="non-scaling-stroke" />
   </svg>);
 }
 
@@ -1057,6 +1058,16 @@ function CorePortfolioView() {
     setSatMsg("…يبدأ (قد يستغرق دقيقة)");
     try { const r = await fetch("/api/satellite-ledger/rebalance", { method: "POST" }).then(x => x.json());
       setSatMsg(r.message || "بدأ"); setTimeout(loadSat, 9000); setTimeout(loadSat, 26000); } catch (e) { setSatMsg("تعذّر"); }
+  };
+  const [exp, setExp] = useState(null);       // explorer ledger (PVEX) — rocket-signature forward OOS
+  const [expMsg, setExpMsg] = useState("");
+  const loadExp = () => fetch("/api/explorer-ledger").then(r => r.json()).then(setExp).catch(() => {});
+  useEffect(() => { loadExp(); }, []);
+  const startExp = async () => {
+    if (!window.confirm("فتح/تحديث سلّة المستكشف (التقلّب العالي + البعد عن القمّة)؟ رهان يانصيب صغير، تتبّع أماميّ ظلّيّ فقط — لا يُنشَر حيّاً ولا يرسل أمراً.")) return;
+    setExpMsg("…يبدأ (قد يستغرق دقيقة)");
+    try { const r = await fetch("/api/explorer-ledger/rebalance", { method: "POST" }).then(x => x.json());
+      setExpMsg(r.message || "بدأ"); setTimeout(loadExp, 9000); setTimeout(loadExp, 26000); } catch (e) { setExpMsg("تعذّر"); }
   };
   const rows = (dp && dp.results) || [];
   const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
@@ -1191,10 +1202,34 @@ function CorePortfolioView() {
         {satMsg && <div className="mz-note" style={{ color: satMsg === "تعذّر" ? NEG : POS }}>{satMsg}</div>}
       </Panel>
 
-      <Panel title="🏁 سباق النواة ضدّ القمر — المنحنى الأماميّ" cls="mz-core-ledger">
+      <Panel title="🚀 المستكشف — صيّاد الذيل (ظلّيّ، رهان يانصيب)" cls="mz-core-ledger"
+        right={<button className="mz-btn" style={{ maxWidth: 150 }} onClick={startExp}>{exp && exp.open ? "↻ حدّث المستكشف" : "▶ افتح المستكشف"}</button>}>
+        <div className="mz-verdict" style={{ borderColor: WARN, color: "var(--text-secondary)", marginBottom: 12, fontWeight: 600 }}>
+          🔬 من <b>تشريح الصاعدين</b> (642 من 9,604 حالة تضاعفت): بصمة الصاروخ = <b>تقلّب عالٍ + بُعد عن قمّة 52 أسبوعاً</b>. لكن ساق "المنهار" <b style={{ color: NEG }}>مسمومة بانحياز البقاء</b> (نرى فقط من ارتدّ)، وساق التقلّب أنظف. لذا هذه <b>سلّة يانصيب صغيرة — تتوقّع فشل معظمها</b>؛ هذا الدفتر الأماميّ يقيس كم من "×3" حقيقيّ. لا يُنشَر حيّاً.
+        </div>
+        {exp ? (exp.open ? (<div>
+          <div className="mz-pain-out" style={{ marginBottom: 10 }}>
+            <div><span>عائد غير محقّق (أماميّ)</span><b style={{ color: (exp.unrealized_pct || 0) >= 0 ? POS : NEG }}>{pct(exp.unrealized_pct)}</b></div>
+            <div><span>عدد المراكز</span><b>{exp.open}</b></div>
+            <div><span>القيمة السوقيّة</span><b>{money(exp.market_value)}</b></div>
+            <div><span>آخر إعادة توازن</span><b style={{ fontSize: 13 }}>{exp.days_since_rebalance != null ? ("منذ " + exp.days_since_rebalance + " يوم") : "—"}</b></div>
+          </div>
+          {(exp.positions || []).length ? (
+            <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>القيمة</th></tr></thead>
+              <tbody>{exp.positions.slice(0, 12).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td>{money(p.value)}</td></tr>))}</tbody></table>
+          ) : null}
+          <div className="mz-note ql-dim">سلّة صغيرة متساوية من أعلى الأسماء تقلّباً وبُعداً عن القمّة (~{exp.rebalance_days} يوم). العائد سيتقلّب بعنف — هذا متوقّع. قياس فقط — لا صفقات.</div>
+        </div>) : (
+          <div className="mz-empty">لم يُفتح دفتر المستكشف بعد — اضغط «▶ افتح المستكشف» لبدء تتبّع بصمة الصاروخ أماميّاً. يعمل تلقائيّاً أيضاً كلّ ~{exp.rebalance_days || 28} يوم.</div>
+        )) : <div className="mz-empty">…يحمّل المستكشف</div>}
+        {expMsg && <div className="mz-note" style={{ color: expMsg === "تعذّر" ? NEG : POS }}>{expMsg}</div>}
+      </Panel>
+
+      <Panel title="🏁 سباق المحرّكات الثلاثة — المنحنى الأماميّ" cls="mz-core-ledger">
         <div className="mz-race-legend">
           <span><i style={{ background: ACC }} />النواة {nav && nav.latest ? pct(nav.latest.core_upl) : "…"}</span>
-          <span><i style={{ background: POS }} />القمر (الزخم) {nav && nav.latest ? pct(nav.latest.sat_upl) : "…"}</span>
+          <span><i style={{ background: POS }} />القمر {nav && nav.latest ? pct(nav.latest.sat_upl) : "…"}</span>
+          <span><i style={{ background: WARN }} />المستكشف {nav && nav.latest ? pct(nav.latest.exp_upl) : "…"}</span>
           <span className="ql-dim" style={{ marginInlineStart: "auto" }}>{nav ? (nav.days + " يوم مُسجَّل") : "…"}</span>
         </div>
         <RaceChart rows={nav && nav.rows} />

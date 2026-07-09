@@ -791,6 +791,13 @@ def _scheduler_loop():
                     logger.info("Satellite paper ledger rebalance: %s", rebalance_satellite())
                 except Exception as e:
                     logger.error(f"Satellite paper ledger rebalance failed: {e}", exc_info=True)
+                # EXPLORER ledger (PVEX): forward OOS test of the Winner-Autopsy rocket signature
+                # (high vol + far-from-52w-high). Monthly cadence (self-guards). Shadow only.
+                try:
+                    from app.services.paper_validation import rebalance_explorer
+                    logger.info("Explorer paper ledger rebalance: %s", rebalance_explorer())
+                except Exception as e:
+                    logger.error(f"Explorer paper ledger rebalance failed: {e}", exc_info=True)
 
             # --- MONTHLY AAOIFI FINANCIAL RE-SCREEN (halal universe hygiene) ---
             # 1st of the month ~02:30 ET (off-hours, heavy): recompute the debt /

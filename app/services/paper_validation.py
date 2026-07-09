@@ -49,11 +49,12 @@ PV_PAIRS = "PVP"     # halal long-only relative-value pairs (cointegration) — 
 PV_SHADOW = "PVSH"   # weekly SHADOW ledger — gate-REJECTED picks, inert (measurement only)
 PV_CORE = "PVC"      # Core Portfolio — own the halal universe equal-weight, quarterly rebalance, NO stops
 PV_SATELLITE = "PVSA"  # Momentum SATELLITE — top-K by 12-1 momentum, monthly rebalance; SHADOW/forward-OOS only
+PV_EXPLORER = "PVEX"   # EXPLORER — top-K by "rocket signature" (high vol + far-from-52w-high); SHADOW/forward-OOS
 PV_STRATEGY = PV_WEEKLY  # backward-compat alias (older callers / tests use PV_STRATEGY)
 
 
 def _strategy_for(scanner: str | None) -> str:
-    """Map a 'weekly'|'monthly'|'pairs'|'core'|'satellite' scanner label to its ledger strategy id."""
+    """Map a 'weekly'|'monthly'|'pairs'|'core'|'satellite'|'explorer' scanner label to its strategy id."""
     s = str(scanner or "").lower()
     if s.startswith("pair"):
         return PV_PAIRS
@@ -63,6 +64,8 @@ def _strategy_for(scanner: str | None) -> str:
         return PV_CORE
     if s.startswith("sat") or s.startswith("moon") or s.startswith("mom"):
         return PV_SATELLITE
+    if s.startswith("expl") or s.startswith("rocket") or s.startswith("tail"):
+        return PV_EXPLORER
     return PV_WEEKLY
 
 
@@ -609,7 +612,8 @@ def paper_ledger_status(strategy_id: str = PV_WEEKLY) -> dict:
         "scanner": ("pairs" if strategy_id == PV_PAIRS
                     else "monthly" if strategy_id == PV_MONTHLY
                     else "core" if strategy_id == PV_CORE
-                    else "satellite" if strategy_id == PV_SATELLITE else "weekly"),
+                    else "satellite" if strategy_id == PV_SATELLITE
+                    else "explorer" if strategy_id == PV_EXPLORER else "weekly"),
         "strategy_id": strategy_id,
         "open": open_n,
         "closed": closed_n,
@@ -1217,38 +1221,34 @@ def _momentum_ranked_picks(limit: int = 200) -> list[dict]:
     return out
 
 
-def rebalance_satellite(account: float = 100000.0, top_k: int = 10, _picks_fn=None,
-                        force: bool = False) -> dict:
-    """Rebalance the momentum SATELLITE ledger (PVSA) to the current top-K by 12-1 momentum, equal-
-    DOLLAR weight, NO stops. Monthly cadence guard (SAT_REBALANCE_DAYS, default 28); ``force`` opens
-    the first basket / a manual refresh. KEEP held names still in the top-K, CLOSE those that fell
-    out (at current price), OPEN new entrants. SHADOW/forward-OOS — never places a broker order."""
-    min_days = int(os.environ.get("SAT_REBALANCE_DAYS", "28"))
-    top_k = int(os.environ.get("SAT_TOP_K", str(top_k)))
-    days_since = _days_since_last(PV_SATELLITE)
+def _rebalance_ranked(strategy_id: str, picks_fn, row_fn, *, account: float, top_k: int,
+                      min_days: int, force: bool) -> dict:
+    """Generic top-K equal-dollar rebalance for a ranked SHADOW ledger (satellite / explorer).
+    Cadence-guarded; KEEP held names still in the top-K, CLOSE those that fell out (at current
+    price), OPEN new entrants. picks_fn() returns the FULL ranked list (best first); row_fn(pick,
+    budget) builds the OPEN TradeHistory kwargs. Never places a broker order."""
+    days_since = _days_since_last(strategy_id)
     if days_since is not None and not force and days_since < min_days:
         return {"skipped": True, "reason": "within cadence", "days_since": days_since,
                 "min_days": min_days}
-
-    fn = _picks_fn or _momentum_ranked_picks
     try:
-        ranked = [p for p in (fn() or [])
+        ranked = [p for p in (picks_fn() or [])
                   if p.get("symbol") and float(p.get("price") or 0) > 0]
     except Exception as e:
-        logger.error("rebalance_satellite: picks fn failed: %s", e)
+        logger.error("_rebalance_ranked(%s): picks fn failed: %s", strategy_id, e)
         return {"error": f"picks_fn failed: {e}"}
     if not ranked:
         return {"target": 0, "opened": 0, "closed": 0, "held": 0, "reason": "no picks"}
 
     price_map = {p["symbol"]: p["price"] for p in ranked}
-    target = [p["symbol"] for p in ranked][:max(top_k, 1)]
+    target = [p["symbol"] for p in ranked][:max(int(top_k), 1)]
     target_set = set(target)
     per_name = float(account) / max(len(target), 1)
 
     db = SessionLocal()
     try:
         open_trades = db.query(TradeHistory).filter(
-            TradeHistory.strategy_id == PV_SATELLITE, TradeHistory.pnl_pct.is_(None)).all()
+            TradeHistory.strategy_id == strategy_id, TradeHistory.pnl_pct.is_(None)).all()
         held_syms = {t.symbol for t in open_trades}
 
         closed = held = 0
@@ -1276,18 +1276,27 @@ def rebalance_satellite(account: float = 100000.0, top_k: int = 10, _picks_fn=No
             if not price or price <= 0:
                 continue
             pick = next((p for p in ranked if p["symbol"] == sym), {"symbol": sym, "price": price})
-            db.add(TradeHistory(created_at=_utc_now(), **_satellite_row_from_pick(pick, per_name)))
+            db.add(TradeHistory(created_at=_utc_now(), **row_fn(pick, per_name)))
             opened += 1
 
         db.commit()
         return {"target": len(target), "opened": opened, "closed": closed, "held": held,
-                "account": account, "top_k": top_k}
+                "account": account, "top_k": int(top_k)}
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error("rebalance_satellite failed: %s", e)
+        logger.error("_rebalance_ranked(%s) failed: %s", strategy_id, e)
         return {"error": str(e)}
     finally:
         db.close()
+
+
+def rebalance_satellite(account: float = 100000.0, top_k: int = 10, _picks_fn=None,
+                        force: bool = False) -> dict:
+    """Rebalance the momentum SATELLITE ledger (PVSA) to the current top-K by 12-1 momentum."""
+    return _rebalance_ranked(
+        PV_SATELLITE, _picks_fn or _momentum_ranked_picks, _satellite_row_from_pick,
+        account=account, top_k=int(os.environ.get("SAT_TOP_K", str(top_k))),
+        min_days=int(os.environ.get("SAT_REBALANCE_DAYS", "28")), force=force)
 
 
 def satellite_ledger_summary(account: float = 100000.0) -> dict:
@@ -1303,6 +1312,121 @@ def satellite_ledger_summary(account: float = 100000.0) -> dict:
              "equal-weight). In-sample it beat the core after costs (~+5%/yr, top-10) at a MUCH higher "
              "drawdown (−37% vs −21%); this forward ledger tests whether the alpha survives without "
              "survivorship bias — the honest gate before any real allocation. Shadow only; never trades.")
+
+
+# ── EXPLORER ledger (PVEX) — forward OOS test of the "rocket signature" ────────
+# The Winner Autopsy (12mo forward on the 4y panel, 642 of 9,604 events doubled): the +100% names
+# were the MIRROR of momentum — highest volatility (atr_pct lift ×2.5), furthest below their 52w
+# high (×3.0), worst 6m drawdown (×3.3), lowest priced. The drawdown/proximity legs are HEAVILY
+# survivorship-inflated (we only see the beaten-down names that RECOVERED); the volatility leg is
+# cleaner (bigger two-sided dispersion). So the explorer ranks by BOTH (volatility + far-from-high),
+# holds a small equal-weight basket, and is tracked FORWARD to measure how much of the ×3 is real.
+# A lottery bet by design: expect most names to fail. SHADOW only — never trades.
+
+def _explorer_row_from_pick(pick: dict, per_name_budget: float) -> dict:
+    """Map a rocket-signature halal name → OPEN PVEX trade (equal-dollar, fractional qty). No stops."""
+    price = float(pick.get("price") or pick.get("current_price") or 0)
+    qty = round(per_name_budget / price, 6) if price > 0 else 0.0
+    return {
+        "strategy_id": PV_EXPLORER,
+        "symbol": pick.get("symbol"),
+        "side": "buy",
+        "qty": qty,
+        "entry_price": round(price, 4) if price else 0.0,
+        "position_value": round(qty * price, 2) if price else 0.0,
+        "confidence": float(pick.get("score") or 0),
+        "status": "open",
+        "signal_details": {"source": "paper_validation_explorer", "rank_by": "rocket(vol+far_from_high)",
+                           "weight": "equal_dollar", "asof": _utc_now().isoformat()},
+    }
+
+
+def _rocket_ranked_picks(limit: int = 200) -> list[dict]:
+    """Halal deep-picks ranked by the 'rocket signature' from the Winner Autopsy: high volatility
+    (atr_pct) + far below the 52-week high. Uses SCALE-FREE rank-combination (avg of the volatility
+    rank and the far-from-high rank) so no arbitrary blend weight is fit. Volatility is required
+    (the honest, less-survivorship-biased leg); the far-from-high leg is a bonus when 52w data
+    exists. Returns the FULL ranked list, best first. [] on failure."""
+    import asyncio
+
+    def _call():
+        from app.workspace_server import screener_deep_picks
+        res = asyncio.run(screener_deep_picks(limit=limit, use_cache="true"))
+        return res if isinstance(res, dict) else {}
+
+    try:
+        try:
+            res = _call()
+        except RuntimeError:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                res = ex.submit(_call).result()
+    except Exception as e:
+        logger.warning("explorer picks: deep-picks unavailable: %s", e)
+        return []
+    cands: list[dict] = []
+    for r in res.get("results", []) or []:
+        if not (r.get("is_halal") or r.get("halal_verdict") == "halal"):
+            continue
+        try:
+            price = float(r.get("price") or r.get("current_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not r.get("symbol") or price <= 0:
+            continue
+        atr = r.get("atr_pct")
+        if not isinstance(atr, (int, float)):
+            continue                              # volatility required — can't rank without it
+        hi = r.get("52w_high") or r.get("fiftyTwoWeekHigh")
+        prox = None
+        try:
+            if hi and float(hi) > 0:
+                prox = price / float(hi)          # 1.0 = at the high, <1 = below it
+        except (TypeError, ValueError):
+            prox = None
+        cands.append({"symbol": r["symbol"], "price": price, "atr": float(atr), "prox": prox,
+                      "company": r.get("company"), "sector": r.get("sector")})
+    if not cands:
+        return []
+    # scale-free rank-combination: 0 = best (highest vol / furthest below high)
+    by_atr = sorted(cands, key=lambda c: -c["atr"])
+    for i, c in enumerate(by_atr):
+        c["r_atr"] = i
+    withprox = [c for c in cands if c["prox"] is not None]
+    by_prox = sorted(withprox, key=lambda c: c["prox"])      # lowest proximity (furthest below) first
+    for i, c in enumerate(by_prox):
+        c["r_prox"] = i
+    med_rank = (len(withprox) / 2.0) if withprox else 0.0
+    for c in cands:
+        c.setdefault("r_prox", med_rank)                     # no 52w data → neutral on that leg
+        c["score"] = -(c["r_atr"] + c["r_prox"])             # higher (less negative) = better
+    cands.sort(key=lambda c: c["score"], reverse=True)
+    return [{"symbol": c["symbol"], "price": c["price"], "score": round(c["score"], 2),
+             "company": c.get("company"), "sector": c.get("sector")} for c in cands]
+
+
+def rebalance_explorer(account: float = 100000.0, top_k: int = 15, _picks_fn=None,
+                       force: bool = False) -> dict:
+    """Rebalance the EXPLORER ledger (PVEX) to the current top-K by the rocket signature."""
+    return _rebalance_ranked(
+        PV_EXPLORER, _picks_fn or _rocket_ranked_picks, _explorer_row_from_pick,
+        account=account, top_k=int(os.environ.get("EXP_TOP_K", str(top_k))),
+        min_days=int(os.environ.get("EXP_REBALANCE_DAYS", "28")), force=force)
+
+
+def explorer_ledger_summary(account: float = 100000.0) -> dict:
+    """The explorer ledger's live tracker (PVEX) — the forward OOS record of the rocket signature."""
+    try:
+        ranked = _rocket_ranked_picks()
+    except Exception:
+        ranked = []
+    price_map = {p["symbol"]: p["price"] for p in ranked}
+    return _equal_ledger_summary(
+        PV_EXPLORER, price_map, rebalance_days=int(os.environ.get("EXP_REBALANCE_DAYS", "28")),
+        note="Forward (out-of-sample) tracker of the Winner-Autopsy 'rocket signature' (high volatility "
+             "+ far below 52w high), small equal-weight basket. A LOTTERY bet — most names are expected "
+             "to fail; the beaten-down leg is survivorship-inflated in-sample, so this forward ledger "
+             "measures how much of the ×3 winner-lift is real. Shadow only; never trades.")
 
 
 # ── Pairs ledger (PVP) — halal long-only relative-value, cointegration ─────────
