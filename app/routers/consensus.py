@@ -248,6 +248,40 @@ async def ledger_nav_ep():
     return nav_history()
 
 
+@router.get("/api/graduation-criteria")
+async def graduation_criteria_ep():
+    """The pre-registered satellite graduation criteria (locked before the data) + provenance."""
+    from app.services.graduation_criteria import graduation_criteria_state
+    return graduation_criteria_state()
+
+
+@router.post("/api/graduation-criteria/approve")
+async def graduation_criteria_approve_ep(payload: dict = Body(...)):
+    """Lock the graduation criteria (min_rebalances, min_alpha_pct, max_worse_dd_pct). Persisted,
+    audited, reversible. Sets the yardstick only — changes no trading.
+    Body: {"min_rebalances": 4, "min_alpha_pct": 3, "max_worse_dd_pct": 15}."""
+    from app.services.graduation_criteria import approve_criteria
+    vals = (payload or {}).get("values") if isinstance(payload, dict) else None
+    if not isinstance(vals, dict):
+        vals = payload if isinstance(payload, dict) else {}
+    return approve_criteria(vals)
+
+
+@router.post("/api/graduation-criteria/reset")
+async def graduation_criteria_reset_ep():
+    """Revoke the locked criteria (revert to 'not yet locked')."""
+    from app.services.graduation_criteria import reset_criteria
+    return reset_criteria()
+
+
+@router.get("/api/graduation-eval")
+async def graduation_eval_ep():
+    """Mechanical verdict for each satellite vs the LOCKED criteria, from the NAV race. Verdict only
+    — never archives or promotes a ledger (that stays the user's decision)."""
+    from app.services.graduation_criteria import evaluate_satellites
+    return evaluate_satellites()
+
+
 @router.post("/api/ledger-nav/record")
 async def ledger_nav_record_ep():
     """Record today's NAV row now (background) — normally the scheduler does this ~daily at close.

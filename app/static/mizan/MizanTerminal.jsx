@@ -1069,6 +1069,23 @@ function CorePortfolioView() {
     try { const r = await fetch("/api/explorer-ledger/rebalance", { method: "POST" }).then(x => x.json());
       setExpMsg(r.message || "بدأ"); setTimeout(loadExp, 9000); setTimeout(loadExp, 26000); } catch (e) { setExpMsg("تعذّر"); }
   };
+  const [gc, setGc] = useState(null);         // pre-registered graduation criteria
+  const [gcD, setGcD] = useState({ min_rebalances: 4, min_alpha_pct: 3, max_worse_dd_pct: 15 });
+  const [gcEval, setGcEval] = useState(null);
+  const [gcMsg, setGcMsg] = useState("");
+  const loadGc = () => {
+    fetch("/api/graduation-criteria").then(r => r.json()).then(s => { setGc(s); setGcD({ ...s.values }); }).catch(() => {});
+    fetch("/api/graduation-eval").then(r => r.json()).then(setGcEval).catch(() => {});
+  };
+  useEffect(() => { loadGc(); }, []);
+  const approveGc = async () => {
+    if (!window.confirm("قفل معايير التخرّج الآن؟ تُثبَّت قبل تراكم البيانات وتُحفَظ بتاريخها — لا تتداول، تحدّد المسطرة فقط.")) return;
+    setGcMsg("…يقفل");
+    try { const r = await fetch("/api/graduation-criteria/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values: gcD }) }).then(x => x.json());
+      if (r.error) { setGcMsg("خطأ: " + r.error); return; }
+      setGc(r); setGcD({ ...r.values }); setGcMsg("قُفِلت ✓"); loadGc(); } catch (e) { setGcMsg("تعذّر"); }
+  };
+  const VERDICT = { watching: ["قيد المراقبة", WARN], graduated: ["تخرّج ✓", POS], archive: ["يُوصى بالأرشفة", NEG], criteria_not_locked: ["اقفل المعايير أوّلاً", MUT], no_data: ["لا بيانات بعد", MUT] };
   const rows = (dp && dp.results) || [];
   const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
   const core = co && co.strategies && co.strategies.core;
@@ -1234,6 +1251,32 @@ function CorePortfolioView() {
         </div>
         <RaceChart rows={nav && nav.rows} />
         <div className="mz-note ql-dim">عائد المراكز المفتوحة لكلّ دفتر بأسعار الإغلاق (يستثني المحقَّق). تُسجَّل لقطة آليّاً كلّ يوم عند إغلاق السوق. هذا هو الدليل خارج العيّنة الذي يحسم إن كانت ألفا الزخم حقيقيّة. قياس فقط — لا صفقات.</div>
+      </Panel>
+
+      <Panel title="📜 معايير التخرّج — مقفلة مسبقاً (قبل البيانات)" cls="mz-core-ledger"
+        right={gc && <span className="mz-dim3" style={{ color: gc.locked ? POS : WARN }}>{gc.locked ? "مقفلة ✓" : "غير مقفلة"}</span>}>
+        <div className="mz-cb-banner">العلم الأمين يقفل قواعد النجاح/الفشل <b>قبل</b> وصول البيانات — كي لا نبرّر أيّ نتيجة لاحقاً. تقفلها مرّةً، فيصبح الحكم <b>آليّاً</b>. قياس فقط: لا يؤرشف ولا يرقّي شيئاً — القرار قرارك.</div>
+        <div className="mz-cb-rows">
+          <div className="mz-cb-row"><div className="mz-cb-h">① مدّة الانتظار (عدد إعادات التوازن)</div>
+            <label className="mz-fl">إعادات<input type="number" className="mz-inp" style={{ width: 80 }} min="1" max="24" value={gcD.min_rebalances} onChange={e => setGcD(d => ({ ...d, min_rebalances: +e.target.value }))} /></label>
+            <div className="mz-cb-eff">لا حكم قبلها (~{Math.round((gcD.min_rebalances || 0) * 28 / 30)} شهراً)</div></div>
+          <div className="mz-cb-row"><div className="mz-cb-h">② أدنى تفوّق على النواة (ألفا تراكميّة %)</div>
+            <label className="mz-fl">%<input type="number" className="mz-inp" style={{ width: 80 }} min="0" max="50" value={gcD.min_alpha_pct} onChange={e => setGcD(d => ({ ...d, min_alpha_pct: +e.target.value }))} /></label>
+            <div className="mz-cb-eff">دون هذا = لا قيمة مضافة</div></div>
+          <div className="mz-cb-row"><div className="mz-cb-h">③ أقصى تراجع إضافيّ مسموح فوق النواة %</div>
+            <label className="mz-fl">%<input type="number" className="mz-inp" style={{ width: 80 }} min="0" max="100" value={gcD.max_worse_dd_pct} onChange={e => setGcD(d => ({ ...d, max_worse_dd_pct: +e.target.value }))} /></label>
+            <div className="mz-cb-eff">تراجع أسوأ من النواة بأكثر منه = يسقط</div></div>
+        </div>
+        <div className="mz-wt-act">
+          <button className="mz-btn gold" style={{ maxWidth: 190 }} onClick={approveGc}>{gc && gc.locked ? "تحديث القفل" : "أقفل المعايير"}</button>
+        </div>
+        {gc && gc.approved_at && <div className="mz-note" style={{ color: POS }}>✓ قُفِلت في {(() => { try { return new Date(gc.approved_at).toLocaleString("ar"); } catch (e) { return gc.approved_at; } })()}</div>}
+        {gcMsg && <div className="mz-note" style={{ color: gcMsg.startsWith("خطأ") || gcMsg === "تعذّر" ? NEG : POS }}>{gcMsg}</div>}
+        {gcEval && gcEval.engines && (
+          <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 10 }}><thead><tr><th className="tl">المحرّك</th><th>ألفا %</th><th>تراجع أسوأ من النواة</th><th>الحكم الآليّ</th></tr></thead>
+            <tbody>{["sat", "exp"].map(k => { const e = gcEval.engines[k]; if (!e) return null; const v = VERDICT[e.verdict] || [e.verdict, MUT]; return (<tr key={k}><td className="tl mz-fn">{e.label}</td><td>{e.alpha != null ? pct(e.alpha) : "—"}</td><td>{e.worse_dd_vs_core != null ? (e.worse_dd_vs_core > 0 ? "+" : "") + num(e.worse_dd_vs_core, 1) + "%" : "—"}</td><td style={{ color: v[1], fontWeight: 700 }}>{v[0]}</td></tr>); })}</tbody></table>
+        )}
+        <div className="mz-note ql-dim">{gcEval ? ("مضى " + gcEval.span_days + " يوم من أصل " + gcEval.min_days + " قبل الحكم. ") : ""}الحكم يُحسَب آليّاً من منحنى السباق مقابل المعايير المقفلة — بلا اجتهاد بشريّ عند لحظة القرار.</div>
       </Panel>
     </div>
   );
