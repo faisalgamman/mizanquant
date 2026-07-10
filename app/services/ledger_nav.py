@@ -101,4 +101,134 @@ def nav_history() -> dict:
     }
 
 
-__all__ = ["record_nav", "nav_history"]
+# ── PIT basket-membership archive — the permanent survivorship-bias killer ─────
+# One JSONL line per day: the halal basket EXACTLY as it stood (symbols + prices). A year from
+# now this is a true point-in-time universe: any future backtest can replay membership as-was,
+# with zero survivorship bias. Append-only; idempotent per day.
+
+def _basket_hist_path() -> str:
+    base = os.environ.get("CACHE_DIR") or "/data"
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        base = "."
+    return os.path.join(base, "basket_history.jsonl")
+
+
+def record_basket_membership() -> dict:
+    """Append today's halal-basket membership to the PIT archive (skips if already logged today
+    or the basket is empty). Fail-safe — never raises into the scheduler."""
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        from app.workspace_server import _cache_get
+        basket = _cache_get("halal_basket", max_age=86400 * 3) or {}
+        rows = basket.get("results") or []
+    except Exception as e:
+        logger.debug("basket archive: cache unavailable: %s", e)
+        rows = []
+    if not rows:
+        return {"skipped": True, "reason": "empty basket"}
+    path = _basket_hist_path()
+    try:                                      # idempotent: check the last line's date only
+        from collections import deque
+        with open(path, "r", encoding="utf-8") as fh:
+            last = deque(fh, maxlen=1)
+        if last and json.loads(last[0]).get("date") == day:
+            return {"skipped": True, "reason": "already logged today", "date": day}
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass                                  # unreadable tail → just append (dupes are harmless)
+    entry = {"date": day, "n": len(rows),
+             "members": [{"s": r.get("symbol"), "p": r.get("price")} for r in rows if r.get("symbol")]}
+    with _LOCK:
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.error("basket archive write failed: %s", e)
+            return {"error": str(e)}
+    logger.info("basket archive: %s logged %d members", day, entry["n"])
+    return {"date": day, "n": entry["n"]}
+
+
+def basket_history_summary() -> dict:
+    """Light summary of the PIT archive: per-day membership counts (no member lists)."""
+    days = []
+    try:
+        with open(_basket_hist_path(), "r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                    days.append({"date": row.get("date"), "n": row.get("n")})
+                except Exception:
+                    continue
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.debug("basket history read failed: %s", e)
+    return {"days": len(days), "series": days[-370:],
+            "note": "Point-in-time halal-basket membership archive (one line/day, symbols+prices "
+                    "stored on disk). Future backtests replay membership as-was — no survivorship bias."}
+
+
+# ── Weekly race digest → Telegram (the system reports to the user) ────────────
+
+def race_digest_text() -> str:
+    """Compose the weekly Arabic race digest from the NAV series + graduation eval + the
+    circuit-breaker state. Pure composition — no side effects."""
+    h = nav_history()
+    latest = h.get("latest") or {}
+    def _p(v):
+        return ("+" if isinstance(v, (int, float)) and v >= 0 else "") + (f"{v:.2f}%" if isinstance(v, (int, float)) else "—")
+    lines = ["🏁 تقرير السباق الأسبوعيّ — MIZAN", ""]
+    lines.append(f"🎯 النواة: { _p(latest.get('core_upl')) } ({latest.get('core_open') or '—'} اسماً)")
+    lines.append(f"🌙 القمر (زخم): { _p(latest.get('sat_upl')) } ({latest.get('sat_open') or '—'})")
+    lines.append(f"🚀 المستكشف (ذيل): { _p(latest.get('exp_upl')) } ({latest.get('exp_open') or '—'})")
+    vals = {k: latest.get(k) for k in ("core_upl", "sat_upl", "exp_upl") if isinstance(latest.get(k), (int, float))}
+    if vals:
+        names = {"core_upl": "النواة", "sat_upl": "القمر", "exp_upl": "المستكشف"}
+        lead = max(vals, key=vals.get)
+        lines.append(f"المتصدّر: {names[lead]}")
+    lines.append(f"أيام مسجّلة: {h.get('days', 0)}")
+    try:
+        from app.services.graduation_criteria import evaluate_satellites
+        ev = evaluate_satellites()
+        if ev.get("locked"):
+            remaining = max(0, int(ev.get("min_days", 0)) - int(ev.get("span_days", 0)))
+            lines.append(f"📜 المعايير مقفلة — الحكم بعد ~{remaining} يوم")
+            for k in ("sat", "exp"):
+                e = (ev.get("engines") or {}).get(k) or {}
+                if e.get("verdict") in ("graduated", "archive"):
+                    lines.append(f"⚖️ {e.get('label')}: {e.get('verdict')}")
+        else:
+            lines.append("📜 معايير التخرّج غير مقفلة بعد — اقفلها من صفحة محفظة النواة")
+    except Exception:
+        pass
+    try:
+        from app.services.circuit_breaker import circuit_breaker_state
+        cb = circuit_breaker_state()
+        lines.append("🛑 بطاقة القواطع: " + ("مُقرّة ✓" if cb.get("approved") else "لم تُقرّ بعد"))
+    except Exception:
+        pass
+    lines.append("")
+    lines.append("قياس ظلّيّ — لا صفقات آليّة. التفاصيل: /mizan → محفظة النواة")
+    return "\n".join(lines)
+
+
+def send_race_digest() -> dict:
+    """Send the weekly digest to the configured Telegram chat. Deliberately bypasses the
+    TELEGRAM_BUY_ONLY signal filter (this is the user's own status report, not a buy signal)
+    by using the direct sender. Returns {sent: bool}."""
+    text = race_digest_text()
+    try:
+        from app.services.notify import _send_text_now
+        ok = _send_text_now(text)
+        return {"sent": bool(ok), "chars": len(text)}
+    except Exception as e:
+        logger.error("race digest send failed: %s", e)
+        return {"sent": False, "error": str(e), "chars": len(text)}
+
+
+__all__ = ["record_nav", "nav_history", "record_basket_membership", "basket_history_summary",
+           "race_digest_text", "send_race_digest"]

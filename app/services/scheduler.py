@@ -317,6 +317,7 @@ def _scheduler_loop():
     last_intraday_warm = ""  # YYYY-MM-DD:HH — intraday screener re-warm slots
     last_db_backup = ""      # YYYY-MM-DD — daily DB backup of measurement tables
     last_nav_record = ""     # YYYY-MM-DD — daily paper-ledger NAV race snapshot
+    last_race_digest = ""    # YYYY-MM-DD — weekly (Friday) race digest → Telegram
     last_full_rescreen = ""  # YYYY-MM-DD — off-session FULL precompute (exchange-closed days)
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
@@ -471,6 +472,22 @@ def _scheduler_loop():
                     logger.info("Ledger NAV race snapshot: %s", record_nav())
                 except Exception as e:
                     logger.error(f"Ledger NAV snapshot failed: {e}")
+                # PIT basket-membership archive (one JSONL line/day) — the permanent
+                # survivorship-bias killer for future backtests. Idempotent, fail-safe.
+                try:
+                    from app.services.ledger_nav import record_basket_membership
+                    logger.info("Basket membership archive: %s", record_basket_membership())
+                except Exception as e:
+                    logger.error(f"Basket archive failed: {e}")
+                # Weekly race digest → Telegram (Fridays, after the NAV row lands). The system
+                # reports to the user instead of waiting to be checked. Report only — no signals.
+                if now.weekday() == 4 and last_race_digest != today_str:
+                    last_race_digest = today_str
+                    try:
+                        from app.services.ledger_nav import send_race_digest
+                        logger.info("Weekly race digest: %s", send_race_digest())
+                    except Exception as e:
+                        logger.error(f"Race digest failed: {e}")
 
             # --- MODEL PERFORMANCE BENCHMARK: Sunday 11:00 AM ET (weekly) ---
             if now.weekday() == 6 and now.hour == 11 and last_model_benchmark != today_str:

@@ -292,6 +292,29 @@ async def ledger_nav_record_ep():
     return {"status": "started", "message": "يسجّل قيمة اليوم للدفترين — لحظات."}
 
 
+@router.get("/api/basket-history")
+async def basket_history_ep():
+    """The PIT halal-basket membership archive (per-day counts; member lists stay on disk).
+    Future backtests replay membership as-was — no survivorship bias."""
+    from app.services.ledger_nav import basket_history_summary
+    return basket_history_summary()
+
+
+@router.get("/api/race-digest")
+async def race_digest_ep():
+    """Preview the weekly race digest text (compose only — does NOT send)."""
+    from app.services.ledger_nav import race_digest_text
+    return {"text": race_digest_text()}
+
+
+@router.post("/api/race-digest/send")
+async def race_digest_send_ep():
+    """Send the race digest to the configured Telegram chat NOW (the scheduler also sends it every
+    Friday after close). Report only — no signals, no trades."""
+    from app.services.ledger_nav import send_race_digest
+    return send_race_digest()
+
+
 @router.get("/api/signal-calibration")
 async def signal_calibration(scanner: str = "weekly", view: str = "calibration"):
     """READ-ONLY measurement: does a higher scanner score actually yield a higher forward
