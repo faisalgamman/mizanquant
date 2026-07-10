@@ -23,6 +23,26 @@ def _clean_factors(d: dict) -> dict:
     return {k: (None if (isinstance(v, float) and not math.isfinite(v)) else v) for k, v in (d or {}).items()}
 
 
+def _panel_rows(universe: str = "halal"):
+    """(snap_date, factors, fwd_ret) panel rows, filtered to the requested slice.
+
+    universe="halal" (default — preserves every existing reading): keeps rows whose factors carry
+    halal∈{1, missing} — legacy rows predate the tag and were all halal-universe. universe="all":
+    the full research panel including the non-halal expansion (DISCOVERY reading only; nothing
+    graduates without passing the halal slice)."""
+    from app.db.database import SessionLocal
+    from app.db.models import FactorSnapshot
+    db = SessionLocal()
+    try:
+        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors,
+                        FactorSnapshot.fwd_ret,).all()
+    finally:
+        db.close()
+    if universe == "all":
+        return rows
+    return [r for r in rows if not (isinstance(r[1], dict) and r[1].get("halal") == 0)]
+
+
 def _price_factors(closes, spy_closes=None) -> dict:
     """Extra CLOSE-ONLY factors (so both the live capture AND the historical backfill compute
     the SAME set → one measurable panel). Each factor is guarded independently; a short window
@@ -137,14 +157,29 @@ def capture_snapshot(symbols=None, cap: int | None = None) -> dict:
             cap = int(_os.environ.get("ALPHA_CAPTURE_CAP", "120"))
         except (TypeError, ValueError):
             cap = 120
+    halal_set: set = set()
     if not symbols:
         try:
-            from app.services.universe import build_halal_candidates
-            symbols = list(build_halal_candidates() or [])[:cap]   # slice — cap arg is ignored upstream
+            # Research universe: halal candidates first (panel continuity) + liquid expansion,
+            # composition-capped internally (RESEARCH_HALAL_N/RESEARCH_EXPANSION_N) — the ``cap``
+            # arg only bounds the legacy fallback path.
+            from app.services.research_universe import get_research_universe
+            symbols = get_research_universe()
         except Exception as e:
-            logger.debug("alpha_capture universe load failed: %s", e)
-            return {"error": "no universe"}
+            logger.debug("alpha_capture research universe failed: %s", e)
+        if not symbols:
+            try:
+                from app.services.universe import build_halal_candidates
+                symbols = list(build_halal_candidates() or [])[:cap]
+            except Exception as e:
+                logger.debug("alpha_capture universe load failed: %s", e)
+                return {"error": "no universe"}
     symbols = list(dict.fromkeys(symbols))
+    try:
+        from app.services.research_universe import get_halal_set
+        halal_set = get_halal_set()
+    except Exception:
+        halal_set = set()
 
     spy = _f("SPY", period="1y")
     spy_closes = spy["close"].astype(float).values if spy is not None and len(spy) >= 70 else None
@@ -174,6 +209,9 @@ def capture_snapshot(symbols=None, cap: int | None = None) -> dict:
                 if not fac:
                     continue
                 fac["regime"] = regime          # market regime stamp (① regime-conditional IC)
+                # halal-slice tag (two-tier research): 1 = in the AAOIFI basket today, 0 = research-
+                # only expansion name. Legacy rows lack the tag and are treated as halal (they were).
+                fac["halal"] = 1 if (halal_set and sym.upper() in halal_set) else (1 if not halal_set else 0)
                 db.add(FactorSnapshot(snap_date=snap_date, symbol=sym,
                                       price=fac.get("price"), factors=_clean_factors(fac), fwd_ret=None))
                 stored += 1
@@ -261,6 +299,8 @@ def snapshot_attribution(horizon_days: int = 10, sector_neutral: bool = False) -
                         FactorSnapshot.sector, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
     finally:
         db.close()
+    # halal slice only (the verdict that counts) — expansion rows are discovery-only
+    rows = [r for r in rows if not (isinstance(r[3], dict) and r[3].get("halal") == 0)]
 
     by_date: dict = {}
     for sd, sym, sec, fac, fwd in rows:
@@ -359,11 +399,22 @@ def backfill_snapshots(symbols=None, *, period: str = "2y", rebalance_days: int 
 
     if not symbols:
         try:
-            from app.services.universe import build_halal_candidates
-            symbols = list(build_halal_candidates() or [])[:cap]
+            from app.services.research_universe import get_research_universe
+            symbols = get_research_universe()
         except Exception as e:
-            return {"error": f"no universe: {e}"}
+            logger.debug("backfill research universe failed: %s", e)
+        if not symbols:
+            try:
+                from app.services.universe import build_halal_candidates
+                symbols = list(build_halal_candidates() or [])[:cap]
+            except Exception as e:
+                return {"error": f"no universe: {e}"}
     symbols = list(dict.fromkeys(symbols))
+    try:
+        from app.services.research_universe import get_halal_set
+        _hset = get_halal_set()
+    except Exception:
+        _hset = set()
     mat = _aligned_closes(list(symbols) + ["SPY"], period)
     if mat is None or "SPY" not in mat.columns:
         return {"error": "no data"}
@@ -418,6 +469,9 @@ def backfill_snapshots(symbols=None, *, period: str = "2y", rebalance_days: int 
                     "mom_12_1": round(float(mom) * 100, 2) if mom is not None else None,
                     "atr_pct": round(atr_pct, 2) if atr_pct is not None else None,
                     "regime": reg[i], "price": round(float(c[i]), 2), "backfill": 1,
+                    # halal tag AS OF TODAY (membership history starts with the daily basket
+                    # archive; historical membership is unknowable — documented limitation)
+                    "halal": 1 if (_hset and s.upper() in _hset) else (1 if not _hset else 0),
                 }
                 fac.update(_price_factors(csl, spysl))   # + factor-factory (close-only), AS-OF date i
                 db.add(FactorSnapshot(snap_date=d, symbol=s, price=fac["price"],
@@ -485,11 +539,7 @@ def regime_conditional_ic(horizon_days: int = 10) -> dict:
     from app.services.signal_calibration import _spearman
 
     h = str(int(horizon_days))
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows()
 
     # per (regime, date) cross-section
     by_key: dict = {}
@@ -544,12 +594,7 @@ def gate_ema20_ab(horizon_days: int = 20, min_rs=None) -> dict:
         except Exception:
             min_rs = -2.0
     h = str(int(horizon_days))
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors,
-                        FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows()
 
     by_date: dict = {}
     for sd, fac, fwd in rows:
@@ -617,7 +662,7 @@ _MULTI_CACHE = {"at": 0.0, "key": None, "data": None}
 _CAND_CACHE = {"at": 0.0, "key": None, "data": None}
 
 
-def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
+def candidate_composites_ic(horizons=(5, 10, 20), universe: str = "halal") -> dict:
     """Forward IC of CANDIDATE technical composites vs the plain-momentum baseline, measured on
     the snapshot panel (per-date cross-sectional z-score → Spearman IC vs forward return). This
     is a SHADOW factor race — research/measurement only, it NEVER touches the live composite or
@@ -627,21 +672,15 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
     mean-reversion tweaks help short-horizon at best. Surfacing them lets the edge earn its way
     in by evidence over time before any weighting decision (which stays the user's call)."""
     import time as _t
-    key = tuple(int(h) for h in horizons)
+    key = (tuple(int(h) for h in horizons), universe)
     now = _t.time()
     if _CAND_CACHE["data"] is not None and _CAND_CACHE["key"] == key and (now - _CAND_CACHE["at"]) < 600:
         return _CAND_CACHE["data"]
     import numpy as np
-    from app.db.database import SessionLocal
-    from app.db.models import FactorSnapshot
     from app.services.signal_calibration import _spearman
 
     hs = [str(int(h)) for h in horizons]
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows(universe)
     by_date: dict = {}
     for sd, fac, fwd in rows:
         if isinstance(fac, dict) and isinstance(fwd, dict):
@@ -727,6 +766,7 @@ def candidate_composites_ic(horizons=(5, 10, 20)) -> dict:
                 per_h[h] = {"mean_ic": None, "t": None, "n_dates": 0}
         out[cname] = {"label": LABELS[cname], "h": per_h}
     res = {"horizons": [int(h) for h in horizons], "labelled_dates": max_dates, "candidates": out,
+           "universe": universe,
            "note": "Shadow candidate composites — forward IC vs plain-momentum. Research only; never live scoring."}
     _CAND_CACHE.update(at=now, key=key, data=res)
     return res
@@ -753,11 +793,7 @@ def walk_forward_sim(top_k: int = 5, hold: str = "5", cost_bps: float = 15.0) ->
     import numpy as np, math
     from app.db.database import SessionLocal
     from app.db.models import FactorSnapshot
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows()
     by_date: dict = {}
     for sd, fac, fwd in rows:
         if isinstance(fac, dict) and isinstance(fwd, dict) and isinstance(fwd.get(hold), (int, float)):
@@ -858,11 +894,7 @@ def core_overlay_sim(hold: str = "5", target_vol: float = 0.15, cost_bps: float 
     import numpy as np
     from app.db.database import SessionLocal
     from app.db.models import FactorSnapshot
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows()
     by_date: dict = {}
     for sd, fac, fwd in rows:
         if isinstance(fac, dict) and isinstance(fwd, dict) and isinstance(fwd.get(hold), (int, float)):
@@ -955,11 +987,7 @@ def candidate_forward_validation(recent_n: int = 60) -> dict:
     from app.db.database import SessionLocal
     from app.db.models import FactorSnapshot
     full = candidate_composites_ic()
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors, FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows()
     by_date: dict = {}
     for sd, fac, fwd in rows:
         if isinstance(fac, dict) and isinstance(fwd, dict):
@@ -1022,28 +1050,21 @@ def candidate_forward_validation(recent_n: int = 60) -> dict:
     return res
 
 
-def snapshot_attribution_multi(horizons=(5, 10, 20)) -> dict:
+def snapshot_attribution_multi(horizons=(5, 10, 20), universe: str = "halal") -> dict:
     """Per-factor Information Coefficient at MULTIPLE horizons in ONE pass (for the factor
     table) + a direction arrow and plain-language verdict from the primary (10d) horizon.
     Cached ~10 min — it scans the whole snapshot panel (thousands of rows) and only changes
     when the daily capture/backfill adds data."""
     import time as _t
-    key = tuple(int(h) for h in horizons)
+    key = (tuple(int(h) for h in horizons), universe)
     now = _t.time()
     if _MULTI_CACHE["data"] is not None and _MULTI_CACHE["key"] == key and (now - _MULTI_CACHE["at"]) < 600:
         return _MULTI_CACHE["data"]
     import numpy as np
-    from app.db.database import SessionLocal
-    from app.db.models import FactorSnapshot
     from app.services.signal_calibration import _spearman
 
     hs = [str(int(h)) for h in horizons]
-    db = SessionLocal()
-    try:
-        rows = db.query(FactorSnapshot.snap_date, FactorSnapshot.factors,
-                        FactorSnapshot.fwd_ret).all()
-    finally:
-        db.close()
+    rows = _panel_rows(universe)
 
     by_date: dict = {}
     for sd, fac, fwd in rows:

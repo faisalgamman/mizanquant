@@ -542,18 +542,24 @@ async def alpha_curve_ep(days: int = 365):
 
 
 @router.get("/api/factor-ic-multi")
-async def factor_ic_multi_ep():
-    """Per-factor IC at 5/10/20-day horizons + direction + verdict (for the factor table)."""
+async def factor_ic_multi_ep(universe: str = "halal"):
+    """Per-factor IC at 5/10/20-day horizons + direction + verdict (for the factor table).
+    universe=halal (default, the verdict slice) | all (full research panel incl. the non-halal
+    expansion — DISCOVERY reading only)."""
     from app.services.alpha_capture import snapshot_attribution_multi, capture_status
-    return {"status": capture_status(), "attribution": snapshot_attribution_multi()}
+    u = universe if universe in ("halal", "all") else "halal"
+    return {"status": capture_status(), "universe": u,
+            "attribution": snapshot_attribution_multi(universe=u)}
 
 
 @router.get("/api/candidate-composites")
-async def candidate_composites_ep():
+async def candidate_composites_ep(universe: str = "halal"):
     """Shadow factor race — forward IC of candidate technical composites vs plain momentum,
-    measured on the snapshot panel. Research/measurement only; never touches live scoring."""
+    measured on the snapshot panel. universe=halal (default, the verdict) | all (discovery).
+    Research/measurement only; never touches live scoring."""
     from app.services.alpha_capture import candidate_composites_ic
-    return candidate_composites_ic()
+    u = universe if universe in ("halal", "all") else "halal"
+    return candidate_composites_ic(universe=u)
 
 
 @router.get("/api/candidate-validation")
