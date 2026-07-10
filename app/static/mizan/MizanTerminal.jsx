@@ -1829,6 +1829,7 @@ function MizanTerminal() {
             <span className="mz-sys"><span className="mz-dot on" /> النظام يعمل</span>
             <span className="mz-clock">{clock} · {today.toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })} · UTC</span>
             <span className="mz-bell" style={{ cursor: "pointer" }} title="تنبيهات المسح" onClick={() => { location.hash = "alerts"; }}>🔔{unread > 0 && <span className="mz-bell-b">{unread > 9 ? "9+" : unread}</span>}</span>
+            <button className="mz-lang" title="العربية / English" onClick={() => { if (window.__mizanToggleLang) window.__mizanToggleLang(); }}>{(window.__mizanLang && window.__mizanLang() === "en") ? "ع" : "EN"}</button>
             <span className="mz-theme">🌙</span>
           </div>
         </header>

@@ -380,6 +380,12 @@
 .mz-cb-h { font-size: 12px; font-weight: 700; color: var(--text-primary); }
 .mz-cb-eff { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 .mz-core-ledger { margin-top: 14px; }
+.mz-lang { background: var(--bg-raised); border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: 6px; font-size: 11px; font-weight: 700; padding: 3px 9px; cursor: pointer; font-family: var(--font-body); }
+.mz-lang:hover { border-color: var(--accent); color: var(--text-primary); }
+/* English (LTR) mode — the i18n engine stamps dir="ltr" on <html>; flip the RTL text containers */
+html[dir="ltr"] .mz-side, html[dir="ltr"] .mz-top, html[dir="ltr"] .mz-view,
+html[dir="ltr"] .mz-ov, html[dir="ltr"] .mz-rail, html[dir="ltr"] .mz-ana-main,
+html[dir="ltr"] .mz-ana-rail { direction: ltr; }
 .mz-race-svg { width: 100%; height: auto; display: block; }
 .mz-race-legend { display: flex; align-items: center; gap: 16px; font-size: 11.5px; color: var(--text-secondary); margin-bottom: 8px; font-family: var(--font-mono); }
 .mz-race-legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-inline-end: 5px; vertical-align: middle; }
