@@ -3929,6 +3929,18 @@ def _composite_from_parts(parts: list) -> int:
     return min(100, round(got / mx * 100)) if mx else 0
 
 
+@app.get("/api/screener/halal-basket")
+async def screener_halal_basket():
+    """The FULL AAOIFI-passing basket from the latest scan (light rows: symbol/price/company/
+    sector) — the Core Portfolio's true universe (~490 names), NOT the top-50 display slice.
+    Read-only; falls back to empty (the pre-market scan repopulates it daily)."""
+    data = _cache_get("halal_basket", max_age=86400 * 3) or {}
+    if not data.get("results"):
+        return {"results": [], "total": 0, "status": "empty",
+                "message": "Basket not built yet — it fills on the next full scan."}
+    return data
+
+
 @app.get("/api/screener/deep-picks")
 async def screener_deep_picks(
     limit: int = Query(15, description="Max results (halal, sorted by composite score)"),
@@ -4829,6 +4841,21 @@ def _run_screener_bg(scan_symbols: list):
         # Filter, sort, build result
         filtered = [r for r in all_results if r.get("is_halal")]
         filtered.sort(key=lambda r: r.get("smart_score", 0), reverse=True)
+        # FULL halal basket (light rows) — the breadth fix. The scan already computed every
+        # halal name but the display cache below keeps only the top-50, which silently choked
+        # the Core Portfolio to ~28 names (measured: 491 pass AAOIFI). Persist ALL of them
+        # cheaply so the core ledger / order generator own the whole universe; the heavy
+        # display cache stays top-50 (bounded enrichment load).
+        try:
+            _cache_set("halal_basket", {
+                "results": [{"symbol": r.get("symbol"), "price": r.get("price") or r.get("current_price"),
+                             "company": r.get("company"), "sector": r.get("sector"), "is_halal": True}
+                            for r in filtered if (r.get("price") or r.get("current_price"))],
+                "total": len(filtered),
+                "asof": datetime.utcnow().isoformat() + "Z",
+            })
+        except Exception as _hb_e:
+            logger.debug("halal_basket cache write failed: %s", _hb_e)
         # Cap forecast symbols when torch not available (ARIMA-only is fast; DL is heavier)
         _forecast_cap = 20 if _HAS_TORCH else 10
         top = filtered[:50]

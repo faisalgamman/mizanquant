@@ -917,9 +917,21 @@ def _core_row_from_pick(pick: dict, per_name_budget: float) -> dict:
 
 
 def _default_core_picks(limit: int = 200) -> list[dict]:
-    """The live halal universe (deep-picks, halal-only) → [{symbol, price, score}]. This is the
-    EXACT basket the Core Portfolio page's order generator shows, so the paper mirror tracks
-    what the user is told to buy. Returns [] on any failure (rebalance then no-ops)."""
+    """The live halal universe → [{symbol, price, score}] — the EXACT basket the Core page's
+    order generator shows, so the paper mirror tracks what the user is told to buy.
+
+    Primary source: the `halal_basket` cache — ALL AAOIFI-passing names from the latest scan
+    (~490; the breadth fix). Fallback: the deep-picks display slice (top-50-derived, ~28) so the
+    core still works before the first post-deploy scan. Returns [] on total failure."""
+    try:
+        from app.workspace_server import _cache_get
+        basket = _cache_get("halal_basket", max_age=86400 * 3) or {}
+        rows = basket.get("results") or []
+        if len(rows) >= 30:                       # a real basket, not a partial/stale stub
+            return _normalize_picks(rows)
+    except Exception as e:
+        logger.debug("core picks: halal_basket unavailable: %s", e)
+
     import asyncio
 
     def _call():

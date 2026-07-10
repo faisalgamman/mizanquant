@@ -1086,15 +1086,23 @@ function CorePortfolioView() {
       setGc(r); setGcD({ ...r.values }); setGcMsg("قُفِلت ✓"); loadGc(); } catch (e) { setGcMsg("تعذّر"); }
   };
   const VERDICT = { watching: ["قيد المراقبة", WARN], graduated: ["تخرّج ✓", POS], archive: ["يُوصى بالأرشفة", NEG], criteria_not_locked: ["اقفل المعايير أوّلاً", MUT], no_data: ["لا بيانات بعد", MUT] };
+  const hb = useGet("/api/screener/halal-basket");
   const rows = (dp && dp.results) || [];
-  const halal = rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
+  const basketRows = ((hb && hb.results) || []).filter(r => r.price > 0);
+  const halal = basketRows.length >= 30 ? basketRows
+    : rows.filter(r => (r.is_halal || r.halal_verdict === "halal") && r.price > 0);
   const core = co && co.strategies && co.strategies.core;
   const maxDD = core ? Math.abs(core.max_drawdown) : 25;
   const exposure = Math.max(0, Math.min(100, Math.round((maxLoss / maxDD) * 100)));
   const deploy = capital * exposure / 100;
   const N = halal.length || 1;
   const perName = deploy / N;
-  const orders = halal.map(r => { const sh = Math.floor(perName / r.price); return { sym: r.symbol, co: r.company, sector: r.sector, price: r.price, shares: sh, value: sh * r.price }; }).filter(o => o.shares > 0);
+  const orders = halal.map(r => {
+    // whole shares when the per-name budget affords them; else a fractional qty (IBKR supports
+    // fractional US shares) so a wide basket stays buyable with modest capital
+    const sh = perName >= r.price ? Math.floor(perName / r.price) : +((perName / r.price).toFixed(3));
+    return { sym: r.symbol, co: r.company, sector: r.sector, price: r.price, shares: sh, value: sh * r.price };
+  }).filter(o => o.shares > 0);
   const invested = orders.reduce((a, o) => a + o.value, 0);
   const worst = Math.round(deploy * maxDD / 100);
   const exportCsv = () => {
@@ -1138,7 +1146,7 @@ function CorePortfolioView() {
             <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>السعر</th><th>عدد الأسهم</th><th>القيمة</th></tr></thead>
               <tbody>{orders.slice(0, 60).map((o, i) => (<tr key={i}><td className="tl mz-fn">{o.sym}<div className="mz-dim2">{(o.co || "").slice(0, 18)}</div></td><td>{money(o.price)}</td><td className="mz-fn">{o.shares}</td><td>{money(o.value)}</td></tr>))}</tbody></table>
           ) : <div className="mz-empty">…يحمّل السلّة الحلال (أدخِل رأس مالاً كافياً)</div>}
-          <div className="mz-note ql-dim">قائمة تنفّذها <b>يدويّاً من IBKR</b> بالتساوي — أنا لا أرسل أوامر. أعِد التوازن فصليّاً (٤ مرّات/سنة) لإبقاء التكاليف منخفضة.</div>
+          <div className="mz-note ql-dim">قائمة تنفّذها <b>يدويّاً من IBKR</b> بالتساوي — أنا لا أرسل أوامر. السلّة الآن هي <b>الكون الحلال الكامل</b> ({N} اسماً)؛ الكميّات الكسريّة مدعومة في IBKR للأسهم الأمريكيّة. أعِد التوازن فصليّاً (٤ مرّات/سنة) لإبقاء التكاليف منخفضة.</div>
         </Panel>
       </div>
 
