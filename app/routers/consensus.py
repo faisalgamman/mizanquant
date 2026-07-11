@@ -562,6 +562,15 @@ async def candidate_composites_ep(universe: str = "halal"):
     return candidate_composites_ic(universe=u)
 
 
+@router.get("/api/market-relative-race")
+async def market_relative_race_ep():
+    """Two-tier test: does ranking a multi-factor composite over the FULL research universe (wider
+    normalisation denominator) pick better HALAL names than halal-only ranking? Buys/measures halal
+    top-bucket only. Matures as the expansion history backfills. Research/shadow; never live scoring."""
+    from app.services.alpha_capture import market_relative_race
+    return market_relative_race()
+
+
 @router.get("/api/candidate-validation")
 async def candidate_validation_ep(recent_n: int = 60):
     """Graduation gate — each shadow candidate's recent-window vs full-panel top-bucket t, with a

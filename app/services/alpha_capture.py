@@ -772,6 +772,104 @@ def candidate_composites_ic(horizons=(5, 10, 20), universe: str = "halal") -> di
     return res
 
 
+_MKTREL_CACHE = {"at": 0.0, "key": None, "data": None}
+
+
+def market_relative_race(horizons=(5, 10, 20)) -> dict:
+    """Two-tier hypothesis test (from the 2026-07 breadth expansion): does z-scoring a MULTI-factor
+    composite over the FULL research universe (halal + non-halal expansion — a ~3x wider normalisation
+    denominator) pick BETTER halal names than z-scoring over halal-only? Single-factor rank is invariant
+    to scaling, so this only moves multi-factor composites (the wider denominator changes each factor's
+    relative scale → different composite ranking of the SAME halal names). We rank over the chosen
+    universe but ONLY ever buy/measure the HALAL top-bucket (long-only halal). 'market' beating 'halal'
+    = the wider denominator improves selection. Meaningful only once expansion history is backfilled.
+    SHADOW/research — never touches live scoring or any order."""
+    import time as _t
+    key = tuple(int(h) for h in horizons)
+    now = _t.time()
+    if _MKTREL_CACHE["data"] is not None and _MKTREL_CACHE["key"] == key and (now - _MKTREL_CACHE["at"]) < 600:
+        return _MKTREL_CACHE["data"]
+    import numpy as np
+    hs = [str(int(h)) for h in horizons]
+    rows = _panel_rows("all")
+    by_date: dict = {}
+    for sd, fac, fwd in rows:
+        if isinstance(fac, dict) and isinstance(fwd, dict):
+            by_date.setdefault(sd, []).append((fac, fwd))
+
+    def _z(vals):
+        a = np.asarray(vals, dtype=float); s = a.std()
+        return (a - a.mean()) / s if s > 1e-9 else a * 0.0
+
+    def _is_halal(fac):
+        return fac.get("halal") != 0                      # 1 or missing(legacy) = halal; 0 = expansion
+
+    NEED = ("mom_12_1", "above_ema20", "dist_ema20_pct")
+
+    def _adaptive(Z, rg):
+        if rg == "calm_bull":
+            return Z["above_ema20"] + 0.5 * Z["mom_12_1"]
+        if rg == "crisis":
+            return Z["mom_12_1"] - Z["above_ema20"]
+        return Z["mom_12_1"] - 0.5 * Z["above_ema20"]
+    RECIPES = {"fresh_dist": lambda Z, rg: Z["mom_12_1"] - Z["dist_ema20_pct"], "adaptive": _adaptive}
+    LABELS = {"fresh_dist": "زخم − امتداد", "adaptive": "★ مشروط بالنظام (HMM)"}
+
+    exc = {r: {m: {h: [] for h in hs} for m in ("market", "halal")} for r in RECIPES}
+    dates_used = dates_with_exp = 0
+    for _sd, items in by_date.items():
+        allg = [(fa, fw) for fa, fw in items if all(isinstance(fa.get(k), (int, float)) for k in NEED)]
+        hal = [(fa, fw) for fa, fw in allg if _is_halal(fa)]
+        if len(hal) < 8 or len(allg) < 12:
+            continue
+        dates_used += 1
+        if any(not _is_halal(fa) for fa, fw in allg):
+            dates_with_exp += 1
+        rg = allg[0][0].get("regime")
+        Zfull = {k: _z([fa.get(k) for fa, fw in allg]) for k in NEED}     # over FULL universe
+        Zhal = {k: _z([fa.get(k) for fa, fw in hal]) for k in NEED}       # over halal-only
+        halal_idx = [i for i, (fa, fw) in enumerate(allg) if _is_halal(fa)]
+        for rname, fn in RECIPES.items():
+            sfull = fn(Zfull, rg); shal = fn(Zhal, rg)
+            for h in hs:
+                ym = [(float(sfull[i]), float(allg[i][1].get(h))) for i in halal_idx
+                      if isinstance(allg[i][1].get(h), (int, float))]
+                yh = [(float(shal[j]), float(hal[j][1].get(h))) for j in range(len(hal))
+                      if isinstance(hal[j][1].get(h), (int, float))]
+                for tag, ys in (("market", ym), ("halal", yh)):
+                    if len(ys) >= 8:
+                        ss = sorted(ys, key=lambda p: -p[0])
+                        ktop = max(3, int(round(len(ys) * 0.2)))
+                        um = sum(p[1] for p in ys) / len(ys)
+                        tm = sum(p[1] for p in ss[:ktop]) / ktop
+                        exc[rname][tag][h].append(tm - um)
+
+    out = {}
+    for rname in RECIPES:
+        per_h = {}
+        for h in hs:
+            cell = {}
+            for tag in ("market", "halal"):
+                e = np.asarray(exc[rname][tag][h], dtype=float)
+                if len(e):
+                    se = float(e.std(ddof=1)) if len(e) > 1 else 0.0
+                    cell[tag] = {"top_excess": round(float(e.mean()), 3),
+                                 "t": round(float(e.mean() / (se / np.sqrt(len(e)))), 2) if se > 0 else None,
+                                 "n": len(e)}
+                else:
+                    cell[tag] = {"top_excess": None, "t": None, "n": 0}
+            per_h[h] = cell
+        out[rname] = {"label": LABELS[rname], "h": per_h}
+    res = {"horizons": [int(h) for h in horizons], "recipes": out,
+           "dates_used": dates_used, "dates_with_expansion": dates_with_exp,
+           "note": "Two-tier test: rank a multi-factor composite over the FULL universe (market) vs "
+                   "halal-only (halal); buy/measure HALAL top-bucket only. 'market' top_excess > 'halal' "
+                   "means the wider denominator improves halal selection. Grows meaningful as expansion "
+                   "history backfills (see dates_with_expansion). Shadow only; never live scoring."}
+    _MKTREL_CACHE.update(at=now, key=key, data=res)
+    return res
+
+
 _SIM_CACHE = {"at": 0.0, "key": None, "data": None}
 
 
