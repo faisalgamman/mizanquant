@@ -44,17 +44,26 @@ def _env_f(name: str, default: float) -> float:
         return default
 
 
+def _flag(name: str, default: bool) -> bool:
+    return os.environ.get(name, "true" if default else "false").strip().lower() in ("true", "1", "yes", "on")
+
+
 def _cfg() -> dict:
     return {
         "slots": int(_env_f("SPEC_SLOTS", 5)),
-        "tp_pct": _env_f("SPEC_TP_PCT", 10.0),
-        "sl_pct": _env_f("SPEC_SL_PCT", 5.0),
+        "tp_pct": _env_f("SPEC_TP_PCT", 10.0),           # first target = 2R (Ross Cameron 2:1)
+        "sl_pct": _env_f("SPEC_SL_PCT", 5.0),            # initial stop = 1R
         "max_hold_hrs": _env_f("SPEC_MAX_HOLD_HRS", 30.0),
         "min_score": _env_f("SPEC_MIN_SCORE", 55.0),
         "slip": _env_f("SPEC_SLIP_BPS", 10.0) / 1e4,      # per side
         "account": _env_f("SPEC_ACCOUNT", 10000.0),
-        "halal_only": os.environ.get("SPEC_HALAL_ONLY", "true").strip().lower() in ("true", "1", "yes", "on"),
-        "enabled": os.environ.get("SPEC_ENABLED", "true").strip().lower() in ("true", "1", "yes", "on"),
+        "halal_only": _flag("SPEC_HALAL_ONLY", True),
+        "enabled": _flag("SPEC_ENABLED", True),
+        # ── Ross Cameron mechanizable rules ──────────────────────────────────
+        "scale_out": _flag("SPEC_SCALE_OUT", True),      # sell HALF at 1R, stop→breakeven, ride rest
+        "max_price": _env_f("SPEC_MAX_PRICE", 20.0),     # "stocks under $10 make 50% moves"; cap the profile
+        "min_rvol": _env_f("SPEC_MIN_RVOL", 2.0),        # high relative volume = his #1 requirement
+        "min_gap": _env_f("SPEC_MIN_GAP", 0.0),          # optional gap-and-go filter (0 = off)
     }
 
 
@@ -80,13 +89,23 @@ def _explosion_candidates(cfg: dict) -> list[dict]:
         try:
             score = float(r.get("explosion_score") or 0)
             price = float(r.get("price") or 0)
+            rvol = float(r.get("rvol") or 0)
+            gap = abs(float(r.get("gap_pct") or 0))
         except (TypeError, ValueError):
             continue
         if not r.get("symbol") or price <= 0 or score < cfg["min_score"]:
             continue
         if cfg["halal_only"] and not r.get("is_halal"):
             continue
-        out.append({"symbol": str(r["symbol"]).upper(), "price": price, "score": score})
+        # ── Ross Cameron stock profile: cheap + high relative volume + (optional) gap ──
+        if cfg["max_price"] > 0 and price > cfg["max_price"]:
+            continue
+        if cfg["min_rvol"] > 0 and rvol < cfg["min_rvol"]:
+            continue
+        if cfg["min_gap"] > 0 and gap < cfg["min_gap"]:
+            continue
+        out.append({"symbol": str(r["symbol"]).upper(), "price": price, "score": score,
+                    "rvol": rvol, "gap": gap})
     out.sort(key=lambda x: -x["score"])
     return out
 
@@ -110,32 +129,52 @@ def speculation_tick() -> dict:
         want = [c["symbol"] for c in cands if c["symbol"] not in held_syms][:max(0, cfg["slots"] - len(open_rows))]
         px = get_live_prices(list(held_syms) + want)
 
-        # ── exits: TP / SL / time-stop, at live price with slippage against us ──
+        # ── exits (Ross Cameron risk model): scale half out at +1R & move stop to breakeven,
+        #    ride the rest to the 2R target; a stopped-out runner is a SMALL WIN, not a loss.
+        #    All fills take slippage against us. ──
+        tp, sl = cfg["tp_pct"], cfg["sl_pct"]
+        scaled_now = 0
         for t in open_rows:
             cur = px.get(t.symbol)
             entry = float(t.entry_price or 0)
             if not cur or entry <= 0:
                 held += 1                        # can't price honestly → hold
                 continue
+            sd = dict(t.signal_details) if isinstance(t.signal_details, dict) else {}
+            scaled = bool(sd.get("scaled"))
             chg = (cur / entry - 1.0) * 100
             age = _age_hours(t.created_at)
+
+            # scale-out: first time we reach +1R, "sell half" and lock the stop at breakeven
+            if cfg["scale_out"] and not scaled and chg >= sl:
+                scale_fill = cur * (1.0 - cfg["slip"])
+                sd["scaled"] = True
+                sd["scale_pnl"] = round((scale_fill / entry - 1.0) * 100, 2)
+                t.signal_details = sd
+                scaled = True
+                scaled_now += 1
+
             reason = None
-            if chg >= cfg["tp_pct"]:
-                reason = "tp"
-            elif chg <= -cfg["sl_pct"]:
-                reason = "sl"
+            if chg >= tp:
+                reason = "tp"                    # first target = 2R
+            elif not scaled and chg <= -sl:
+                reason = "sl"                    # initial 1R stop (pre-scale)
+            elif scaled and cur <= entry:
+                reason = "be"                    # breakeven stop after scaling → small win
             elif age >= cfg["max_hold_hrs"]:
                 reason = "time"
             if not reason:
                 held += 1
                 continue
-            fill = cur * (1.0 - cfg["slip"])     # sell below the tape — slippage against us
-            t.exit_price = round(fill, 4)
-            t.pnl_pct = round((fill / entry - 1.0) * 100, 2)
-            t.pnl = round((fill - entry) * float(t.qty or 0), 2)
+
+            final_fill = cur * (1.0 - cfg["slip"])
+            final_leg = (final_fill / entry - 1.0) * 100
+            pnl_pct = (0.5 * float(sd.get("scale_pnl") or 0.0) + 0.5 * final_leg) if scaled else final_leg
+            t.exit_price = round(final_fill, 4)
+            t.pnl_pct = round(pnl_pct, 2)
+            t.pnl = round(float(t.qty or 0) * entry * pnl_pct / 100.0, 2)
             t.closed_at = _utc_now()
             t.status = "closed"
-            sd = dict(t.signal_details) if isinstance(t.signal_details, dict) else {}
             sd["exit_reason"] = reason
             sd["hold_hours"] = round(age, 1)
             t.signal_details = sd
@@ -154,15 +193,16 @@ def speculation_tick() -> dict:
                 created_at=_utc_now(), strategy_id=PV_SPEC, symbol=sym, side="buy",
                 qty=qty, entry_price=round(fill, 4), position_value=round(qty * fill, 2),
                 confidence=float(cand.get("score") or 0), status="open",
-                signal_details={"source": "speculation_paper", "explosion_score": cand.get("score"),
-                                "tp_pct": cfg["tp_pct"], "sl_pct": cfg["sl_pct"],
-                                "max_hold_hrs": cfg["max_hold_hrs"], "slip_bps": cfg["slip"] * 1e4,
-                                "asof": _utc_now().isoformat()},
+                signal_details={"source": "speculation_paper", "strategy": "ross_cameron_momentum",
+                                "explosion_score": cand.get("score"), "rvol": cand.get("rvol"),
+                                "gap_pct": cand.get("gap"), "tp_pct": cfg["tp_pct"], "sl_pct": cfg["sl_pct"],
+                                "scale_out": cfg["scale_out"], "max_hold_hrs": cfg["max_hold_hrs"],
+                                "slip_bps": cfg["slip"] * 1e4, "asof": _utc_now().isoformat()},
             ))
             opened += 1
 
         db.commit()
-        return {"opened": opened, "closed": closed, "held": held,
+        return {"opened": opened, "closed": closed, "held": held, "scaled": scaled_now,
                 "candidates": len(cands), "slots": cfg["slots"]}
     except SQLAlchemyError as e:
         db.rollback()
@@ -221,7 +261,10 @@ def speculation_summary() -> dict:
         reasons[r] = reasons.get(r, 0) + 1
     return {
         "strategy_id": PV_SPEC, "enabled": cfg["enabled"], "halal_only": cfg["halal_only"],
-        "config": {k: cfg[k] for k in ("slots", "tp_pct", "sl_pct", "max_hold_hrs", "min_score")},
+        "strategy": "Ross Cameron momentum (mechanized): cheap + high-RVOL + gap selection, 2:1 R:R, "
+                    "scale half at 1R → breakeven stop, ride to 2R. No float/1-min-chart (data-limited).",
+        "config": {k: cfg[k] for k in ("slots", "tp_pct", "sl_pct", "max_hold_hrs", "min_score",
+                                        "scale_out", "max_price", "min_rvol")},
         "open": open_pos, "closed_n": n,
         "win_rate": round(len(wins) / n * 100, 1) if n else None,
         "avg_win_pct": round(sum(wins) / len(wins), 2) if wins else None,

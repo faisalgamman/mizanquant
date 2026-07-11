@@ -1525,7 +1525,7 @@ function LabView() {
       <Panel title="🎰 دفتر المضاربة السريعة — الحلم مقاساً (ورقيّ 100%)" cls="mz-core-ledger"
         right={<button className="mz-btn" style={{ maxWidth: 150 }} onClick={startSpec}>▶ شغّل دورة</button>}>
         <div className="mz-verdict" style={{ borderColor: WARN, color: "var(--text-secondary)", marginBottom: 12, fontWeight: 600 }}>
-          يقيس حلم «10-20% أسبوعيّاً»: يشتري أسخن أسهم الانفجار بسعر حيّ، يخرج بربح {spec && spec.config ? "+" + spec.config.tp_pct + "%" : "+10%"} أو وقف {spec && spec.config ? "−" + spec.config.sl_pct + "%" : "−5%"} أو باليوم التالي — بانزلاق واقعيّ على الطرفين. <b>محاكاة كاملة — لا مال حقيقيّ، لا أمر حقيقيّ.</b> يعمل تلقائيّاً كلّ ~20 دقيقة أثناء التداول.
+يقيس حلم «10-20% أسبوعيّاً» <b>بقواعد روس كاميرون</b>: انتقاء الأسهم الرخيصة (≤${spec && spec.config ? spec.config.max_price : 20}) عالية الحجم النسبيّ (RVOL≥{spec && spec.config ? spec.config.min_rvol : 2}) والفجوة، بنسبة ربح:مخاطرة 2:1، <b>وبيع النصف عند 1R ونقل الوقف للتعادل</b> ثمّ ركوب الباقي — بأسعار حيّة وانزلاق على الطرفين. <b>محاكاة 100% — لا مال ولا أمر حقيقيّ.</b> يعمل كلّ ~20 دقيقة أثناء التداول. <span style={{ color: WARN }}>قيد أمين: لا نملك بيانات «الفلوت» ولا شموع الدقيقة التي يعتمدها كاميرون — فهذه ميكنة لجوهره المُقاس (الانتقاء + الانضباط)، لا نسخة حرفيّة.</span>
         </div>
         {spec ? (<div>
           <div className="mz-pain-out">
