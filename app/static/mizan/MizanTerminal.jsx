@@ -1304,6 +1304,7 @@ function LabView() {
   const gc = useGet("/api/gate-config");
   const cv = useGet("/api/candidate-validation");
   const wf = useGet("/api/walk-forward-sim?top_k=5&hold=5&cost_bps=15");
+  const mr = useGet("/api/market-relative-race");     // two-tier "rank vs full market" test
   const scanners = (sq && sq.scanners) || [];
   const ov = (sq && sq.overlays) || {};
   const gate = (sq && sq.gate) || {};
@@ -1471,6 +1472,45 @@ function LabView() {
           ) : <div className="mz-empty">لم يُجرِ النظام تغييراً معتمَداً بعد — كل تعديل ينتظر قرارك. هذا مقصود: القياس يقترح، وأنت تقرّر.</div>}
         </Panel>
       </div>
+
+      <div className="mz-sec-h">🔭 محرّك الاكتشاف — المتابعة (بحثيّ · ظلّيّ)</div>
+      <Panel title="حالة الأبحاث الجديدة — تنضج أماميّاً">
+        <div className="mz-cb-banner">متابعة الأبحاث التي بنيناها مؤخّراً وهي تجمع الدليل مع الوقت: نموّ اللوحة، الكون البحثيّ ثنائيّ الطبقة، اختبار «الترتيب مقابل السوق»، وعامل الأرباح (PEAD). قياس فقط — لا يمسّ تسجيلاً حيّاً ولا صفقة.</div>
+        <div className="mz-pain-out">
+          <div><span>حجم اللوحة (لقطات)</span><b>{capRows != null ? Number(capRows).toLocaleString("en") : "…"}</b></div>
+          <div><span>تواريخ مُعنونة</span><b>{capLab != null ? Number(capLab).toLocaleString("en") : "…"}</b></div>
+          <div><span>عائلات الإشارة</span><b style={{ fontSize: 14 }}>سعر + أرباح</b></div>
+          <div><span>وصفات في السباق</span><b>{nCands || "…"}</b></div>
+        </div>
+        <div className="mz-learn" style={{ marginTop: 13 }}>
+          <div className="mz-learn-c">
+            <div className="mz-learn-t">🆚 الترتيب مقابل السوق</div>
+            {(() => {
+              const c = mr && mr.recipes && mr.recipes.adaptive && mr.recipes.adaptive.h && mr.recipes.adaptive.h["20"];
+              if (!c || !c.market || c.market.top_excess == null) return <div className="mz-empty">…يقيس</div>;
+              const better = (c.halal.top_excess || 0) >= (c.market.top_excess || 0);
+              return <div className="mz-learn-d">فائض القمّة (20ي): مقابل السوق <b>{num(c.market.top_excess, 3)}%</b> · مقابل الحلال <b>{num(c.halal.top_excess, 3)}%</b><br /><span style={{ color: better ? NEG : POS }}>{better ? "الحلال مساوٍ/أفضل ⇒ توسيع المُقام لا يتفوّق (مُغلَق)" : "السوق أفضل ⇒ واعد"}</span> · {mr.dates_with_expansion || 0} تاريخاً بتوسعة</div>;
+            })()}
+          </div>
+          <div className="mz-learn-c">
+            <div className="mz-learn-t">📊 عامل الأرباح (PEAD) — غير سعريّ</div>
+            {(() => {
+              const p = facs && facs.pead && facs.pead.h && facs.pead.h["20"];
+              if (p && p.n_dates >= 6) return <div className="mz-learn-d">IC(20ي) <b>{num(p.mean_ic, 4)}</b> · IR <b>{p.ir != null ? num(p.ir, 2) : "—"}</b> · على {p.n_dates} تاريخاً — نضج للقراءة.</div>;
+              return <div className="mz-learn-d">يتراكم أماميّاً — لم ينضج بعد ({p ? p.n_dates : 0} تاريخاً مُعنوناً). أوّل عائلة إشارات غير سعريّة؛ يظهر IC-ه بعد أسابيع من التعنون.</div>;
+            })()}
+          </div>
+          <div className="mz-learn-c">
+            <div className="mz-learn-t">🏁 أقوى وصفة (المشروط بالنظام · 20ي)</div>
+            {(() => {
+              const c = cc && cc.candidates && cc.candidates.adaptive && cc.candidates.adaptive.h && cc.candidates.adaptive.h["20"];
+              if (!c || c.top_excess == null) return <div className="mz-empty">…يحسب</div>;
+              return <div className="mz-learn-d">فائض القمّة <b>{num(c.top_excess, 3)}%</b> · دلالة t=<b style={{ color: (c.top_t || 0) >= 2 ? POS : WARN }}>{c.top_t != null ? num(c.top_t, 2) : "—"}</b> على {c.n_dates} تاريخاً.<br /><span className="ql-dim">فائض اختيار قبل التكاليف — لا يعني ربحاً بعدها (آلة الزمن تحكم).</span></div>;
+            })()}
+          </div>
+        </div>
+        <div className="mz-note ql-dim">هذه اللوحة للمتابعة فقط — كلّ رقم فيها بحثيّ ظلّيّ. لا وصفة ولا عامل يدخل التسجيل الحيّ إلا بعد أن يعبر آلة الزمن بعد التكاليف، وبقرارك أنت.</div>
+      </Panel>
     </div>
   );
 }

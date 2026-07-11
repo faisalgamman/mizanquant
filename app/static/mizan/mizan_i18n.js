@@ -25,6 +25,13 @@
     "الموقع بالنطاق 20ي": "20d range position", "انعكاس 5 أيام": "5-day reversal", "أخرى": "Other",
     "الزخم": "Momentum", "القوّة النسبية": "Relative strength", "الامتداد": "Extension", "التذبذب": "Volatility",
     "المنهار": "Beaten-down", "انجراف الأرباح (PEAD)": "Earnings drift (PEAD)",
+    "🔭 محرّك الاكتشاف — المتابعة (بحثيّ · ظلّيّ)": "🔭 Discovery engine — monitor (research · shadow)",
+    "حالة الأبحاث الجديدة — تنضج أماميّاً": "New-research status — maturing forward",
+    "حجم اللوحة (لقطات)": "Panel size (snapshots)", "تواريخ مُعنونة": "Labelled dates",
+    "عائلات الإشارة": "Signal families", "سعر + أرباح": "Price + earnings", "وصفات في السباق": "Recipes in the race",
+    "🆚 الترتيب مقابل السوق": "🆚 Rank vs the market", "…يقيس": "…measuring",
+    "📊 عامل الأرباح (PEAD) — غير سعريّ": "📊 Earnings factor (PEAD) — non-price",
+    "🏁 أقوى وصفة (المشروط بالنظام · 20ي)": "🏁 Strongest recipe (regime-conditional · 20d)", "…يحسب": "…computing",
     // generic magnitudes / verdicts
     "عالٍ": "High", "متوسط": "Medium", "منخفض": "Low", "مرتفع": "High", "قيد التحقّق": "Validating",
     "موثوق": "Reliable", "قيد التعلّم": "Learning", "✓ متوافق": "✓ Compliant", "حلال": "Halal",
