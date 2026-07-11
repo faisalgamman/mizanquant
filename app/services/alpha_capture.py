@@ -141,6 +141,33 @@ def _symbol_factors(df, spy_closes) -> dict | None:
         return None
 
 
+_PEAD_WINDOW = 140.0   # calendar days from fiscal period-end over which the drift stays "fresh"
+                       # (period-end + ~3-6wk announcement lag + ~60-trading-day drift window)
+
+
+def _pead_factor(symbol: str) -> "float | None":
+    """Post-Earnings-Announcement-Drift signal — the first NON-price factor. The most recent
+    reported earnings surprise, decayed by how long ago it was (drift fades ~1 quarter after the
+    announcement). Positive = a recent beat (expected continued upward drift). None when no recent
+    earnings or no Finnhub key. Fail-safe. Cheap (Finnhub cached 6h)."""
+    try:
+        from app.services.finnhub_client import finnhub_client
+        e = finnhub_client.get_recent_earnings_surprise(symbol)
+        if not e:
+            return None
+        ds = e.get("days_since"); sp = e.get("surprise_pct")
+        if not isinstance(ds, (int, float)) or not isinstance(sp, (int, float)):
+            return None
+        ds = max(0.0, float(ds))                    # a just-ended quarter is freshest (weight ~1)
+        if ds > _PEAD_WINDOW:
+            return None                             # older than a quarter → drift has faded
+        w = 1.0 - ds / _PEAD_WINDOW                 # linear recency decay
+        sp = max(-200.0, min(200.0, float(sp)))     # clamp tiny-estimate blowups
+        return round(sp * w, 3)
+    except Exception:
+        return None
+
+
 def capture_snapshot(symbols=None, cap: int | None = None) -> dict:
     """Store today's PIT factor row for every universe name (deduped by date+symbol).
 
@@ -212,6 +239,12 @@ def capture_snapshot(symbols=None, cap: int | None = None) -> dict:
                 # halal-slice tag (two-tier research): 1 = in the AAOIFI basket today, 0 = research-
                 # only expansion name. Legacy rows lack the tag and are treated as halal (they were).
                 fac["halal"] = 1 if (halal_set and sym.upper() in halal_set) else (1 if not halal_set else 0)
+                # PEAD (non-price factor) — compute only for the HALAL (buyable) names to keep the
+                # Finnhub call budget bounded; expansion names are denominator-only and don't need it.
+                if fac["halal"] == 1:
+                    p = _pead_factor(sym)
+                    if p is not None:
+                        fac["pead"] = p
                 db.add(FactorSnapshot(snap_date=snap_date, symbol=sym,
                                       price=fac.get("price"), factors=_clean_factors(fac), fwd_ret=None))
                 stored += 1
@@ -279,7 +312,7 @@ def label_snapshots(horizon_days: int = 10) -> dict:
         db.close()
 
 
-_FACTORS = ("rs", "rsi", "above_ema20", "atr_pct", "dist_ema20_pct", "mom_12_1") + _NEW_FACTORS
+_FACTORS = ("rs", "rsi", "above_ema20", "atr_pct", "dist_ema20_pct", "mom_12_1") + _NEW_FACTORS + ("pead",)
 
 
 def snapshot_attribution(horizon_days: int = 10, sector_neutral: bool = False) -> dict:

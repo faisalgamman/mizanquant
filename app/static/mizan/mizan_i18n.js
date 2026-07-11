@@ -24,7 +24,7 @@
     "التقلّب الهابط": "Downside volatility", "بيتا (مقابل SPY)": "Beta (vs SPY)", "أقصى تراجع 6ش": "Max drawdown 6m",
     "الموقع بالنطاق 20ي": "20d range position", "انعكاس 5 أيام": "5-day reversal", "أخرى": "Other",
     "الزخم": "Momentum", "القوّة النسبية": "Relative strength", "الامتداد": "Extension", "التذبذب": "Volatility",
-    "المنهار": "Beaten-down",
+    "المنهار": "Beaten-down", "انجراف الأرباح (PEAD)": "Earnings drift (PEAD)",
     // generic magnitudes / verdicts
     "عالٍ": "High", "متوسط": "Medium", "منخفض": "Low", "مرتفع": "High", "قيد التحقّق": "Validating",
     "موثوق": "Reliable", "قيد التعلّم": "Learning", "✓ متوافق": "✓ Compliant", "حلال": "Halal",

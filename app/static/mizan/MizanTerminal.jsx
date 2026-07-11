@@ -123,7 +123,7 @@ function Overview() {
   const graduated = lw.graduated || (lw.status === "graduated");
 
   const facMap = { mom_12_1: "زخم 12-1", rs: "قوّة نسبيّة (RS)", above_ema20: "شرط فوق EMA20", rsi: "RSI (14)", atr_pct: "التقلّب (ATR)", dist_ema20_pct: "الامتداد عن EMA20",
-    hi52_prox: "قرب قمّة 52 أسبوعاً", resid_mom: "زخم البواقي", sharpe_mom: "زخم معدّل بالمخاطر", mom_consistency: "ثبات الزخم", downside_vol: "التقلّب الهابط", beta: "بيتا (مقابل SPY)", maxdd_6m: "أقصى تراجع 6ش", range_pos_20: "الموقع بالنطاق 20ي", rev_5d: "انعكاس 5 أيام" };
+    hi52_prox: "قرب قمّة 52 أسبوعاً", resid_mom: "زخم البواقي", sharpe_mom: "زخم معدّل بالمخاطر", mom_consistency: "ثبات الزخم", downside_vol: "التقلّب الهابط", beta: "بيتا (مقابل SPY)", maxdd_6m: "أقصى تراجع 6ش", range_pos_20: "الموقع بالنطاق 20ي", rev_5d: "انعكاس 5 أيام", pead: "انجراف الأرباح (PEAD)" };
   const facRows = attr ? Object.entries(attr).map(([f, v]) => ({ f, name: facMap[f] || f, ic: (v.h && v.h["10"] || {}).mean_ic, ir: (v.h && v.h["10"] || {}).ir, dir: v.direction }))
     .sort((a, b) => (b.ir || -99) - (a.ir || -99)) : [];
   let decay = null;
@@ -754,7 +754,7 @@ function FactorsView() {
   const attr = fic && fic.attribution && fic.attribution.factors;
   const gate = (sq && sq.gate) || {}; const rec = gate.recommendation;
   const facMap = { mom_12_1: "زخم 12-1", rs: "قوّة نسبيّة (RS)", above_ema20: "شرط فوق EMA20", rsi: "RSI (14)", atr_pct: "التقلّب (ATR)", dist_ema20_pct: "الامتداد عن EMA20",
-    hi52_prox: "قرب قمّة 52 أسبوعاً", resid_mom: "زخم البواقي", sharpe_mom: "زخم معدّل بالمخاطر", mom_consistency: "ثبات الزخم", downside_vol: "التقلّب الهابط", beta: "بيتا (مقابل SPY)", maxdd_6m: "أقصى تراجع 6ش", range_pos_20: "الموقع بالنطاق 20ي", rev_5d: "انعكاس 5 أيام" };
+    hi52_prox: "قرب قمّة 52 أسبوعاً", resid_mom: "زخم البواقي", sharpe_mom: "زخم معدّل بالمخاطر", mom_consistency: "ثبات الزخم", downside_vol: "التقلّب الهابط", beta: "بيتا (مقابل SPY)", maxdd_6m: "أقصى تراجع 6ش", range_pos_20: "الموقع بالنطاق 20ي", rev_5d: "انعكاس 5 أيام", pead: "انجراف الأرباح (PEAD)" };
   const rows = attr ? Object.entries(attr) : [];
   const regimes = (ricd && ricd.regimes) || [];
   return (

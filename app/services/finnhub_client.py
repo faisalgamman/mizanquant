@@ -94,6 +94,28 @@ class FinnhubClient:
             return d["metric"]
         return None
 
+    def get_recent_earnings_surprise(self, symbol: str) -> dict | None:
+        """The most recent REPORTED earnings surprise → {period_end, days_since, surprise_pct} or
+        None. Uses /stock/earnings (FREE tier: last 4 quarters with actual/estimate/surprisePercent).
+        The raw material for the post-earnings-announcement-drift (PEAD) factor. NOTE: 'days_since'
+        counts from the fiscal PERIOD END (Finnhub gives no announcement date on the free tier); the
+        actual announcement lags the period end by ~2-6 weeks, so the PEAD window is widened to suit."""
+        from datetime import date, datetime as _dt
+        d = self._get("stock/earnings", {"symbol": symbol.upper()})
+        if not isinstance(d, list) or not d:
+            return None
+        cand = [r for r in d if r.get("actual") is not None
+                and r.get("surprisePercent") is not None and r.get("period")]
+        if not cand:
+            return None
+        r = sorted(cand, key=lambda x: x["period"], reverse=True)[0]   # most recent reported quarter
+        try:
+            pend = _dt.strptime(r["period"], "%Y-%m-%d").date()
+            ds = (date.today() - pend).days
+            return {"period_end": r["period"], "days_since": int(ds), "surprise_pct": round(float(r["surprisePercent"]), 2)}
+        except (TypeError, ValueError):
+            return None
+
     def get_insider_transactions(self, symbol: str) -> list | None:
         """SEC Form 4 insider transactions: rows with {name, change, transactionDate,
         transactionCode ('S'=sale, 'P'=purchase, 'A'=award, 'F'=tax), transactionPrice}."""
