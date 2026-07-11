@@ -36,6 +36,11 @@
     "▶ شغّل دورة": "▶ Run a cycle", "العائد الأسبوعيّ المُركَّب": "Compounded weekly return", "الهدف (الحلم)": "Target (the dream)",
     "نسبة الفوز": "Win rate", "صفقات مغلقة": "Closed trades", "متوسّط الرابحة": "Avg winner", "متوسّط الخاسرة": "Avg loser",
     "لا مراكز مفتوحة الآن": "No open positions now", "…يحمّل دفتر المضاربة": "…loading the speculation ledger", "ساعات": "Hrs",
+    "التداول اليومي": "Day Trading", "↻ إعادة المسح": "↻ Rescan",
+    "🎰 نتائج اختبار المضاربة (قواعد روس كاميرون · ورقيّ)": "🎰 Speculation test results (Ross Cameron rules · paper)",
+    "الانفجار": "Explosion", "💥 انفجار": "💥 Explosion", "الحجم النسبيّ": "Rel. volume", "الفجوة%": "Gap%",
+    "فجوة%": "Gap%", "زخم 3ي%": "3d mom%", "زخم3ي%": "3d mom%", "شرعي": "Halal", "كاميرون": "Cameron",
+    "مركز مفتوح": "Open position", "…يحمّل نتائج المضاربة": "…loading speculation results",
     // generic magnitudes / verdicts
     "عالٍ": "High", "متوسط": "Medium", "منخفض": "Low", "مرتفع": "High", "قيد التحقّق": "Validating",
     "موثوق": "Reliable", "قيد التعلّم": "Learning", "✓ متوافق": "✓ Compliant", "حلال": "Halal",

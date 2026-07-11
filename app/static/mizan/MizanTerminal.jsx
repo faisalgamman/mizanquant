@@ -80,6 +80,7 @@ const NAV = [
   { key: "overview", label: "نظرة عامة", icon: "🏠" },
   { key: "core", label: "محفظة النواة", icon: "🎯" },
   { key: "screener", label: "المسح", icon: "🔍" },
+  { key: "daytrade", label: "التداول اليومي", icon: "⚡" },
   { key: "analysis", label: "تحليل الأسهم", icon: "📊" },
   { key: "portfolio", label: "المحفظة", icon: "💼" },
   { key: "ledger", label: "الدفتر الورقي", icon: "📒" },
@@ -1551,6 +1552,82 @@ function LabView() {
   );
 }
 
+function DayTradingView() {
+  const [tick, setTick] = useState(0);
+  const dt = useGet("/api/screener/daytrade?limit=60&_t=" + tick);
+  const [spec, setSpec] = useState(null);
+  const [specMsg, setSpecMsg] = useState("");
+  const [sortK, setSortK] = useState("explosion_score");
+  const loadSpec = () => fetch("/api/speculation-ledger").then(r => r.json()).then(setSpec).catch(() => {});
+  useEffect(() => { loadSpec(); }, []);
+  const runSpec = async () => {
+    if (!window.confirm("تشغيل دورة مضاربة ورقيّة الآن (قواعد كاميرون)؟ محاكاة 100% — لا مال ولا أمر حقيقيّ.")) return;
+    setSpecMsg("…يشغّل الدورة");
+    try { const r = await fetch("/api/speculation-ledger/tick", { method: "POST" }).then(x => x.json());
+      setSpecMsg(r.message || "بدأ"); setTimeout(loadSpec, 9000); setTimeout(loadSpec, 22000); } catch (e) { setSpecMsg("تعذّر"); }
+  };
+  const rows = (dt && dt.results) || [];
+  const scanning = dt && dt.status === "scanning";
+  const cfg = spec && spec.config;
+  const passCam = r => cfg ? (r.price <= cfg.max_price && (r.rvol || 0) >= cfg.min_rvol && (r.explosion_score || 0) >= cfg.min_score) : false;
+  const COLS = [["explosion_score", "الانفجار"], ["rvol", "الحجم النسبيّ"], ["gap_pct", "الفجوة%"], ["momentum_pct", "زخم 3ي%"], ["change_pct", "التغيّر%"], ["price", "السعر"]];
+  const sorted = [...rows].sort((a, b) => Math.abs(b[sortK] || 0) - Math.abs(a[sortK] || 0));
+  const whyOf = r => { const c = r.components || {}; const e = Object.entries({ "حجم": c.rvol, "زخم": c.momentum, "تقلّب": c.volatility, "فجوة": c.gap }).filter(x => x[1] != null); e.sort((a, b) => b[1] - a[1]); return e.length ? e[0][0] : "—"; };
+
+  return (
+    <div className="mz-view mz-wrap-full">
+      <div className="mz-ana-top">
+        <div className="mz-crumb">⚡ <b>التداول اليومي</b> — بحث في كلّ الأسهم (حلال وغير حلال) · اختبارات ونتائج</div>
+        <button className="mz-btn" style={{ maxWidth: 150 }} onClick={() => setTick(t => t + 1)}>↻ إعادة المسح</button>
+      </div>
+      <div className="mz-verdict" style={{ borderColor: WARN, color: "var(--text-secondary)", marginBottom: 14, fontWeight: 600 }}>
+        🔬 بحثيّ بحت: يمسح ~2500 سهماً (S&P + Russell + المتداوَلة النشطة) — <b>حلال وغير حلال</b> — لقياس الانفجار (حجم نسبيّ + زخم + تقلّب + فجوة). ليس توصية ولا دخول دفتر. <b>الشراء الحقيقيّ يبقى حلالاً محجوباً</b> — هذه الصفحة للبحث والقياس فقط.
+      </div>
+
+      <Panel title="🎰 نتائج اختبار المضاربة (قواعد روس كاميرون · ورقيّ)" right={<button className="mz-btn" style={{ maxWidth: 130 }} onClick={runSpec}>▶ شغّل دورة</button>}>
+        {spec ? (<div>
+          <div className="mz-pain-out">
+            <div><span>العائد الأسبوعيّ المُركَّب</span><b style={{ color: (spec.weekly_rate_pct || 0) >= 0 ? POS : NEG, fontSize: 20 }}>{spec.weekly_rate_pct != null ? pct(spec.weekly_rate_pct) : "…لم ينضج"}</b></div>
+            <div><span>الهدف (الحلم)</span><b style={{ color: WARN }}>10-20%</b></div>
+            <div><span>نسبة الفوز</span><b>{spec.win_rate != null ? spec.win_rate + "%" : "—"}</b></div>
+            <div><span>صفقات مغلقة</span><b>{spec.closed_n || 0}{spec.days_running ? " · " + spec.days_running + "ي" : ""}</b></div>
+            <div><span>متوسّط الرابحة</span><b style={{ color: POS }}>{spec.avg_win_pct != null ? pct(spec.avg_win_pct) : "—"}</b></div>
+            <div><span>متوسّط الخاسرة</span><b style={{ color: NEG }}>{spec.avg_loss_pct != null ? pct(spec.avg_loss_pct) : "—"}</b></div>
+          </div>
+          {cfg ? <div className="mz-note ql-dim">قواعد كاميرون: سعر ≤${cfg.max_price} · RVOL≥{cfg.min_rvol} · ربح +{cfg.tp_pct}%/وقف −{cfg.sl_pct}% (2:1){cfg.scale_out ? " · بيع النصف عند 1R + وقف تعادل" : ""}. قيد أمين: لا فلوت ولا شموع دقيقة — ميكنة الجوهر لا نسخة حرفيّة.</div> : null}
+          {(spec.open || []).length ? (
+            <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 8 }}><thead><tr><th className="tl">مركز مفتوح</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>ساعات</th></tr></thead>
+              <tbody>{spec.open.slice(0, 8).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td className="mz-dim2">{p.hold_hours}س</td></tr>))}</tbody></table>
+          ) : null}
+        </div>) : <div className="mz-empty">…يحمّل نتائج المضاربة</div>}
+        {specMsg && <div className="mz-note" style={{ color: specMsg === "تعذّر" ? NEG : POS }}>{specMsg}</div>}
+      </Panel>
+
+      <Panel title={"الأسهم المرشّحة — تقييم الانفجار" + (rows.length ? " (" + rows.length + ")" : "")}
+        right={<div className="mz-sort">{COLS.map(c => <button key={c[0]} className={"mz-basket-t" + (sortK === c[0] ? " on" : "")} style={sortK === c[0] ? { color: ACC, borderColor: ACC } : {}} onClick={() => setSortK(c[0])}>{c[1]}</button>)}</div>}>
+        {scanning ? <div className="mz-empty">…يمسح ~2500 سهماً (قد يستغرق دقيقة — اضغط «إعادة المسح» بعد قليل)</div>
+          : rows.length ? (
+            <table className="mz-tbl mz-tbl-wide"><thead><tr><th className="tl">الرمز</th><th>السعر</th><th>التغيّر%</th><th>💥 انفجار</th><th>RVOL</th><th>فجوة%</th><th>زخم3ي%</th><th>لماذا؟</th><th>شرعي</th><th>كاميرون</th></tr></thead>
+              <tbody>{sorted.map((r, i) => (
+                <tr key={i} className="mz-prow" onClick={() => goAnalyze(r.symbol, "")}>
+                  <td className="tl mz-fn">{r.symbol}</td>
+                  <td>{money(r.price)}</td>
+                  <td style={{ color: (r.change_pct || 0) >= 0 ? POS : NEG }}>{pct(r.change_pct)}</td>
+                  <td className="mz-fn" style={{ color: (r.explosion_score || 0) >= 70 ? POS : (r.explosion_score || 0) >= 55 ? WARN : MUT }}>{num(r.explosion_score, 0)}</td>
+                  <td>{num(r.rvol, 1)}×</td>
+                  <td style={{ color: (r.gap_pct || 0) >= 0 ? POS : NEG }}>{pct(r.gap_pct)}</td>
+                  <td style={{ color: (r.momentum_pct || 0) >= 0 ? POS : NEG }}>{pct(r.momentum_pct)}</td>
+                  <td><span className="mz-why">{whyOf(r)}</span></td>
+                  <td>{r.is_halal ? <span style={{ color: POS }}>✓</span> : <span className="mz-dim2">—</span>}</td>
+                  <td>{passCam(r) ? <span style={{ color: ACC, fontWeight: 700 }}>★</span> : <span className="mz-dim2">·</span>}</td>
+                </tr>))}</tbody></table>
+          ) : <div className="mz-empty">لا نتائج بعد — اضغط «إعادة المسح».</div>}
+        <div className="mz-note ql-dim">الترتيب بالانفجار: حجم نسبيّ (RVOL) + زخم + تقلّب + فجوة على شموع يوميّة. ★ كاميرون = يمرّ فلتر المضاربة (سعر/حجم/درجة). انقر أيّ صفّ للتحليل. بحث وقياس — لا توصية.</div>
+      </Panel>
+    </div>
+  );
+}
+
 function ReportsView() {
   const ov = useGet("/api/v1/overview");
   const sq = useGet("/api/selection-quality");
@@ -1912,6 +1989,7 @@ function MizanTerminal() {
         <div className="mz-body">
           {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div>
             : view === "screener" ? <ScreenerView />
+              : view === "daytrade" ? <DayTradingView />
               : view === "analysis" ? <StockAnalysisView />
               : view === "core" ? <CorePortfolioView />
               : view === "lab" ? <LabView />
