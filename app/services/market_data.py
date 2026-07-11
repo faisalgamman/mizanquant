@@ -203,6 +203,58 @@ def _data_bars_url(symbols: list[str]) -> tuple[str, dict]:
 
 
 
+_LIVE_PX_CACHE: dict = {}          # sym -> (ts, price)
+_LIVE_PX_TTL = 45.0                # seconds — intraday freshness without hammering the feed
+
+
+def get_live_prices(symbols) -> dict:
+    """Latest trade price per symbol from Alpaca's free IEX feed (batch
+    /v2/stocks/trades/latest). ~45s micro-cache per symbol. Returns {SYM: price}
+    for whatever succeeded — may be a subset or {} (missing keys / feed outage);
+    callers MUST tolerate gaps (skip, don't fabricate)."""
+    syms = [str(s).upper().strip() for s in (symbols or []) if s]
+    if not syms:
+        return {}
+    now = time.time()
+    out: dict = {}
+    missing: list[str] = []
+    for s in syms:
+        hit = _LIVE_PX_CACHE.get(s)
+        if hit and now - hit[0] < _LIVE_PX_TTL:
+            out[s] = hit[1]
+        else:
+            missing.append(s)
+    if missing:
+        key, secret = _alpaca_data_creds()
+        if key and secret:
+            try:
+                import httpx
+                # batch endpoint accepts up to ~100 symbols per call
+                for i in range(0, len(missing), 100):
+                    chunk = missing[i:i + 100]
+                    r = httpx.get(
+                        "https://data.alpaca.markets/v2/stocks/trades/latest",
+                        params={"symbols": ",".join(chunk), "feed": "iex"},
+                        headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret},
+                        timeout=8,
+                    )
+                    if r.status_code != 200:
+                        logger.debug("live prices %s: HTTP %s", chunk[:3], r.status_code)
+                        continue
+                    for s, t in (r.json().get("trades") or {}).items():
+                        try:
+                            px = float(t.get("p") or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if px > 0:
+                            su = s.upper()
+                            _LIVE_PX_CACHE[su] = (now, px)
+                            out[su] = px
+            except Exception as e:
+                logger.debug("live prices failed: %s", e)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Symbol validation
 # ---------------------------------------------------------------------------

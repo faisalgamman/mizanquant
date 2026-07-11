@@ -562,6 +562,26 @@ async def candidate_composites_ep(universe: str = "halal"):
     return candidate_composites_ic(universe=u)
 
 
+@router.get("/api/speculation-ledger")
+async def speculation_ledger_ep():
+    """The SPECULATION shadow ledger (PVSP) — the 10-20%/week fast-trading dream, MEASURED on
+    paper: open positions at live prices + the closed ledger's honest arithmetic (win rate, avg
+    win/loss, compounded weekly rate, exit-reason mix). Shadow only; NEVER trades real money."""
+    from app.services.speculation_ledger import speculation_summary
+    return speculation_summary()
+
+
+@router.post("/api/speculation-ledger/tick")
+async def speculation_ledger_tick_ep():
+    """Run one speculation paper cycle NOW (manage exits + fill slots at live prices) — normally
+    the scheduler does this ~every 20 min during market hours. Background; poll GET
+    /api/speculation-ledger. Paper only; NEVER a real order."""
+    from threading import Thread
+    from app.services.speculation_ledger import speculation_tick
+    Thread(target=speculation_tick, daemon=True, name="spec-tick").start()
+    return {"status": "started", "message": "يشغّل دورة مضاربة ورقيّة — لحظات."}
+
+
 @router.get("/api/market-relative-race")
 async def market_relative_race_ep():
     """Two-tier test: does ranking a multi-factor composite over the FULL research universe (wider

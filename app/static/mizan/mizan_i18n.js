@@ -32,6 +32,10 @@
     "🆚 الترتيب مقابل السوق": "🆚 Rank vs the market", "…يقيس": "…measuring",
     "📊 عامل الأرباح (PEAD) — غير سعريّ": "📊 Earnings factor (PEAD) — non-price",
     "🏁 أقوى وصفة (المشروط بالنظام · 20ي)": "🏁 Strongest recipe (regime-conditional · 20d)", "…يحسب": "…computing",
+    "🎰 دفتر المضاربة السريعة — الحلم مقاساً (ورقيّ 100%)": "🎰 Fast-speculation ledger — the dream, measured (100% paper)",
+    "▶ شغّل دورة": "▶ Run a cycle", "العائد الأسبوعيّ المُركَّب": "Compounded weekly return", "الهدف (الحلم)": "Target (the dream)",
+    "نسبة الفوز": "Win rate", "صفقات مغلقة": "Closed trades", "متوسّط الرابحة": "Avg winner", "متوسّط الخاسرة": "Avg loser",
+    "لا مراكز مفتوحة الآن": "No open positions now", "…يحمّل دفتر المضاربة": "…loading the speculation ledger", "ساعات": "Hrs",
     // generic magnitudes / verdicts
     "عالٍ": "High", "متوسط": "Medium", "منخفض": "Low", "مرتفع": "High", "قيد التحقّق": "Validating",
     "موثوق": "Reliable", "قيد التعلّم": "Learning", "✓ متوافق": "✓ Compliant", "حلال": "Halal",

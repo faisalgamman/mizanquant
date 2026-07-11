@@ -1305,6 +1305,16 @@ function LabView() {
   const cv = useGet("/api/candidate-validation");
   const wf = useGet("/api/walk-forward-sim?top_k=5&hold=5&cost_bps=15");
   const mr = useGet("/api/market-relative-race");     // two-tier "rank vs full market" test
+  const [spec, setSpec] = useState(null);             // speculation shadow ledger (PVSP)
+  const [specMsg, setSpecMsg] = useState("");
+  const loadSpec = () => fetch("/api/speculation-ledger").then(r => r.json()).then(setSpec).catch(() => {});
+  useEffect(() => { loadSpec(); }, []);
+  const startSpec = async () => {
+    if (!window.confirm("تشغيل دورة مضاربة ورقيّة الآن؟ محاكاة 100% — لا مال حقيقيّ ولا أمر حقيقيّ. (يعمل تلقائيّاً كلّ ~20 دقيقة أثناء تداول السوق)")) return;
+    setSpecMsg("…يشغّل الدورة");
+    try { const r = await fetch("/api/speculation-ledger/tick", { method: "POST" }).then(x => x.json());
+      setSpecMsg(r.message || "بدأ"); setTimeout(loadSpec, 9000); setTimeout(loadSpec, 22000); } catch (e) { setSpecMsg("تعذّر"); }
+  };
   const scanners = (sq && sq.scanners) || [];
   const ov = (sq && sq.overlays) || {};
   const gate = (sq && sq.gate) || {};
@@ -1510,6 +1520,32 @@ function LabView() {
           </div>
         </div>
         <div className="mz-note ql-dim">هذه اللوحة للمتابعة فقط — كلّ رقم فيها بحثيّ ظلّيّ. لا وصفة ولا عامل يدخل التسجيل الحيّ إلا بعد أن يعبر آلة الزمن بعد التكاليف، وبقرارك أنت.</div>
+      </Panel>
+
+      <Panel title="🎰 دفتر المضاربة السريعة — الحلم مقاساً (ورقيّ 100%)" cls="mz-core-ledger"
+        right={<button className="mz-btn" style={{ maxWidth: 150 }} onClick={startSpec}>▶ شغّل دورة</button>}>
+        <div className="mz-verdict" style={{ borderColor: WARN, color: "var(--text-secondary)", marginBottom: 12, fontWeight: 600 }}>
+          يقيس حلم «10-20% أسبوعيّاً»: يشتري أسخن أسهم الانفجار بسعر حيّ، يخرج بربح {spec && spec.config ? "+" + spec.config.tp_pct + "%" : "+10%"} أو وقف {spec && spec.config ? "−" + spec.config.sl_pct + "%" : "−5%"} أو باليوم التالي — بانزلاق واقعيّ على الطرفين. <b>محاكاة كاملة — لا مال حقيقيّ، لا أمر حقيقيّ.</b> يعمل تلقائيّاً كلّ ~20 دقيقة أثناء التداول.
+        </div>
+        {spec ? (<div>
+          <div className="mz-pain-out">
+            <div><span>العائد الأسبوعيّ المُركَّب</span><b style={{ color: (spec.weekly_rate_pct || 0) >= 0 ? POS : NEG, fontSize: 20 }}>{spec.weekly_rate_pct != null ? pct(spec.weekly_rate_pct) : "…"}</b></div>
+            <div><span>الهدف (الحلم)</span><b style={{ color: WARN }}>10-20%</b></div>
+            <div><span>نسبة الفوز</span><b>{spec.win_rate != null ? spec.win_rate + "%" : "—"}</b></div>
+            <div><span>صفقات مغلقة</span><b>{spec.closed_n || 0}{spec.days_running ? " · " + spec.days_running + "ي" : ""}</b></div>
+            <div><span>متوسّط الرابحة</span><b style={{ color: POS }}>{spec.avg_win_pct != null ? pct(spec.avg_win_pct) : "—"}</b></div>
+            <div><span>متوسّط الخاسرة</span><b style={{ color: NEG }}>{spec.avg_loss_pct != null ? pct(spec.avg_loss_pct) : "—"}</b></div>
+          </div>
+          {(spec.open || []).length ? (
+            <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 10 }}><thead><tr><th className="tl">الرمز</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>ساعات</th></tr></thead>
+              <tbody>{spec.open.slice(0, 10).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td className="mz-dim2">{p.hold_hours}س</td></tr>))}</tbody></table>
+          ) : <div className="mz-empty" style={{ marginTop: 8 }}>{spec.closed_n ? "لا مراكز مفتوحة الآن" : "لم تبدأ الدورة بعد — تعمل تلقائيّاً عند فتح السوق، أو اضغط «شغّل دورة»."}</div>}
+          {spec.exit_reasons && Object.keys(spec.exit_reasons).length ? (
+            <div className="mz-note ql-dim">أسباب الخروج: {Object.entries(spec.exit_reasons).map(([k, v]) => ({ tp: "ربح", sl: "وقف", time: "يوم تالٍ", "?": "؟" }[k] || k) + " " + v).join(" · ")}</div>
+          ) : null}
+          <div className="mz-note ql-dim">قارن «العائد الأسبوعيّ المُركَّب» بالهدف 10-20%. توقّعي الصادق: صفقات مفردة مبهرة، محصّلة قاسية. الحكم للأرقام لا للحماس. ظلّيّ بحت — لا يتداول مالاً.</div>
+        </div>) : <div className="mz-empty">…يحمّل دفتر المضاربة</div>}
+        {specMsg && <div className="mz-note" style={{ color: specMsg === "تعذّر" ? NEG : POS }}>{specMsg}</div>}
       </Panel>
     </div>
   );

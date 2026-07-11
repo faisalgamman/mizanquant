@@ -318,6 +318,7 @@ def _scheduler_loop():
     last_db_backup = ""      # YYYY-MM-DD — daily DB backup of measurement tables
     last_nav_record = ""     # YYYY-MM-DD — daily paper-ledger NAV race snapshot
     last_race_digest = ""    # YYYY-MM-DD — weekly (Friday) race digest → Telegram
+    last_spec_tick = ""      # YYYY-MM-DD HH:slot — speculation ledger intraday tick (~20 min)
     last_full_rescreen = ""  # YYYY-MM-DD — off-session FULL precompute (exchange-closed days)
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
@@ -394,6 +395,19 @@ def _scheduler_loop():
                 # Weekends or late night: sleep 10 minutes between checks
                 time.sleep(600)
                 continue
+
+            # --- SPECULATION shadow ledger (PVSP): ~every 20 min during market hours ---
+            # Paper-trades the fast 10-20%/week dream on the explosion names (buy live, exit
+            # intraday on TP/SL or next-day) so its honest arithmetic accrues. Never trades real.
+            if _is_market_hours(now) and now.minute % 20 == 0:
+                _spec_slot = f"{today_str} {now.hour}:{now.minute // 20}"
+                if last_spec_tick != _spec_slot:
+                    last_spec_tick = _spec_slot
+                    try:
+                        from app.services.speculation_ledger import speculation_tick
+                        logger.info("Speculation ledger tick: %s", speculation_tick())
+                    except Exception as e:
+                        logger.error(f"Speculation tick failed: {e}")
 
             if _is_weekday(now) and now.hour == 1 and last_reference_refresh != today_str:
                 last_reference_refresh = today_str
