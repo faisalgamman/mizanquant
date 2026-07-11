@@ -1526,7 +1526,7 @@ function LabView() {
       <Panel title="🎰 دفتر المضاربة السريعة — الحلم مقاساً (ورقيّ 100%)" cls="mz-core-ledger"
         right={<button className="mz-btn" style={{ maxWidth: 150 }} onClick={startSpec}>▶ شغّل دورة</button>}>
         <div className="mz-verdict" style={{ borderColor: WARN, color: "var(--text-secondary)", marginBottom: 12, fontWeight: 600 }}>
-يقيس حلم «10-20% أسبوعيّاً» <b>بقواعد روس كاميرون</b>: انتقاء الأسهم الرخيصة (≤${spec && spec.config ? spec.config.max_price : 20}) عالية الحجم النسبيّ (RVOL≥{spec && spec.config ? spec.config.min_rvol : 2}) والفجوة، بنسبة ربح:مخاطرة 2:1، <b>وبيع النصف عند 1R ونقل الوقف للتعادل</b> ثمّ ركوب الباقي — بأسعار حيّة وانزلاق على الطرفين. <b>محاكاة 100% — لا مال ولا أمر حقيقيّ.</b> يعمل كلّ ~20 دقيقة أثناء التداول. <span style={{ color: WARN }}>قيد أمين: لا نملك بيانات «الفلوت» ولا شموع الدقيقة التي يعتمدها كاميرون — فهذه ميكنة لجوهره المُقاس (الانتقاء + الانضباط)، لا نسخة حرفيّة.</span>
+يقيس حلم «10-20% أسبوعيّاً» <b>بقواعد روس كاميرون</b>: انتقاء الأسهم الرخيصة (≤${spec && spec.config ? spec.config.max_price : 20}) عالية الحجم النسبيّ (RVOL≥{spec && spec.config ? spec.config.min_rvol : 2})، <b>ويدخل فقط عند طبع نمط علم صاعد / قمّة مسطّحة على شمعة الدقيقة</b> — بوقفٍ عند دعم النمط وهدفٍ 2:1، وبيع النصف عند 1R ونقل الوقف للتعادل. أسعار حيّة وانزلاق على الطرفين. <b>محاكاة 100% — لا مال ولا أمر حقيقيّ.</b> <span style={{ color: WARN }}>قيد أمين: شموع الدقيقة من IEX (جزء من الحجم) — دقيقة للأسماء السائلة؛ لا Level 2، والفلوت مرشّح ليّن (بياناته متقطّعة).</span>
         </div>
         {spec ? (<div>
           <div className="mz-pain-out">
@@ -1594,10 +1594,10 @@ function DayTradingView() {
             <div><span>متوسّط الرابحة</span><b style={{ color: POS }}>{spec.avg_win_pct != null ? pct(spec.avg_win_pct) : "—"}</b></div>
             <div><span>متوسّط الخاسرة</span><b style={{ color: NEG }}>{spec.avg_loss_pct != null ? pct(spec.avg_loss_pct) : "—"}</b></div>
           </div>
-          {cfg ? <div className="mz-note ql-dim">قواعد كاميرون: سعر ≤${cfg.max_price} · RVOL≥{cfg.min_rvol} · ربح +{cfg.tp_pct}%/وقف −{cfg.sl_pct}% (2:1){cfg.scale_out ? " · بيع النصف عند 1R + وقف تعادل" : ""}. قيد أمين: لا فلوت ولا شموع دقيقة — ميكنة الجوهر لا نسخة حرفيّة.</div> : null}
+          {cfg ? <div className="mz-note ql-dim">قواعد كاميرون: سعر ≤${cfg.max_price} · RVOL≥{cfg.min_rvol} · {cfg.cameron_patterns ? "دخول عند نمط علم صاعد/قمّة مسطّحة على شمعة الدقيقة، وقف عند دعم النمط، هدف 2:1" : "ربح +" + cfg.tp_pct + "%/وقف −" + cfg.sl_pct + "% (2:1)"}{cfg.scale_out ? " · بيع النصف عند 1R + وقف تعادل" : ""}. قيد أمين: شموع IEX (جزء من الحجم)، لا Level 2، والفلوت مرشّح ليّن.</div> : null}
           {(spec.open || []).length ? (
-            <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 8 }}><thead><tr><th className="tl">مركز مفتوح</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>ساعات</th></tr></thead>
-              <tbody>{spec.open.slice(0, 8).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td className="mz-dim2">{p.hold_hours}س</td></tr>))}</tbody></table>
+            <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 8 }}><thead><tr><th className="tl">مركز مفتوح</th><th>النمط</th><th>الدخول</th><th>الحاليّ</th><th>غير محقّق %</th><th>ساعات</th></tr></thead>
+              <tbody>{spec.open.slice(0, 8).map((p, i) => (<tr key={i}><td className="tl mz-fn">{p.symbol}</td><td className="mz-dim2">{p.pattern === "flat_top" ? "قمّة مسطّحة" : p.pattern === "bull_flag" ? "علم صاعد" : (p.pattern || "—")}{p.scaled ? " ½" : ""}</td><td>{money(p.entry)}</td><td>{money(p.current)}</td><td style={{ color: (p.upl_pct || 0) >= 0 ? POS : NEG }}>{pct(p.upl_pct)}</td><td className="mz-dim2">{p.hold_hours}س</td></tr>))}</tbody></table>
           ) : null}
         </div>) : <div className="mz-empty">…يحمّل نتائج المضاربة</div>}
         {specMsg && <div className="mz-note" style={{ color: specMsg === "تعذّر" ? NEG : POS }}>{specMsg}</div>}

@@ -64,6 +64,8 @@ def _cfg() -> dict:
         "max_price": _env_f("SPEC_MAX_PRICE", 20.0),     # "stocks under $10 make 50% moves"; cap the profile
         "min_rvol": _env_f("SPEC_MIN_RVOL", 2.0),        # high relative volume = his #1 requirement
         "min_gap": _env_f("SPEC_MIN_GAP", 0.0),          # optional gap-and-go filter (0 = off)
+        "cameron_patterns": _flag("SPEC_CAMERON_PATTERNS", True),  # require a 1-min bull-flag/flat-top to enter
+        "max_float_m": _env_f("SPEC_MAX_FLOAT_M", 0.0),  # soft low-float filter (millions; 0 = off, data spotty)
     }
 
 
@@ -129,10 +131,9 @@ def speculation_tick() -> dict:
         want = [c["symbol"] for c in cands if c["symbol"] not in held_syms][:max(0, cfg["slots"] - len(open_rows))]
         px = get_live_prices(list(held_syms) + want)
 
-        # ── exits (Ross Cameron risk model): scale half out at +1R & move stop to breakeven,
-        #    ride the rest to the 2R target; a stopped-out runner is a SMALL WIN, not a loss.
-        #    All fills take slippage against us. ──
-        tp, sl = cfg["tp_pct"], cfg["sl_pct"]
+        # ── exits (Ross Cameron risk model) on ABSOLUTE price levels stored at entry (dynamic when a
+        #    1-min pattern set the stop; fixed-% fallback for legacy rows): scale half at +1R & move
+        #    stop to breakeven, ride to the 2R target; a stopped-out runner is a SMALL WIN not a loss. ──
         scaled_now = 0
         for t in open_rows:
             cur = px.get(t.symbol)
@@ -141,12 +142,14 @@ def speculation_tick() -> dict:
                 held += 1                        # can't price honestly → hold
                 continue
             sd = dict(t.signal_details) if isinstance(t.signal_details, dict) else {}
+            stop_price = float(sd.get("stop_price") or entry * (1.0 - cfg["sl_pct"] / 100.0))
+            target_price = float(sd.get("target_price") or entry * (1.0 + cfg["tp_pct"] / 100.0))
+            scale_price = float(sd.get("scale_price") or (entry + (entry - stop_price)))   # +1R
             scaled = bool(sd.get("scaled"))
-            chg = (cur / entry - 1.0) * 100
             age = _age_hours(t.created_at)
 
             # scale-out: first time we reach +1R, "sell half" and lock the stop at breakeven
-            if cfg["scale_out"] and not scaled and chg >= sl:
+            if cfg["scale_out"] and not scaled and cur >= scale_price:
                 scale_fill = cur * (1.0 - cfg["slip"])
                 sd["scaled"] = True
                 sd["scale_pnl"] = round((scale_fill / entry - 1.0) * 100, 2)
@@ -155,10 +158,10 @@ def speculation_tick() -> dict:
                 scaled_now += 1
 
             reason = None
-            if chg >= tp:
-                reason = "tp"                    # first target = 2R
-            elif not scaled and chg <= -sl:
-                reason = "sl"                    # initial 1R stop (pre-scale)
+            if cur >= target_price:
+                reason = "tp"                    # 2R target
+            elif not scaled and cur <= stop_price:
+                reason = "sl"                    # pattern/1R stop (pre-scale)
             elif scaled and cur <= entry:
                 reason = "be"                    # breakeven stop after scaling → small win
             elif age >= cfg["max_hold_hrs"]:
@@ -180,30 +183,58 @@ def speculation_tick() -> dict:
             t.signal_details = sd
             closed += 1
 
-        # ── entries: fill free slots from the hottest names, at live ask-ish price ──
+        # ── entries: a hot name is bought ONLY when it prints a Ross-Cameron 1-min setup
+        #    (bull flag / flat top); the pattern's support sets a DYNAMIC stop and a 2:1 target. ──
         budget = cfg["account"] / max(cfg["slots"], 1)
+        patt_skips = 0
         for sym in want:
             cur = px.get(sym)
             if not cur or cur <= 0:
                 continue
-            fill = cur * (1.0 + cfg["slip"])     # buy above the tape
-            qty = round(budget / fill, 6)
             cand = next((c for c in cands if c["symbol"] == sym), {})
+            pattern, pat_stop = None, None
+            if cfg["cameron_patterns"]:
+                try:
+                    from app.services.cameron_patterns import cameron_setup
+                    s = cameron_setup(sym)
+                except Exception:
+                    s = {"ok": False}
+                if not s.get("ok"):
+                    patt_skips += 1
+                    continue                     # no 1-min bull-flag/flat-top right now → don't enter
+                pattern, pat_stop = s["pattern"], float(s["stop"])
+            flt = None
+            if cfg["max_float_m"] > 0:
+                try:
+                    from app.services.cameron_patterns import get_float_millions
+                    flt = get_float_millions(sym)
+                except Exception:
+                    flt = None
+                if flt is not None and flt > cfg["max_float_m"]:
+                    continue                     # too large a float (soft filter)
+            fill = cur * (1.0 + cfg["slip"])     # buy above the tape
+            stop_price = pat_stop if (pat_stop is not None and pat_stop < fill) else fill * (1.0 - cfg["sl_pct"] / 100.0)
+            risk = fill - stop_price
+            target_price = fill + 2.0 * risk     # 2:1 off the real stop
+            scale_price = fill + risk            # +1R
+            qty = round(budget / fill, 6)
             db.add(TradeHistory(
                 created_at=_utc_now(), strategy_id=PV_SPEC, symbol=sym, side="buy",
                 qty=qty, entry_price=round(fill, 4), position_value=round(qty * fill, 2),
                 confidence=float(cand.get("score") or 0), status="open",
                 signal_details={"source": "speculation_paper", "strategy": "ross_cameron_momentum",
-                                "explosion_score": cand.get("score"), "rvol": cand.get("rvol"),
-                                "gap_pct": cand.get("gap"), "tp_pct": cfg["tp_pct"], "sl_pct": cfg["sl_pct"],
-                                "scale_out": cfg["scale_out"], "max_hold_hrs": cfg["max_hold_hrs"],
-                                "slip_bps": cfg["slip"] * 1e4, "asof": _utc_now().isoformat()},
+                                "pattern": pattern, "explosion_score": cand.get("score"),
+                                "rvol": cand.get("rvol"), "gap_pct": cand.get("gap"), "float_m": flt,
+                                "stop_price": round(stop_price, 4), "target_price": round(target_price, 4),
+                                "scale_price": round(scale_price, 4), "scale_out": cfg["scale_out"],
+                                "max_hold_hrs": cfg["max_hold_hrs"], "slip_bps": cfg["slip"] * 1e4,
+                                "asof": _utc_now().isoformat()},
             ))
             opened += 1
 
         db.commit()
         return {"opened": opened, "closed": closed, "held": held, "scaled": scaled_now,
-                "candidates": len(cands), "slots": cfg["slots"]}
+                "pattern_skips": patt_skips, "candidates": len(cands), "slots": cfg["slots"]}
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("speculation_tick failed: %s", e)
@@ -231,9 +262,12 @@ def speculation_summary() -> dict:
             if t.pnl_pct is None:
                 entry = float(t.entry_price or 0)
                 cur = px.get(t.symbol) or entry
+                sdp = t.signal_details if isinstance(t.signal_details, dict) else {}
                 open_pos.append({"symbol": t.symbol, "entry": round(entry, 2), "current": round(cur, 2),
                                  "upl_pct": round((cur / entry - 1.0) * 100, 2) if entry > 0 else None,
-                                 "hold_hours": round(_age_hours(t.created_at), 1)})
+                                 "hold_hours": round(_age_hours(t.created_at), 1),
+                                 "pattern": sdp.get("pattern"), "scaled": bool(sdp.get("scaled")),
+                                 "stop": sdp.get("stop_price"), "target": sdp.get("target_price")})
             else:
                 sd = t.signal_details if isinstance(t.signal_details, dict) else {}
                 closed.append({"pnl_pct": float(t.pnl_pct), "reason": sd.get("exit_reason"),
@@ -261,10 +295,12 @@ def speculation_summary() -> dict:
         reasons[r] = reasons.get(r, 0) + 1
     return {
         "strategy_id": PV_SPEC, "enabled": cfg["enabled"], "halal_only": cfg["halal_only"],
-        "strategy": "Ross Cameron momentum (mechanized): cheap + high-RVOL + gap selection, 2:1 R:R, "
-                    "scale half at 1R → breakeven stop, ride to 2R. No float/1-min-chart (data-limited).",
+        "strategy": ("Ross Cameron momentum (mechanized): cheap + high-RVOL selection, ENTER only on a "
+                     "1-min bull-flag/flat-top with a dynamic stop at pattern support, 2:1 target, scale "
+                     "half at 1R → breakeven. Limits: IEX 1-min bars (~2-3% of volume, thin names noisy), "
+                     "no Level-2 order flow; float filter soft (data spotty)."),
         "config": {k: cfg[k] for k in ("slots", "tp_pct", "sl_pct", "max_hold_hrs", "min_score",
-                                        "scale_out", "max_price", "min_rvol")},
+                                        "scale_out", "max_price", "min_rvol", "cameron_patterns", "max_float_m")},
         "open": open_pos, "closed_n": n,
         "win_rate": round(len(wins) / n * 100, 1) if n else None,
         "avg_win_pct": round(sum(wins) / len(wins), 2) if wins else None,

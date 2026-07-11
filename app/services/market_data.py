@@ -255,6 +255,47 @@ def get_live_prices(symbols) -> dict:
     return out
 
 
+_INTRADAY_CACHE: dict = {}         # sym -> (ts, bars)
+_INTRADAY_TTL = 50.0
+
+
+def get_intraday_bars(symbol: str, timeframe: str = "1Min", minutes_back: int = 150) -> list:
+    """Recent intraday bars from Alpaca IEX → [{t,o,h,l,c,v}, ...] oldest-first. ~50s cache.
+    For Ross-Cameron 1-min pattern detection (bull flag / flat top). [] on any gap/no key —
+    callers MUST treat [] as 'no setup' (never fabricate)."""
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        return []
+    now = time.time()
+    hit = _INTRADAY_CACHE.get((sym, timeframe))
+    if hit and now - hit[0] < _INTRADAY_TTL:
+        return hit[1]
+    key, secret = _alpaca_data_creds()
+    if not (key and secret):
+        return []
+    out: list = []
+    try:
+        from datetime import datetime, timezone, timedelta
+        start = (datetime.now(timezone.utc) - timedelta(minutes=int(minutes_back))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = httpx.get(
+            "https://data.alpaca.markets/v2/stocks/bars",
+            params={"symbols": sym, "timeframe": timeframe, "start": start, "limit": 1000,
+                    "adjustment": "raw", "feed": "iex", "sort": "asc"},
+            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}, timeout=10,
+        )
+        if r.status_code == 200:
+            for b in (r.json().get("bars", {}) or {}).get(sym, []) or []:
+                try:
+                    out.append({"t": b.get("t"), "o": float(b["o"]), "h": float(b["h"]),
+                                "l": float(b["l"]), "c": float(b["c"]), "v": float(b.get("v") or 0)})
+                except (TypeError, ValueError, KeyError):
+                    continue
+    except Exception as e:
+        logger.debug("intraday bars %s: %s", sym, e)
+    _INTRADAY_CACHE[(sym, timeframe)] = (now, out)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Symbol validation
 # ---------------------------------------------------------------------------
