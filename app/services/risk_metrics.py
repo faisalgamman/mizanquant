@@ -77,17 +77,26 @@ def portfolio_var(equity=None) -> dict:
 
 
 def cumulative_alpha_series(strategy_ids=("PV", "PVM"), days: int = 365) -> dict:
-    """Real cumulative selection-alpha curve from the closed paper ledger."""
+    """Real cumulative selection-alpha curve from the closed paper ledger.
+
+    Applies each ledger's inception cutoff (ledger_inception) — the SAME cutoff the weekly
+    ledger status + graduation gate already use — so a known-corrupt pre-inception batch (e.g.
+    the 31 weekly picks recorded right before the 2026-06 drop, all closed at the catastrophe
+    stop) does not poison the curve. Those trades stay in the DB; they are just not reported here.
+    """
     from datetime import datetime, timedelta, timezone
     from app.db.database import SessionLocal
     from app.db.models import TradeHistory
     from app.services.beta_benchmark import _spy_lookup
+    from app.services.paper_validation import ledger_inception
 
     spy_at = _spy_lookup()
     if spy_at is None:
         return {"series": [], "error": "no SPY data"}
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    inceptions = {s: ledger_inception(s) for s in strategy_ids}  # per-strategy, None = full history
     db = SessionLocal()
+    excluded = 0
     try:
         rows = (db.query(TradeHistory)
                   .filter(TradeHistory.strategy_id.in_(list(strategy_ids)),
@@ -95,15 +104,26 @@ def cumulative_alpha_series(strategy_ids=("PV", "PVM"), days: int = 365) -> dict
                           TradeHistory.closed_at.isnot(None),
                           TradeHistory.closed_at >= cutoff)
                   .order_by(TradeHistory.closed_at.asc()).all())
-        trades = [(float(r.pnl_pct), r.created_at, r.closed_at, r.closed_at.date().isoformat())
-                  for r in rows if r.created_at and r.closed_at]
+        trades = []
+        for r in rows:
+            if not (r.created_at and r.closed_at):
+                continue
+            inc = inceptions.get(r.strategy_id)
+            if inc is not None:
+                ca = r.created_at.replace(tzinfo=None) if r.created_at.tzinfo else r.created_at
+                if ca < inc:                     # pre-inception corrupt batch — skip (as elsewhere)
+                    excluded += 1
+                    continue
+            trades.append((float(r.pnl_pct), r.created_at, r.closed_at, r.closed_at.date().isoformat()))
     finally:
         db.close()
 
     series = cumulative_alpha(trades, spy_at)
     return {"series": series, "n": len(series),
             "final_alpha": series[-1]["cum_alpha"] if series else 0.0,
-            "note": "مجموع تراكمي لـ(عائد الصفقة − SPY) على الصفقات المغلقة بالترتيب الزمني."}
+            "excluded_pre_inception": excluded,
+            "note": "مجموع تراكمي لـ(عائد الصفقة − SPY) على الصفقات المغلقة بالترتيب الزمني، بعد "
+                    "استبعاد الدفعات قبل تأسيس كلّ دفتر (نفس قطع حالة الدفتر والتخرّج)."}
 
 
 __all__ = ["parametric_var", "cumulative_alpha", "portfolio_var", "cumulative_alpha_series"]
