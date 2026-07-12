@@ -325,10 +325,13 @@ TOOL_SCHEMAS = [
             "The HONEST edge measurements — does our stock SELECTION actually beat the market / "
             "carry alpha? Returns (1) market_relative_race: factor composites ranked over the FULL "
             "US universe vs halal-only, with the HALAL top-bucket excess return + t-stat per "
-            "horizon; and (2) selection_quality: a plain-language grade of whether our picks beat "
-            "SPY (alpha t-stat) and whether score predicts return. Use when the user asks whether "
-            "the system 'works', has an edge, or which factor recipe wins. Small samples are "
-            "DIRECTIONAL not proof — always surface the t-stat / n and that nothing is graduated."
+            "horizon; (2) selection_quality: a plain-language grade of whether our picks beat "
+            "SPY (alpha t-stat) and whether score predicts return; and (3) halal_benchmark_alpha: "
+            "cumulative selection alpha vs SPY AND the halal ETFs SPUS/HLAL — beating the halal ETF "
+            "(not just SPY) is the honest test of halal-selection skill (if alpha vs SPUS/HLAL ≤0, "
+            "the honest answer is 'just buy the halal ETF'). Use when the user asks whether the "
+            "system 'works', has an edge, beats a halal index, or which factor recipe wins. Small "
+            "samples are DIRECTIONAL not proof — always surface the t-stat / n and that nothing is graduated."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
@@ -1319,6 +1322,11 @@ def _exec_get_research_edge() -> dict:
         out["selection_quality"] = _cap(selection_quality_summary() or {}, list_limit=6)
     except Exception as e:
         out["selection_quality"] = {"error": str(e)}
+    try:
+        from app.services.risk_metrics import benchmark_comparison
+        out["halal_benchmark_alpha"] = _cap(benchmark_comparison() or {}, list_limit=6)
+    except Exception as e:
+        out["halal_benchmark_alpha"] = {"error": str(e)}
     return out
 
 

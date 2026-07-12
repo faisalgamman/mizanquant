@@ -107,7 +107,7 @@ function Overview() {
     g("/api/context/bundle", "mk"); g("/api/v1/overview", "ov");
     g("/api/market/indicators", "ind"); g("/api/screener/deep-picks?limit=8", "dp");
     g("/paper_validation/status?scanner=weekly", "lw"); g("/api/alpha-curve", "ac");
-    g("/api/market/spark", "sp");
+    g("/api/market/spark", "sp"); g("/api/benchmark-comparison", "bc");
     return () => { alive = false; };
   }, []);
 
@@ -232,6 +232,16 @@ function Overview() {
             </div>) : <div className="mz-cum"><div className="mz-cum-v">{pct(fin, 1)}</div>
               <div className="mz-note ql-dim">يتراكم — يظهر المنحنى بعد صفقات مغلقة كافية.</div></div>;
           })()}
+          {d.bc && d.bc.benchmarks ? (<div style={{ marginTop: 11, borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["SPY", "SPUS", "HLAL"].map(b => { const x = d.bc.benchmarks[b]; if (!x) return null;
+                return (<div key={b} style={{ flex: 1, minWidth: 88, background: "var(--bg-raised)", borderRadius: 9, padding: "8px 11px", border: x.halal ? "1px solid " + POS + "44" : "1px solid var(--border-subtle)" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{x.halal ? "🌙 " : ""}مقابل {b}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-mono)", color: (x.cum_alpha || 0) >= 0 ? POS : NEG }}>{x.cum_alpha != null ? pct(x.cum_alpha, 1) : "—"}</div>
+                </div>); })}
+            </div>
+            <div className="mz-note ql-dim">🌙 SPUS/HLAL صندوقا حلال يمكن شراؤهما مباشرةً — التفوّق عليهما (لا على SPY وحده) هو الاختبار الأصدق لمهارة الانتقاء الحلال. قياس ورقيّ.</div>
+          </div>) : null}
         </Panel>
         <Panel title="خريطة العوامل (IC)">
           <div className="mz-heat">{facRows.slice(0, 8).map(r => <HeatCell key={r.f} f={r.name.split(" ")[0]} v={r.ic} />)}</div>

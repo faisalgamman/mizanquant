@@ -76,23 +76,55 @@ def portfolio_var(equity=None) -> dict:
     }
 
 
-def cumulative_alpha_series(strategy_ids=("PV", "PVM"), days: int = 365) -> dict:
-    """Real cumulative selection-alpha curve from the closed paper ledger.
+def _bench_lookup(symbol: str = "SPY", period: str = "2y"):
+    """Return a ``ts -> <symbol> close on/nearest-before that date`` function, or None.
+    Generalises the SPY lookup to ANY benchmark (e.g. the halal ETFs SPUS / HLAL)."""
+    try:
+        import numpy as np
+        import pandas as pd
+        from app.services.market_data import fetch
+        df = fetch(symbol, period=period)
+        if df is None or len(df) == 0 or "date" not in df.columns:
+            return None
+        d = pd.to_datetime(df["date"], utc=True)
+        closes = df["close"].astype(float).values
+        order = np.argsort(d.values)
+        d_sorted = d.values[order]
+        c_sorted = closes[order]
+
+        def _at(ts):
+            try:
+                t = pd.Timestamp(ts)
+                if t.tz is None:
+                    t = t.tz_localize("UTC")
+                idx = np.searchsorted(d_sorted, np.datetime64(t), side="right") - 1
+                return float(c_sorted[idx]) if idx >= 0 else None
+            except Exception:
+                return None
+        return _at
+    except Exception as exc:
+        logger.debug("bench lookup build failed for %s: %s", symbol, exc)
+        return None
+
+
+def cumulative_alpha_series(strategy_ids=("PV", "PVM"), days: int = 365,
+                            benchmark: str = "SPY") -> dict:
+    """Real cumulative selection-alpha curve from the closed paper ledger vs ``benchmark``.
 
     Applies each ledger's inception cutoff (ledger_inception) — the SAME cutoff the weekly
     ledger status + graduation gate already use — so a known-corrupt pre-inception batch (e.g.
     the 31 weekly picks recorded right before the 2026-06 drop, all closed at the catastrophe
     stop) does not poison the curve. Those trades stay in the DB; they are just not reported here.
+    ``benchmark`` defaults to SPY (broad market); pass SPUS / HLAL for the halal-ETF alternative.
     """
     from datetime import datetime, timedelta, timezone
     from app.db.database import SessionLocal
     from app.db.models import TradeHistory
-    from app.services.beta_benchmark import _spy_lookup
     from app.services.paper_validation import ledger_inception
 
-    spy_at = _spy_lookup()
+    spy_at = _bench_lookup(benchmark)
     if spy_at is None:
-        return {"series": [], "error": "no SPY data"}
+        return {"series": [], "error": f"no {benchmark} data"}
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     inceptions = {s: ledger_inception(s) for s in strategy_ids}  # per-strategy, None = full history
     db = SessionLocal()
@@ -126,4 +158,41 @@ def cumulative_alpha_series(strategy_ids=("PV", "PVM"), days: int = 365) -> dict
                     "استبعاد الدفعات قبل تأسيس كلّ دفتر (نفس قطع حالة الدفتر والتخرّج)."}
 
 
-__all__ = ["parametric_var", "cumulative_alpha", "portfolio_var", "cumulative_alpha_series"]
+def benchmark_comparison(strategy_ids=("PV", "PVM"), days: int = 365,
+                         benchmarks=("SPY", "SPUS", "HLAL")) -> dict:
+    """Cumulative selection alpha of the closed paper ledger vs EACH benchmark.
+
+    SPY = the broad market; SPUS (SP Funds S&P 500 Sharia) and HLAL (Wahed FTSE USA Shariah) =
+    the passive HALAL alternative a Muslim investor could simply buy. Beating SPY can be mostly
+    the halal tilt (tech-heavy, no banks); beating SPUS/HLAL is the honest test of whether our
+    stock SELECTION adds value over just owning a halal index. Same inception cutoff as the
+    curve. Read-only measurement — never trades.
+    """
+    labels = {"SPY": "S&P 500 (broad market)",
+              "SPUS": "SP Funds S&P 500 Sharia (halal ETF)",
+              "HLAL": "Wahed FTSE USA Shariah (halal ETF)"}
+    out: dict = {}
+    n = None
+    for b in benchmarks:
+        r = cumulative_alpha_series(strategy_ids=strategy_ids, days=days, benchmark=b)
+        out[b] = {"label": labels.get(b, b), "cum_alpha": r.get("final_alpha"),
+                  "n": r.get("n"), "halal": b in ("SPUS", "HLAL"), "error": r.get("error")}
+        if n is None and r.get("n"):
+            n = r.get("n")
+    beats_halal = None
+    try:
+        halal_alphas = [out[b]["cum_alpha"] for b in ("SPUS", "HLAL")
+                        if out.get(b) and out[b].get("cum_alpha") is not None]
+        if halal_alphas:
+            beats_halal = all(a > 0 for a in halal_alphas)
+    except Exception:
+        pass
+    return {"benchmarks": out, "n": n, "beats_halal_benchmarks": beats_halal,
+            "note": ("Cumulative selection alpha (Σ trade − benchmark) vs each index. SPUS/HLAL are "
+                     "halal ETFs a Muslim investor could buy directly — beating THEM (not just SPY) "
+                     "is the honest test of halal stock-selection skill. If alpha vs SPUS/HLAL is "
+                     "≤0, the honest answer is 'just buy the halal ETF'. Paper measurement only.")}
+
+
+__all__ = ["parametric_var", "cumulative_alpha", "portfolio_var", "cumulative_alpha_series",
+           "benchmark_comparison"]

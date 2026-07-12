@@ -582,6 +582,14 @@ async def speculation_ledger_tick_ep():
     return {"status": "started", "message": "يشغّل دورة مضاربة ورقيّة — لحظات."}
 
 
+@router.get("/api/benchmark-comparison")
+async def benchmark_comparison_ep(days: int = 365):
+    """Cumulative selection alpha of the closed paper ledger vs SPY + the halal ETFs SPUS/HLAL —
+    the honest 'do our picks beat a passive halal index?' test. Read-only measurement."""
+    from app.services.risk_metrics import benchmark_comparison
+    return benchmark_comparison(days=days)
+
+
 @router.get("/api/ibkr-executions")
 async def ibkr_executions_ep(days: int = 365):
     """The stored REAL IBKR-PAPER executed-fills history (read-only): realized win-rate, avg
