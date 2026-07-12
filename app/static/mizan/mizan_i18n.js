@@ -26,6 +26,12 @@
     "يفكّر ويستدعي الأدوات…": "Thinking & calling tools…",
     "إرشاديّ — إشارات كمّية مقاسة، ليست نصيحة مرخّصة. القرار لك.": "Advisory — measured quant signals, not licensed advice. Your decision.",
     "إغلاق": "Close", "إرسال": "Send",
+    // Opportunities board
+    "الفرص": "Opportunities", "المرشّحون للشراء — لوحة الفرص": "Buy candidates — Opportunities board",
+    "مرشّحون للشراء": "Buy candidates", "شراء قويّ": "Strong buy", "متوافق شرعاً": "Sharia-compliant", "متوسّط الدرجة": "Avg score",
+    "الدرجة": "Score", "الزخم": "Momentum", "الأساسي": "Fundamentals", "التغيّر": "Change", "حلال فقط": "Halal only",
+    "العائد المتوقّع": "Expected return", "احتمال النجاح": "Success prob.", "المخاطرة": "Risk", "منخفضة": "Low", "متوسّطة": "Medium",
+    "التفاصيل": "Details", "صفقة ورقيّة": "Paper trade", "تحليل متقدّم": "Advanced analysis", "…يحمّل المرشّحين": "…loading candidates",
     // IBKR executions panel
     "تنفيذات IBKR الورقيّة الفعليّة": "Real IBKR-paper executions", "مزامنة الآن": "Sync now", "…يزامن": "…syncing",
     "تنفيذات": "Executions", "ربح محقّق": "Realized PnL", "متوسّط رابح/خاسر": "Avg win/loss", "العمولات": "Commissions",

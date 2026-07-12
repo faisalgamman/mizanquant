@@ -78,6 +78,7 @@ function HeatCell({ f, v }) {
 
 const NAV = [
   { key: "overview", label: "نظرة عامة", icon: "🏠" },
+  { key: "opportunities", label: "الفرص", icon: "✨" },
   { key: "core", label: "محفظة النواة", icon: "🎯" },
   { key: "screener", label: "المسح", icon: "🔍" },
   { key: "daytrade", label: "التداول اليومي", icon: "⚡" },
@@ -1987,6 +1988,98 @@ function Stub({ label }) {
     <div className="mz-stub-s">هذا القسم قيد الإعداد ضمن الهيكلة الجديدة — يُبنى ببيانات حقيقية (لا بيانات وهمية).</div></div>;
 }
 
+// ── لوحة الفرص — professional board of ALL buy candidates (rich cards, sortable/filterable) ──
+function OpportunitiesView() {
+  const raw = useGet("/api/screener/deep-picks?limit=200");
+  const [sortK, setSortK] = useState("composite_score");
+  const [halalOnly, setHalalOnly] = useState(false);
+  const minScore = 55;
+  const all = (raw && Array.isArray(raw.results)) ? raw.results : [];
+  const loading = !raw;
+  const cands = all
+    .filter(r => (r.composite_score || 0) >= minScore && (!halalOnly || r.is_halal))
+    .sort((a, b) => (b[sortK] || 0) - (a[sortK] || 0));
+  const strongN = cands.filter(r => (r.composite_score || 0) >= 72).length;
+  const halalN = cands.filter(r => r.is_halal).length;
+  const avg = cands.length ? Math.round(cands.reduce((s, r) => s + (r.composite_score || 0), 0) / cands.length) : 0;
+  const SORTS = [["composite_score", "الدرجة"], ["score_mom121", "الزخم"], ["score_fund", "الأساسي"], ["change_pct", "التغيّر"]];
+  return (
+    <div className="mz-view">
+      <style>{`
+        .mz-opp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(288px,1fr));gap:12px;margin-top:10px}
+        .mz-opp-card{background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:9px;transition:.15s}
+        .mz-opp-card:hover{border-color:var(--accent);box-shadow:var(--shadow-panel);transform:translateY(-2px)}
+        .mz-opp-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+        .mz-opp-sym{font-size:19px;font-weight:800;font-family:var(--font-mono);letter-spacing:-.3px;display:flex;align-items:center;gap:7px}
+        .mz-opp-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px;border:1px solid;letter-spacing:.3px;white-space:nowrap}
+        .mz-opp-co{font-size:11px;color:var(--text-muted);margin-top:2px;max-width:175px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .mz-opp-px{font-size:17px;font-weight:700;font-family:var(--font-mono)}
+        .mz-opp-chips{display:flex;gap:5px;flex-wrap:wrap}
+        .mz-opp-bars{display:flex;flex-direction:column;gap:5px;margin:1px 0}
+        .mz-opp-bar{display:flex;align-items:center;gap:7px;font-size:10.5px}
+        .mz-opp-bl{width:34px;color:var(--text-muted)}
+        .mz-opp-bt{flex:1;height:5px;background:var(--bg-raised);border-radius:3px;overflow:hidden}
+        .mz-opp-bf{height:100%;background:linear-gradient(90deg,var(--accent),#ffc357);border-radius:3px}
+        .mz-opp-bv{width:22px;text-align:end;font-family:var(--font-mono);color:var(--text-secondary)}
+        .mz-opp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 0;border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
+        .mz-opp-stats>div{display:flex;flex-direction:column;gap:2px}
+        .mz-opp-stats span{font-size:9.5px;color:var(--text-muted)}
+        .mz-opp-stats b{font-size:12.5px}
+        .mz-opp-btns{display:flex;gap:6px}
+        .mz-opp-btns .mz-btn{flex:1;font-size:11px;padding:6px 4px;text-align:center}
+      `}</style>
+      <div className="mz-cards">
+        <div className="mz-card"><div className="mz-c-l">مرشّحون للشراء</div><div className="mz-c-v" style={{ color: POS }}>{cands.length}</div><div className="mz-c-s">الدرجة ≥ {minScore}</div></div>
+        <div className="mz-card"><div className="mz-c-l">شراء قويّ</div><div className="mz-c-v">{strongN}</div><div className="mz-c-s">الدرجة ≥ 72</div></div>
+        <div className="mz-card"><div className="mz-c-l">متوافق شرعاً</div><div className="mz-c-v" style={{ color: POS }}>{halalN}</div><div className="mz-c-s">AAOIFI</div></div>
+        <div className="mz-card"><div className="mz-c-l">متوسّط الدرجة</div><div className="mz-c-v">{avg}</div><div className="mz-c-s">من 100</div></div>
+      </div>
+      <Panel title="المرشّحون للشراء — لوحة الفرص" right={
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {SORTS.map(([k, l]) => <button key={k} className={"mz-basket-t" + (sortK === k ? " on" : "")} style={sortK === k ? { color: ACC, borderColor: ACC } : {}} onClick={() => setSortK(k)}>{l}</button>)}
+          <button className={"mz-basket-t" + (halalOnly ? " on" : "")} style={halalOnly ? { color: POS, borderColor: POS } : {}} onClick={() => setHalalOnly(v => !v)}>حلال فقط</button>
+        </div>}>
+        <div className="mz-note ql-dim">كلّ الأسهم المرشّحة للشراء (الدرجة الشاملة ≥ {minScore}) من الماسح الشهريّ المركّب — مرتّبة ومصنّفة. اضغط أيّ زرّ لفتح التحليل الكامل. إرشاديّ لا تنفيذ.</div>
+        {loading ? <div className="mz-empty">…يحمّل المرشّحين</div>
+          : !cands.length ? <div className="mz-empty">لا مرشّحين بالمعايير الحاليّة — جرّب إلغاء «حلال فقط» أو انتظر اكتمال المسح.</div>
+            : <div className="mz-opp-grid">
+              {cands.map((r, i) => {
+                const [vd, vc] = verdictOf(r.composite_score || 0);
+                const er = (r.reward_per_share && r.price) ? (r.reward_per_share / r.price) * 100 : null;
+                const lowRisk = (r.atr_pct || 3) < 3;
+                return (
+                  <div className="mz-opp-card" key={r.symbol || i}>
+                    <div className="mz-opp-top">
+                      <div><div className="mz-opp-sym">{r.symbol} <span className="mz-opp-badge" style={{ background: vc + "22", color: vc, borderColor: vc + "55" }}>{vd}</span></div>
+                        <div className="mz-opp-co">{r.company || ""}</div></div>
+                      <Ring value={Math.round(r.composite_score || 0)} color={(r.composite_score || 0) >= 72 ? POS : ACC} size={52} sub="/100" />
+                    </div>
+                    <div className="mz-opp-px">{money(r.price)}{r.change_pct != null && <span style={{ color: r.change_pct >= 0 ? POS : NEG, fontSize: 12, marginInlineStart: 6 }}>{pct(r.change_pct, 2)}</span>}</div>
+                    <div className="mz-opp-chips"><span className="mz-chip">{r.sector || "—"}</span><span className="mz-chip">USA</span>{r.is_halal && <span className="mz-chip" style={{ color: POS, borderColor: POS + "55" }}>AAOIFI ✓</span>}</div>
+                    <div className="mz-opp-bars">
+                      {[["تقني", r.score_tech, 30], ["أساسي", r.score_fund, 25], ["زخم", r.score_mom121, 12]].map(([l, v, mx], j) => (
+                        <div className="mz-opp-bar" key={j}><span className="mz-opp-bl">{l}</span>
+                          <div className="mz-opp-bt"><div className="mz-opp-bf" style={{ width: Math.min(100, Math.round((v || 0) / mx * 100)) + "%" }} /></div>
+                          <span className="mz-opp-bv">{num(v, 0)}</span></div>))}
+                    </div>
+                    <div className="mz-opp-stats">
+                      <div><span>العائد المتوقّع</span><b style={{ color: POS }}>{er != null ? pct(er) : "—"}</b></div>
+                      <div><span>احتمال النجاح</span><b>{r.forecast_score != null ? Math.round(r.forecast_score) + "%" : "—"}</b></div>
+                      <div><span>المخاطرة</span><b style={{ color: lowRisk ? POS : WARN }}>{lowRisk ? "منخفضة" : "متوسّطة"}</b></div>
+                    </div>
+                    <div className="mz-opp-btns">
+                      <button className="mz-btn" onClick={() => goAnalyze(r.symbol, "")}>التفاصيل</button>
+                      <button className="mz-btn" onClick={() => goAnalyze(r.symbol, "trade")}>صفقة ورقيّة</button>
+                      <button className="mz-btn gold" onClick={() => goAnalyze(r.symbol, "forecast")}>تحليل متقدّم</button>
+                    </div>
+                  </div>);
+              })}
+            </div>}
+      </Panel>
+    </div>
+  );
+}
+
 // ── الوكيل الذكي — floating AI agent. Sees the WHOLE platform via POST /agent/chat
 //    (analyze/halal/scanners + the paper ledgers, speculation, research-edge & basket tools).
 //    Self-contained: inline styles + one scoped <style>, inline SVG (no FontAwesome). ────────
@@ -2149,6 +2242,7 @@ function MizanTerminal() {
         </header>
         <div className="mz-body">
           {view === "overview" ? <div className="mz-ov-wrap"><Overview /><RightRail {...shared} /></div>
+            : view === "opportunities" ? <OpportunitiesView />
             : view === "screener" ? <ScreenerView />
               : view === "daytrade" ? <DayTradingView />
               : view === "analysis" ? <StockAnalysisView />
