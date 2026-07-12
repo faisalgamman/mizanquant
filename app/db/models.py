@@ -403,3 +403,25 @@ class HotPick(Base):
     total_value = Column(Float, nullable=True)
     investors = Column(JSON, nullable=True)  # List of investor IDs or names who bought
     created_at = Column(DateTime, default=_utcnow)
+
+
+class IbkrExecution(Base):
+    """One IBKR-PAPER fill, synced read-only from the gateway. The IB API only exposes the
+    current session's fills, so the daily sync accumulates a durable, REAL execution history:
+    actual fill prices, slippage, commissions, and realized PnL (populated by IB on closing
+    fills). Deduped by exec_id. NEVER placed/modified an order — read-only measurement."""
+    __tablename__ = "ibkr_executions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    exec_id = Column(String(64), nullable=False, unique=True, index=True)
+    account = Column(String(24), index=True)
+    symbol = Column(String(16), nullable=False, index=True)
+    side = Column(String(8))                    # BOT / SLD
+    qty = Column(Float)
+    price = Column(Float)                        # this fill's execution price
+    avg_price = Column(Float)                     # order average fill price
+    commission = Column(Float, nullable=True)
+    realized_pnl = Column(Float, nullable=True)   # from commissionReport on CLOSING fills
+    exec_time = Column(DateTime, index=True)      # UTC
+    perm_id = Column(String(24), nullable=True)
+    synced_at = Column(DateTime, default=_utcnow)

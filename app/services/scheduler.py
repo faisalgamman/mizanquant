@@ -319,6 +319,7 @@ def _scheduler_loop():
     last_nav_record = ""     # YYYY-MM-DD — daily paper-ledger NAV race snapshot
     last_race_digest = ""    # YYYY-MM-DD — weekly (Friday) race digest → Telegram
     last_spec_tick = ""      # YYYY-MM-DD HH:slot — speculation ledger intraday tick (~20 min)
+    last_ibkr_exec_sync = "" # YYYY-MM-DD — daily read-only sync of IBKR-paper fills
     last_full_rescreen = ""  # YYYY-MM-DD — off-session FULL precompute (exchange-closed days)
     _screener_warmed_startup = False  # one-shot on boot
     SCAN_INTERVAL = 14400  # 4 hours between scans (was 30 min) — cost optimization
@@ -502,6 +503,18 @@ def _scheduler_loop():
                         logger.info("Weekly race digest: %s", send_race_digest())
                     except Exception as e:
                         logger.error(f"Race digest failed: {e}")
+
+            # --- IBKR-PAPER EXECUTION SYNC: daily ~16:46 ET (after close) ---
+            # Read-only: the IB API only exposes the current session's fills, so we persist them
+            # daily (deduped by execId) to accumulate a REAL execution history — fill prices,
+            # slippage, commissions, realized PnL. NEVER places or cancels an order.
+            if _is_weekday(now) and now.hour == 16 and now.minute >= 46 and now.minute < 51 and last_ibkr_exec_sync != today_str:
+                last_ibkr_exec_sync = today_str
+                try:
+                    from app.services.ibkr_exec_sync import sync_ibkr_executions
+                    logger.info("IBKR-paper exec sync: %s", sync_ibkr_executions())
+                except Exception as e:
+                    logger.error(f"IBKR exec sync failed: {e}")
 
             # --- MODEL PERFORMANCE BENCHMARK: Sunday 11:00 AM ET (weekly) ---
             if now.weekday() == 6 and now.hour == 11 and last_model_benchmark != today_str:

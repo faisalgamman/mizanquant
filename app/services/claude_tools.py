@@ -349,6 +349,26 @@ TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "get_ibkr_executions",
+        "description": (
+            "The REAL IBKR-PAPER execution history — actual fills synced read-only from the "
+            "gateway (fill prices, slippage, commissions, and realized PnL on closing trades). "
+            "Returns totals, realized win-rate, avg win/loss, commissions, and per-symbol realized "
+            "PnL. Use when the user asks about their IBKR-paper account's ACTUAL executed trades / "
+            "fills / realized performance. Paper account — NO real money; and provenance is "
+            "unverified (may include IBKR's seeded demo book or manual TWS trades, not only platform "
+            "orders) — say so. realized_pnl exists only on CLOSING fills; open buys have none. If it "
+            "returns empty, the daily post-close sync just hasn't accumulated history yet."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Lookback window in days (default 365)."}
+            },
+            "required": []
+        }
+    },
 ]
 DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
@@ -1332,6 +1352,15 @@ def _exec_get_halal_basket(top_n: int = 30) -> dict:
                          "sector": r.get("sector")} for r in rows[:limit]]}
 
 
+def _exec_get_ibkr_executions(days: int = 365) -> dict:
+    """The real IBKR-paper execution history (read-only sync)."""
+    try:
+        from app.services.ibkr_exec_sync import executions_summary
+        return _cap(executions_summary(days=days) or {}, list_limit=10)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 TOOL_REGISTRY: dict[str, Any] = {
     "analyze_stock": lambda **kw: _exec_analyze_stock(kw["symbol"]),
     "check_halal": lambda **kw: _exec_check_halal(kw["symbol"]),
@@ -1353,6 +1382,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_paper_portfolios": lambda **kw: _exec_get_paper_portfolios(kw.get("tier", "all")),
     "get_research_edge": lambda **kw: _exec_get_research_edge(),
     "get_halal_basket": lambda **kw: _exec_get_halal_basket(kw.get("top_n", 30)),
+    "get_ibkr_executions": lambda **kw: _exec_get_ibkr_executions(kw.get("days", 365)),
 }
 
 
