@@ -286,6 +286,69 @@ TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "get_speculation_ledger",
+        "description": (
+            "The SPECULATION day-trade ledger (PVSP) — the mechanized Ross Cameron system that "
+            "chases the '10-20%/week' dream ON PAPER. It enters ONLY on a live 1-minute bull-flag "
+            "or flat-top pattern in cheap high-RVOL names (stop at pattern support, 2:1 target, "
+            "half-out at 1R). Returns open positions (with the triggering pattern), win_rate, "
+            "avg_win/avg_loss, book_return, weekly_rate_pct, and config. 100% SIMULATION — no real "
+            "orders. Use it when the user asks about day-trading / المضاربة / التداول اليومي / "
+            "Cameron / the speculation ledger. Always state it is unproven paper and high-risk."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_paper_portfolios",
+        "description": (
+            "The 3-tier PAPER research portfolio + the daily NAV race between the tiers + the "
+            "pre-registered graduation rule. CORE = the halal beta basket (equal-weight), "
+            "SATELLITE = a 12-1 momentum tilt, EXPLORER = experimental. Returns each tier's "
+            "return/positions/rebalance cadence, the out-of-sample NAV 'race' (which tier is "
+            "winning), and 'graduation' (the locked pass/fail rule that must be met before ANY "
+            "real capital). Use for 'محفظة النواة' / core portfolio / which strategy is winning. "
+            "No real money — report returns with the paper/unproven caveat."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tier": {"type": "string", "enum": ["core", "satellite", "explorer", "all"],
+                         "description": "Which tier to detail. Default 'all' (also adds race + graduation)."}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_research_edge",
+        "description": (
+            "The HONEST edge measurements — does our stock SELECTION actually beat the market / "
+            "carry alpha? Returns (1) market_relative_race: factor composites ranked over the FULL "
+            "US universe vs halal-only, with the HALAL top-bucket excess return + t-stat per "
+            "horizon; and (2) selection_quality: a plain-language grade of whether our picks beat "
+            "SPY (alpha t-stat) and whether score predicts return. Use when the user asks whether "
+            "the system 'works', has an edge, or which factor recipe wins. Small samples are "
+            "DIRECTIONAL not proof — always surface the t-stat / n and that nothing is graduated."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_halal_basket",
+        "description": (
+            "The full investable HALAL core basket (AAOIFI-screened) — the 'core beta' universe "
+            "the Core ledger buys equal-weight. This is BREADTH (the buyable list + count), NOT "
+            "ranked picks: for ranked buys use get_deep_picks (monthly) / get_buy_signals (weekly). "
+            "Use it when the user asks how many / which halal names are investable, or about the "
+            "core basket / universe size."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "top_n": {"type": "integer", "description": "How many members to list (default 30, max 60). The 'total' count is always returned."}
+            },
+            "required": []
+        }
+    },
 ]
 DEEPSEEK_TOOL_SCHEMAS = _to_openai_tools(TOOL_SCHEMAS)
 
@@ -1142,6 +1205,133 @@ def _exec_get_measurement_facts() -> dict:
     return result
 
 
+def _cap(obj, list_limit=8, str_limit=500, _depth=0):
+    """Recursively bound a tool payload — cap lists to `list_limit` and long strings — so a
+    UI-shaped summary dict can be passed through to the LLM without knowing its exact keys or
+    blowing the context window. Pure and fail-safe."""
+    if _depth > 6:
+        return obj
+    if isinstance(obj, dict):
+        return {k: _cap(v, list_limit, str_limit, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        capped = [_cap(v, list_limit, str_limit, _depth + 1) for v in obj[:list_limit]]
+        if len(obj) > list_limit:
+            capped.append(f"…(+{len(obj) - list_limit} more, truncated)")
+        return capped
+    if isinstance(obj, str) and len(obj) > str_limit:
+        return obj[:str_limit] + "…"
+    return obj
+
+
+def _exec_get_speculation_ledger() -> dict:
+    """PVSP speculation ledger — the mechanized Ross Cameron 1-min day-trade sim (PAPER only)."""
+    try:
+        from app.services.speculation_ledger import speculation_summary
+        s = _cap(speculation_summary() or {}, list_limit=8)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    s["ledger"] = "speculation (PVSP)"
+    s["scanner_note"] = (
+        "The SPECULATION day-trade ledger — mechanized Ross Cameron: it enters ONLY on a live "
+        "1-minute bull-flag / flat-top pattern in cheap high-RVOL names (stop at pattern support, "
+        "2:1 target, half-out at 1R). It measures the '10-20%/week' dream ON PAPER — 100% "
+        "simulation, NO real orders, NO advice. Report win_rate / book_return / weekly_rate_pct "
+        "with the caveat that it is UNPROVEN paper and high-risk; never present it as a live edge. "
+        "If closed_n is small or weekly_rate_pct is null, say it has not matured yet."
+    )
+    return s
+
+
+def _exec_get_paper_portfolios(tier: str = "all") -> dict:
+    """The 3-tier paper portfolio (Core/Satellite/Explorer) + NAV race + graduation state."""
+    tier = (tier or "all").lower().strip()
+    out = {"note": (
+        "Three PAPER research ledgers (NO real money): CORE = the halal beta basket (equal-weight), "
+        "SATELLITE = a 12-1 momentum tilt, EXPLORER = experimental. 'race' is their daily "
+        "out-of-sample NAV series (which tier leads); 'graduation' is the PRE-REGISTERED pass/fail "
+        "rule that must be met before ANY real capital is risked. Report returns with the "
+        "paper/unproven caveat and never imply real money is deployed.")}
+    fns = {"core": "core_ledger_summary", "satellite": "satellite_ledger_summary",
+           "explorer": "explorer_ledger_summary"}
+    want = list(fns) if tier in ("all", "") else [t for t in fns if t == tier]
+    try:
+        import app.services.paper_validation as pv
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    for t in (want or list(fns)):
+        try:
+            out[t] = _cap(getattr(pv, fns[t])() or {}, list_limit=6)
+        except Exception as e:
+            out[t] = {"error": str(e)}
+    if tier in ("all", ""):
+        try:
+            from app.services.ledger_nav import nav_history
+            nh = nav_history() or {}
+            out["race"] = {"days": nh.get("days"), "latest": _cap(nh.get("latest") or {}, 6),
+                           "note": nh.get("note")}
+        except Exception as e:
+            out["race"] = {"error": str(e)}
+        try:
+            from app.services.graduation_criteria import (graduation_criteria_state,
+                                                          evaluate_satellites)
+            out["graduation"] = _cap(graduation_criteria_state() or {}, list_limit=6)
+            out["graduation_eval"] = _cap(evaluate_satellites() or {}, list_limit=6)
+        except Exception as e:
+            out["graduation"] = {"error": str(e)}
+    return out
+
+
+def _exec_get_research_edge() -> dict:
+    """Honest edge measurement: market-relative composite race + selection-quality grade."""
+    out = {"note": (
+        "The HONEST edge check. 'market_relative_race' ranks factor composites over the FULL US "
+        "universe vs halal-only and reports the HALAL top-bucket excess return + t-stat per "
+        "horizon. 'selection_quality' grades whether our picks beat SPY (alpha t-stat) and whether "
+        "the score predicts return. Small samples are DIRECTIONAL, not proof — ALWAYS state the "
+        "t-stat / n, and that nothing is graduated to real money yet.")}
+    try:
+        from app.services.alpha_capture import market_relative_race
+        out["market_relative_race"] = _cap(market_relative_race() or {}, list_limit=6)
+    except Exception as e:
+        out["market_relative_race"] = {"error": str(e)}
+    try:
+        from app.services.selection_quality import selection_quality_summary
+        out["selection_quality"] = _cap(selection_quality_summary() or {}, list_limit=6)
+    except Exception as e:
+        out["selection_quality"] = {"error": str(e)}
+    return out
+
+
+def _exec_get_halal_basket(top_n: int = 30) -> dict:
+    """The full investable HALAL core basket (AAOIFI-screened breadth, not ranked picks)."""
+    import asyncio
+    import concurrent.futures
+    limit = max(min(int(top_n or 30), 60), 5)
+    try:
+        from app.workspace_server import screener_halal_basket
+
+        def _call():
+            return asyncio.run(screener_halal_basket())
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            res = ex.submit(_call).result(timeout=30)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    rows = (res or {}).get("results") or []
+    if not rows:
+        return {"status": "not_ready", "count": 0,
+                "message": "The halal basket cache is cold — open the terminal or wait for the "
+                           "pre-market warm. Don't claim basket membership meanwhile."}
+    return {"status": "ok", "total": (res or {}).get("total") or len(rows),
+            "asof": (res or {}).get("asof"),
+            "note": ("The full HALAL investable basket (AAOIFI-screened) = the 'core beta' universe "
+                     "the Core ledger buys equal-weight. This is BREADTH, not ranked picks — for "
+                     "ranked buys use get_deep_picks (monthly) / get_buy_signals (weekly)."),
+            "count": len(rows[:limit]),
+            "members": [{"symbol": r.get("symbol"), "price": r.get("price"),
+                         "sector": r.get("sector")} for r in rows[:limit]]}
+
+
 TOOL_REGISTRY: dict[str, Any] = {
     "analyze_stock": lambda **kw: _exec_analyze_stock(kw["symbol"]),
     "check_halal": lambda **kw: _exec_check_halal(kw["symbol"]),
@@ -1159,6 +1349,10 @@ TOOL_REGISTRY: dict[str, Any] = {
     "get_accuracy_report": lambda **kw: _exec_get_accuracy_report(kw.get("period_days", 30)),
     "get_measurement_facts": lambda **kw: _exec_get_measurement_facts(),
     "record_recommendation": lambda **kw: _exec_record_recommendation(kw["symbol"], kw["verdict"], kw["confidence"], kw["rationale"]),
+    "get_speculation_ledger": lambda **kw: _exec_get_speculation_ledger(),
+    "get_paper_portfolios": lambda **kw: _exec_get_paper_portfolios(kw.get("tier", "all")),
+    "get_research_edge": lambda **kw: _exec_get_research_edge(),
+    "get_halal_basket": lambda **kw: _exec_get_halal_basket(kw.get("top_n", 30)),
 }
 
 

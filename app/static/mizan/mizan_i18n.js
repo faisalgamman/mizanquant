@@ -17,6 +17,15 @@
     "متّصل · LIVE": "Connected · LIVE", "غير متّصل": "Disconnected", "ابحث عن رمز أو إسم…": "Search symbol or name…",
     "ابحث عن رمز أو اسم…": "Search symbol or name…", "بحث رمز…": "Search symbol…", "بحث رمز أو اسم…": "Search symbol or name…",
     "بحث زوج…": "Search pair…", "رمز السهم…": "Ticker…",
+    // AI agent (الوكيل الذكي)
+    "وكيل ميزان الذكي": "MizanAI Agent", "يرى كل بيانات المنصّة · يحلّل ولا ينفّذ": "Sees all platform data · analyzes, never executes",
+    "أفضل الفرص الحلال": "Best halal opportunities", "محفظة النواة — من يفوز؟": "Core portfolio — who's winning?",
+    "دفتر المضاربة اليوميّة": "Day-trade speculation ledger", "هل لدينا أفضليّة فعليّة؟": "Do we have a real edge?",
+    "حلّل سهماً": "Analyze a stock", "حالة السوق": "Market state",
+    "اسأل عن سهم، أداء، حلال، السوق…": "Ask about a stock, performance, halal, market…",
+    "يفكّر ويستدعي الأدوات…": "Thinking & calling tools…",
+    "إرشاديّ — إشارات كمّية مقاسة، ليست نصيحة مرخّصة. القرار لك.": "Advisory — measured quant signals, not licensed advice. Your decision.",
+    "إغلاق": "Close", "إرسال": "Send",
     // factor names
     "زخم 12-1": "12-1 Momentum", "قوّة نسبيّة (RS)": "Relative Strength (RS)", "شرط فوق EMA20": "Above EMA20",
     "التقلّب (ATR)": "Volatility (ATR)", "الامتداد عن EMA20": "Extension from EMA20", "قرب قمّة 52 أسبوعاً": "52-week-high proximity",

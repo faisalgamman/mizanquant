@@ -1,7 +1,7 @@
 // MizanTerminal.jsx — unified quant terminal, Bloomberg-style, matching the design mockup.
 // Shell: left nav · center main · RIGHT info rail. Real data everywhere it exists; honest
 // placeholders otherwise (never fabricated numbers/curves).
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 
 const pct = (v, d = 1) => (v == null || isNaN(v)) ? "—" : (v >= 0 ? "+" : "") + Number(v).toFixed(d) + "%";
 const num = (v, d = 2) => (v == null || isNaN(v)) ? "—" : Number(v).toFixed(d);
@@ -1938,6 +1938,118 @@ function Stub({ label }) {
     <div className="mz-stub-s">هذا القسم قيد الإعداد ضمن الهيكلة الجديدة — يُبنى ببيانات حقيقية (لا بيانات وهمية).</div></div>;
 }
 
+// ── الوكيل الذكي — floating AI agent. Sees the WHOLE platform via POST /agent/chat
+//    (analyze/halal/scanners + the paper ledgers, speculation, research-edge & basket tools).
+//    Self-contained: inline styles + one scoped <style>, inline SVG (no FontAwesome). ────────
+function agentMd(text) {
+  const inline = (s) => String(s).split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+    (p.startsWith("**") && p.endsWith("**")) ? <b key={j}>{p.slice(2, -2)}</b> : p);
+  const lines = String(text || "").split("\n"); const out = []; let list = null, k = 0;
+  const isSep = (s) => /-/.test(s) && /^[\s|:\-]+$/.test(s);
+  const cells = (s) => s.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+  const flush = () => { if (list) { out.push(<ul key={"u" + k++} style={{ margin: "4px 0", paddingInlineStart: 18 }}>{list.map((x, j) => <li key={j}>{inline(x)}</li>)}</ul>); list = null; } };
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t.startsWith("|") && i + 1 < lines.length && isSep(lines[i + 1].trim())) {
+      flush(); const head = cells(t); i += 2; const rows = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) { rows.push(cells(lines[i])); i++; } i--;
+      out.push(<div key={"tw" + k++} style={{ overflowX: "auto" }}><table className="mz-ai-tbl"><thead><tr>{head.map((h, j) => <th key={j}>{inline(h)}</th>)}</tr></thead><tbody>{rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci}>{inline(c)}</td>)}</tr>)}</tbody></table></div>);
+      continue;
+    }
+    if (/^#{1,6}\s/.test(t)) { flush(); out.push(<div key={"h" + k++} style={{ fontWeight: 700, margin: "6px 0 2px", color: "var(--accent)" }}>{inline(t.replace(/^#{1,6}\s/, ""))}</div>); continue; }
+    if (/^[-*]\s/.test(t)) { (list = list || []).push(t.replace(/^[-*]\s/, "")); continue; }
+    if (t === "") { flush(); continue; }
+    flush(); out.push(<p key={"p" + k++} style={{ margin: "3px 0" }}>{inline(t)}</p>);
+  }
+  flush(); return <div className="mz-ai-md">{out}</div>;
+}
+
+const AGENT_CHIPS = [
+  { l: "أفضل الفرص الحلال", q: "ما أفضل الفرص الحلال اليوم من الماسحَين معاً — الأسبوعي (get_buy_signals) والشهري (get_deep_picks)؟ ادمجهما وميّز مصدر كل سهم، ثم حلّل الأقوى بإيجاز مع الدخول/الوقف/الأهداف. اذكر القيود المقاسة ولا تختلق أرقاماً." },
+  { l: "محفظة النواة — من يفوز؟", q: "أرِني حالة المحافظ الورقيّة الثلاث (النواة/القمر/المستكشف) وسباق الـNAV بينها ومعايير التخرّج — أيّها يتقدّم؟ استخدم get_paper_portfolios وذكّر أنها ورقيّة بلا مال حقيقيّ." },
+  { l: "دفتر المضاربة اليوميّة", q: "ما حالة دفتر المضاربة اليوميّة (روس كاميرون) — المراكز المفتوحة وأنماطها ونسبة الفوز والعائد الأسبوعيّ؟ استخدم get_speculation_ledger وذكّر أنها محاكاة ورقيّة عالية المخاطرة وغير مُثبتة." },
+  { l: "هل لدينا أفضليّة فعليّة؟", q: "هل انتقاؤنا للأسهم يتفوّق على السوق فعلاً؟ اعرض قياس الأفضليّة عبر get_research_edge — السباق النسبيّ للسوق وجودة الانتقاء، مع القيمة الإحصائية t وحجم العيّنة، ووضّح أنّ العيّنة الصغيرة إرشاديّة لا إثبات." },
+  { l: "حلّل سهماً", q: "حلّل AAPL بالكامل عبر analyze_stock: الحلال، الفنّي، الأساسيّات، المحلّلون، المطّلعون، الأرباح، نظام السوق والأخبار، مع الدخول/الوقف/الأهداف الثلاثة. اذكر ما تؤكّده الأدوات فقط." },
+  { l: "حالة السوق", q: "ما حالة السوق الآن (النظام/VIX/الائتمان/الاتّساع)؟ بإيجاز." },
+];
+
+function MizanAgent() {
+  const [open, setOpen] = useState(false);
+  const [msgs, setMsgs] = useState([{ role: "ai", text: "السلام عليكم، أنا **وكيل ميزان الذكي**. أرى كامل بيانات المنصّة — الماسحات، الدفاتر الورقيّة، دفتر المضاربة، وقياس الأفضليّة. اسألني عن سهم أو أداء أو حلال أو السوق.", tools: [] }]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const convId = useRef(null);
+  const endRef = useRef(null);
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ behavior: "smooth" }); }, [msgs, open]);
+  const send = async (text) => {
+    const q = (text != null ? text : input).trim();
+    if (!q || busy) return;
+    setInput(""); setMsgs(m => [...m, { role: "user", text: q }]); setBusy(true);
+    try {
+      const r = await fetch("/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, conversation_id: convId.current }) });
+      const j = await r.json();
+      if (j && j.error) setMsgs(m => [...m, { role: "ai", text: "تعذّر: " + j.error, tools: [] }]);
+      else { if (j.conversation_id) convId.current = j.conversation_id; setMsgs(m => [...m, { role: "ai", text: j.response || "—", tools: j.tools_used || [], model: j.model }]); }
+    } catch (e) { setMsgs(m => [...m, { role: "ai", text: "خطأ في الشبكة — حاول ثانية.", tools: [] }]); }
+    finally { setBusy(false); }
+  };
+  const Spark = () => (<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" fill="currentColor" stroke="none"/><path d="M18 14l.8 2 2 .8-2 .8L18 20l-.8-2-2-.8 2-.8z" fill="currentColor" stroke="none"/></svg>);
+  const Close = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>);
+  const Send = () => (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>);
+  return (
+    <div dir="rtl" style={{ position: "fixed", insetInlineStart: 20, bottom: 20, zIndex: 9000 }}>
+      <style>{`
+        @keyframes mzAiPulse{0%{box-shadow:0 0 0 0 var(--accent-dim)}70%{box-shadow:0 0 0 14px rgba(245,166,35,0)}100%{box-shadow:0 0 0 0 rgba(245,166,35,0)}}
+        @keyframes mzAiUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+        .mz-ai-md p:first-child{margin-top:0}
+        .mz-ai-tbl{border-collapse:collapse;width:100%;font-size:11.5px;margin:5px 0}
+        .mz-ai-tbl th,.mz-ai-tbl td{border:1px solid var(--border-subtle);padding:4px 7px;text-align:start;white-space:nowrap}
+        .mz-ai-tbl th{background:var(--bg-raised);color:var(--text-secondary);font-weight:600}
+        .mz-ai-chip{background:var(--bg-raised);border:1px solid var(--border);color:var(--text-secondary);border-radius:999px;padding:5px 11px;font-size:11.5px;cursor:pointer;white-space:nowrap;transition:.15s}
+        .mz-ai-chip:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+        .mz-ai-chip:disabled{opacity:.5;cursor:default}
+      `}</style>
+      {open && (
+        <div style={{ position: "absolute", insetInlineStart: 0, bottom: 68, width: "min(384px, calc(100vw - 32px))", height: "min(600px, calc(100vh - 120px))", display: "flex", flexDirection: "column", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "var(--shadow-pop)", overflow: "hidden", animation: "mzAiUp .18s ease" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderBottom: "1px solid var(--border-subtle)", background: "linear-gradient(180deg,var(--accent-dim),transparent)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ color: "var(--accent)", display: "flex" }}><Spark /></span>
+              <div><div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--text-primary)" }}>وكيل ميزان الذكي</div>
+                <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>يرى كل بيانات المنصّة · يحلّل ولا ينفّذ</div></div>
+            </div>
+            <button onClick={() => setOpen(false)} title="إغلاق" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex", padding: 4 }}><Close /></button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {msgs.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-start" : "stretch", maxWidth: m.role === "user" ? "85%" : "100%" }}>
+                <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--text-primary)", background: m.role === "user" ? "var(--accent-dim)" : "var(--bg-panel)", border: "1px solid " + (m.role === "user" ? "transparent" : "var(--border-subtle)"), borderRadius: 12, padding: "8px 11px" }}>
+                  {m.role === "ai" ? agentMd(m.text) : m.text}
+                </div>
+                {m.tools && m.tools.length > 0 && <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3, paddingInlineStart: 2 }}>🔧 {m.tools.join(" · ")}</div>}
+              </div>
+            ))}
+            {busy && <div style={{ fontSize: 12, color: "var(--accent)", fontStyle: "italic" }}>يفكّر ويستدعي الأدوات…</div>}
+            <div ref={endRef} />
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "8px 12px", borderTop: "1px solid var(--border-subtle)" }}>
+            {AGENT_CHIPS.map((c, i) => <button key={i} className="mz-ai-chip" disabled={busy} onClick={() => send(c.q)}>{c.l}</button>)}
+          </div>
+          <div style={{ display: "flex", gap: 7, padding: "10px 12px", borderTop: "1px solid var(--border-subtle)", alignItems: "center" }}>
+            <input value={input} disabled={busy} placeholder="اسأل عن سهم، أداء، حلال، السوق…" onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") send(); }}
+              style={{ flex: 1, background: "var(--bg-raised)", border: "1px solid var(--border)", borderRadius: 10, color: "var(--text-primary)", padding: "9px 11px", fontSize: 12.5, fontFamily: "inherit", outline: "none" }} />
+            <button onClick={() => send()} disabled={busy || !input.trim()} title="إرسال" style={{ background: "var(--accent)", border: "none", borderRadius: 10, color: "#1a1206", cursor: busy || !input.trim() ? "default" : "pointer", opacity: busy || !input.trim() ? 0.5 : 1, display: "flex", padding: "9px 11px" }}><Send /></button>
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "center", padding: "0 12px 9px" }}>إرشاديّ — إشارات كمّية مقاسة، ليست نصيحة مرخّصة. القرار لك.</div>
+        </div>
+      )}
+      <button onClick={() => setOpen(o => !o)} title="وكيل ميزان الذكي" aria-label="MizanAI"
+        style={{ width: 56, height: 56, borderRadius: "50%", border: "1px solid var(--accent)", background: "linear-gradient(145deg,var(--accent),#c8791a)", color: "#1a1206", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "var(--shadow-pop)", animation: open ? "none" : "mzAiPulse 2.6s infinite" }}>
+        {open ? <Close /> : <Spark />}
+      </button>
+    </div>
+  );
+}
+
 function MizanTerminal() {
   const [view, setView] = useState((location.hash || "").replace(/^#/, "") || "overview");
   const [clock, setClock] = useState("--:--:--");
@@ -2004,6 +2116,7 @@ function MizanTerminal() {
                               : <Stub label={cur.label} />}
         </div>
       </div>
+      <MizanAgent />
     </div>
   );
 }
