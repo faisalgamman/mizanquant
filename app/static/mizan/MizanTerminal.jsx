@@ -2002,15 +2002,15 @@ function MizanAgent() {
         @keyframes mzAiPulse{0%{box-shadow:0 0 0 0 var(--accent-dim)}70%{box-shadow:0 0 0 14px rgba(245,166,35,0)}100%{box-shadow:0 0 0 0 rgba(245,166,35,0)}}
         @keyframes mzAiUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
         .mz-ai-md p:first-child{margin-top:0}
-        .mz-ai-tbl{border-collapse:collapse;width:100%;font-size:11.5px;margin:5px 0}
-        .mz-ai-tbl th,.mz-ai-tbl td{border:1px solid var(--border-subtle);padding:4px 7px;text-align:start;white-space:nowrap}
+        .mz-ai-tbl{border-collapse:collapse;width:100%;font-size:12.5px;margin:6px 0}
+        .mz-ai-tbl th,.mz-ai-tbl td{border:1px solid var(--border-subtle);padding:6px 10px;text-align:start;white-space:nowrap}
         .mz-ai-tbl th{background:var(--bg-raised);color:var(--text-secondary);font-weight:600}
         .mz-ai-chip{background:var(--bg-raised);border:1px solid var(--border);color:var(--text-secondary);border-radius:999px;padding:5px 11px;font-size:11.5px;cursor:pointer;white-space:nowrap;transition:.15s}
         .mz-ai-chip:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
         .mz-ai-chip:disabled{opacity:.5;cursor:default}
       `}</style>
       {open && (
-        <div style={{ position: "absolute", insetInlineStart: 0, bottom: 68, width: "min(384px, calc(100vw - 32px))", height: "min(600px, calc(100vh - 120px))", display: "flex", flexDirection: "column", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "var(--shadow-pop)", overflow: "hidden", animation: "mzAiUp .18s ease" }}>
+        <div style={{ position: "absolute", insetInlineStart: 0, bottom: 68, width: "min(860px, calc(100vw - 32px), max(360px, 46vw))", height: "min(900px, calc(100vh - 96px))", display: "flex", flexDirection: "column", background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "var(--shadow-pop)", overflow: "hidden", animation: "mzAiUp .18s ease" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderBottom: "1px solid var(--border-subtle)", background: "linear-gradient(180deg,var(--accent-dim),transparent)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ color: "var(--accent)", display: "flex" }}><Spark /></span>
@@ -2022,7 +2022,7 @@ function MizanAgent() {
           <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
             {msgs.map((m, i) => (
               <div key={i} style={{ alignSelf: m.role === "user" ? "flex-start" : "stretch", maxWidth: m.role === "user" ? "85%" : "100%" }}>
-                <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--text-primary)", background: m.role === "user" ? "var(--accent-dim)" : "var(--bg-panel)", border: "1px solid " + (m.role === "user" ? "transparent" : "var(--border-subtle)"), borderRadius: 12, padding: "8px 11px" }}>
+                <div style={{ fontSize: 13.5, lineHeight: 1.65, color: "var(--text-primary)", background: m.role === "user" ? "var(--accent-dim)" : "var(--bg-panel)", border: "1px solid " + (m.role === "user" ? "transparent" : "var(--border-subtle)"), borderRadius: 12, padding: "9px 13px" }}>
                   {m.role === "ai" ? agentMd(m.text) : m.text}
                 </div>
                 {m.tools && m.tools.length > 0 && <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3, paddingInlineStart: 2 }}>🔧 {m.tools.join(" · ")}</div>}
