@@ -26,6 +26,10 @@
     "يفكّر ويستدعي الأدوات…": "Thinking & calling tools…",
     "إرشاديّ — إشارات كمّية مقاسة، ليست نصيحة مرخّصة. القرار لك.": "Advisory — measured quant signals, not licensed advice. Your decision.",
     "إغلاق": "Close", "إرسال": "Send",
+    // IBKR executions panel
+    "تنفيذات IBKR الورقيّة الفعليّة": "Real IBKR-paper executions", "مزامنة الآن": "Sync now", "…يزامن": "…syncing",
+    "تنفيذات": "Executions", "ربح محقّق": "Realized PnL", "متوسّط رابح/خاسر": "Avg win/loss", "العمولات": "Commissions",
+    "الجانب": "Side",
     // factor names
     "زخم 12-1": "12-1 Momentum", "قوّة نسبيّة (RS)": "Relative Strength (RS)", "شرط فوق EMA20": "Above EMA20",
     "التقلّب (ATR)": "Volatility (ATR)", "الامتداد عن EMA20": "Extension from EMA20", "قرب قمّة 52 أسبوعاً": "52-week-high proximity",

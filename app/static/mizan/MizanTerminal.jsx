@@ -809,6 +809,54 @@ function FactorsView() {
   );
 }
 
+// Real IBKR-paper executed-fills history + an in-app "sync now" (runs in-process, so it reuses
+// the app's warm gateway connection instead of colliding on the client-id like an SSH run would).
+function IbkrExecPanel() {
+  const [data, setData] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { fetch("/api/ibkr-executions").then(r => r.json()).then(setData).catch(() => {}); }, []);
+  const sync = async () => {
+    setSyncing(true); setMsg("");
+    try {
+      const r = await fetch("/api/ibkr-exec-sync", { method: "POST" }).then(x => x.json());
+      if (r.summary) setData(r.summary);
+      const s = r.sync || {};
+      setMsg(s.status === "ok" ? ("تمّت المزامنة — تنفيذات جديدة: " + (s.inserted || 0) + " (من " + (s.seen || 0) + ")")
+        : s.status === "gateway_offline" ? "البوّابة غير متّصلة الآن — أعِد المحاولة بعد قليل."
+        : "تعذّرت المزامنة: " + (s.message || s.status || "?"));
+    } catch (e) { setMsg("خطأ في الشبكة."); }
+    finally { setSyncing(false); }
+  };
+  const d = data || {};
+  const empty = !d.count || d.status === "empty" || d.status === "error";
+  return (
+    <Panel title="تنفيذات IBKR الورقيّة الفعليّة" right={
+      <button className="mz-btn gold" disabled={syncing} onClick={sync}>{syncing ? "…يزامن" : "مزامنة الآن"}</button>}>
+      <div className="mz-note ql-dim">تُقرأ من البوّابة (قراءة فقط، لا أوامر). الربح المحقّق يظهر على صفقات الإغلاق فقط. حساب ورقيّ — ومصدر المراكز غير مؤكّد (قد يشمل محفظة IBKR التجريبيّة).</div>
+      {msg ? <div className="mz-note" style={{ color: WARN, marginTop: 6 }}>{msg}</div> : null}
+      {empty ? <div className="mz-empty">{d.message || "لا تنفيذات مخزّنة بعد — تتراكم بعد إغلاق أوّل يوم تداول (~4:46م نيويورك). اضغط «مزامنة الآن» لجلبها فور توفّرها."}</div> : (
+        <>
+          <div className="mz-cards" style={{ marginTop: 10 }}>
+            <div className="mz-card"><div className="mz-c-l">تنفيذات</div><div className="mz-c-v">{d.count}</div><div className="mz-c-s">{d.buys}ش · {d.sells}ب</div></div>
+            <div className="mz-card"><div className="mz-c-l">ربح محقّق</div><div className="mz-c-v" style={{ color: (d.total_realized_pnl || 0) >= 0 ? POS : NEG }}>{d.total_realized_pnl != null ? money(d.total_realized_pnl) : "—"}</div><div className="mz-c-s">{d.closed_trades_with_pnl} صفقة مُغلقة</div></div>
+            <div className="mz-card"><div className="mz-c-l">نسبة الفوز</div><div className="mz-c-v">{d.realized_win_rate_pct != null ? d.realized_win_rate_pct + "%" : "—"}</div></div>
+            <div className="mz-card"><div className="mz-c-l">متوسّط رابح/خاسر</div><div className="mz-c-v" style={{ fontSize: 15 }}><span style={{ color: POS }}>{d.avg_win != null ? money(d.avg_win) : "—"}</span> / <span style={{ color: NEG }}>{d.avg_loss != null ? money(d.avg_loss) : "—"}</span></div></div>
+            <div className="mz-card"><div className="mz-c-l">العمولات</div><div className="mz-c-v">{d.total_commission != null ? money(d.total_commission) : "—"}</div></div>
+          </div>
+          {(d.recent_fills || []).length ? (
+            <table className="mz-tbl mz-tbl-wide" style={{ marginTop: 10 }}><thead><tr><th className="tl">الرمز</th><th>الجانب</th><th>الكمّية</th><th>السعر</th><th>ربح محقّق</th><th>الوقت</th></tr></thead>
+              <tbody>{d.recent_fills.slice(0, 12).map((f, i) => (<tr key={i}><td className="tl mz-fn">{f.symbol}</td>
+                <td>{f.side === "BOT" ? "شراء" : f.side === "SLD" ? "بيع" : f.side}</td><td>{f.qty}</td><td>{money(f.price)}</td>
+                <td style={{ color: (f.realized_pnl || 0) >= 0 ? POS : NEG }}>{f.realized_pnl != null ? money(f.realized_pnl) : "—"}</td>
+                <td className="mz-dim2">{f.time ? String(f.time).slice(0, 16).replace("T", " ") : "—"}</td></tr>))}</tbody></table>
+          ) : null}
+        </>
+      )}
+    </Panel>
+  );
+}
+
 function PortfolioView() {
   const ov = useGet("/api/v1/overview");
   const bh = useGet("/api/v1/broker/health");
@@ -836,6 +884,7 @@ function PortfolioView() {
               <td style={{ color: (p.unrealized_pnl || 0) >= 0 ? POS : NEG }}>{p.unrealized_pnl != null ? money(p.unrealized_pnl) : "—"}</td></tr>))}</tbody></table>
         ) : <div className="mz-empty">لا مراكز مفتوحة حاليّاً</div>}
       </Panel>
+      <IbkrExecPanel />
     </div>
   );
 }

@@ -582,6 +582,26 @@ async def speculation_ledger_tick_ep():
     return {"status": "started", "message": "يشغّل دورة مضاربة ورقيّة — لحظات."}
 
 
+@router.get("/api/ibkr-executions")
+async def ibkr_executions_ep(days: int = 365):
+    """The stored REAL IBKR-PAPER executed-fills history (read-only): realized win-rate, avg
+    win/loss, per-symbol realized PnL, recent fills. Refresh via POST /api/ibkr-exec-sync."""
+    from app.services.ibkr_exec_sync import executions_summary
+    return executions_summary(days=days)
+
+
+@router.post("/api/ibkr-exec-sync")
+async def ibkr_exec_sync_ep():
+    """Run the IBKR-paper execution sync NOW, IN-PROCESS — reuses the app's warm gateway
+    connection (avoids the SSH client-id collision). Read-only; NEVER places/cancels an order.
+    Returns the sync result + the refreshed summary."""
+    import asyncio
+    from app.services.ibkr_exec_sync import sync_ibkr_executions, executions_summary
+    res = await asyncio.to_thread(sync_ibkr_executions)
+    summ = await asyncio.to_thread(executions_summary)
+    return {"sync": res, "summary": summ}
+
+
 @router.get("/api/market-relative-race")
 async def market_relative_race_ep():
     """Two-tier test: does ranking a multi-factor composite over the FULL research universe (wider
