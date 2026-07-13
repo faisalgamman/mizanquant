@@ -22,6 +22,24 @@ logger = logging.getLogger("screener")
 
 _LOCK = threading.Lock()
 _MAX_ROWS = 500          # ~2 years of daily rows; oldest trimmed
+_LEDGER_ACCOUNT = 100000.0   # notional capital each paper ledger is seeded with
+
+
+def _nav_return(summary: dict):
+    """TRUE cumulative NAV return % since inception = (realized P&L + open unrealized $) / capital.
+
+    Unlike the snapshot ``unrealized_pct`` (open positions only), this BANKS realized P&L, so it is
+    a real equity curve — the correct basis to compare against the buy-and-hold ghost lines. None on
+    bad inputs."""
+    try:
+        real = float(summary.get("realized_pnl") or 0.0)
+        mv, cb = summary.get("market_value"), summary.get("cost_basis")
+        if mv is not None and cb is not None:
+            return round((real + (float(mv) - float(cb))) / _LEDGER_ACCOUNT * 100.0, 3)
+        upl = float(summary.get("unrealized_pct") or 0.0)     # fallback: realized% + snapshot upl%
+        return round(real / _LEDGER_ACCOUNT * 100.0 + upl, 3)
+    except Exception:
+        return None
 
 
 def _path() -> str:
@@ -55,6 +73,7 @@ def record_nav() -> dict:
         row["core_mv"] = c.get("market_value")
         row["core_realized"] = c.get("realized_pnl")
         row["core_open"] = c.get("open")
+        row["core_nav"] = _nav_return(c)          # true cumulative NAV (banks realized P&L)
     except Exception as e:
         logger.debug("record_nav core failed: %s", e)
     try:
@@ -64,6 +83,7 @@ def record_nav() -> dict:
         row["sat_mv"] = s.get("market_value")
         row["sat_realized"] = s.get("realized_pnl")
         row["sat_open"] = s.get("open")
+        row["sat_nav"] = _nav_return(s)
     except Exception as e:
         logger.debug("record_nav satellite failed: %s", e)
     try:
@@ -73,6 +93,7 @@ def record_nav() -> dict:
         row["exp_mv"] = x.get("market_value")
         row["exp_realized"] = x.get("realized_pnl")
         row["exp_open"] = x.get("open")
+        row["exp_nav"] = _nav_return(x)
     except Exception as e:
         logger.debug("record_nav explorer failed: %s", e)
 
@@ -129,9 +150,22 @@ def _ghost_benchmarks(rows: list) -> dict:
     return out
 
 
+def _backfill_nav(rows: list) -> None:
+    """Reconstruct the true cumulative NAV for rows recorded BEFORE the *_nav field existed —
+    from their stored realized $ + snapshot unrealized %: nav ≈ realized/capital% + unrealized%."""
+    for r in rows:
+        for pre in ("core", "sat", "exp"):
+            if r.get(pre + "_nav") is None:
+                real, upl = r.get(pre + "_realized"), r.get(pre + "_upl")
+                if real is not None or upl is not None:
+                    r[pre + "_nav"] = round(float(real or 0.0) / _LEDGER_ACCOUNT * 100.0
+                                            + float(upl or 0.0), 3)
+
+
 def nav_history() -> dict:
     """The full daily race series (ascending by date) + a small summary for the UI."""
     rows = sorted(_read(), key=lambda r: r.get("date", ""))
+    _backfill_nav(rows)
     benchmarks = _ghost_benchmarks(rows)
     latest = rows[-1] if rows else {}
     return {

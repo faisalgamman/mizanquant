@@ -1054,25 +1054,29 @@ function SettingsView() {
 }
 
 function RaceChart({ rows }) {
-  const pts = (rows || []).filter(r => r && (r.core_upl != null || r.sat_upl != null || r.exp_upl != null));
+  // Plot the TRUE cumulative NAV (*_nav — banks realized P&L), the same basis as the buy-and-hold
+  // ghost lines. Falls back to the snapshot *_upl for any legacy row missing a nav value.
+  const nv = (r, pre) => r[pre + "_nav"] != null ? r[pre + "_nav"] : r[pre + "_upl"];
+  const pts = (rows || []).filter(r => r && (nv(r, "core") != null || nv(r, "sat") != null || nv(r, "exp") != null));
   if (pts.length < 2) return <div className="mz-empty">يبدأ رسم السباق بعد يومين من التسجيل (لقطة تلقائيّة كلّ يوم عند الإغلاق).</div>;
   const W = 620, H = 170, PAD = 26;
   const vals = [];
-  pts.forEach(r => ["core_upl", "sat_upl", "exp_upl", "spus_ret", "hlal_ret"].forEach(k => { if (r[k] != null) vals.push(r[k]); }));
+  pts.forEach(r => { ["core", "sat", "exp"].forEach(p => { const v = nv(r, p); if (v != null) vals.push(v); }); ["spus_ret", "hlal_ret"].forEach(k => { if (r[k] != null) vals.push(r[k]); }); });
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
   if (hi - lo < 1) { hi += 0.5; lo -= 0.5; }
   const x = i => PAD + (i / (pts.length - 1)) * (W - 2 * PAD);
   const y = v => PAD + (1 - (v - lo) / (hi - lo)) * (H - 2 * PAD);
-  const line = key => pts.map((r, i) => r[key] == null ? null : x(i) + "," + y(r[key])).filter(Boolean).join(" ");
+  const gline = key => pts.map((r, i) => r[key] == null ? null : x(i) + "," + y(r[key])).filter(Boolean).join(" ");
+  const nline = pre => pts.map((r, i) => nv(r, pre) == null ? null : x(i) + "," + y(nv(r, pre))).filter(Boolean).join(" ");
   const zeroY = y(0);
   return (<svg viewBox={"0 0 " + W + " " + H} className="mz-race-svg">
     <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="var(--border-subtle)" strokeDasharray="3 3" />
     {/* halal buy-and-hold ghost references (dashed) */}
-    <polyline points={line("spus_ret")} fill="none" stroke="#38bdf8" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
-    <polyline points={line("hlal_ret")} fill="none" stroke="#a78bfa" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
-    <polyline points={line("core_upl")} fill="none" stroke={ACC} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-    <polyline points={line("sat_upl")} fill="none" stroke={POS} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-    <polyline points={line("exp_upl")} fill="none" stroke={WARN} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    <polyline points={gline("spus_ret")} fill="none" stroke="#38bdf8" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+    <polyline points={gline("hlal_ret")} fill="none" stroke="#a78bfa" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+    <polyline points={nline("core")} fill="none" stroke={ACC} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    <polyline points={nline("sat")} fill="none" stroke={POS} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    <polyline points={nline("exp")} fill="none" stroke={WARN} strokeWidth="2" vectorEffect="non-scaling-stroke" />
   </svg>);
 }
 
@@ -1316,9 +1320,9 @@ function CorePortfolioView() {
 
       <Panel title="🏁 سباق المحرّكات الثلاثة — المنحنى الأماميّ" cls="mz-core-ledger">
         <div className="mz-race-legend">
-          <span><i style={{ background: ACC }} />النواة {nav && nav.latest ? pct(nav.latest.core_upl) : "…"}</span>
-          <span><i style={{ background: POS }} />القمر {nav && nav.latest ? pct(nav.latest.sat_upl) : "…"}</span>
-          <span><i style={{ background: WARN }} />المستكشف {nav && nav.latest ? pct(nav.latest.exp_upl) : "…"}</span>
+          <span><i style={{ background: ACC }} />النواة {nav && nav.latest ? pct(nav.latest.core_nav != null ? nav.latest.core_nav : nav.latest.core_upl) : "…"}</span>
+          <span><i style={{ background: POS }} />القمر {nav && nav.latest ? pct(nav.latest.sat_nav != null ? nav.latest.sat_nav : nav.latest.sat_upl) : "…"}</span>
+          <span><i style={{ background: WARN }} />المستكشف {nav && nav.latest ? pct(nav.latest.exp_nav != null ? nav.latest.exp_nav : nav.latest.exp_upl) : "…"}</span>
           <span title="شراء واحتفاظ (مرجع)"><i style={{ background: "#38bdf8" }} />🌙 SPUS {nav && nav.benchmarks && nav.benchmarks.SPUS ? pct(nav.benchmarks.SPUS.cum_ret) : "…"}</span>
           <span title="شراء واحتفاظ (مرجع)"><i style={{ background: "#a78bfa" }} />🌙 HLAL {nav && nav.benchmarks && nav.benchmarks.HLAL ? pct(nav.benchmarks.HLAL.cum_ret) : "…"}</span>
           <span className="ql-dim" style={{ marginInlineStart: "auto" }}>{nav ? (nav.days + " يوم مُسجَّل") : "…"}</span>
