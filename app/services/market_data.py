@@ -321,6 +321,7 @@ def get_intraday_bars(symbol: str, timeframe: str = "1Min", minutes_back: int = 
         return []
     out: list = []
     try:
+        import httpx  # local import — module has no top-level httpx (matches the other callers)
         from datetime import datetime, timezone, timedelta
         start = (datetime.now(timezone.utc) - timedelta(minutes=int(minutes_back))).strftime("%Y-%m-%dT%H:%M:%SZ")
         r = httpx.get(
