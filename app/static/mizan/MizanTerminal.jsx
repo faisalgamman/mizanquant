@@ -1058,7 +1058,7 @@ function RaceChart({ rows }) {
   if (pts.length < 2) return <div className="mz-empty">يبدأ رسم السباق بعد يومين من التسجيل (لقطة تلقائيّة كلّ يوم عند الإغلاق).</div>;
   const W = 620, H = 170, PAD = 26;
   const vals = [];
-  pts.forEach(r => ["core_upl", "sat_upl", "exp_upl"].forEach(k => { if (r[k] != null) vals.push(r[k]); }));
+  pts.forEach(r => ["core_upl", "sat_upl", "exp_upl", "spus_ret", "hlal_ret"].forEach(k => { if (r[k] != null) vals.push(r[k]); }));
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
   if (hi - lo < 1) { hi += 0.5; lo -= 0.5; }
   const x = i => PAD + (i / (pts.length - 1)) * (W - 2 * PAD);
@@ -1067,6 +1067,9 @@ function RaceChart({ rows }) {
   const zeroY = y(0);
   return (<svg viewBox={"0 0 " + W + " " + H} className="mz-race-svg">
     <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="var(--border-subtle)" strokeDasharray="3 3" />
+    {/* halal buy-and-hold ghost references (dashed) */}
+    <polyline points={line("spus_ret")} fill="none" stroke="#38bdf8" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+    <polyline points={line("hlal_ret")} fill="none" stroke="#a78bfa" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
     <polyline points={line("core_upl")} fill="none" stroke={ACC} strokeWidth="2" vectorEffect="non-scaling-stroke" />
     <polyline points={line("sat_upl")} fill="none" stroke={POS} strokeWidth="2" vectorEffect="non-scaling-stroke" />
     <polyline points={line("exp_upl")} fill="none" stroke={WARN} strokeWidth="2" vectorEffect="non-scaling-stroke" />
@@ -1316,8 +1319,11 @@ function CorePortfolioView() {
           <span><i style={{ background: ACC }} />النواة {nav && nav.latest ? pct(nav.latest.core_upl) : "…"}</span>
           <span><i style={{ background: POS }} />القمر {nav && nav.latest ? pct(nav.latest.sat_upl) : "…"}</span>
           <span><i style={{ background: WARN }} />المستكشف {nav && nav.latest ? pct(nav.latest.exp_upl) : "…"}</span>
+          <span title="شراء واحتفاظ (مرجع)"><i style={{ background: "#38bdf8" }} />🌙 SPUS {nav && nav.benchmarks && nav.benchmarks.SPUS ? pct(nav.benchmarks.SPUS.cum_ret) : "…"}</span>
+          <span title="شراء واحتفاظ (مرجع)"><i style={{ background: "#a78bfa" }} />🌙 HLAL {nav && nav.benchmarks && nav.benchmarks.HLAL ? pct(nav.benchmarks.HLAL.cum_ret) : "…"}</span>
           <span className="ql-dim" style={{ marginInlineStart: "auto" }}>{nav ? (nav.days + " يوم مُسجَّل") : "…"}</span>
         </div>
+        <div className="mz-note ql-dim">الخطّان المتقطّعان 🌙 = شراء واحتفاظ بصندوق حلال (SPUS/HLAL) على نفس النافذة — مرجع «هل تغلّبنا على مجرّد اقتناء مؤشّر حلال؟». يتراكم مع طول السباق.</div>
         <RaceChart rows={nav && nav.rows} />
         <div className="mz-note ql-dim">عائد المراكز المفتوحة لكلّ دفتر بأسعار الإغلاق (يستثني المحقَّق). تُسجَّل لقطة آليّاً كلّ يوم عند إغلاق السوق. هذا هو الدليل خارج العيّنة الذي يحسم إن كانت ألفا الزخم حقيقيّة. قياس فقط — لا صفقات.</div>
       </Panel>

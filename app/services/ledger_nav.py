@@ -88,16 +88,60 @@ def record_nav() -> dict:
     return row
 
 
+def _ghost_benchmarks(rows: list) -> dict:
+    """Attach buy-and-hold SPY / SPUS / HLAL 'ghost' returns to each row (from HISTORICAL prices
+    keyed on the row's date, relative to the race inception) — the passive halal alternative over
+    the exact same window. Derived, not stored: works retroactively and self-corrects. Fail-safe.
+
+    SPUS = SP Funds S&P 500 Sharia, HLAL = Wahed FTSE USA Shariah — a Muslim investor could just
+    buy either; comparing our active book to them is the honest time-weighted test (immune to the
+    per-trade-count problem, since it is a continuous NAV, not a sum over closed 'trades')."""
+    out: dict = {}
+    if not rows:
+        return out
+    try:
+        from datetime import datetime, timezone
+        from app.services.risk_metrics import _bench_lookup
+    except Exception:
+        return out
+
+    def _mid(d):
+        return datetime.strptime(d, "%Y-%m-%d").replace(hour=16, tzinfo=timezone.utc)
+
+    inception = rows[0].get("date")
+    for sym, key in (("SPY", "spy_ret"), ("SPUS", "spus_ret"), ("HLAL", "hlal_ret")):
+        try:
+            look = _bench_lookup(sym)
+            if look is None:
+                continue
+            base = look(_mid(inception))
+            if not base or base <= 0:
+                continue
+            last = None
+            for r in rows:
+                px = look(_mid(r.get("date", inception)))
+                if px and px > 0:
+                    r[key] = round((px / base - 1.0) * 100.0, 3)
+                    last = r[key]
+            out[sym] = {"cum_ret": last, "halal": sym in ("SPUS", "HLAL")}
+        except Exception as e:
+            logger.debug("ghost benchmark %s failed: %s", sym, e)
+    return out
+
+
 def nav_history() -> dict:
     """The full daily race series (ascending by date) + a small summary for the UI."""
     rows = sorted(_read(), key=lambda r: r.get("date", ""))
+    benchmarks = _ghost_benchmarks(rows)
     latest = rows[-1] if rows else {}
     return {
         "rows": rows,
         "days": len(rows),
         "latest": latest,
-        "note": "Daily out-of-sample race of the paper core (PVC) vs the momentum satellite (PVSA). "
-                "Unrealized-return of open positions at each day's scan prices. Measurement only; never trades.",
+        "benchmarks": benchmarks,
+        "note": "Daily out-of-sample race of the paper core (PVC) vs the momentum satellite (PVSA), "
+                "with buy-and-hold SPY / SPUS / HLAL (halal ETF) ghost lines over the same window — "
+                "the honest 'did we beat just holding a halal index?' reference. Measurement only.",
     }
 
 
