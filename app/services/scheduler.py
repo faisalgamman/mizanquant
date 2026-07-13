@@ -404,6 +404,12 @@ def _scheduler_loop():
                 _spec_slot = f"{today_str} {now.hour}:{now.minute // 20}"
                 if last_spec_tick != _spec_slot:
                     last_spec_tick = _spec_slot
+                    # Refresh Cameron's cheap-mover universe FIRST (so the tick has fresh candidates)
+                    try:
+                        from app.services.cheap_movers import refresh_cheap_movers
+                        logger.info("Cheap-mover scan: %s", refresh_cheap_movers())
+                    except Exception as e:
+                        logger.error(f"Cheap-mover scan failed: {e}")
                     try:
                         from app.services.speculation_ledger import speculation_tick
                         logger.info("Speculation ledger tick: %s", speculation_tick())

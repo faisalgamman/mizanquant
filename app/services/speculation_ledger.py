@@ -81,10 +81,12 @@ def _explosion_candidates(cfg: dict) -> list[dict]:
     [{symbol, price, score}] sorted best-first; [] when the cache is cold."""
     try:
         from app.workspace_server import _cache_get
-        data = _cache_get("daytrade_scan", max_age=3600) or {}
+        # Prefer the dedicated CHEAP-MOVER scan (Cameron's real universe: sub-$20 gappers from the
+        # Alpaca screener); fall back to the S&P day-trade scan (which rarely has cheap names).
+        data = _cache_get("speculation_scan", max_age=3600) or _cache_get("daytrade_scan", max_age=3600) or {}
         rows = data.get("results") or []
     except Exception as e:
-        logger.debug("spec candidates: daytrade cache unavailable: %s", e)
+        logger.debug("spec candidates: scan cache unavailable: %s", e)
         return []
     out = []
     for r in rows:
@@ -295,6 +297,13 @@ def speculation_summary() -> dict:
         reasons[r] = reasons.get(r, 0) + 1
     return {
         "strategy_id": PV_SPEC, "enabled": cfg["enabled"], "halal_only": cfg["halal_only"],
+        "research_only": not cfg["halal_only"],
+        "research_note": (None if cfg["halal_only"] else
+                          "بحث فقط — غير مفلتر شرعيّاً. كون كاميرون (أسهم رخيصة متفجّرة) يهيمن عليه ما لا "
+                          "يوافق الشريعة (صناديق رافعة/كريبتو/SPAC)، فهذا الدفتر يقيس «حلم 10-20%» على "
+                          "المتحرّكات الحقيقيّة لأغراض البحث فقط — ليس توصية شراء ولا مالاً حقيقيّاً، والمسار "
+                          "الحلال للاستثمار يبقى منفصلاً ومحميّاً."),
+        "universe": "alpaca_screener_cheap_movers",
         "strategy": ("Ross Cameron momentum (mechanized): cheap + high-RVOL selection, ENTER only on a "
                      "1-min bull-flag/flat-top with a dynamic stop at pattern support, 2:1 target, scale "
                      "half at 1R → breakeven. Limits: IEX 1-min bars (~2-3% of volume, thin names noisy), "

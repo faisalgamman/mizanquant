@@ -10,6 +10,12 @@ primary_region = "iad"   # US-East (close to Alpaca/FMP/IBKR US endpoints); chan
 [env]
   PORT = "8080"
   CACHE_DIR = "/data"      # persistent volume mount (see [[mounts]])
+  # Speculation (Ross Cameron) shadow ledger — RESEARCH mode: measure the day-trade dream on the
+  # real cheap-mover universe. NOT halal-screened (cheap gappers are mostly leveraged ETFs/crypto/
+  # SPACs) and RVOL isn't in the Alpaca screener, so both gates are off; the 1-min Cameron pattern
+  # stays the real entry gate. Paper only — never a real order, never a buy recommendation.
+  SPEC_HALAL_ONLY = "false"
+  SPEC_MIN_RVOL = "0"
 
 [http_service]
   internal_port = 8080

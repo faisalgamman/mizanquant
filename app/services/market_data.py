@@ -255,6 +255,52 @@ def get_live_prices(symbols) -> dict:
     return out
 
 
+def get_alpaca_movers(top: int = 50, max_price: float = 25.0, min_price: float = 1.0) -> list:
+    """Cheap day-trade movers from Alpaca's live screener — the real Ross-Cameron hunting ground
+    (cheap stocks making big % moves on volume). Combines the top % GAINERS with the MOST-ACTIVES
+    (by volume), prices them, and keeps names in [min_price, max_price]. Returns
+    [{symbol, price, pct_change}] deduped. Best-effort → [] on any failure. Read-only."""
+    key, secret = _alpaca_data_creds()
+    if not (key and secret):
+        return []
+    H = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+    seen: dict = {}
+    try:
+        import httpx
+    except Exception:
+        return []
+    # 1) top gainers — the % explosions (already priced by the screener)
+    try:
+        r = httpx.get("https://data.alpaca.markets/v1beta1/screener/stocks/movers",
+                      params={"top": int(top)}, headers=H, timeout=10)
+        if r.status_code == 200:
+            for x in (r.json().get("gainers") or []):
+                s, p = x.get("symbol"), x.get("price")
+                try:
+                    p = float(p)
+                except (TypeError, ValueError):
+                    continue
+                if s and min_price <= p <= max_price:
+                    seen[s] = {"symbol": s, "price": round(p, 4), "pct_change": x.get("percent_change")}
+    except Exception as e:
+        logger.debug("alpaca movers (gainers) failed: %s", e)
+    # 2) most-actives by volume — price via the latest-trade batch, keep cheap ones
+    try:
+        r = httpx.get("https://data.alpaca.markets/v1beta1/screener/stocks/most-actives",
+                      params={"by": "volume", "top": int(top)}, headers=H, timeout=10)
+        if r.status_code == 200:
+            actives = [x.get("symbol") for x in (r.json().get("most_actives") or []) if x.get("symbol")]
+            need = [s for s in actives if s not in seen]
+            px = get_live_prices(need) if need else {}
+            for s in need:
+                p = px.get(s)
+                if p and min_price <= float(p) <= max_price:
+                    seen[s] = {"symbol": s, "price": round(float(p), 4), "pct_change": None}
+    except Exception as e:
+        logger.debug("alpaca most-actives failed: %s", e)
+    return list(seen.values())
+
+
 _INTRADAY_CACHE: dict = {}         # sym -> (ts, bars)
 _INTRADAY_TTL = 50.0
 
