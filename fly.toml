@@ -1,11 +1,13 @@
-# Fly.io deployment for mizanquant — see FLY_MIGRATION.md for the full runbook.
-# Railway keeps using railway.json + Dockerfile and IGNORES this file, so it is safe to
-# commit while still on Railway. The app already binds 0.0.0.0:$PORT (workspace_server.main).
-app = "mizanquant"
-primary_region = "iad"   # US-East (close to Alpaca/FMP/IBKR US endpoints); change if you prefer
+# fly.toml app configuration file generated for mizanquant on 2026-06-20T21:07:40Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'mizanquant'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
   PORT = "8080"
@@ -20,9 +22,7 @@ primary_region = "iad"   # US-East (close to Alpaca/FMP/IBKR US endpoints); chan
 [http_service]
   internal_port = 8080
   force_https = true
-  # ALWAYS-ON: the scheduler is an in-process thread (off-session precompute, paper ledgers,
-  # outcome matching). The machine must NEVER sleep, or those jobs stop firing.
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = false
   min_machines_running = 1
 
